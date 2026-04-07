@@ -6,44 +6,77 @@ This directory mirrors the Windmill scripts that the internal-app depends on. **
 
 ```
 windmill/
-├── billing/         ← f/billing/* — only scripts service-billing actually uses
-├── billing_audit/   ← f/billing_audit/* — pattern reference for invoice classification
-├── qbo/             ← f/qbo/* — QBO ↔ Supabase customer sync (canonical sync pattern)
-├── webhooks/        ← f/webhooks/* — incoming handlers (Gusto employee sync)
-└── (shared/ added when ≥2 modules need a utility)
+├── webhooks/        ← f/webhooks/* — Gusto employee sync (only direct dependency today)
+└── billing/         ← f/billing/* — added once Phase 2 creates pull_qbo_invoices
+└── (more added per phase as new scripts are created)
 ```
 
 ## Mirrored scripts (2026-04-07)
 
-This mirror is **scoped to scripts the internal-app's service-billing module actually
-references or learns patterns from**. Anything else in Windmill belongs to a different
-module and stays out of this mirror — that's how orphans become visible.
+This mirror contains **only scripts that the internal-app's service-billing module
+directly calls, schedules, or depends on**. Pattern references and "scripts I might
+want to glance at" do NOT belong here — they live in Windmill itself, accessible via
+the UI or MCP whenever a new script needs to be built.
 
 | Path | Why it's here |
 |---|---|
-| `billing/sync_invoice_balances.py` | **Pattern**: bulk pull all open invoices from QBO and sync balances. The new pull_qbo_invoices job (Phase 2) follows this shape. |
-| `billing_audit/load_month.py` | **Pattern**: classify invoices by SKU keyword, derive service frequency. The new classify_work_orders job (Phase 3) draws from this. |
-| `qbo/qbo_customer_sync.py` | **Canonical** QBO→Supabase sync pattern (paginated, retry, soft-delete, sync log). Service-billing's pull_qbo_invoices will mirror this exactly. |
-| `qbo/sync_customer_to_qbo.py` | Reverse direction: Supabase→QBO single-record push. Pattern reference for any future write-back. |
-| `webhooks/get_employees.py` | **Direct dependency**: Gusto→public.employees daily sync. Currently webhook-only, needs daily schedule (pending Phase 1). |
+| `webhooks/get_employees.py` | **Direct dependency**: Gusto → `public.employees` daily sync. Service billing's revenue-by-employee view depends on this table being kept current. Currently webhook-only — needs daily schedule (Phase 1). |
 
-## NOT mirrored (different modules / unrelated)
+That's the entire mirror right now.
 
-These exist in Windmill but aren't part of service-billing. They live in their own
-modules' mirrors when those apps get built:
+## What service billing IS and ISN'T
 
-- `f/billing/switch_to_weekly_campaign` — bi-weekly→weekly upsell campaign (autopay/marketing)
-- `f/billing/send_monthly_invoices` — monthly maint invoice email send (autopay billing module)
-- `f/billing/send_decline_email` — autopay decline notifications (autopay billing module)
-- `f/billing_audit/compute_chemical_estimates` — chem-cost percentiles for the quote form (separate quote app)
-- `f/check_buddy/*` — manual check entry + QBO payment search/match (check buddy module)
-- `f/email_extraction/*` — vendor email parsing
-- `f/google_maps/*` — geocoding
-- `f/leads/*` — lead capture
-- `f/ION/*` — ION Pool Care scrapers
+To prevent the same scope mistake again, here's the explicit definition:
 
-When service-billing actually starts needing one of these (e.g., the credit auto-apply
-pass in Phase 4 needs `check_buddy/search_qbo_payments`), it gets pulled in then.
+**Service billing IS**: the daily workflow for one-off service work orders (repairs,
+installs, deliveries, one-time cleans) flowing from ION Pool Care into QBO invoices,
+then into Supabase for classification, matching, processing, and post-sync auditing.
+
+**Service billing IS NOT**:
+- **Autopay maintenance billing** (monthly recurring charges for chem+labor flat rates).
+  Same QBO instance, same `billing` schema, completely different workflow. Lives in its
+  own future module.
+- **The quote form** (residential website lead capture).
+- **The chemical audit pipeline** (`billing_audit.maintenance_invoices` — that's autopay).
+- **Customer master data sync** (handled by `f/qbo/qbo_customer_sync` for all apps).
+- **Anything that touches `billing_audit.*` tables** — that's the autopay audit schema.
+- **Anything that touches `billing.autopay_*` tables** — that's autopay.
+
+**Service billing's tables**: `billing.invoices`, `billing.processing_attempts`,
+`billing.classification_rules`, `billing.customer_payment_methods`,
+`billing.customer_billing_preferences`, plus columns on `public.work_orders`.
+**Nothing in `billing_audit.*` and nothing in `billing.autopay_*`.**
+
+## How the mirror grows
+
+The mirror grows as new scripts are CREATED in upcoming phases — not by pulling
+existing ones for reference. Expected additions:
+
+| Phase | Script | Folder |
+|---|---|---|
+| Phase 2 | `pull_qbo_invoices` (new) | `billing/` |
+| Phase 3 | `classify_work_orders` (new) | `billing/` |
+| Phase 3 | `match_invoices_to_work_orders` (new) | `billing/` |
+| Phase 4 | `sync_invoice` (new) | `billing/` |
+| Phase 5 | `process_invoices` (refactor) | `billing/` |
+| Phase 6 | `check_billing_status` (new) | `billing/` |
+
+If during Phase 4 the credit auto-apply logic ends up needing to call into an
+existing payment-search script (e.g., `f/check_buddy/search_qbo_payments`), the
+right move is to **promote that script to `f/shared/`** since it'd then be used by
+≥2 modules (check_buddy and service_billing), and mirror it in both apps.
+
+## Scope test
+
+Before adding ANY script to this mirror, run these three questions:
+
+1. Does this app's code call this script? (via edge function, schedule, webhook, or direct API)
+2. Does this app schedule, monitor, or orchestrate this script?
+3. Is this script's table or output a hard precondition for this app?
+
+If all three are no, **do not pull it.** "Good pattern reference" is NOT a valid
+reason — read those scripts in Windmill UI when building something new, don't
+mirror them here.
 
 ## Sync workflow
 
