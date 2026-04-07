@@ -6,11 +6,36 @@ This directory mirrors the Windmill scripts that the internal-app depends on. **
 
 ```
 windmill/
-├── shared/          ← f/shared/* — utilities used by ≥2 modules
-├── billing/         ← f/billing/* — service billing scripts
-├── webhooks/        ← f/webhooks/* — incoming webhook handlers (incl. Gusto sync)
-└── (others added per module)
+├── billing/         ← f/billing/* — autopay sending, decline emails, balance sync
+├── billing_audit/   ← f/billing_audit/* — monthly invoice classification + chem estimates
+├── qbo/             ← f/qbo/* — QBO ↔ Supabase customer sync (canonical sync pattern)
+├── webhooks/        ← f/webhooks/* — incoming handlers (Gusto employee sync)
+└── (shared/ added when ≥2 modules need a utility)
 ```
+
+## Initial mirror (2026-04-07)
+
+The first pull copied 9 scripts that the internal-app's service-billing module references
+or learns patterns from:
+
+| Path | Purpose |
+|---|---|
+| `billing/switch_to_weekly_campaign.py` | Bi-weekly→weekly upsell campaign |
+| `billing/send_monthly_invoices.py` | Send monthly maint invoices via QBO email API |
+| `billing/send_decline_email.py` | Notify customers of failed autopay charges |
+| `billing/sync_invoice_balances.py` | **Pattern**: bulk pull all open invoices from QBO and sync balances |
+| `billing_audit/load_month.py` | **Pattern**: classify invoices, derive service frequency |
+| `billing_audit/compute_chemical_estimates.py` | Monthly chemical-cost percentile aggregation |
+| `qbo/qbo_customer_sync.py` | **Canonical** QBO→Supabase sync pattern (paginated, retry, soft-delete, sync log) |
+| `qbo/sync_customer_to_qbo.py` | Reverse direction: Supabase→QBO single-customer push |
+| `webhooks/get_employees.py` | Gusto→Supabase employee sync (NEEDS DAILY SCHEDULE — pending Phase 1) |
+
+**Not yet mirrored** (will pull when service-billing actually depends on them):
+- `f/check_buddy/*` — manual check entry + QBO payment search/match
+- `f/email_extraction/*` — vendor email parsing
+- `f/google_maps/*` — geocoding
+- `f/leads/*` — lead capture
+- `f/ION/*` — ION Pool Care scrapers
 
 ## Sync workflow
 
