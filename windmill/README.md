@@ -6,36 +6,44 @@ This directory mirrors the Windmill scripts that the internal-app depends on. **
 
 ```
 windmill/
-├── billing/         ← f/billing/* — autopay sending, decline emails, balance sync
-├── billing_audit/   ← f/billing_audit/* — monthly invoice classification + chem estimates
+├── billing/         ← f/billing/* — only scripts service-billing actually uses
+├── billing_audit/   ← f/billing_audit/* — pattern reference for invoice classification
 ├── qbo/             ← f/qbo/* — QBO ↔ Supabase customer sync (canonical sync pattern)
 ├── webhooks/        ← f/webhooks/* — incoming handlers (Gusto employee sync)
 └── (shared/ added when ≥2 modules need a utility)
 ```
 
-## Initial mirror (2026-04-07)
+## Mirrored scripts (2026-04-07)
 
-The first pull copied 9 scripts that the internal-app's service-billing module references
-or learns patterns from:
+This mirror is **scoped to scripts the internal-app's service-billing module actually
+references or learns patterns from**. Anything else in Windmill belongs to a different
+module and stays out of this mirror — that's how orphans become visible.
 
-| Path | Purpose |
+| Path | Why it's here |
 |---|---|
-| `billing/switch_to_weekly_campaign.py` | Bi-weekly→weekly upsell campaign |
-| `billing/send_monthly_invoices.py` | Send monthly maint invoices via QBO email API |
-| `billing/send_decline_email.py` | Notify customers of failed autopay charges |
-| `billing/sync_invoice_balances.py` | **Pattern**: bulk pull all open invoices from QBO and sync balances |
-| `billing_audit/load_month.py` | **Pattern**: classify invoices, derive service frequency |
-| `billing_audit/compute_chemical_estimates.py` | Monthly chemical-cost percentile aggregation |
-| `qbo/qbo_customer_sync.py` | **Canonical** QBO→Supabase sync pattern (paginated, retry, soft-delete, sync log) |
-| `qbo/sync_customer_to_qbo.py` | Reverse direction: Supabase→QBO single-customer push |
-| `webhooks/get_employees.py` | Gusto→Supabase employee sync (NEEDS DAILY SCHEDULE — pending Phase 1) |
+| `billing/sync_invoice_balances.py` | **Pattern**: bulk pull all open invoices from QBO and sync balances. The new pull_qbo_invoices job (Phase 2) follows this shape. |
+| `billing_audit/load_month.py` | **Pattern**: classify invoices by SKU keyword, derive service frequency. The new classify_work_orders job (Phase 3) draws from this. |
+| `qbo/qbo_customer_sync.py` | **Canonical** QBO→Supabase sync pattern (paginated, retry, soft-delete, sync log). Service-billing's pull_qbo_invoices will mirror this exactly. |
+| `qbo/sync_customer_to_qbo.py` | Reverse direction: Supabase→QBO single-record push. Pattern reference for any future write-back. |
+| `webhooks/get_employees.py` | **Direct dependency**: Gusto→public.employees daily sync. Currently webhook-only, needs daily schedule (pending Phase 1). |
 
-**Not yet mirrored** (will pull when service-billing actually depends on them):
-- `f/check_buddy/*` — manual check entry + QBO payment search/match
+## NOT mirrored (different modules / unrelated)
+
+These exist in Windmill but aren't part of service-billing. They live in their own
+modules' mirrors when those apps get built:
+
+- `f/billing/switch_to_weekly_campaign` — bi-weekly→weekly upsell campaign (autopay/marketing)
+- `f/billing/send_monthly_invoices` — monthly maint invoice email send (autopay billing module)
+- `f/billing/send_decline_email` — autopay decline notifications (autopay billing module)
+- `f/billing_audit/compute_chemical_estimates` — chem-cost percentiles for the quote form (separate quote app)
+- `f/check_buddy/*` — manual check entry + QBO payment search/match (check buddy module)
 - `f/email_extraction/*` — vendor email parsing
 - `f/google_maps/*` — geocoding
 - `f/leads/*` — lead capture
 - `f/ION/*` — ION Pool Care scrapers
+
+When service-billing actually starts needing one of these (e.g., the credit auto-apply
+pass in Phase 4 needs `check_buddy/search_qbo_payments`), it gets pulled in then.
 
 ## Sync workflow
 
