@@ -1,0 +1,62 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..800&family=Public+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Pool-company palette: chlorine, deep water, foam */
+    --bg: 11 22 32;
+    --bg-elev: 18 34 49;
+    --surface: 15 28 40;
+    --line: 30 51 70;
+    --line-soft: 22 38 54;
+    --ink: 234 244 251;
+    --ink-dim: 156 182 201;
+    --ink-mute: 91 122 144;
+    --cyan: 56 189 248;
+    --cyan-deep: 14 165 233;
+    --teal: 45 212 191;
+    --sun: 251 191 36;
+    --coral: 251 113 133;
+    --grass: 52 211 153;
+
+    --font-display: "Fraunces";
+    --font-sans: "Public Sans";
+    --font-mono: "JetBrains Mono";
+  }
+
+  html,
+  body {
+    background: rgb(var(--bg));
+    color: rgb(var(--ink));
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    font-size: 14px;
+    letter-spacing: 0.005em;
+  }
+
+  body {
+    background:
+      radial-gradient(1200px 700px at 85% -10%, rgb(14 165 233 / 0.1), transparent 60%),
+      radial-gradient(900px 600px at -10% 110%, rgb(45 212 191 / 0.08), transparent 60%),
+      rgb(var(--bg));
+    min-height: 100vh;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display), ui-serif, Georgia, serif;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+  }
+}
+
+@layer components {
+  .num {
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+}
