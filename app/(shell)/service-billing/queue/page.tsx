@@ -11,7 +11,7 @@ import { formatCurrency, formatDate } from "@/lib/utils/format"
 export const dynamic = "force-dynamic"
 
 export default async function QueuePage() {
-  const rows = await getBillingQueue({ status: "needs_classification", limit: 200 })
+  const rows = await getBillingQueue({ status: "ready_to_process", limit: 200 })
   const total = rows.reduce((acc, r) => acc + Number(r.total_due ?? 0), 0)
 
   return (
@@ -25,7 +25,7 @@ export default async function QueuePage() {
       <ObjectHeader
         eyebrow="Service Billing"
         title="Billing Queue"
-        sub={`${rows.length} work orders awaiting classification · ${formatCurrency(total)}`}
+        sub={`${rows.length} work orders ready to process · ${formatCurrency(total)}`}
         icon={<BarChart3 className="w-6 h-6" strokeWidth={1.8} />}
       />
       <Tabs
@@ -40,7 +40,7 @@ export default async function QueuePage() {
       <div className="px-7 py-6">
         <Card>
           <CardHeader>
-            <CardTitle>needs_classification</CardTitle>
+            <CardTitle>ready_to_process</CardTitle>
             <Pill tone="cyan" className="ml-auto">
               {rows.length} rows · {formatCurrency(total)}
             </Pill>
@@ -53,6 +53,7 @@ export default async function QueuePage() {
                   <th className="font-medium">Invoice</th>
                   <th className="font-medium">Customer</th>
                   <th className="font-medium">Type</th>
+                  <th className="font-medium">Method</th>
                   <th className="font-medium">Tech</th>
                   <th className="font-medium">Office</th>
                   <th className="font-medium">Completed</th>
@@ -76,6 +77,13 @@ export default async function QueuePage() {
                     <td className="font-mono text-ink-dim text-xs">{row.invoice_number}</td>
                     <td className="text-ink truncate max-w-[200px]">{row.customer ?? "—"}</td>
                     <td className="text-ink-dim text-xs">{row.type}</td>
+                    <td className="text-xs">
+                      {row.payment_method === "on_file" ? (
+                        <span className="text-cyan">On file</span>
+                      ) : (
+                        <span className="text-ink-mute">Invoice</span>
+                      )}
+                    </td>
                     <td className="text-ink-mute text-xs font-mono">
                       {row.assigned_to?.split(",")[1]?.trim() ?? row.assigned_to ?? "—"}
                     </td>

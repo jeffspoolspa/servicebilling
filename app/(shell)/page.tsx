@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic"
 export default async function HomePage() {
   const [kpis, recentQueue, missingAlerts] = await Promise.all([
     getDashboardKpis(),
-    getBillingQueue({ status: "needs_classification", limit: 8 }),
+    getBillingQueue({ status: "ready_to_process", limit: 8 }),
     getMissingInvoiceAlerts(6),
   ])
 
@@ -23,33 +23,33 @@ export default async function HomePage() {
       <ObjectHeader
         eyebrow="Service Billing · Live"
         title="Good morning, Carter."
-        sub={`${kpis.needs_classification.toLocaleString()} work orders need classification · ${kpis.missing_invoice_alerts} missing invoices · ${formatCurrency(kpis.total_billable_value)} in the pipeline`}
+        sub={`${kpis.ready_to_process.toLocaleString()} ready to process · ${kpis.needs_review} need review · ${kpis.missing_invoice_alerts} missing invoices · ${formatCurrency(kpis.total_billable_value)} in pipeline`}
         icon={<Waves className="w-6 h-6" strokeWidth={1.8} />}
       />
 
       <div className="px-7 py-6 flex flex-col gap-6">
         <section className="grid grid-cols-4 gap-3.5">
           <KpiCard
-            label="Needs Classification"
-            value={kpis.needs_classification.toLocaleString()}
-            delta={`${formatCurrency(kpis.needs_classification_total)} pending`}
+            label="Ready to Process"
+            value={kpis.ready_to_process.toLocaleString()}
+            delta={`${formatCurrency(kpis.ready_to_process_total)} pending`}
             tone="cyan"
             href="/service-billing/queue"
             delay={0}
-          />
-          <KpiCard
-            label="Missing Invoice Alert"
-            value={kpis.missing_invoice_alerts.toLocaleString()}
-            delta="completed but no invoice in ION"
-            tone="sun"
-            href="/service-billing/needs-attention"
-            delay={1}
           />
           <KpiCard
             label="Needs Review"
             value={kpis.needs_review.toLocaleString()}
             delta={kpis.needs_review > 0 ? "human eyes required" : "all clear"}
             tone={kpis.needs_review > 0 ? "sun" : "grass"}
+            href="/service-billing/needs-attention"
+            delay={1}
+          />
+          <KpiCard
+            label="Missing Invoice Alert"
+            value={kpis.missing_invoice_alerts.toLocaleString()}
+            delta="completed but no invoice in ION"
+            tone="sun"
             href="/service-billing/needs-attention"
             delay={2}
           />
@@ -66,9 +66,9 @@ export default async function HomePage() {
         <section className="grid grid-cols-[2fr_1fr] gap-5">
           <Card className="animate-fadeup" style={{ animationDelay: "0.1s" }}>
             <CardHeader>
-              <CardTitle>Billing Queue · Needs Classification</CardTitle>
+              <CardTitle>Billing Queue · Ready to Process</CardTitle>
               <Pill tone="cyan" className="ml-auto">
-                {kpis.needs_classification.toLocaleString()} total
+                {kpis.ready_to_process.toLocaleString()} total
               </Pill>
             </CardHeader>
             <div className="overflow-x-auto">
@@ -121,7 +121,7 @@ export default async function HomePage() {
                 href="/service-billing/queue"
                 className="text-[12px] text-cyan hover:underline"
               >
-                View all {kpis.needs_classification.toLocaleString()} →
+                View all {kpis.ready_to_process.toLocaleString()} →
               </Link>
             </div>
           </Card>
