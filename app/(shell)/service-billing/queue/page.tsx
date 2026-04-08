@@ -4,6 +4,7 @@ import { Tabs } from "@/components/shell/tabs"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { BarChart3 } from "lucide-react"
+import Link from "next/link"
 import { getBillingQueue } from "@/lib/queries/dashboard"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
 
@@ -64,7 +65,14 @@ export default async function QueuePage() {
                     key={row.wo_number}
                     className="border-b border-line-soft hover:bg-white/[0.03] transition-colors"
                   >
-                    <td className="px-5 py-2.5 font-mono text-cyan">{row.wo_number}</td>
+                    <td className="px-5 py-2.5 font-mono">
+                      <Link
+                        href={`/work-orders/${row.wo_number}` as never}
+                        className="text-cyan hover:underline"
+                      >
+                        {row.wo_number}
+                      </Link>
+                    </td>
                     <td className="font-mono text-ink-dim text-xs">{row.invoice_number}</td>
                     <td className="text-ink truncate max-w-[200px]">{row.customer ?? "—"}</td>
                     <td className="text-ink-dim text-xs">{row.type}</td>

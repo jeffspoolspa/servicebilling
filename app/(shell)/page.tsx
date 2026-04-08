@@ -89,7 +89,14 @@ export default async function HomePage() {
                       key={row.wo_number}
                       className="border-b border-line-soft hover:bg-white/[0.03] transition-colors"
                     >
-                      <td className="px-5 py-2.5 font-mono text-cyan">{row.wo_number}</td>
+                      <td className="px-5 py-2.5 font-mono">
+                        <Link
+                          href={`/work-orders/${row.wo_number}` as never}
+                          className="text-cyan hover:underline"
+                        >
+                          {row.wo_number}
+                        </Link>
+                      </td>
                       <td className="text-ink truncate max-w-[200px]">{row.customer ?? "—"}</td>
                       <td className="text-ink-dim text-xs">{row.type}</td>
                       <td className="text-ink-mute text-xs font-mono">
