@@ -17,10 +17,10 @@ const groups: NavGroup[] = [
   {
     heading: "Queue",
     items: [
-      { href: "/service-billing/needs-attention", label: "Needs Attention", count: 7 },
-      { href: "/service-billing/queue", label: "Ready to Process", count: 23 },
-      { href: "/service-billing/sent", label: "Sent", count: 412 },
-      { href: "/service-billing/past-due", label: "Past Due", count: 9 },
+      { href: "/service-billing/awaiting-invoice", label: "Awaiting Invoice" },
+      { href: "/service-billing/queue", label: "Ready to Process" },
+      { href: "/service-billing/needs-attention", label: "Needs Review" },
+      { href: "/service-billing/sent", label: "Processed" },
     ],
   },
   {

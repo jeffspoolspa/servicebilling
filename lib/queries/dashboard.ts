@@ -1,8 +1,8 @@
 import { createAnon } from "@/lib/supabase/anon"
 
 export interface DashboardKpis {
-  needs_classification: number
-  needs_classification_total: number
+  awaiting_invoice: number
+  awaiting_invoice_total: number
   ready_to_process: number
   ready_to_process_total: number
   needs_review: number
@@ -32,8 +32,8 @@ export async function getDashboardKpis(): Promise<DashboardKpis> {
 
   // Use raw SQL via rpc-style approach: do explicit count queries per status
   const [
-    needsClass,
-    needsClassSum,
+    awaitingInvoice,
+    awaitingInvoiceSum,
     readyToProc,
     readyToProcSum,
     needsReview,
@@ -48,8 +48,8 @@ export async function getDashboardKpis(): Promise<DashboardKpis> {
     sb
       .from("work_orders")
       .select("wo_number", { count: "exact", head: true })
-      .eq("billing_status", "needs_classification"),
-    sumTotalDue(sb, "needs_classification"),
+      .eq("billing_status", "awaiting_invoice"),
+    sumTotalDue(sb, "awaiting_invoice"),
     sb
       .from("work_orders")
       .select("wo_number", { count: "exact", head: true })
@@ -95,8 +95,8 @@ export async function getDashboardKpis(): Promise<DashboardKpis> {
   ])
 
   return {
-    needs_classification: needsClass.count ?? 0,
-    needs_classification_total: needsClassSum,
+    awaiting_invoice: awaitingInvoice.count ?? 0,
+    awaiting_invoice_total: awaitingInvoiceSum,
     ready_to_process: readyToProc.count ?? 0,
     ready_to_process_total: readyToProcSum,
     needs_review: needsReview.count ?? 0,
@@ -248,6 +248,24 @@ export async function listCustomers(opts?: { search?: string; limit?: number }):
   if (opts?.search) q = q.ilike("display_name", `%${opts.search}%`)
   const { data } = await q
   return (data ?? []) as CustomerRow[]
+}
+
+export interface NeedsReviewRow {
+  wo_number: string
+  customer: string | null
+  total_due: number | null
+  needs_review_reason: string | null
+}
+
+export async function getNeedsReview(limit = 10): Promise<NeedsReviewRow[]> {
+  const sb = createAnon("public")
+  const { data } = await sb
+    .from("work_orders")
+    .select("wo_number, customer, total_due, needs_review_reason")
+    .eq("billing_status", "needs_review")
+    .order("billing_status_set_at", { ascending: false })
+    .limit(limit)
+  return (data ?? []) as NeedsReviewRow[]
 }
 
 export async function getCustomerById(id: string): Promise<CustomerRow | null> {
