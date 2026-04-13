@@ -1,10 +1,15 @@
 # Pull unapplied QBO payments and credit memos into billing.open_credits.
 #
-# Queries QBO for:
-#   1. Payments WHERE UnappliedAmt > '0'
-#   2. CreditMemos WHERE RemainingCredit > '0'
-# Upserts into billing.open_credits. Removes rows where the QBO entity
-# no longer has unapplied balance (credit was applied elsewhere).
+# UnappliedAmt is NOT a queryable field in QBO's WHERE clause (computed field).
+# So we fetch recent Payments (last 6 months by default) and filter client-side
+# for UnappliedAmt > 0. CreditMemos are fewer, so we pull all and filter for
+# RemainingCredit > 0.
+#
+# Upserts into billing.open_credits. Removes rows where the QBO entity no
+# longer has unapplied balance (credit was applied elsewhere).
+#
+# The Postgres trigger fn_on_invoice_number_change reads from this table
+# to auto-match credits to work orders when invoice_number is set.
 #
 # Schedule: every 30 minutes.
 
@@ -13,10 +18,11 @@ import wmill
 import psycopg2
 import psycopg2.extras
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 QBO_RESOURCE = "u/carter/quickbooks_api"
 SUPABASE_RESOURCE = "u/carter/supabase"
+LOOKBACK_DAYS = 180  # 6 months of payments to scan
 
 
 def refresh_qbo_token():
@@ -25,8 +31,7 @@ def refresh_qbo_token():
         "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
         headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
         data={"grant_type": "refresh_token", "refresh_token": resource["refresh_token"]},
-        auth=(resource["client_id"], resource["client_secret"]),
-        timeout=30,
+        auth=(resource["client_id"], resource["client_secret"]), timeout=30,
     )
     if not resp.ok:
         raise Exception(f"QBO token refresh failed: {resp.status_code} - {resp.text}")
@@ -45,63 +50,58 @@ def get_db_conn():
     )
 
 
-def qbo_query_all(query: str, entity: str, access_token: str, realm_id: str) -> list:
-    """Paginated QBO query. Returns all matching entities."""
+def qbo_query_all(query, entity, access_token, realm_id):
     headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
     all_results = []
     start = 1
-    page_size = 1000
-
     while True:
-        paged = f"{query} STARTPOSITION {start} MAXRESULTS {page_size}"
+        paged = f"{query} STARTPOSITION {start} MAXRESULTS 1000"
         resp = requests.get(
             f"https://quickbooks.api.intuit.com/v3/company/{realm_id}/query",
-            headers=headers,
-            params={"query": paged},
-            timeout=30,
+            headers=headers, params={"query": paged}, timeout=60,
         )
         if not resp.ok:
             print(f"  QBO query failed at pos {start}: {resp.status_code}")
             break
-
         batch = resp.json().get("QueryResponse", {}).get(entity, [])
         all_results.extend(batch)
-
-        if len(batch) < page_size:
+        print(f"  page {(start - 1) // 1000 + 1}: {len(batch)} {entity}s (total {len(all_results)})")
+        if len(batch) < 1000:
             break
-        start += page_size
-
+        start += 1000
     return all_results
 
 
-def main():
-    """Pull all unapplied payments + credit memos from QBO into billing.open_credits."""
-    print("=== pull_qbo_credits started ===")
+def main(lookback_days: int = 180):
+    """Pull unapplied payments + credit memos from QBO into billing.open_credits.
 
+    Args:
+        lookback_days: How far back to scan for payments (default 6 months).
+    """
+    print(f"=== pull_qbo_credits started (lookback={lookback_days} days) ===")
     access_token, realm_id = refresh_qbo_token()
     conn = get_db_conn()
     now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
-    # ── 1. Fetch unapplied Payments from QBO ─────────────────────
-    print("Fetching unapplied payments...")
-    payments = qbo_query_all(
-        "SELECT * FROM Payment WHERE UnappliedAmt > '0'",
+    # Fetch recent Payments, filter client-side (UnappliedAmt not queryable)
+    print(f"Fetching payments since {cutoff}...")
+    all_payments = qbo_query_all(
+        f"SELECT * FROM Payment WHERE TxnDate >= '{cutoff}'",
         "Payment", access_token, realm_id
     )
-    print(f"  Found {len(payments)} unapplied payments")
+    unapplied_payments = [p for p in all_payments if float(p.get("UnappliedAmt", 0)) > 0]
+    print(f"  {len(all_payments)} total, {len(unapplied_payments)} with unapplied balance")
 
-    # ── 2. Fetch unapplied CreditMemos from QBO ─────────────────
-    print("Fetching unapplied credit memos...")
-    credit_memos = qbo_query_all(
-        "SELECT * FROM CreditMemo WHERE RemainingCredit > '0'",
-        "CreditMemo", access_token, realm_id
-    )
-    print(f"  Found {len(credit_memos)} unapplied credit memos")
+    # Fetch all CreditMemos, filter client-side
+    print("Fetching credit memos...")
+    all_credit_memos = qbo_query_all("SELECT * FROM CreditMemo", "CreditMemo", access_token, realm_id)
+    unapplied_cms = [cm for cm in all_credit_memos if float(cm.get("RemainingCredit", 0)) > 0]
+    print(f"  {len(all_credit_memos)} total, {len(unapplied_cms)} with remaining credit")
 
-    # ── 3. Build unified list ────────────────────────────────────
+    # Build unified list
     credits = []
-
-    for pmt in payments:
+    for pmt in unapplied_payments:
         credits.append({
             "qbo_payment_id": pmt.get("Id"),
             "qbo_customer_id": pmt.get("CustomerRef", {}).get("value"),
@@ -113,10 +113,9 @@ def main():
             "memo": pmt.get("PrivateNote"),
             "raw": pmt,
         })
-
-    for cm in credit_memos:
+    for cm in unapplied_cms:
         credits.append({
-            "qbo_payment_id": f"CM-{cm.get('Id')}",  # prefix to avoid ID collision with payments
+            "qbo_payment_id": f"CM-{cm.get('Id')}",
             "qbo_customer_id": cm.get("CustomerRef", {}).get("value"),
             "type": "credit_memo",
             "unapplied_amt": float(cm.get("RemainingCredit", 0)),
@@ -127,12 +126,11 @@ def main():
             "raw": cm,
         })
 
-    print(f"  Total credits to upsert: {len(credits)}")
+    print(f"Total to upsert: {len(credits)}")
 
-    # ── 4. Upsert into billing.open_credits ──────────────────────
+    # Upsert
     cur = conn.cursor()
     upserted = 0
-
     for c in credits:
         cur.execute("""
             INSERT INTO billing.open_credits
@@ -140,65 +138,45 @@ def main():
                  total_amt, txn_date, ref_num, memo, raw, fetched_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
             ON CONFLICT (qbo_payment_id) DO UPDATE SET
-                unapplied_amt = EXCLUDED.unapplied_amt,
-                total_amt = EXCLUDED.total_amt,
-                txn_date = EXCLUDED.txn_date,
-                ref_num = EXCLUDED.ref_num,
-                memo = EXCLUDED.memo,
-                raw = EXCLUDED.raw,
-                fetched_at = EXCLUDED.fetched_at
+                unapplied_amt = EXCLUDED.unapplied_amt, total_amt = EXCLUDED.total_amt,
+                txn_date = EXCLUDED.txn_date, ref_num = EXCLUDED.ref_num,
+                memo = EXCLUDED.memo, raw = EXCLUDED.raw, fetched_at = EXCLUDED.fetched_at
         """, (
             c["qbo_payment_id"], c["qbo_customer_id"], c["type"],
             c["unapplied_amt"], c["total_amt"], c["txn_date"],
-            c["ref_num"], c["memo"],
-            psycopg2.extras.Json(c["raw"]),
-            now,
+            c["ref_num"], c["memo"], psycopg2.extras.Json(c["raw"]), now,
         ))
         upserted += 1
-
     conn.commit()
 
-    # ── 5. Remove stale credits (no longer unapplied in QBO) ─────
+    # Remove stale
     live_ids = [c["qbo_payment_id"] for c in credits]
-
     if live_ids:
-        cur.execute("""
-            DELETE FROM billing.open_credits
-            WHERE qbo_payment_id != ALL(%s)
-            AND fetched_at < %s
-        """, (live_ids, now))
+        cur.execute("DELETE FROM billing.open_credits WHERE qbo_payment_id != ALL(%s)", (live_ids,))
     else:
-        # No credits at all in QBO — clear everything
-        cur.execute("DELETE FROM billing.open_credits WHERE fetched_at < %s", (now,))
-
+        cur.execute("DELETE FROM billing.open_credits")
     removed = cur.rowcount
     conn.commit()
-    cur.close()
 
-    # ── 6. Summary ───────────────────────────────────────────────
-    # Count by type
-    cur2 = conn.cursor()
-    cur2.execute("""
-        SELECT type, count(*), sum(unapplied_amt)
-        FROM billing.open_credits
-        GROUP BY type
-    """)
-    by_type = {r[0]: {"count": r[1], "total": float(r[2])} for r in cur2.fetchall()}
-    cur2.close()
+    # Summary
+    cur.execute("SELECT type, count(*), sum(unapplied_amt) FROM billing.open_credits GROUP BY type")
+    by_type = {r[0]: {"count": r[1], "total": float(r[2])} for r in cur.fetchall()}
+    cur.execute("SELECT count(*) FROM billing.open_credits WHERE ref_num IS NOT NULL AND ref_num ~ '^\\d{5,}$'")
+    wo_tagged = cur.fetchone()[0]
+    cur.close()
     conn.close()
 
     total_unapplied = sum(t["total"] for t in by_type.values())
-
     print(f"=== done: {upserted} upserted, {removed} removed ===")
     print(f"  by type: {by_type}")
-    print(f"  total unapplied: ${total_unapplied:,.2f}")
+    print(f"  WO-tagged: {wo_tagged}")
+    print(f"  total: ${total_unapplied:,.2f}")
 
     return {
-        "status": "success",
-        "upserted": upserted,
-        "removed": removed,
-        "by_type": by_type,
+        "status": "success", "upserted": upserted, "removed": removed,
+        "by_type": by_type, "wo_tagged_credits": wo_tagged,
         "total_unapplied": total_unapplied,
-        "qbo_payments_found": len(payments),
-        "qbo_credit_memos_found": len(credit_memos),
+        "qbo_payments_scanned": len(all_payments),
+        "qbo_payments_unapplied": len(unapplied_payments),
+        "qbo_credit_memos_unapplied": len(unapplied_cms),
     }
