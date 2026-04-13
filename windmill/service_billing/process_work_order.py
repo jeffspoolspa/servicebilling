@@ -326,6 +326,97 @@ def log_processing_attempt(conn, wo_number: str, result: dict):
     cur.close()
 
 
+def get_matched_credits(conn, wo_number: str) -> list[dict]:
+    """Get credits matched to this WO from billing.open_credits."""
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""
+        SELECT qbo_payment_id, type, unapplied_amt, matched_amount, match_reason, raw
+        FROM billing.open_credits
+        WHERE matched_wo_number = %s AND matched_amount > 0
+        ORDER BY matched_amount DESC
+    """, (wo_number,))
+    rows = [dict(r) for r in cur.fetchall()]
+    cur.close()
+    return rows
+
+
+def apply_credit_in_qbo(credit_id: str, credit_type: str, invoice_id: str,
+                         amount: float, access_token: str, realm_id: str) -> dict:
+    """Link a QBO Payment or CreditMemo to an Invoice.
+
+    For Payments: GET the Payment, append a Line linking it to the Invoice, POST update.
+    For CreditMemos: similar but uses the CreditMemo entity.
+    This is the same apply_credits logic from the original service_billing_processing.
+    """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        if credit_type == "credit_memo":
+            # CreditMemo IDs are stored as "CM-{id}" — strip prefix
+            cm_id = credit_id.replace("CM-", "")
+
+            # Fetch current CreditMemo
+            cm_resp = requests.get(
+                f"https://quickbooks.api.intuit.com/v3/company/{realm_id}/creditmemo/{cm_id}",
+                headers=headers,
+            )
+            if not cm_resp.ok:
+                return {"success": False, "error": f"Failed to fetch CreditMemo {cm_id}: {cm_resp.status_code}"}
+
+            # Apply CreditMemo to Invoice via Payment endpoint
+            payment_data = {
+                "CustomerRef": cm_resp.json().get("CreditMemo", {}).get("CustomerRef"),
+                "TotalAmt": 0,
+                "Line": [{
+                    "Amount": amount,
+                    "LinkedTxn": [
+                        {"TxnId": cm_id, "TxnType": "CreditMemo"},
+                        {"TxnId": invoice_id, "TxnType": "Invoice"},
+                    ]
+                }],
+            }
+            apply_resp = requests.post(
+                f"https://quickbooks.api.intuit.com/v3/company/{realm_id}/payment",
+                headers=headers, json=payment_data,
+            )
+            if not apply_resp.ok:
+                return {"success": False, "error": f"CreditMemo apply failed: {apply_resp.text[:300]}"}
+            return {"success": True}
+
+        else:
+            # Payment: GET current, add Line linking to Invoice, POST update
+            pmt_resp = requests.get(
+                f"https://quickbooks.api.intuit.com/v3/company/{realm_id}/payment/{credit_id}",
+                headers=headers,
+            )
+            if not pmt_resp.ok:
+                return {"success": False, "error": f"Failed to fetch Payment {credit_id}: {pmt_resp.status_code}"}
+
+            payment = pmt_resp.json().get("Payment", {})
+            existing_lines = payment.get("Line", [])
+            existing_lines.append({
+                "Amount": amount,
+                "LinkedTxn": [{"TxnId": invoice_id, "TxnType": "Invoice"}]
+            })
+            payment["Line"] = existing_lines
+            payment["sparse"] = True
+
+            update_resp = requests.post(
+                f"https://quickbooks.api.intuit.com/v3/company/{realm_id}/payment",
+                headers=headers, json=payment,
+            )
+            if not update_resp.ok:
+                return {"success": False, "error": f"Payment apply failed: {update_resp.text[:300]}"}
+            return {"success": True}
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def update_invoice_cache(conn, invoice_number: str, balance: float, email_status: str):
     """Update billing.invoices cache after processing."""
     cur = conn.cursor()
@@ -417,13 +508,61 @@ def process_one(conn, wo_number: str, access_token: str, realm_id: str, dry_run:
             return result
 
         if dry_run:
+            matched = get_matched_credits(conn, wo_number)
+            pm = get_cached_payment_method(conn, qbo_customer_id) if payment_method == "on_file" and qbo_balance > 0 else None
+            pm_info = f"{pm['type']} x{pm['last_four']}" if pm else "n/a"
             result["status"] = "skipped"
-            result["error_message"] = "dry_run=True, no QBO writes"
-            release_lock(conn, wo_number, "ready_to_process")  # release back to ready
+            result["credits_applied"] = [{"id": c["qbo_payment_id"], "amount": float(c["matched_amount"])} for c in matched]
+            result["error_message"] = f"dry_run — credits: {len(matched)} (${sum(float(c['matched_amount']) for c in matched):.2f}), charge remainder via {pm_info}, balance=${qbo_balance:.2f}"
+            release_lock(conn, wo_number, "ready_to_process")
             return result
 
-        # ── 5. PAYMENT METHOD LOGIC ──────────────────────────────
-        if payment_method == "on_file" and qbo_balance > 0:
+        # ── 5. APPLY MATCHED CREDITS IN QBO ──────────────────────
+        matched_credits = get_matched_credits(conn, wo_number)
+        credits_applied = []
+        remaining_balance = qbo_balance
+
+        for mc in matched_credits:
+            apply_amount = min(float(mc["matched_amount"]), remaining_balance)
+            if apply_amount <= 0:
+                break
+
+            apply_result = apply_credit_in_qbo(
+                credit_id=mc["qbo_payment_id"],
+                credit_type=mc["type"],
+                invoice_id=qbo_invoice_id,
+                amount=apply_amount,
+                access_token=access_token,
+                realm_id=realm_id,
+            )
+
+            credits_applied.append({
+                "credit_id": mc["qbo_payment_id"],
+                "amount": apply_amount,
+                "success": apply_result["success"],
+                "error": apply_result.get("error"),
+            })
+
+            if apply_result["success"]:
+                remaining_balance -= apply_amount
+                # Mark credit as used in our table
+                cur = conn.cursor()
+                cur.execute("""
+                    UPDATE billing.open_credits
+                    SET unapplied_amt = GREATEST(unapplied_amt - %s, 0)
+                    WHERE qbo_payment_id = %s
+                """, (apply_amount, mc["qbo_payment_id"]))
+                conn.commit()
+                cur.close()
+            else:
+                print(f"  credit apply failed for {mc['qbo_payment_id']}: {apply_result.get('error')}")
+
+        result["credits_applied"] = credits_applied
+        if credits_applied:
+            print(f"  applied {len(credits_applied)} credits, remaining balance: ${remaining_balance:.2f}")
+
+        # ── 6. CHARGE REMAINDER (on_file only) ───────────────────
+        if payment_method == "on_file" and remaining_balance > 0:
             # Get cached payment method
             pm = get_cached_payment_method(conn, qbo_customer_id)
             if not pm:
@@ -433,7 +572,7 @@ def process_one(conn, wo_number: str, access_token: str, realm_id: str, dry_run:
                 log_processing_attempt(conn, wo_number, result)
                 return result
 
-            charge_amount = qbo_balance
+            charge_amount = remaining_balance
             result["charge_amount"] = charge_amount
 
             # Charge
