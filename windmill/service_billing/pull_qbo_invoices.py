@@ -332,11 +332,30 @@ def main(
         upserted = upsert_invoices(conn, qbo_invoices)
         print(f"Upserted {upserted} invoices into billing.invoices")
 
+        # 4. Re-evaluate stuck WOs: any needs_classification WO that now has
+        #    a cached invoice should re-trigger classification. We "touch" the
+        #    row by setting invoice_number = invoice_number. The trigger's guard
+        #    (billing_status IN ('not_billable','needs_classification')) lets it
+        #    through and classification succeeds now that the invoice is cached.
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE public.work_orders
+            SET invoice_number = invoice_number
+            WHERE billing_status = 'needs_classification'
+              AND invoice_number IN (SELECT doc_number FROM billing.invoices)
+        """)
+        reclassified = cur.rowcount
+        conn.commit()
+        cur.close()
+        if reclassified > 0:
+            print(f"Re-triggered classification for {reclassified} stuck WOs")
+
         return {
             "status": "success" if not errors else "partial",
             "to_fetch": len(invoice_numbers),
             "fetched": len(qbo_invoices),
             "upserted": upserted,
+            "reclassified": reclassified,
             "not_found_in_qbo": len(not_found),
             "not_found_sample": not_found[:20],
             "batch_errors": errors,
