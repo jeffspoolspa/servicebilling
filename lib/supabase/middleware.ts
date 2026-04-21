@@ -1,7 +1,10 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
+import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
 
 type CookieToSet = { name: string; value: string; options?: CookieOptions }
+
+const TECH_ALLOWED_PREFIXES = ["/sign-out", "/tech-login", "/auth"]
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request })
@@ -30,18 +33,38 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const path = request.nextUrl.pathname
-  const isAuthRoute = path.startsWith("/login") || path.startsWith("/auth")
+  const isOfficeAuthRoute = path.startsWith("/login") || path.startsWith("/auth")
+  const isTechLogin = path.startsWith("/tech-login")
 
-  if (!user && !isAuthRoute) {
+  if (!user) {
+    if (isOfficeAuthRoute || isTechLogin) return response
+    // Unauthenticated hits to /sign-out bounce to the tech login, everything else
+    // bounces to the office login.
     const url = request.nextUrl.clone()
-    url.pathname = "/login"
+    url.pathname = path.startsWith("/sign-out") ? "/tech-login" : "/login"
     return NextResponse.redirect(url)
   }
 
-  if (user && isAuthRoute) {
+  if (isOfficeAuthRoute || isTechLogin) {
     const url = request.nextUrl.clone()
     url.pathname = "/"
     return NextResponse.redirect(url)
+  }
+
+  // Sandbox maintenance techs to /sign-out and related auth paths.
+  const { data: emp } = await supabase
+    .from("employees")
+    .select("department_id")
+    .eq("auth_user_id", user.id)
+    .maybeSingle()
+
+  if (emp?.department_id === MAINTENANCE_DEPARTMENT_ID) {
+    const allowed = TECH_ALLOWED_PREFIXES.some((p) => path === p || path.startsWith(p + "/"))
+    if (!allowed) {
+      const url = request.nextUrl.clone()
+      url.pathname = "/sign-out"
+      return NextResponse.redirect(url)
+    }
   }
 
   return response
