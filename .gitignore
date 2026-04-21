@@ -39,3 +39,6 @@ preview/
 
 # windmill (mirror; secrets are filtered but be safe)
 windmill/**/secret-*
+
+# claude code local state
+.claude/

@@ -20,6 +20,8 @@ export default async function CustomerDetailPage({ params }: PageProps) {
   return (
     <>
       <Topbar
+        back
+        backFallbackHref="/customers"
         crumbs={[
           { label: "Customers", href: "/customers" },
           { label: customer.display_name },

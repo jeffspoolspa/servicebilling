@@ -3,16 +3,36 @@ import { ObjectHeader } from "@/components/shell/object-header"
 import { Tabs } from "@/components/shell/tabs"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
+import { Pagination } from "@/components/ui/pagination"
 import { BarChart3 } from "lucide-react"
-import Link from "next/link"
-import { getBillingQueue } from "@/lib/queries/dashboard"
-import { formatCurrency, formatDate } from "@/lib/utils/format"
+import { getBillingQueue, DEFAULT_SORT } from "@/lib/queries/dashboard"
+import { formatCurrency } from "@/lib/utils/format"
+import { QueueActions } from "@/components/billing/queue-actions"
 
 export const dynamic = "force-dynamic"
 
-export default async function QueuePage() {
-  const rows = await getBillingQueue({ status: "ready_to_process", limit: 200 })
-  const total = rows.reduce((acc, r) => acc + Number(r.total_due ?? 0), 0)
+const PER_PAGE = 25
+const BASE = "/service-billing/queue"
+
+interface PageProps {
+  searchParams: Promise<{ page?: string; sort?: string; dir?: string }>
+}
+
+export default async function QueuePage({ searchParams }: PageProps) {
+  const sp = await searchParams
+  const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1)
+  const sort = sp.sort ?? DEFAULT_SORT.ready_to_process.column
+  const dir: "asc" | "desc" = sp.dir === "asc" ? "asc" : "desc"
+
+  const { rows, total } = await getBillingQueue({
+    status: "ready_to_process",
+    offset: (page - 1) * PER_PAGE,
+    limit: PER_PAGE,
+    sortBy: sort,
+    sortDir: dir,
+  })
+  const pageTotal = rows.reduce((acc, r) => acc + Number(r.total_due ?? 0), 0)
+  const preserve = { sort, dir }
 
   return (
     <>
@@ -25,7 +45,7 @@ export default async function QueuePage() {
       <ObjectHeader
         eyebrow="Service Billing"
         title="Billing Queue"
-        sub={`${rows.length} work orders ready to process · ${formatCurrency(total)}`}
+        sub={`${total} work orders ready to process · ${formatCurrency(pageTotal)} on this page`}
         icon={<BarChart3 className="w-6 h-6" strokeWidth={1.8} />}
       />
       <Tabs
@@ -34,68 +54,27 @@ export default async function QueuePage() {
           { href: "/service-billing/queue", label: "Ready to Process" },
           { href: "/service-billing/needs-attention", label: "Needs Review" },
           { href: "/service-billing/sent", label: "Processed" },
+          { href: "/service-billing/audit", label: "Audit" },
         ]}
       />
-      <div className="px-7 py-6">
+      <div className="px-7 py-6 pb-20">
         <Card>
           <CardHeader>
             <CardTitle>ready_to_process</CardTitle>
             <Pill tone="cyan" className="ml-auto">
-              {rows.length} rows · {formatCurrency(total)}
+              {total}
             </Pill>
           </CardHeader>
-          <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
-              <thead>
-                <tr className="text-left text-[10px] uppercase tracking-[0.12em] text-ink-mute border-b border-line-soft bg-[#0c1926]">
-                  <th className="px-5 py-2.5 font-medium">WO</th>
-                  <th className="font-medium">Invoice</th>
-                  <th className="font-medium">Customer</th>
-                  <th className="font-medium">Type</th>
-                  <th className="font-medium">Method</th>
-                  <th className="font-medium">Tech</th>
-                  <th className="font-medium">Office</th>
-                  <th className="font-medium">Completed</th>
-                  <th className="font-medium num text-right pr-5">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr
-                    key={row.wo_number}
-                    className="border-b border-line-soft hover:bg-white/[0.03] transition-colors"
-                  >
-                    <td className="px-5 py-2.5 font-mono">
-                      <Link
-                        href={`/work-orders/${row.wo_number}` as never}
-                        className="text-cyan hover:underline"
-                      >
-                        {row.wo_number}
-                      </Link>
-                    </td>
-                    <td className="font-mono text-ink-dim text-xs">{row.invoice_number}</td>
-                    <td className="text-ink truncate max-w-[200px]">{row.customer ?? "—"}</td>
-                    <td className="text-ink-dim text-xs">{row.type}</td>
-                    <td className="text-xs">
-                      {row.payment_method === "on_file" ? (
-                        <span className="text-cyan">On file</span>
-                      ) : (
-                        <span className="text-ink-mute">Invoice</span>
-                      )}
-                    </td>
-                    <td className="text-ink-mute text-xs font-mono">
-                      {row.assigned_to?.split(",")[1]?.trim() ?? row.assigned_to ?? "—"}
-                    </td>
-                    <td className="text-ink-mute text-xs">{row.office_name}</td>
-                    <td className="text-ink-mute text-xs">{formatDate(row.completed)}</td>
-                    <td className="num text-right pr-5 text-ink">
-                      {formatCurrency(Number(row.total_due ?? 0))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {/* Selection + Process/Dry-run buttons live in the client component.
+              Sort state round-trips through the URL via SortableHeader links. */}
+          <QueueActions
+            rows={rows}
+            sort={sort}
+            dir={dir}
+            preserve={preserve}
+            basePath={BASE}
+          />
+          <Pagination basePath={BASE} page={page} perPage={PER_PAGE} total={total} preserve={preserve} />
         </Card>
       </div>
     </>

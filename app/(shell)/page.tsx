@@ -2,7 +2,7 @@ import { Topbar } from "@/components/shell/topbar"
 import { ObjectHeader } from "@/components/shell/object-header"
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
-import { Waves } from "lucide-react"
+import { Waves, AlertTriangle } from "lucide-react"
 import Link from "next/link"
 import { getDashboardKpis, getBillingQueue, getNeedsReview } from "@/lib/queries/dashboard"
 import { formatCurrency, formatRelative } from "@/lib/utils/format"
@@ -10,11 +10,12 @@ import { formatCurrency, formatRelative } from "@/lib/utils/format"
 export const dynamic = "force-dynamic"
 
 export default async function HomePage() {
-  const [kpis, recentQueue, needsReviewRows] = await Promise.all([
+  const [kpis, queueResult, needsReviewRows] = await Promise.all([
     getDashboardKpis(),
     getBillingQueue({ status: "ready_to_process", limit: 8 }),
     getNeedsReview(6),
   ])
+  const recentQueue = queueResult.rows
 
   return (
     <>
@@ -28,6 +29,28 @@ export default async function HomePage() {
       />
 
       <div className="px-7 py-6 flex flex-col gap-6">
+        {(kpis.audit_billable_zero_subtotal > 0 || kpis.audit_non_billable_with_charges > 0) && (
+          <Link
+            href={"/service-billing/audit" as never}
+            className="flex items-center gap-3 rounded-lg border border-sun/20 bg-sun/5 px-4 py-2.5 hover:border-sun/40 transition-colors"
+          >
+            <AlertTriangle className="w-4 h-4 text-sun" strokeWidth={2} />
+            <div className="text-[12px] text-ink-dim flex-1">
+              <span className="text-sun font-medium">Audit:</span>{" "}
+              {kpis.audit_billable_zero_subtotal > 0 && (
+                <>{kpis.audit_billable_zero_subtotal} billable WOs with $0 subtotal</>
+              )}
+              {kpis.audit_billable_zero_subtotal > 0 &&
+                kpis.audit_non_billable_with_charges > 0 &&
+                " · "}
+              {kpis.audit_non_billable_with_charges > 0 && (
+                <>{kpis.audit_non_billable_with_charges} non-billable WOs with charges</>
+              )}
+            </div>
+            <span className="text-[11px] text-cyan">Review →</span>
+          </Link>
+        )}
+
         <section className="grid grid-cols-4 gap-3.5">
           <KpiCard
             label="Ready to Process"
@@ -173,13 +196,13 @@ interface KpiCardProps {
   label: string
   value: string
   delta: string
-  tone: "cyan" | "sun" | "grass"
+  tone: "cyan" | "sun" | "grass" | "coral"
   href: string
   delay: number
 }
 
 function KpiCard({ label, value, delta, tone, href, delay }: KpiCardProps) {
-  const toneClass = { cyan: "text-cyan", sun: "text-sun", grass: "text-grass" }[tone]
+  const toneClass = { cyan: "text-cyan", sun: "text-sun", grass: "text-grass", coral: "text-coral" }[tone]
   return (
     <Link href={href as never}>
       <Card

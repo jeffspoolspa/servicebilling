@@ -6,14 +6,19 @@ const WINDMILL_BASE = process.env.WINDMILL_BASE_URL || "https://app.windmill.dev
 const WINDMILL_WORKSPACE = process.env.WINDMILL_WORKSPACE || "jps-internal"
 const WINDMILL_TOKEN = process.env.WINDMILL_TOKEN
 
-export async function triggerScript(
-  scriptPath: string,
-  args: Record<string, unknown> = {},
+async function runAtPath(
+  kind: "p" | "f",
+  path: string,
+  args: Record<string, unknown>,
 ): Promise<{ jobId: string }> {
-  if (!WINDMILL_TOKEN) throw new Error("WINDMILL_TOKEN not set")
+  if (!WINDMILL_TOKEN) {
+    throw new Error(
+      "WINDMILL_TOKEN env var is missing. Add it to .env.local (and Vercel for prod) — see .env.example. Get a token from Windmill Settings → Tokens.",
+    )
+  }
 
   const resp = await fetch(
-    `${WINDMILL_BASE}/w/${WINDMILL_WORKSPACE}/jobs/run/p/${scriptPath}`,
+    `${WINDMILL_BASE}/w/${WINDMILL_WORKSPACE}/jobs/run/${kind}/${path}`,
     {
       method: "POST",
       headers: {
@@ -31,6 +36,22 @@ export async function triggerScript(
 
   const jobId = await resp.text()
   return { jobId: jobId.replace(/"/g, "") }
+}
+
+/** Trigger a Windmill script (not a flow). */
+export async function triggerScript(
+  scriptPath: string,
+  args: Record<string, unknown> = {},
+): Promise<{ jobId: string }> {
+  return runAtPath("p", scriptPath, args)
+}
+
+/** Trigger a Windmill flow. */
+export async function triggerFlow(
+  flowPath: string,
+  args: Record<string, unknown> = {},
+): Promise<{ jobId: string }> {
+  return runAtPath("f", flowPath, args)
 }
 
 export async function getJobStatus(jobId: string): Promise<{

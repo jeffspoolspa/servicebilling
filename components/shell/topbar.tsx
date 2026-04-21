@@ -1,20 +1,39 @@
+import Link from "next/link"
 import { Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { BackButton } from "@/components/shell/back-button"
 
 interface TopbarProps {
   crumbs?: Array<{ label: string; href?: string }>
+  /** Show a back arrow button to the left of the crumbs (uses browser history). */
+  back?: boolean
+  /** Where to send the user if they hit Back with no history (rarely needed). */
+  backFallbackHref?: string
 }
 
-export function Topbar({ crumbs = [] }: TopbarProps) {
+export function Topbar({ crumbs = [], back = false, backFallbackHref }: TopbarProps) {
   return (
     <div className="sticky top-0 z-10 flex items-center gap-3.5 px-7 py-3.5 border-b border-line-soft bg-[#0A1622]/80 backdrop-blur-md">
+      {back && <BackButton fallbackHref={backFallbackHref} />}
       <div className="text-xs text-ink-mute flex gap-2 items-center">
-        {crumbs.map((c, i) => (
-          <span key={i} className="flex items-center gap-2">
-            {i > 0 && <span>/</span>}
-            <span className={i === crumbs.length - 1 ? "text-ink font-medium" : ""}>{c.label}</span>
-          </span>
-        ))}
+        {crumbs.map((c, i) => {
+          const isLast = i === crumbs.length - 1
+          return (
+            <span key={i} className="flex items-center gap-2">
+              {i > 0 && <span>/</span>}
+              {c.href && !isLast ? (
+                <Link
+                  href={c.href as never}
+                  className="text-ink-mute hover:text-cyan transition-colors"
+                >
+                  {c.label}
+                </Link>
+              ) : (
+                <span className={isLast ? "text-ink font-medium" : ""}>{c.label}</span>
+              )}
+            </span>
+          )
+        })}
       </div>
 
       <div className="ml-auto flex items-center gap-2 bg-[#0E1C2A] border border-line rounded-lg px-3 py-1.5 w-80 text-ink-mute text-[13px]">

@@ -59,4 +59,122 @@
   .num {
     font-variant-numeric: tabular-nums lining-nums;
   }
+
+  /* Slow, subtle shimmer sweep across an "active" batch processing row.
+     Financial context — restrained on purpose. Uses ease-in-out because
+     it's continuous motion (not enter/exit). */
+  @keyframes batch-shimmer {
+    0% {
+      background-position: -160% 0;
+    }
+    100% {
+      background-position: 260% 0;
+    }
+  }
+  .batch-active-shimmer {
+    background-image: linear-gradient(
+      110deg,
+      transparent 0%,
+      transparent 35%,
+      rgba(56, 189, 248, 0.14) 48%,
+      rgba(56, 189, 248, 0.22) 52%,
+      rgba(56, 189, 248, 0.14) 58%,
+      transparent 72%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: batch-shimmer 2400ms cubic-bezier(0.455, 0.03, 0.515, 0.955) infinite;
+  }
+
+  /* Status icon swap: scale in from 0.85, not from 0 (per Emil: never from 0). */
+  @keyframes icon-swap-in {
+    from {
+      opacity: 0;
+      transform: scale(0.85);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  .icon-swap-in {
+    animation: icon-swap-in 180ms cubic-bezier(0.215, 0.61, 0.355, 1);
+  }
+
+  /* Modal surface enter: fade + scale 0.96 → 1, ease-out, 200ms. */
+  @keyframes modal-surface-enter {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  .modal-surface-enter {
+    animation: modal-surface-enter 200ms cubic-bezier(0.215, 0.61, 0.355, 1);
+  }
+
+  /* Triage card enter — subtle slide-in from right + fade.
+     User-initiated, entering the viewport → ease-out. */
+  @keyframes triage-card-enter {
+    from {
+      opacity: 0;
+      transform: translateX(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  .triage-card-enter {
+    animation: triage-card-enter 180ms cubic-bezier(0.215, 0.61, 0.355, 1);
+  }
+
+  /* Approve feedback — brief green ring flash before the card swap.
+     One-shot, 160ms. Avoids the slow-feeling delay before advancing. */
+  @keyframes triage-approve-flash {
+    0% {
+      box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+    }
+    50% {
+      box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.5),
+        0 0 16px 0 rgba(52, 211, 153, 0.2);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+    }
+  }
+  .triage-approve-flash {
+    animation: triage-approve-flash 160ms cubic-bezier(0.215, 0.61, 0.355, 1);
+  }
+
+  /* Row "just completed" pop — brief scale bump then settle. */
+  @keyframes row-complete-pop {
+    0% {
+      transform: scale(1);
+    }
+    40% {
+      transform: scale(1.015);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+  .row-complete-pop {
+    animation: row-complete-pop 280ms cubic-bezier(0.215, 0.61, 0.355, 1);
+  }
+
+  /* Respect user preferences — kill all motion. Instant state swaps only. */
+  @media (prefers-reduced-motion: reduce) {
+    .batch-active-shimmer,
+    .icon-swap-in,
+    .modal-surface-enter,
+    .row-complete-pop,
+    .triage-card-enter,
+    .triage-approve-flash {
+      animation: none;
+    }
+  }
 }
