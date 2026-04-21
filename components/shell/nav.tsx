@@ -39,6 +39,7 @@ const groups: NavGroup[] = [
       { href: "/admin/sync-log", label: "Sync Log" },
       { href: "/admin/classification-rules", label: "Classification Rules" },
       { href: "/admin/ion-mapping", label: "ION Mapping" },
+      { href: "/admin/tech-users", label: "Tech Users" },
     ],
   },
 ]
