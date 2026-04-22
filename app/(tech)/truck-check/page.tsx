@@ -11,5 +11,11 @@ export default async function TruckCheckPage() {
 
   const items = await listSignOutItems()
 
-  return <TruckCheckList items={items} storageKey={`truck-check:${employee.id}`} />
+  return (
+    <TruckCheckList
+      items={items}
+      storageKey={`truck-check:${employee.id}`}
+      completedStorageKey={`truck-check-completed:${employee.id}`}
+    />
+  )
 }
