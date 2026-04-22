@@ -63,7 +63,7 @@ export async function updateSession(request: NextRequest) {
     const allowed = TECH_ALLOWED_PREFIXES.some((p) => path === p || path.startsWith(p + "/"))
     if (!allowed) {
       const url = request.nextUrl.clone()
-      url.pathname = "/sign-out"
+      url.pathname = "/truck-check"
       return NextResponse.redirect(url)
     }
   }
