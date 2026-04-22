@@ -4,7 +4,7 @@ import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
 
 type CookieToSet = { name: string; value: string; options?: CookieOptions }
 
-const TECH_ALLOWED_PREFIXES = ["/sign-out", "/tech-login", "/auth"]
+const TECH_ALLOWED_PREFIXES = ["/sign-out", "/truck-check", "/tech-login", "/auth"]
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request })
@@ -38,10 +38,11 @@ export async function updateSession(request: NextRequest) {
 
   if (!user) {
     if (isOfficeAuthRoute || isTechLogin) return response
-    // Unauthenticated hits to /sign-out bounce to the tech login, everything else
+    // Unauthenticated hits to tech URLs bounce to the tech login; everything else
     // bounces to the office login.
     const url = request.nextUrl.clone()
-    url.pathname = path.startsWith("/sign-out") ? "/tech-login" : "/login"
+    const isTechPath = path.startsWith("/sign-out") || path.startsWith("/truck-check")
+    url.pathname = isTechPath ? "/tech-login" : "/login"
     return NextResponse.redirect(url)
   }
 

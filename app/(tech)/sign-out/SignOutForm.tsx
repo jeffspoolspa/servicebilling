@@ -21,6 +21,7 @@ const initial: SubmitState = {}
 interface Props {
   employeeName: string
   items: SignOutItem[]
+  prefillIds?: number[]
 }
 
 function pluralize(word: string, n: number) {
@@ -42,8 +43,17 @@ function isRowValid(row: Row, items: SignOutItem[]): boolean {
   return Number(row.qty) > 0
 }
 
-export function SignOutForm({ employeeName, items }: Props) {
-  const [rows, setRows] = useState<Row[]>([blankRow()])
+export function SignOutForm({ employeeName, items, prefillIds = [] }: Props) {
+  const initialRows: Row[] =
+    prefillIds.length > 0
+      ? prefillIds.map((id) => {
+          const item = items.find((i) => i.id === id)
+          // Non-bulk items default to qty 1; bulk items submit as 1 container implicitly.
+          const qty = item && !isBulkItem(item) ? "1" : ""
+          return { itemId: String(id), qty }
+        })
+      : [blankRow()]
+  const [rows, setRows] = useState<Row[]>(initialRows)
   const [state, formAction, pending] = useActionState(submitSignOut, initial)
   const [showToast, setShowToast] = useState(false)
   const lastResult = useRef(state)
