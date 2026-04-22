@@ -218,6 +218,24 @@
     animation: check-draw 180ms cubic-bezier(0.215, 0.61, 0.355, 1) both;
   }
 
+  /* Bottom sheet slide-up (260ms). Paired with backdrop fade. */
+  @keyframes sheet-slide-up {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+  @keyframes sheet-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
   /* Respect user preferences — kill all motion. Instant state swaps only. */
   @media (prefers-reduced-motion: reduce) {
     .batch-active-shimmer,
@@ -230,6 +248,10 @@
     .tick-bump,
     .check-draw {
       animation: none;
+    }
+    [style*="sheet-slide-up"],
+    [style*="sheet-fade-in"] {
+      animation: none !important;
     }
   }
 }

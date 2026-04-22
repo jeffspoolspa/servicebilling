@@ -1,27 +1,34 @@
 "use client"
 
 import { useActionState, useState, useEffect, useRef } from "react"
-import { Button } from "@/components/ui/button"
-import { Plus, Trash2 } from "lucide-react"
+import { Minus, Plus, Trash2 } from "lucide-react"
+import { cn } from "@/lib/utils/cn"
 import type { SignOutItem } from "@/lib/entities/inventory-signout/types"
-import {
-  SIGNOUT_CATEGORIES,
-  SIGNOUT_CATEGORY_LABELS,
-} from "@/lib/entities/inventory-signout/signout-items"
 import { submitSignOut, type SubmitState } from "./actions"
+import { ItemPicker } from "./ItemPicker"
 
 interface Row {
   itemId: string
   qty: string
 }
 
-const blankRow = (): Row => ({ itemId: "", qty: "" })
+const blankRow = (): Row => ({ itemId: "", qty: "1" })
 const initial: SubmitState = {}
 
 interface Props {
   employeeName: string
   items: SignOutItem[]
   prefillIds?: number[]
+}
+
+// Inline cyan chevron for native <select>. Applied as a style prop to avoid
+// Tailwind's arbitrary-value URL escaping getting mangled by PostCSS.
+const SELECT_CHEVRON_STYLE: React.CSSProperties = {
+  backgroundImage:
+    "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5 L6 6.5 L11 1.5' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>\")",
+  backgroundRepeat: "no-repeat",
+  backgroundPosition: "right 14px center",
+  backgroundSize: "12px 8px",
 }
 
 function pluralize(word: string, n: number) {
@@ -34,7 +41,6 @@ function isBulkItem(item: SignOutItem | undefined) {
   return Boolean(item && item.multiplier > 1 && item.input_unit)
 }
 
-/** For bulk items, qty is implicitly "1"; only non-bulk items need explicit qty > 0. */
 function isRowValid(row: Row, items: SignOutItem[]): boolean {
   if (!row.itemId) return false
   const item = items.find((i) => i.id === Number(row.itemId))
@@ -46,12 +52,7 @@ function isRowValid(row: Row, items: SignOutItem[]): boolean {
 export function SignOutForm({ employeeName, items, prefillIds = [] }: Props) {
   const initialRows: Row[] =
     prefillIds.length > 0
-      ? prefillIds.map((id) => {
-          const item = items.find((i) => i.id === id)
-          // Non-bulk items default to qty 1; bulk items submit as 1 container implicitly.
-          const qty = item && !isBulkItem(item) ? "1" : ""
-          return { itemId: String(id), qty }
-        })
+      ? prefillIds.map((id) => ({ itemId: String(id), qty: "1" }))
       : [blankRow()]
   const [rows, setRows] = useState<Row[]>(initialRows)
   const [state, formAction, pending] = useActionState(submitSignOut, initial)
@@ -107,88 +108,74 @@ export function SignOutForm({ employeeName, items, prefillIds = [] }: Props) {
             : undefined
           const bulk = isBulkItem(selected)
           const qtyNum = Number(row.qty) || 0
+          const canRemove = rows.length > 1
+
+          const trashBtn = (
+            <button
+              type="button"
+              onClick={() =>
+                setRows((rs) =>
+                  rs.length === 1 ? [blankRow()] : rs.filter((_, i) => i !== idx),
+                )
+              }
+              aria-label={canRemove ? "Remove item" : "Clear item"}
+              className={cn(
+                "shrink-0 w-11 h-11 grid place-items-center rounded-lg",
+                "text-ink-mute hover:text-coral hover:bg-coral/10",
+                "transition-[color,background-color,transform] duration-150 ease-out",
+                "active:scale-[0.92]",
+              )}
+            >
+              <Trash2 className="w-4 h-4" strokeWidth={1.8} />
+            </button>
+          )
 
           return (
             <div
               key={idx}
-              className="flex gap-2 items-start border border-line-soft rounded-lg p-3 bg-bg-elev/40"
+              className="rounded-xl p-3 bg-bg-elev/60 border border-line-soft flex flex-col gap-2"
             >
-              <div className="flex-1 flex flex-col gap-2">
-                <select
-                  required
-                  value={row.itemId}
-                  onChange={(e) =>
-                    setRows((rs) =>
-                      rs.map((r, i) => (i === idx ? { ...r, itemId: e.target.value } : r)),
-                    )
-                  }
-                  className="bg-[#0E1C2A] border border-line rounded-lg px-3 py-2.5 text-base text-ink min-h-11 focus:border-cyan focus:outline-none"
-                >
-                  <option value="">Select item…</option>
-                  {SIGNOUT_CATEGORIES.map((cat) => {
-                    const group = items.filter((it) => it.category === cat)
-                    if (group.length === 0) return null
-                    return (
-                      <optgroup key={cat} label={SIGNOUT_CATEGORY_LABELS[cat]}>
-                        {group.map((it) => (
-                          <option key={it.id} value={it.id}>
-                            {it.display_name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )
-                  })}
-                </select>
+              <ItemPicker
+                items={items}
+                value={row.itemId}
+                onChange={(next) =>
+                  setRows((rs) =>
+                    rs.map((r, i) => (i === idx ? { ...r, itemId: next } : r)),
+                  )
+                }
+                chevronStyle={SELECT_CHEVRON_STYLE}
+              />
 
-                {bulk && selected ? (
-                  <div className="text-ink-dim text-sm">
-                    1 {selected.input_unit}
-                    {selected.stock_unit ? (
+              {bulk && selected ? (
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 flex items-baseline gap-1.5 text-sm">
+                    <span className="text-ink">1 {selected.input_unit}</span>
+                    {selected.stock_unit && (
                       <span className="text-ink-mute">
-                        {" "}
                         · {selected.multiplier} {pluralize(selected.stock_unit, selected.multiplier)}
-                      </span>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <input
-                      required
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="any"
-                      placeholder="Quantity"
-                      value={row.qty}
-                      onChange={(e) =>
-                        setRows((rs) =>
-                          rs.map((r, i) =>
-                            i === idx ? { ...r, qty: e.target.value } : r,
-                          ),
-                        )
-                      }
-                      className="flex-1 bg-[#0E1C2A] border border-line rounded-lg px-3 py-2.5 text-base text-ink min-h-11 focus:border-cyan focus:outline-none"
-                    />
-                    {selected?.stock_unit && qtyNum > 0 && (
-                      <span className="text-ink-dim text-sm whitespace-nowrap">
-                        {pluralize(selected.stock_unit, qtyNum)}
                       </span>
                     )}
                   </div>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() =>
-                  setRows((rs) =>
-                    rs.length === 1 ? [blankRow()] : rs.filter((_, i) => i !== idx),
-                  )
-                }
-                aria-label="Remove row"
-                className="text-ink-mute hover:text-coral p-2 rounded-lg transition-colors"
-              >
-                <Trash2 className="w-5 h-5" />
-              </button>
+                  {trashBtn}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <QtyStepper
+                    value={row.qty}
+                    onChange={(next) =>
+                      setRows((rs) =>
+                        rs.map((r, i) => (i === idx ? { ...r, qty: next } : r)),
+                      )
+                    }
+                  />
+                  {selected?.stock_unit && qtyNum > 0 && (
+                    <span className="text-ink-dim text-sm whitespace-nowrap">
+                      {pluralize(selected.stock_unit, qtyNum)}
+                    </span>
+                  )}
+                  <div className="ml-auto">{trashBtn}</div>
+                </div>
+              )}
             </div>
           )
         })}
@@ -196,21 +183,33 @@ export function SignOutForm({ employeeName, items, prefillIds = [] }: Props) {
         <button
           type="button"
           onClick={() => setRows((rs) => [...rs, blankRow()])}
-          className="flex items-center justify-center gap-2 text-cyan text-sm py-2.5 border border-dashed border-cyan/30 rounded-lg hover:bg-cyan/5 transition-colors"
+          className={cn(
+            "flex items-center justify-center gap-2 text-cyan text-sm py-3 rounded-xl",
+            "border border-dashed border-cyan/30 bg-cyan/[0.02]",
+            "transition-[background-color,border-color,transform] duration-150 ease-out",
+            "hover:bg-cyan/5 hover:border-cyan/50",
+            "active:scale-[0.99]",
+          )}
         >
           <Plus className="w-4 h-4" /> Add another item
         </button>
 
         {state.error && <p className="text-coral text-sm">{state.error}</p>}
 
-        <Button
+        <button
           type="submit"
-          variant="primary"
           disabled={!valid || pending}
-          className="h-12 text-base mt-1"
+          className={cn(
+            "mt-1 h-12 rounded-lg text-base font-medium",
+            "transition-[background,color,border-color,transform,filter] duration-150 ease-out",
+            "active:scale-[0.98] active:brightness-95",
+            valid && !pending
+              ? "bg-gradient-to-b from-cyan to-cyan-deep text-[#061018] shadow-[0_6px_20px_-6px_rgba(56,189,248,0.55)]"
+              : "bg-bg-elev border border-line-soft text-ink-mute cursor-not-allowed",
+          )}
         >
           {pending ? "Saving…" : "Submit sign-out"}
-        </Button>
+        </button>
       </form>
 
       {showToast && (
@@ -218,6 +217,78 @@ export function SignOutForm({ employeeName, items, prefillIds = [] }: Props) {
           Sign-out saved.
         </div>
       )}
+    </div>
+  )
+}
+
+function QtyStepper({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (next: string) => void
+}) {
+  const num = Number(value) || 0
+
+  const dec = () => {
+    const next = Math.max(1, Math.floor(num) - 1)
+    onChange(String(next))
+  }
+  const inc = () => {
+    const next = Math.floor(num) + 1
+    onChange(String(next))
+  }
+
+  return (
+    <div
+      className={cn(
+        "flex-1 min-w-0 flex items-stretch rounded-lg overflow-hidden",
+        "bg-[#0E1C2A] border border-line",
+        "focus-within:border-cyan focus-within:ring-2 focus-within:ring-cyan/30",
+        "transition-[border-color,box-shadow] duration-150 ease-out",
+      )}
+    >
+      <button
+        type="button"
+        onClick={dec}
+        disabled={num <= 1}
+        aria-label="Decrease quantity"
+        className={cn(
+          "flex-1 min-w-0 h-11 grid place-items-center text-ink-dim",
+          "hover:text-ink active:bg-white/5 active:scale-[0.95]",
+          "transition-[color,background-color,transform] duration-150 ease-out",
+          "disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100",
+        )}
+      >
+        <Minus className="w-4 h-4" strokeWidth={2} />
+      </button>
+      <input
+        type="number"
+        inputMode="decimal"
+        min="0"
+        step="any"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(
+          "flex-1 min-w-0 h-11 text-base text-ink text-center",
+          "bg-transparent border-x border-line",
+          "focus:outline-none",
+          "[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
+          "[appearance:textfield]",
+        )}
+      />
+      <button
+        type="button"
+        onClick={inc}
+        aria-label="Increase quantity"
+        className={cn(
+          "flex-1 min-w-0 h-11 grid place-items-center text-ink-dim",
+          "hover:text-ink active:bg-white/5 active:scale-[0.95]",
+          "transition-[color,background-color,transform] duration-150 ease-out",
+        )}
+      >
+        <Plus className="w-4 h-4" strokeWidth={2} />
+      </button>
     </div>
   )
 }
