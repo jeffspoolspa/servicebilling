@@ -13,9 +13,12 @@ interface Props {
   storageKey: string
 }
 
+type SubTab = "missing" | "on-truck"
+
 export function TruckCheckList({ items, storageKey }: Props) {
   const [checked, setChecked] = useState<Set<number>>(new Set())
   const [hydrated, setHydrated] = useState(false)
+  const [subTab, setSubTab] = useState<SubTab>("missing")
 
   // Hydrate from localStorage on mount.
   useEffect(() => {
@@ -55,8 +58,12 @@ export function TruckCheckList({ items, storageKey }: Props) {
   const reset = useCallback(() => setChecked(new Set()), [])
 
   const missing = useMemo(() => items.filter((it) => !checked.has(it.id)), [items, checked])
-  const missingCount = missing.length
-  const hasMissing = missingCount > 0
+  const onTruck = useMemo(() => items.filter((it) => checked.has(it.id)), [items, checked])
+
+  const visibleItems = subTab === "missing" ? missing : onTruck
+
+  const hasMissing = missing.length > 0
+  const pickListVisible = subTab === "missing" && hasMissing
 
   const goToPickList = useCallback(() => {
     if (!hasMissing) return
@@ -72,13 +79,20 @@ export function TruckCheckList({ items, storageKey }: Props) {
     )
   }
 
-  let runningIndex = 0
-
   return (
-    <div className="flex flex-col gap-6 pb-28">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-5 pb-28">
+      <SubTabBar
+        active={subTab}
+        missingCount={missing.length}
+        onTruckCount={onTruck.length}
+        onChange={setSubTab}
+      />
+
+      <div className="flex items-center justify-between px-1">
         <div className="text-sm text-ink-dim">
-          Tap each item you already have on your truck.
+          {subTab === "missing"
+            ? "Tap each item you have on your truck to confirm it."
+            : "Tap to move an item back to missing."}
         </div>
         {checked.size > 0 && (
           <button
@@ -91,6 +105,123 @@ export function TruckCheckList({ items, storageKey }: Props) {
         )}
       </div>
 
+      <FilteredList
+        key={subTab}
+        mode={subTab}
+        items={visibleItems}
+        onToggle={toggle}
+        hydrated={hydrated}
+      />
+
+      <StickyFooter
+        missingCount={missing.length}
+        visible={pickListVisible}
+        onClick={goToPickList}
+      />
+    </div>
+  )
+}
+
+function SubTabBar({
+  active,
+  missingCount,
+  onTruckCount,
+  onChange,
+}: {
+  active: SubTab
+  missingCount: number
+  onTruckCount: number
+  onChange: (tab: SubTab) => void
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Filter items"
+      className="grid grid-cols-2 p-1 rounded-xl bg-bg-elev/60 border border-line-soft"
+    >
+      <SubTabButton
+        active={active === "missing"}
+        onClick={() => onChange("missing")}
+        label="Missing"
+        count={missingCount}
+      />
+      <SubTabButton
+        active={active === "on-truck"}
+        onClick={() => onChange("on-truck")}
+        label="On Truck"
+        count={onTruckCount}
+      />
+    </div>
+  )
+}
+
+function SubTabButton({
+  active,
+  onClick,
+  label,
+  count,
+}: {
+  active: boolean
+  onClick: () => void
+  label: string
+  count: number
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        "h-10 rounded-lg text-sm font-medium",
+        "transition-[background-color,color,box-shadow] duration-150 ease-out",
+        "active:scale-[0.98]",
+        active
+          ? "bg-[#0E1C2A] text-ink shadow-[0_1px_0_0_rgba(56,189,248,0.25)_inset]"
+          : "text-ink-dim hover:text-ink",
+      )}
+    >
+      {label}{" "}
+      <span
+        className={cn(
+          "ml-1 num text-xs",
+          active ? "text-cyan" : "text-ink-mute",
+        )}
+      >
+        <span key={count} className="tick-bump inline-block">
+          {count}
+        </span>
+      </span>
+    </button>
+  )
+}
+
+function FilteredList({
+  mode,
+  items,
+  onToggle,
+  hydrated,
+}: {
+  mode: SubTab
+  items: SignOutItem[]
+  onToggle: (id: number) => void
+  hydrated: boolean
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="text-sm text-ink-dim border border-line-soft bg-bg-elev/40 rounded-xl px-4 py-6 text-center">
+        {mode === "missing"
+          ? "All 25 items confirmed on truck. Nothing missing."
+          : "Nothing confirmed yet. Tap items in the Missing tab to move them here."}
+      </div>
+    )
+  }
+
+  let runningIndex = 0
+  const checked = mode === "on-truck"
+
+  return (
+    <div className="flex flex-col gap-5">
       {SIGNOUT_CATEGORIES.map((cat) => {
         const group = items.filter((it) => it.category === cat)
         if (group.length === 0) return null
@@ -106,8 +237,8 @@ export function TruckCheckList({ items, storageKey }: Props) {
                   <ChecklistCard
                     key={item.id}
                     item={item}
-                    checked={checked.has(item.id)}
-                    onToggle={() => toggle(item.id)}
+                    checked={checked}
+                    onToggle={() => onToggle(item.id)}
                     index={idx}
                     hydrated={hydrated}
                   />
@@ -117,12 +248,6 @@ export function TruckCheckList({ items, storageKey }: Props) {
           </section>
         )
       })}
-
-      <StickyFooter
-        missingCount={missingCount}
-        visible={hasMissing}
-        onClick={goToPickList}
-      />
     </div>
   )
 }
@@ -154,7 +279,7 @@ function ChecklistCard({
           ? "bg-cyan/5 border-cyan/40 shadow-[0_0_0_1px_rgba(56,189,248,0.18)]"
           : "bg-bg-elev/50 border-line-soft hover:border-line",
       )}
-      style={{ animationDelay: hydrated ? "0ms" : `${Math.min(index * 30, 600)}ms` }}
+      style={{ animationDelay: hydrated ? `${Math.min(index * 22, 400)}ms` : `${Math.min(index * 30, 600)}ms` }}
     >
       <CheckCircle checked={checked} />
       <span

@@ -24,5 +24,5 @@ export async function techLoginAction(
 
   if (error) return { error: "Invalid username or password." }
 
-  redirect("/sign-out")
+  redirect("/truck-check")
 }

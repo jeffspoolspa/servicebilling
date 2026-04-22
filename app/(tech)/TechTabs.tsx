@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils/cn"
 
 const tabs = [
-  { href: "/sign-out", label: "Sign Out" },
   { href: "/truck-check", label: "Truck Check" },
+  { href: "/sign-out", label: "Sign Out" },
 ] as const
 
 export function TechTabs() {
