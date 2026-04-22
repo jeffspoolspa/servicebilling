@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import type { SignOutItem } from "@/lib/entities/inventory-signout/types"
 import {
@@ -11,14 +12,35 @@ import {
 interface Props {
   items: SignOutItem[]
   storageKey: string
+  completedStorageKey: string
 }
 
 type SubTab = "missing" | "on-truck"
 
-export function TruckCheckList({ items, storageKey }: Props) {
+/** YYYY-MM-DD string in Eastern — matches the server-side "today" boundary. */
+function todayKeyEastern(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date())
+}
+
+function formatToday(): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  }).format(new Date())
+}
+
+export function TruckCheckList({ items, storageKey, completedStorageKey }: Props) {
   const [checked, setChecked] = useState<Set<number>>(new Set())
   const [hydrated, setHydrated] = useState(false)
   const [subTab, setSubTab] = useState<SubTab>("missing")
+  const [completedToday, setCompletedToday] = useState(false)
 
   // Hydrate from localStorage on mount.
   useEffect(() => {
@@ -30,11 +52,31 @@ export function TruckCheckList({ items, storageKey }: Props) {
           setChecked(new Set(parsed.filter((n): n is number => typeof n === "number")))
         }
       }
+      const doneDate = window.localStorage.getItem(completedStorageKey)
+      if (doneDate === todayKeyEastern()) setCompletedToday(true)
     } catch {
       // ignore
     }
     setHydrated(true)
-  }, [storageKey])
+  }, [storageKey, completedStorageKey])
+
+  const markCompleted = useCallback(() => {
+    try {
+      window.localStorage.setItem(completedStorageKey, todayKeyEastern())
+    } catch {
+      // ignore
+    }
+    setCompletedToday(true)
+  }, [completedStorageKey])
+
+  const clearCompleted = useCallback(() => {
+    try {
+      window.localStorage.removeItem(completedStorageKey)
+    } catch {
+      // ignore
+    }
+    setCompletedToday(false)
+  }, [completedStorageKey])
 
   // Persist on change.
   useEffect(() => {
@@ -68,8 +110,9 @@ export function TruckCheckList({ items, storageKey }: Props) {
   const goToPickList = useCallback(() => {
     if (!hasMissing) return
     const ids = missing.map((i) => i.id).join(",")
+    markCompleted()
     window.location.href = `/sign-out?prefill=${ids}`
-  }, [hasMissing, missing])
+  }, [hasMissing, missing, markCompleted])
 
   if (items.length === 0) {
     return (
@@ -77,6 +120,10 @@ export function TruckCheckList({ items, storageKey }: Props) {
         No items are currently enabled. Ask an admin to update the allowlist.
       </div>
     )
+  }
+
+  if (completedToday) {
+    return <CompletedCard onRedo={clearCompleted} />
   }
 
   return (
@@ -322,6 +369,30 @@ function CheckCircle({ checked }: { checked: boolean }) {
         </svg>
       )}
     </span>
+  )
+}
+
+function CompletedCard({ onRedo }: { onRedo: () => void }) {
+  return (
+    <div className="flex flex-col items-center text-center gap-4 px-4 py-10 rounded-2xl bg-bg-elev/40 border border-line-soft animate-fadeup-small">
+      <div className="w-14 h-14 rounded-full grid place-items-center bg-grass/10 border border-grass/30">
+        <CheckCircle2 className="w-8 h-8 text-grass" strokeWidth={1.8} />
+      </div>
+      <div>
+        <h2 className="font-display text-xl">Truck check completed</h2>
+        <p className="text-ink-dim text-sm mt-1">{formatToday()}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onRedo}
+        className={cn(
+          "text-sm text-ink-dim hover:text-ink underline underline-offset-2",
+          "transition-colors duration-150",
+        )}
+      >
+        Do it again
+      </button>
+    </div>
   )
 }
 
