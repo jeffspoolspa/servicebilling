@@ -1,16 +1,11 @@
-import { Topbar } from "@/components/shell/topbar"
-import { ObjectHeader } from "@/components/shell/object-header"
-import { Tabs } from "@/components/shell/tabs"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { SortableHeader } from "@/components/ui/sortable-header"
 import { Pagination } from "@/components/ui/pagination"
-import { BarChart3 } from "lucide-react"
+import { SearchBar } from "@/components/ui/search-bar"
 import Link from "next/link"
 import { getBillingQueue, DEFAULT_SORT } from "@/lib/queries/dashboard"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
-import { SyncAllButton } from "@/components/billing/sync-all-button"
-import { SyncWorkOrdersButton } from "@/components/billing/sync-work-orders-button"
 
 export const dynamic = "force-dynamic"
 
@@ -18,7 +13,7 @@ const PER_PAGE = 25
 const BASE = "/service-billing/awaiting-invoice"
 
 interface PageProps {
-  searchParams: Promise<{ page?: string; sort?: string; dir?: string }>
+  searchParams: Promise<{ page?: string; sort?: string; dir?: string; q?: string }>
 }
 
 export default async function AwaitingInvoicePage({ searchParams }: PageProps) {
@@ -26,6 +21,7 @@ export default async function AwaitingInvoicePage({ searchParams }: PageProps) {
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1)
   const sort = sp.sort ?? DEFAULT_SORT.awaiting_invoice.column
   const dir: "asc" | "desc" = sp.dir === "asc" ? "asc" : "desc"
+  const q = sp.q?.trim() ?? ""
 
   const { rows, total } = await getBillingQueue({
     status: "awaiting_invoice",
@@ -33,44 +29,20 @@ export default async function AwaitingInvoicePage({ searchParams }: PageProps) {
     limit: PER_PAGE,
     sortBy: sort,
     sortDir: dir,
+    search: q || undefined,
   })
-  const pageTotal = rows.reduce((acc, r) => acc + Number(r.total_due ?? 0), 0)
-  const preserve = { sort, dir }
+  const preserve = { sort, dir, ...(q ? { q } : {}) }
 
   return (
-    <>
-      <Topbar
-        crumbs={[
-          { label: "Service Billing", href: "/service-billing" },
-          { label: "Awaiting Invoice" },
-        ]}
-      />
-      <ObjectHeader
-        eyebrow="Service Billing"
-        title="Awaiting Invoice"
-        sub={`${total} billable work orders waiting for QBO invoice · ${formatCurrency(pageTotal)} on this page`}
-        icon={<BarChart3 className="w-6 h-6" strokeWidth={1.8} />}
-        actions={
-          <>
-            <SyncWorkOrdersButton />
-            <SyncAllButton />
-          </>
-        }
-      />
-      <Tabs
-        items={[
-          { href: "/service-billing/awaiting-invoice", label: "Awaiting Invoice" },
-          { href: "/service-billing/queue", label: "Ready to Process" },
-          { href: "/service-billing/needs-attention", label: "Needs Review" },
-          { href: "/service-billing/sent", label: "Processed" },
-          { href: "/service-billing/audit", label: "Audit" },
-        ]}
-      />
-      <div className="px-7 py-6">
+    // Shared KPI strip + Tabs + sync actions live in
+    // app/(shell)/service-billing/layout.tsx. This page only renders its
+    // own table below the shared chrome.
+    <div className="px-7 py-6">
         <Card>
           <CardHeader>
             <CardTitle>Awaiting Invoice</CardTitle>
-            <Pill tone="sun" className="ml-auto">{total}</Pill>
+            <SearchBar className="ml-auto" placeholder="Search WO, customer, or invoice #…" />
+            <Pill tone="sun">{total}</Pill>
           </CardHeader>
           <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
@@ -118,7 +90,6 @@ export default async function AwaitingInvoicePage({ searchParams }: PageProps) {
           <Pagination basePath={BASE} page={page} perPage={PER_PAGE} total={total} preserve={preserve} />
         </Card>
       </div>
-    </>
   )
 }
 

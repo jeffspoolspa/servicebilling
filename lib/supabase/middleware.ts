@@ -6,8 +6,24 @@ type CookieToSet = { name: string; value: string; options?: CookieOptions }
 
 const TECH_ALLOWED_PREFIXES = ["/sign-out", "/truck-check", "/tech-login", "/auth"]
 
+// Tech accounts are created with synthetic emails at this domain. Any user
+// whose email ISN'T at this domain CANNOT be a maintenance tech, so we can
+// skip the employees lookup entirely for them. This removes one DB round
+// trip per request for every office user (the common case).
+const TECH_EMAIL_DOMAIN = "@techs.jeffspoolspa.internal"
+
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request })
+
+  const path = request.nextUrl.pathname
+
+  // Early exit for /logout — the route handler there clears the session
+  // itself, and we don't want any of the gating logic below (maintenance
+  // sandbox, "authenticated? bounce to /") to interfere. This is the
+  // escape hatch for stuck sessions.
+  if (path === "/logout" || path.startsWith("/logout/")) {
+    return response
+  }
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -32,7 +48,6 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const path = request.nextUrl.pathname
   const isOfficeAuthRoute = path.startsWith("/login") || path.startsWith("/auth")
   const isTechLogin = path.startsWith("/tech-login")
 
@@ -50,6 +65,16 @@ export async function updateSession(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = "/"
     return NextResponse.redirect(url)
+  }
+
+  // Short-circuit: office users (real @jeffspoolspa.com emails, etc.) can
+  // never be maintenance techs — tech accounts use synthetic emails at
+  // @techs.jeffspoolspa.internal. Skipping the DB lookup for office users
+  // saves a round trip on every request (the common case), which matters
+  // a lot when the edge runtime's fetch is slow or flaky.
+  const isTechEmail = user.email?.toLowerCase().endsWith(TECH_EMAIL_DOMAIN) ?? false
+  if (!isTechEmail) {
+    return response
   }
 
   // Sandbox maintenance techs to /sign-out and related auth paths.

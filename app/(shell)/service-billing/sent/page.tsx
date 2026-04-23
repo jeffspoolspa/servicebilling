@@ -1,11 +1,8 @@
-import { Topbar } from "@/components/shell/topbar"
-import { ObjectHeader } from "@/components/shell/object-header"
-import { Tabs } from "@/components/shell/tabs"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { SortableHeader } from "@/components/ui/sortable-header"
 import { Pagination } from "@/components/ui/pagination"
-import { Check } from "lucide-react"
+import { SearchBar } from "@/components/ui/search-bar"
 import Link from "next/link"
 import { getBillingQueue, DEFAULT_SORT } from "@/lib/queries/dashboard"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
@@ -16,7 +13,7 @@ const PER_PAGE = 25
 const BASE = "/service-billing/sent"
 
 interface PageProps {
-  searchParams: Promise<{ page?: string; sort?: string; dir?: string }>
+  searchParams: Promise<{ page?: string; sort?: string; dir?: string; q?: string }>
 }
 
 export default async function SentPage({ searchParams }: PageProps) {
@@ -24,6 +21,7 @@ export default async function SentPage({ searchParams }: PageProps) {
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1)
   const sort = sp.sort ?? DEFAULT_SORT.processed.column
   const dir: "asc" | "desc" = sp.dir === "asc" ? "asc" : "desc"
+  const q = sp.q?.trim() ?? ""
 
   const { rows, total } = await getBillingQueue({
     status: "processed",
@@ -31,40 +29,20 @@ export default async function SentPage({ searchParams }: PageProps) {
     limit: PER_PAGE,
     sortBy: sort,
     sortDir: dir,
+    search: q || undefined,
   })
-  const pageTotal = rows.reduce((a, r) => a + Number(r.total_due ?? 0), 0)
-  const paidOnPage = rows.filter((r) => Number(r.qbo_balance ?? 0) === 0).length
-  const preserve = { sort, dir }
+  const preserve = { sort, dir, ...(q ? { q } : {}) }
 
   return (
-    <>
-      <Topbar
-        crumbs={[
-          { label: "Service Billing", href: "/service-billing" },
-          { label: "Processed" },
-        ]}
-      />
-      <ObjectHeader
-        eyebrow="Service Billing"
-        title="Processed"
-        sub={`${total} invoices processed · ${paidOnPage} paid on this page · ${formatCurrency(pageTotal)} this page`}
-        icon={<Check className="w-6 h-6" strokeWidth={1.8} />}
-      />
-      <Tabs
-        items={[
-          { href: "/service-billing/awaiting-invoice", label: "Awaiting Invoice" },
-          { href: "/service-billing/queue", label: "Ready to Process" },
-          { href: "/service-billing/needs-attention", label: "Needs Review" },
-          { href: "/service-billing/sent", label: "Processed" },
-          { href: "/service-billing/audit", label: "Audit" },
-        ]}
-      />
-      <div className="px-7 py-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>processed</CardTitle>
-            <Pill tone="grass" className="ml-auto">{total}</Pill>
-          </CardHeader>
+    // Shared chrome (KPI strip + Tabs) comes from
+    // app/(shell)/service-billing/layout.tsx.
+    <div className="px-7 py-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Processed</CardTitle>
+          <SearchBar className="ml-auto" placeholder="Search WO, customer, or invoice #…" />
+          <Pill tone="grass">{total}</Pill>
+        </CardHeader>
           <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
               <thead>
@@ -119,7 +97,6 @@ export default async function SentPage({ searchParams }: PageProps) {
           <Pagination basePath={BASE} page={page} perPage={PER_PAGE} total={total} preserve={preserve} />
         </Card>
       </div>
-    </>
   )
 }
 

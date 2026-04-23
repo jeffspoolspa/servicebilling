@@ -1,4 +1,3 @@
-import { Topbar } from "@/components/shell/topbar"
 import { ObjectHeader } from "@/components/shell/object-header"
 import { Card, CardBody } from "@/components/ui/card"
 import { FileText } from "lucide-react"
@@ -6,7 +5,6 @@ import { FileText } from "lucide-react"
 export default function InvoicesPage() {
   return (
     <>
-      <Topbar crumbs={[{ label: "Invoices" }]} />
       <ObjectHeader
         eyebrow="Entity"
         title="Invoices"

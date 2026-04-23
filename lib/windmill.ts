@@ -46,6 +46,61 @@ export async function triggerScript(
   return runAtPath("p", scriptPath, args)
 }
 
+/**
+ * Trigger a Windmill script AND wait for the result synchronously. Uses
+ * Windmill's `/run_wait_result/` endpoint so we get the script's return
+ * value in one HTTP round-trip.
+ *
+ * Use this for user-facing mutations where the UI needs an authoritative
+ * outcome (e.g., "did QBO accept this credit application?"). The async
+ * triggerScript() + poll pattern is wrong for these — it can return before
+ * the downstream API has actually acknowledged, leading to false-positive
+ * UI animations.
+ *
+ * Throws on non-2xx (including job failure). The result is the script's
+ * return value (usually a dict).
+ */
+export async function triggerScriptSync<T = unknown>(
+  scriptPath: string,
+  args: Record<string, unknown> = {},
+  opts: { timeoutMs?: number } = {},
+): Promise<T> {
+  if (!WINDMILL_TOKEN) {
+    throw new Error("WINDMILL_TOKEN env var is missing")
+  }
+
+  const timeoutMs = opts.timeoutMs ?? 60000
+  // Windmill's run_wait_result endpoint accepts a timeout query param (seconds)
+  const timeoutS = Math.ceil(timeoutMs / 1000)
+
+  const controller = new AbortController()
+  const abortTimer = setTimeout(() => controller.abort(), timeoutMs + 5000)
+
+  try {
+    const resp = await fetch(
+      `${WINDMILL_BASE}/w/${WINDMILL_WORKSPACE}/jobs/run_wait_result/p/${scriptPath}?timeout=${timeoutS}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${WINDMILL_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(args),
+        signal: controller.signal,
+      },
+    )
+
+    if (!resp.ok) {
+      const text = await resp.text()
+      throw new Error(`Windmill ${resp.status}: ${text.slice(0, 300)}`)
+    }
+
+    return (await resp.json()) as T
+  } finally {
+    clearTimeout(abortTimer)
+  }
+}
+
 /** Trigger a Windmill flow. */
 export async function triggerFlow(
   flowPath: string,

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   Check,
@@ -25,6 +25,57 @@ import { Pill } from "@/components/ui/pill"
 import { ExpandableText } from "@/components/ui/expandable-text"
 import type { TriageRow, LineItem, OpenCredit } from "@/lib/queries/dashboard"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
+import { useFreshResource } from "@/lib/hooks/use-fresh-resource"
+
+// Subset of TriageRow fields that the /api/qbo/refresh/invoice endpoint
+// can authoritatively refresh (balance, status, classification, etc.).
+// WO fields and open_credits are NOT invoice-owned — they come from the
+// snapshot + the customer-credits hook respectively.
+type InvoicePatch = Partial<
+  Pick<
+    TriageRow,
+    | "balance"
+    | "total_amt"
+    | "invoice_subtotal"
+    | "email_status"
+    | "line_items"
+    | "payment_method"
+    | "qbo_class"
+    | "memo"
+    | "statement_memo"
+    | "needs_review_reason"
+    | "subtotal_ok"
+    | "enrichment_ok"
+    | "credit_review_overridden_at"
+    | "doc_number"
+    | "customer_name"
+  >
+>
+
+function extractInvoicePatch(inv: Record<string, unknown>): InvoicePatch {
+  // Fresh invoice payload from /api/qbo/refresh/invoice — maps the
+  // refresh_invoice script's return shape into TriageRow field names
+  // (note `subtotal` → `invoice_subtotal`).
+  const num = (v: unknown) => (v == null ? null : Number(v))
+  return {
+    balance: num(inv.balance),
+    total_amt: num(inv.total_amt),
+    invoice_subtotal: num(inv.subtotal),
+    email_status: (inv.email_status ?? null) as string | null,
+    line_items: (inv.line_items ?? null) as LineItem[] | null,
+    payment_method: (inv.payment_method ?? null) as string | null,
+    qbo_class: (inv.qbo_class ?? null) as string | null,
+    memo: (inv.memo ?? null) as string | null,
+    statement_memo: (inv.statement_memo ?? null) as string | null,
+    needs_review_reason: (inv.needs_review_reason ?? null) as string | null,
+    subtotal_ok: (inv.subtotal_ok ?? null) as boolean | null,
+    enrichment_ok: (inv.enrichment_ok ?? null) as boolean | null,
+    credit_review_overridden_at:
+      (inv.credit_review_overridden_at ?? null) as string | null,
+    doc_number: (inv.doc_number ?? null) as string | null,
+    customer_name: (inv.customer_name ?? null) as string | null,
+  }
+}
 
 /**
  * Rapid triage UI for the needs_review queue.
@@ -79,7 +130,171 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
   const [err, setErr] = useState<string | null>(null)
   const memoInputRef = useRef<HTMLInputElement | null>(null)
 
-  const current = rows[cursor]
+  // ─── Freshness ──────────────────────────────────────────────────────────
+  // Order is frozen at mount (keyboard cursor depends on it). DATA is
+  // live: we layer fresh invoice + credit overrides on top of the snapshot
+  // so individual fields can update without reshuffling or removing cards.
+  //
+  // Two maps, two hooks. The hooks fetch for the active card's invoice +
+  // customer on cursor change (debounced, TTL-gated, race-guarded — see
+  // lib/hooks/use-fresh-resource.ts). Their onUpdate callbacks write into
+  // these maps, which persist across cursor moves so scrolling back
+  // doesn't refetch within the TTL window.
+  const [freshInvoices, setFreshInvoices] = useState<Record<string, InvoicePatch>>({})
+  const [freshCredits, setFreshCredits] = useState<Record<string, OpenCredit[]>>({})
+
+  const snapshot = rows[cursor]
+  // Resolve the active card from snapshot + live overrides.
+  const current: TriageRow | undefined = useMemo(() => {
+    if (!snapshot) return undefined
+    const invPatch = freshInvoices[snapshot.qbo_invoice_id]
+    const custId = snapshot.qbo_customer_id
+    const liveCredits = custId ? freshCredits[custId] : undefined
+    return {
+      ...snapshot,
+      ...(invPatch ?? {}),
+      open_credits: liveCredits ?? snapshot.open_credits ?? [],
+    }
+  }, [snapshot, freshInvoices, freshCredits])
+
+  const activeInvoiceId = current?.qbo_invoice_id ?? null
+  const activeCustomerId = current?.qbo_customer_id ?? null
+
+  // Active-invoice freshness. When cursor changes to a new invoice, this
+  // hook fires /api/qbo/refresh/invoice/{id} (with TTL + debounce). On
+  // response, we patch freshInvoices so the card re-renders in place.
+  useFreshResource<InvoicePatch>({
+    key: activeInvoiceId,
+    initial: {},
+    ttlMs: 60_000,
+    debounceMs: 250,
+    fetcher: async (id, signal) => {
+      const resp = await fetch(`/api/qbo/refresh/invoice/${id}`, {
+        method: "POST",
+        signal,
+      })
+      if (!resp.ok) throw new Error(`invoice refresh ${resp.status}`)
+      const body = (await resp.json()) as { invoice?: Record<string, unknown> }
+      return body.invoice ? extractInvoicePatch(body.invoice) : {}
+    },
+    onUpdate: (fresh, id) => {
+      setFreshInvoices((prev) => ({ ...prev, [id]: fresh }))
+    },
+    onError: (e, id) =>
+      console.warn(`triage: invoice refresh failed for ${id}:`, e.message),
+  })
+
+  // Active-customer credit freshness. When cursor moves to a card whose
+  // customer we haven't refreshed within TTL, fire the customer credits
+  // refresh. Keyed by qbo_customer_id so multiple cards for the same
+  // customer share one refresh.
+  //
+  // IMPORTANT: the endpoint returns BOTH fresh credits AND an
+  // invoice_patches map (reconciled billing_status / needs_review_reason
+  // for every non-terminal invoice of this customer — the backend's
+  // recheck can clear credit_review on multiple invoices at once). We
+  // store credits in freshCredits AND fan out the invoice patches to
+  // freshInvoices so other cards for the same customer also update in
+  // place.
+  interface CreditRefreshPayload {
+    credits: OpenCredit[]
+    invoicePatches: Record<string, Record<string, unknown>>
+  }
+  useFreshResource<CreditRefreshPayload>({
+    key: activeCustomerId,
+    initial: { credits: [], invoicePatches: {} },
+    ttlMs: 60_000,
+    debounceMs: 250,
+    fetcher: async (id, signal) => {
+      const resp = await fetch(`/api/qbo/refresh/customer/${id}/credits`, {
+        method: "POST",
+        signal,
+      })
+      if (!resp.ok) throw new Error(`credits refresh ${resp.status}`)
+      const body = (await resp.json()) as {
+        credits?: OpenCredit[]
+        invoice_patches?: Record<string, Record<string, unknown>>
+      }
+      return {
+        credits: body.credits ?? [],
+        invoicePatches: body.invoice_patches ?? {},
+      }
+    },
+    onUpdate: (fresh, id) => {
+      setFreshCredits((prev) => ({ ...prev, [id]: fresh.credits }))
+      if (fresh.invoicePatches && Object.keys(fresh.invoicePatches).length > 0) {
+        // Fan out recheck results to freshInvoices so every visible card
+        // for this customer reflects the reconciled billing_status +
+        // needs_review_reason.
+        setFreshInvoices((prev) => {
+          const next = { ...prev }
+          for (const [invId, invRow] of Object.entries(fresh.invoicePatches)) {
+            next[invId] = {
+              ...(next[invId] ?? {}),
+              ...extractInvoicePatch(invRow),
+            }
+          }
+          return next
+        })
+      }
+    },
+    onError: (e, id) =>
+      console.warn(`triage: credit refresh failed for ${id}:`, e.message),
+  })
+
+  // Called by OpenCreditsPanel on authoritative apply success. Patches
+  // the invoice (balance + status + review_reason from the apply response)
+  // AND decrements the specific credit locally so the card reflects the
+  // new state without waiting for the hook's next TTL-gated refresh.
+  const onAppliedCredit = useCallback(
+    (args: {
+      creditQboPaymentId: string
+      amountApplied: number
+      invoicePatch: InvoicePatch
+    }) => {
+      if (!snapshot) return
+      setFreshInvoices((prev) => ({
+        ...prev,
+        [snapshot.qbo_invoice_id]: {
+          ...(prev[snapshot.qbo_invoice_id] ?? {}),
+          ...args.invoicePatch,
+        },
+      }))
+      const custId = snapshot.qbo_customer_id
+      if (!custId) return
+      setFreshCredits((prev) => {
+        const existing = prev[custId] ?? snapshot.open_credits ?? []
+        const updated = existing
+          .map((c) =>
+            c.qbo_payment_id === args.creditQboPaymentId
+              ? {
+                  ...c,
+                  unapplied_amt: Math.max(
+                    0,
+                    Number(c.unapplied_amt ?? 0) - args.amountApplied,
+                  ),
+                }
+              : c,
+          )
+          .filter((c) => Number(c.unapplied_amt ?? 0) > 0)
+        return { ...prev, [custId]: updated }
+      })
+    },
+    [snapshot],
+  )
+
+  // Called by OpenCreditsPanel on override success. Patches the invoice
+  // with credit_review_overridden_at so downstream panels update.
+  const onOverrodeCreditReview = useCallback(() => {
+    if (!snapshot) return
+    setFreshInvoices((prev) => ({
+      ...prev,
+      [snapshot.qbo_invoice_id]: {
+        ...(prev[snapshot.qbo_invoice_id] ?? {}),
+        credit_review_overridden_at: new Date().toISOString(),
+      },
+    }))
+  }, [snapshot])
 
   // Reset card-level state when we move to a new invoice
   useEffect(() => {
@@ -312,6 +527,9 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
     )
   }
 
+  // At this point `cursor < rows.length` is guaranteed by the early
+  // returns above, so `current` is defined.
+  if (!current) return null
   const remaining = rows.length - cursor
   const progressPct = rows.length > 0 ? (cursor / rows.length) * 100 : 0
 
@@ -352,7 +570,9 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
       </div>
 
       {/* Card — keyed on invoice id so React re-mounts per card and plays
-          the enter animation */}
+          the enter animation. `row` is the live-resolved view (snapshot +
+          fresh overrides), so the card fields update in place when a
+          refresh lands without disturbing cursor position. */}
       <Card
         key={current.qbo_invoice_id}
         row={current}
@@ -362,6 +582,8 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
         effective={effective}
         setEdit={setEdit}
         memoInputRef={memoInputRef}
+        onAppliedCredit={onAppliedCredit}
+        onOverrodeCreditReview={onOverrodeCreditReview}
       />
 
       {/* Action bar */}
@@ -438,6 +660,12 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
 }
 
 // ─── Card ────────────────────────────────────────────────────────────────
+interface AppliedCreditPatchArgs {
+  creditQboPaymentId: string
+  amountApplied: number
+  invoicePatch: Partial<TriageRow>
+}
+
 function Card({
   row,
   flash,
@@ -446,6 +674,8 @@ function Card({
   effective,
   setEdit,
   memoInputRef,
+  onAppliedCredit,
+  onOverrodeCreditReview,
 }: {
   row: TriageRow
   flash: boolean
@@ -454,6 +684,8 @@ function Card({
   effective: (field: keyof Edits) => string | null
   setEdit: (field: keyof Edits, value: string) => void
   memoInputRef: React.MutableRefObject<HTMLInputElement | null>
+  onAppliedCredit: (args: AppliedCreditPatchArgs) => void
+  onOverrodeCreditReview: () => void
 }) {
   return (
     <div
@@ -522,7 +754,11 @@ function Card({
       {/* Context + Line items tabs. Auto-lands on line_items when the review
           reason is a subtotal mismatch — that's the one case where the
           invoice breakdown is what matters most. */}
-      <ContextAndLineItems row={row} />
+      <ContextAndLineItems
+        row={row}
+        onAppliedCredit={onAppliedCredit}
+        onOverrodeCreditReview={onOverrodeCreditReview}
+      />
 
 
       {/* Editable classification */}
@@ -580,7 +816,15 @@ function Card({
 }
 
 // ─── Context + Line items + Open credits (tabbed) ─────────────────────────
-function ContextAndLineItems({ row }: { row: TriageRow }) {
+function ContextAndLineItems({
+  row,
+  onAppliedCredit,
+  onOverrodeCreditReview,
+}: {
+  row: TriageRow
+  onAppliedCredit: (args: AppliedCreditPatchArgs) => void
+  onOverrodeCreditReview: () => void
+}) {
   const hasLineItems = Array.isArray(row.line_items) && row.line_items.length > 0
   const openCredits = row.open_credits ?? []
   const hasCredits = openCredits.length > 0
@@ -658,7 +902,13 @@ function ContextAndLineItems({ row }: { row: TriageRow }) {
       <div className="p-3 min-h-[180px]">
         {tab === "context" && <ContextPanel row={row} />}
         {tab === "items" && <LineItemsPanel row={row} />}
-        {tab === "credits" && <OpenCreditsPanel row={row} />}
+        {tab === "credits" && (
+          <OpenCreditsPanel
+            row={row}
+            onAppliedCredit={onAppliedCredit}
+            onOverrodeCreditReview={onOverrodeCreditReview}
+          />
+        )}
       </div>
     </div>
   )
@@ -828,17 +1078,35 @@ function Stat({
 }
 
 // ─── Open Credits panel ───────────────────────────────────────────────────
-function OpenCreditsPanel({ row }: { row: TriageRow }) {
+function OpenCreditsPanel({
+  row,
+  onAppliedCredit,
+  onOverrodeCreditReview,
+}: {
+  row: TriageRow
+  onAppliedCredit: (args: AppliedCreditPatchArgs) => void
+  onOverrodeCreditReview: () => void
+}) {
   const credits = row.open_credits ?? []
   const [overrideOpen, setOverrideOpen] = useState(false)
   const [overrideNote, setOverrideNote] = useState("")
+  const [overrideDone, setOverrideDone] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  const router = useRouter()
-  const [, startTransition] = useTransition()
+  // Authoritative apply outcome — populated only after QBO confirms. Drives
+  // the green "applied X to this invoice, new balance Y" banner.
+  const [applied, setApplied] = useState<{
+    creditId: string
+    amount: number | null
+    newBalance: number | null
+    newStatus: string | null
+  } | null>(null)
 
+  // Synchronous apply — the API now waits for QBO's acknowledgement before
+  // returning. We parse the authoritative response and surface it clearly
+  // instead of flashing success on any 2xx and hoping.
   async function applyCredit(creditId: string) {
-    setBusy(creditId); setErr(null)
+    setBusy(creditId); setErr(null); setApplied(null)
     try {
       const resp = await fetch(
         `/api/billing/invoices/${row.qbo_invoice_id}/apply-credit`,
@@ -848,14 +1116,40 @@ function OpenCreditsPanel({ row }: { row: TriageRow }) {
           body: JSON.stringify({ credit_id: creditId }),
         },
       )
-      if (!resp.ok) throw new Error((await resp.text()).slice(0, 200))
-      // Give the script time to apply + chain pre_process
-      setTimeout(() => {
-        startTransition(() => router.refresh())
-        setBusy(null)
-      }, 5000)
+      const body = await resp.json().catch(() => ({}))
+      if (!resp.ok) {
+        // 422 = QBO rejected (locked period, etc); 502 = script failure.
+        // Surface the actual reason so user sees WHY, doesn't advance.
+        throw new Error(
+          body?.error
+            ? `${body.error}${body.detail?.error ? ` — ${body.detail.error}` : ""}`
+            : `Apply failed (${resp.status})`,
+        )
+      }
+      const amount: number | null = body.applied_amount ?? null
+      const newBalance: number | null = body.invoice?.balance ?? null
+      const newStatus: string | null = body.invoice?.billing_status ?? null
+      setApplied({ creditId, amount, newBalance, newStatus })
+
+      // Patch the live invoice + credit maps in the parent so the card
+      // re-renders with fresh numbers (balance, billing_status) and the
+      // applied credit is decremented (or removed if fully exhausted).
+      // User doesn't need to wait for a full refresh round-trip.
+      onAppliedCredit({
+        creditQboPaymentId: creditId,
+        amountApplied: Number(amount ?? 0),
+        invoicePatch: {
+          balance: newBalance,
+          billing_status: body.invoice?.billing_status ?? undefined,
+          needs_review_reason: body.invoice?.needs_review_reason ?? undefined,
+        } as Partial<TriageRow>,
+      })
+      // DO NOT router.refresh() — that would refetch the snapshot underneath
+      // the cursor and make "previous" land on a different invoice. Apply
+      // outcomes are shown inline; user advances explicitly.
     } catch (e) {
       setErr(e instanceof Error ? e.message : "apply failed")
+    } finally {
       setBusy(null)
     }
   }
@@ -874,7 +1168,10 @@ function OpenCreditsPanel({ row }: { row: TriageRow }) {
       if (!resp.ok) throw new Error((await resp.text()).slice(0, 200))
       setOverrideOpen(false)
       setOverrideNote("")
-      startTransition(() => router.refresh())
+      setOverrideDone(true)
+      onOverrodeCreditReview()
+      // DO NOT router.refresh() — see applyCredit for why. User can hit
+      // Approve (a) to move it to ready_to_process and advance, or Skip.
     } catch (e) {
       setErr(e instanceof Error ? e.message : "override failed")
     } finally {
@@ -908,6 +1205,46 @@ function OpenCreditsPanel({ row }: { row: TriageRow }) {
         </span>
       </div>
 
+      {/* Authoritative apply outcome — only renders after QBO confirms. */}
+      {applied && (
+        <div className="rounded-md border border-grass/40 bg-grass/[0.06] px-3 py-2 text-[12px] flex items-center gap-2">
+          <Check className="w-3.5 h-3.5 text-grass" strokeWidth={2.5} />
+          <span className="text-ink-dim">
+            Applied{" "}
+            <span className="text-grass font-medium">
+              {applied.amount != null ? formatCurrency(applied.amount) : "credit"}
+            </span>{" "}
+            to this invoice.
+            {applied.newBalance != null && (
+              <>
+                {" "}New balance:{" "}
+                <span className="text-ink">{formatCurrency(applied.newBalance)}</span>
+                {applied.newBalance === 0 && (
+                  <span className="text-grass"> — fully covered</span>
+                )}
+              </>
+            )}
+            {applied.newStatus && applied.newStatus !== "needs_review" && (
+              <>
+                {" "}State:{" "}
+                <span className="text-ink">{applied.newStatus}</span>
+              </>
+            )}
+            <span className="text-ink-mute"> · hit Approve to move forward or Skip.</span>
+          </span>
+        </div>
+      )}
+
+      {/* Overridden confirmation */}
+      {overrideDone && !applied && (
+        <div className="rounded-md border border-cyan/40 bg-cyan/[0.06] px-3 py-2 text-[12px] flex items-center gap-2">
+          <Check className="w-3.5 h-3.5 text-cyan" strokeWidth={2.5} />
+          <span className="text-ink-dim">
+            Credit review overridden. Hit <Kbd k="a" /> to approve + advance.
+          </span>
+        </div>
+      )}
+
       {/* Credits table */}
       <div className="overflow-x-auto">
         <table className="w-full text-[12px]">
@@ -927,7 +1264,13 @@ function OpenCreditsPanel({ row }: { row: TriageRow }) {
                 Number(c.unapplied_amt ?? 0),
                 Number(row.balance ?? 0),
               )
-              const disabled = busy !== null || applyAmount <= 0
+              // Once a credit was applied this session, prevent re-clicking.
+              // The DB row won't show unapplied_amt=0 until the user refreshes
+              // or we poll, but WE KNOW it was applied because applied state
+              // was set authoritatively. Belt-and-suspenders against
+              // double-apply.
+              const alreadyApplied = applied?.creditId === c.qbo_payment_id
+              const disabled = busy !== null || applyAmount <= 0 || alreadyApplied
               return (
                 <tr
                   key={c.qbo_payment_id}
@@ -965,12 +1308,16 @@ function OpenCreditsPanel({ row }: { row: TriageRow }) {
                     >
                       {busy === c.qbo_payment_id ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : alreadyApplied ? (
+                        <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
                       ) : (
                         <Coins className="w-3.5 h-3.5" strokeWidth={2} />
                       )}
                       {busy === c.qbo_payment_id
-                        ? "Applying..."
-                        : `Apply ${formatCurrency(applyAmount)}`}
+                        ? "Applying…"
+                        : alreadyApplied
+                          ? "Applied"
+                          : `Apply ${formatCurrency(applyAmount)}`}
                     </Button>
                   </td>
                 </tr>

@@ -265,6 +265,8 @@ export async function getBillingQueue(opts: {
   limit?: number
   sortBy?: string
   sortDir?: "asc" | "desc"
+  /** Free-text search across wo_number, customer, and invoice_number. */
+  search?: string
 }): Promise<{ rows: QueueRow[]; total: number }> {
   const sb = createAnon("public")
   const offset = opts.offset ?? 0
@@ -273,12 +275,27 @@ export async function getBillingQueue(opts: {
   const dflt = DEFAULT_SORT[opts.status]
   const sortBy = opts.sortBy ?? dflt.column
   const sortDir = opts.sortDir ?? dflt.dir
+  const search = opts.search?.trim() ?? ""
 
-  const { data, count, error } = await sb
+  let q = sb
     .from(view)
     .select("*", { count: "exact" })
     .order(sortBy, { ascending: sortDir === "asc", nullsFirst: false })
     .range(offset, offset + limit - 1)
+
+  if (search) {
+    // Single-pass OR filter across the three most useful identifier
+    // columns. Escape commas + parentheses per Postgrest's or() syntax
+    // so they're treated as literal characters, not separators.
+    const safe = search.replace(/[,()]/g, " ").trim()
+    if (safe) {
+      q = q.or(
+        `wo_number.ilike.%${safe}%,customer.ilike.%${safe}%,invoice_number.ilike.%${safe}%`,
+      )
+    }
+  }
+
+  const { data, count, error } = await q
 
   if (error) {
     console.error(`getBillingQueue(${opts.status}) error:`, error)
@@ -361,7 +378,15 @@ export async function listCustomers(opts?: {
     .select("id, qbo_customer_id, display_name, email, phone", { count: "exact" })
     .order(sortBy, { ascending: sortDir === "asc", nullsFirst: false })
     .range(offset, offset + limit - 1)
-  if (opts?.search) q = q.ilike("display_name", `%${opts.search}%`)
+  const s = opts?.search?.trim()
+  if (s) {
+    const safe = s.replace(/[,()]/g, " ").trim()
+    if (safe) {
+      q = q.or(
+        `display_name.ilike.%${safe}%,email.ilike.%${safe}%,phone.ilike.%${safe}%`,
+      )
+    }
+  }
   const { data, count } = await q
   return { rows: (data ?? []) as CustomerRow[], total: count ?? 0 }
 }
@@ -446,18 +471,29 @@ export interface AuditRow {
   red_flag?: string
 }
 
+function applyAuditSearch<Q extends { or: (f: string) => Q }>(q: Q, search?: string): Q {
+  const s = search?.trim()
+  if (!s) return q
+  const safe = s.replace(/[,()]/g, " ").trim()
+  if (!safe) return q
+  return q.or(
+    `wo_number.ilike.%${safe}%,customer.ilike.%${safe}%,invoice_number.ilike.%${safe}%`,
+  )
+}
+
 export async function getBillableZeroSubtotal(opts: {
   offset?: number
   limit?: number
   sortBy?: string
   sortDir?: "asc" | "desc"
+  search?: string
 } = {}): Promise<{ rows: AuditRow[]; total: number }> {
   const sb = createAnon("public")
   const offset = opts.offset ?? 0
   const limit = opts.limit ?? 25
   const sortBy = opts.sortBy ?? "completed"
   const sortDir = opts.sortDir ?? "desc"
-  const { data, count } = await sb
+  let q = sb
     .from("v_billable_zero_subtotal")
     .select(
       "wo_number, customer, type, sub_total, total_due, invoice_number, completed, assigned_to, office_name, schedule_status",
@@ -465,6 +501,8 @@ export async function getBillableZeroSubtotal(opts: {
     )
     .order(sortBy, { ascending: sortDir === "asc", nullsFirst: false })
     .range(offset, offset + limit - 1)
+  q = applyAuditSearch(q, opts.search)
+  const { data, count } = await q
   return { rows: (data ?? []) as AuditRow[], total: count ?? 0 }
 }
 
@@ -473,13 +511,14 @@ export async function getNonBillableWithCharges(opts: {
   limit?: number
   sortBy?: string
   sortDir?: "asc" | "desc"
+  search?: string
 } = {}): Promise<{ rows: AuditRow[]; total: number }> {
   const sb = createAnon("public")
   const offset = opts.offset ?? 0
   const limit = opts.limit ?? 25
   const sortBy = opts.sortBy ?? "sub_total"
   const sortDir = opts.sortDir ?? "desc"
-  const { data, count } = await sb
+  let q = sb
     .from("v_non_billable_with_charges")
     .select(
       "wo_number, customer, type, sub_total, total_due, invoice_number, completed, assigned_to, office_name, schedule_status, red_flag",
@@ -487,6 +526,8 @@ export async function getNonBillableWithCharges(opts: {
     )
     .order(sortBy, { ascending: sortDir === "asc", nullsFirst: false })
     .range(offset, offset + limit - 1)
+  q = applyAuditSearch(q, opts.search)
+  const { data, count } = await q
   return { rows: (data ?? []) as AuditRow[], total: count ?? 0 }
 }
 
@@ -522,6 +563,9 @@ export interface WorkOrderDetail {
   schedule_status: string | null
   skipped_at: string | null
   skipped_reason: string | null
+  /** Raw bonus override — null = follow computed default
+   *  (invoice.qbo_class = 'Service'). */
+  included_in_bonus: boolean | null
 }
 
 export interface InvoiceDetail {
@@ -552,6 +596,9 @@ export interface InvoiceDetail {
   // Credit-review override state (user acknowledged credits not applicable)
   credit_review_overridden_at: string | null
   credit_review_overridden_note: string | null
+  // Per-invoice card-vs-ach override set from the detail page's payment
+  // methods card. NULL = picker uses most recently added default.
+  preferred_payment_type: "card" | "ach" | null
 }
 
 export interface CreditApplied {
@@ -586,11 +633,12 @@ export interface OpenCredit {
 
 export interface PaymentMethod {
   id: string
-  type: string
+  type: string            // 'card' | 'ach'
   card_brand: string | null
   last_four: string | null
   is_default: boolean | null
   is_active: boolean | null
+  qbo_created_at: string | null  // ISO 8601 from QBO, used for sort + display
 }
 
 // Payments/credits that have been applied to a specific invoice.
@@ -610,6 +658,14 @@ export interface AppliedPayment {
   memo: string | null
   total_amt: number | null
   unapplied_amt: number | null
+  // Charge provenance — tells the user whether money actually moved through
+  // Intuit Payments vs just being recorded as a bookkeeping entry.
+  // was_charged + cc_trans_id + cc_status are GENERATED from raw so they're
+  // always in sync. payment_method_name is resolved from QBO PaymentMethod.
+  was_charged: boolean | null
+  cc_trans_id: string | null
+  cc_status: string | null
+  payment_method_name: string | null
 }
 
 export async function getAppliedPaymentsForInvoice(
@@ -626,7 +682,7 @@ export async function getAppliedPaymentsForInvoice(
   const paymentIds = links.map((l) => (l as Record<string, unknown>).payment_id as string)
   const { data: payments } = await sb
     .from("billing_customer_payments")
-    .select("qbo_payment_id, type, ref_num, txn_date, memo, total_amt, unapplied_amt")
+    .select("qbo_payment_id, type, ref_num, txn_date, memo, total_amt, unapplied_amt, was_charged, cc_trans_id, cc_status, payment_method_name")
     .in("qbo_payment_id", paymentIds)
   const byId = new Map<string, Record<string, unknown>>()
   for (const p of (payments ?? []) as Array<Record<string, unknown>>) {
@@ -647,6 +703,10 @@ export async function getAppliedPaymentsForInvoice(
       memo: (p.memo ?? null) as string | null,
       total_amt: p.total_amt == null ? null : Number(p.total_amt),
       unapplied_amt: p.unapplied_amt == null ? null : Number(p.unapplied_amt),
+      was_charged: (p.was_charged ?? null) as boolean | null,
+      cc_trans_id: (p.cc_trans_id ?? null) as string | null,
+      cc_status: (p.cc_status ?? null) as string | null,
+      payment_method_name: (p.payment_method_name ?? null) as string | null,
     }
   })
 }
@@ -860,7 +920,7 @@ export async function getWorkOrderDetail(
   const { data: wo } = await sb
     .from("work_orders")
     .select(
-      "wo_number, type, template, wo_status, customer, customer_type, address, location, email_address, mobile_phone, office_name, assigned_to, employee_id, scheduled, started, completed, sub_total, tax_total, total_due, invoice_number, work_description, technician_instructions, corrective_action, billable, billable_override, qbo_invoice_id, schedule_status, skipped_at, skipped_reason",
+      "wo_number, type, template, wo_status, customer, customer_type, address, location, email_address, mobile_phone, office_name, assigned_to, employee_id, scheduled, started, completed, sub_total, tax_total, total_due, invoice_number, work_description, technician_instructions, corrective_action, billable, billable_override, qbo_invoice_id, schedule_status, skipped_at, skipped_reason, included_in_bonus",
     )
     .eq("wo_number", woNumber)
     .single()
@@ -875,7 +935,7 @@ export async function getWorkOrderDetail(
     const { data: inv } = await sb
       .from("billing_invoices")
       .select(
-        "qbo_invoice_id, doc_number, qbo_customer_id, customer_name, txn_date, due_date, total_amt, subtotal, balance, email_status, line_items, fetched_at, billing_status, needs_review_reason, payment_method, qbo_class, memo, statement_memo, subtotal_ok, enrichment_ok, credits_applied, pre_processed_at, processed_at, credit_review_overridden_at, credit_review_overridden_note",
+        "qbo_invoice_id, doc_number, qbo_customer_id, customer_name, txn_date, due_date, total_amt, subtotal, balance, email_status, line_items, fetched_at, billing_status, needs_review_reason, payment_method, qbo_class, memo, statement_memo, subtotal_ok, enrichment_ok, credits_applied, pre_processed_at, processed_at, credit_review_overridden_at, credit_review_overridden_note, preferred_payment_type",
       )
       .eq("qbo_invoice_id", wo.qbo_invoice_id as string)
       .maybeSingle()
@@ -896,11 +956,16 @@ export async function getWorkOrderDetail(
           .gt("unapplied_amt", 0)
           .or(`txn_date.is.null,txn_date.gte.${cutoff}`)
           .order("txn_date", { ascending: true }),
+        // Only default methods — one default card + one default ACH per
+        // customer is QBO's model, and surfacing non-defaults would invite
+        // charging a card the customer doesn't consider their current one.
         sb
           .from("billing_customer_payment_methods")
-          .select("id, type, card_brand, last_four, is_default, is_active")
+          .select("id, type, card_brand, last_four, is_default, is_active, qbo_created_at")
           .eq("qbo_customer_id", invoice.qbo_customer_id)
-          .eq("is_active", true),
+          .eq("is_active", true)
+          .eq("is_default", true)
+          .order("qbo_created_at", { ascending: false }),
       ])
       // Client-side maint filter (Postgrest NOT ILIKE is awkward to express)
       openCredits = ((credRes.data ?? []) as OpenCredit[]).filter(

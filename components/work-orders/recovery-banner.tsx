@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { AlertTriangle, AlertCircle, RefreshCw, Mail } from "lucide-react"
+import { AlertTriangle, AlertCircle, RefreshCw, Mail, Check } from "lucide-react"
 import type { ProcessAttempt } from "@/lib/queries/dashboard"
 import { formatCurrency } from "@/lib/utils/format"
 
@@ -25,7 +25,7 @@ import { formatCurrency } from "@/lib/utils/format"
  *   succeeded → nothing shown (handled elsewhere).
  */
 
-type Action = "recover_orphan" | "reprocess" | "retry_email"
+type Action = "recover_orphan" | "reprocess" | "retry_email" | "mark_processed"
 
 export function RecoveryBanner({
   attempt,
@@ -44,6 +44,28 @@ export function RecoveryBanner({
     setBusy(action)
     setErr(null)
     try {
+      // mark_processed has a different endpoint — it's a DB-only flip,
+      // no Windmill script involved. The others all go through the
+      // /api/billing/process orchestrator.
+      if (action === "mark_processed") {
+        const resp = await fetch(
+          `/api/billing/invoices/${qboInvoiceId}/mark-processed`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          },
+        )
+        if (!resp.ok) {
+          const txt = await resp.text()
+          throw new Error(txt.slice(0, 200))
+        }
+        setConfirming(null)
+        startTransition(() => router.refresh())
+        setBusy(null)
+        return
+      }
+
       const body: Record<string, unknown> = { qbo_invoice_id: qboInvoiceId }
       if (action === "recover_orphan") body.recover_orphan = true
       if (action === "reprocess" || action === "retry_email") body.force = true
@@ -166,18 +188,32 @@ export function RecoveryBanner({
             <div className="text-sun font-medium text-sm">Email send failed</div>
             <div className="text-ink-dim text-[12px] mt-1 leading-relaxed">
               {attempt.error_message || "Email send failed after retries."}{" "}
-              Financial state (if any charge happened) is unaffected. Retry sends the invoice email only.
+              Financial state (if any charge happened) is unaffected.{" "}
+              <span className="text-ink-dim">Retry Email</span> re-attempts the send.{" "}
+              <span className="text-ink-dim">Mark Processed</span> closes the invoice
+              without sending — use when the customer has no valid email on file.
             </div>
           </div>
-          <Button
-            size="sm"
-            variant="default"
-            onClick={() => fire("retry_email")}
-            disabled={busy !== null}
-          >
-            <Mail className={`w-3.5 h-3.5 ${busy === "retry_email" ? "animate-spin" : ""}`} strokeWidth={2} />
-            {busy === "retry_email" ? "Sending..." : "Retry Email"}
-          </Button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => fire("retry_email")}
+              disabled={busy !== null}
+            >
+              <Mail className={`w-3.5 h-3.5 ${busy === "retry_email" ? "animate-spin" : ""}`} strokeWidth={2} />
+              {busy === "retry_email" ? "Sending..." : "Retry Email"}
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => fire("mark_processed")}
+              disabled={busy !== null}
+            >
+              <Check className="w-3.5 h-3.5" strokeWidth={2} />
+              {busy === "mark_processed" ? "Marking..." : "Mark Processed"}
+            </Button>
+          </div>
         </div>
         {err && <div className="pl-8 text-[11px] text-coral mt-2">{err}</div>}
       </div>

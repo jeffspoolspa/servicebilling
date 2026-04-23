@@ -1,12 +1,10 @@
-import { Topbar } from "@/components/shell/topbar"
-import { ObjectHeader } from "@/components/shell/object-header"
-import { Tabs } from "@/components/shell/tabs"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { Button } from "@/components/ui/button"
 import { SortableHeader } from "@/components/ui/sortable-header"
 import { Pagination } from "@/components/ui/pagination"
-import { AlertCircle, ListChecks } from "lucide-react"
+import { SearchBar } from "@/components/ui/search-bar"
+import { ListChecks } from "lucide-react"
 import Link from "next/link"
 import { getBillingQueue, DEFAULT_SORT } from "@/lib/queries/dashboard"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
@@ -17,7 +15,7 @@ const PER_PAGE = 25
 const BASE = "/service-billing/needs-attention"
 
 interface PageProps {
-  searchParams: Promise<{ page?: string; sort?: string; dir?: string }>
+  searchParams: Promise<{ page?: string; sort?: string; dir?: string; q?: string }>
 }
 
 export default async function NeedsAttentionPage({ searchParams }: PageProps) {
@@ -25,6 +23,7 @@ export default async function NeedsAttentionPage({ searchParams }: PageProps) {
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1)
   const sort = sp.sort ?? DEFAULT_SORT.needs_review.column
   const dir: "asc" | "desc" = sp.dir === "asc" ? "asc" : "desc"
+  const q = sp.q?.trim() ?? ""
 
   const { rows, total } = await getBillingQueue({
     status: "needs_review",
@@ -32,49 +31,28 @@ export default async function NeedsAttentionPage({ searchParams }: PageProps) {
     limit: PER_PAGE,
     sortBy: sort,
     sortDir: dir,
+    search: q || undefined,
   })
-  const pageTotal = rows.reduce((a, r) => a + Number(r.total_due ?? 0), 0)
-  const preserve = { sort, dir }
+  const preserve = { sort, dir, ...(q ? { q } : {}) }
 
   return (
-    <>
-      <Topbar
-        crumbs={[
-          { label: "Service Billing", href: "/service-billing" },
-          { label: "Needs Review" },
-        ]}
-      />
-      <ObjectHeader
-        eyebrow="Service Billing"
-        title="Needs Review"
-        sub={`${total} invoices flagged during pre-processing · ${formatCurrency(pageTotal)} on this page`}
-        icon={<AlertCircle className="w-6 h-6" strokeWidth={1.8} />}
-        actions={
-          total > 0 ? (
+    // Shared KPI strip + Tabs from app/(shell)/service-billing/layout.tsx.
+    // The per-page "Triage mode" button moved into the card header below.
+    <div className="px-7 py-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Needs Review</CardTitle>
+          {total > 0 && (
             <Link href={"/service-billing/triage" as never}>
               <Button size="sm" variant="primary">
                 <ListChecks className="w-3.5 h-3.5" strokeWidth={2} />
                 Triage mode
               </Button>
             </Link>
-          ) : null
-        }
-      />
-      <Tabs
-        items={[
-          { href: "/service-billing/awaiting-invoice", label: "Awaiting Invoice" },
-          { href: "/service-billing/queue", label: "Ready to Process" },
-          { href: "/service-billing/needs-attention", label: "Needs Review" },
-          { href: "/service-billing/sent", label: "Processed" },
-          { href: "/service-billing/audit", label: "Audit" },
-        ]}
-      />
-      <div className="px-7 py-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>needs_review</CardTitle>
-            <Pill tone="coral" className="ml-auto">{total}</Pill>
-          </CardHeader>
+          )}
+          <SearchBar className="ml-auto" placeholder="Search WO, customer, or invoice #…" />
+          <Pill tone="coral">{total}</Pill>
+        </CardHeader>
           <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
               <thead>
@@ -141,7 +119,6 @@ export default async function NeedsAttentionPage({ searchParams }: PageProps) {
           <Pagination basePath={BASE} page={page} perPage={PER_PAGE} total={total} preserve={preserve} />
         </Card>
       </div>
-    </>
   )
 }
 

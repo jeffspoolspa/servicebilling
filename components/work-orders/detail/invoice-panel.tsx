@@ -12,6 +12,7 @@ import { formatCurrency, formatDate } from "@/lib/utils/format"
 import { ClassificationEditor } from "@/components/work-orders/classification-editor"
 import { CreditReviewCard } from "@/components/work-orders/credit-review-card"
 import { AppliedPaymentsCard } from "./applied-payments-card"
+import { PaymentMethodsCard } from "./payment-methods-card"
 
 /**
  * Invoice tab — everything about the QBO invoice side:
@@ -210,43 +211,12 @@ export function InvoicePanel({
         overriddenAt={invoice.credit_review_overridden_at}
       />
 
-      {/* Payment methods on file */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Payment methods on file</CardTitle>
-          <span className="ml-auto text-[11px] text-ink-mute">
-            {paymentMethods.length} active
-          </span>
-        </CardHeader>
-        {paymentMethods.length === 0 ? (
-          <CardBody className="text-ink-mute text-sm">
-            No card or ACH on file — invoice will be emailed.
-          </CardBody>
-        ) : (
-          <div className="flex flex-col">
-            {paymentMethods.map((pm) => (
-              <div
-                key={pm.id}
-                className="px-5 py-2.5 border-b border-line-soft last:border-b-0 text-[12px] flex justify-between items-center"
-              >
-                <div>
-                  <div className="text-ink">
-                    {pm.type === "card"
-                      ? `${pm.card_brand ?? "Card"} ·${pm.last_four ?? "—"}`
-                      : `${pm.card_brand ?? "Bank"} · ACH ·${pm.last_four ?? "—"}`}
-                  </div>
-                  {pm.is_default && (
-                    <div className="text-cyan text-[10px]">default</div>
-                  )}
-                </div>
-                <div className="text-[11px] text-ink-mute">
-                  {pm.type === "card" ? "Card" : "ACH"}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
+      {/* Payment method on file — only defaults surfaced; click to override */}
+      <PaymentMethodsCard
+        qboInvoiceId={invoice.qbo_invoice_id}
+        methods={paymentMethods}
+        preferredPaymentType={invoice.preferred_payment_type}
+      />
     </div>
   )
 }

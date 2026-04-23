@@ -1,11 +1,8 @@
-import { Topbar } from "@/components/shell/topbar"
-import { ObjectHeader } from "@/components/shell/object-header"
-import { Tabs } from "@/components/shell/tabs"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { SortableHeader } from "@/components/ui/sortable-header"
 import { Pagination } from "@/components/ui/pagination"
-import { SearchCheck } from "lucide-react"
+import { SearchBar } from "@/components/ui/search-bar"
 import Link from "next/link"
 import {
   getBillableZeroSubtotal,
@@ -19,12 +16,12 @@ export const dynamic = "force-dynamic"
 const PER_PAGE = 25
 const BASE = "/service-billing/audit"
 
-// Prefixed URL params so each table paginates/sorts independently
+// Prefixed URL params so each table paginates/sorts/searches independently
 // z* = billable-zero-subtotal table, n* = non-billable-with-charges table
 interface PageProps {
   searchParams: Promise<{
-    zp?: string; zs?: string; zd?: string
-    np?: string; ns?: string; nd?: string
+    zp?: string; zs?: string; zd?: string; zq?: string
+    np?: string; ns?: string; nd?: string; nq?: string
   }>
 }
 
@@ -33,10 +30,12 @@ export default async function AuditPage({ searchParams }: PageProps) {
   const zPage = Math.max(1, parseInt(sp.zp ?? "1", 10) || 1)
   const zSort = sp.zs ?? "completed"
   const zDir: "asc" | "desc" = sp.zd === "asc" ? "asc" : "desc"
+  const zQ = sp.zq?.trim() ?? ""
 
   const nPage = Math.max(1, parseInt(sp.np ?? "1", 10) || 1)
   const nSort = sp.ns ?? "sub_total"
   const nDir: "asc" | "desc" = sp.nd === "asc" ? "asc" : "desc"
+  const nQ = sp.nq?.trim() ?? ""
 
   const [billableZero, nonBillable] = await Promise.all([
     getBillableZeroSubtotal({
@@ -44,49 +43,43 @@ export default async function AuditPage({ searchParams }: PageProps) {
       limit: PER_PAGE,
       sortBy: zSort,
       sortDir: zDir,
+      search: zQ || undefined,
     }),
     getNonBillableWithCharges({
       offset: (nPage - 1) * PER_PAGE,
       limit: PER_PAGE,
       sortBy: nSort,
       sortDir: nDir,
+      search: nQ || undefined,
     }),
   ])
 
   // Each table's preserve set includes the OTHER table's params so changing
-  // one table's sort/page doesn't reset the other.
-  const zPreserve = { np: sp.np, ns: sp.ns, nd: sp.nd, zs: zSort, zd: zDir }
-  const nPreserve = { zp: sp.zp, zs: sp.zs, zd: sp.zd, ns: nSort, nd: nDir }
+  // one table's sort/page/search doesn't reset the other.
+  const zPreserve = {
+    np: sp.np, ns: sp.ns, nd: sp.nd, nq: sp.nq,
+    zs: zSort, zd: zDir, ...(zQ ? { zq: zQ } : {}),
+  }
+  const nPreserve = {
+    zp: sp.zp, zs: sp.zs, zd: sp.zd, zq: sp.zq,
+    ns: nSort, nd: nDir, ...(nQ ? { nq: nQ } : {}),
+  }
 
   return (
-    <>
-      <Topbar
-        crumbs={[
-          { label: "Service Billing", href: "/service-billing" },
-          { label: "Audit" },
-        ]}
-      />
-      <ObjectHeader
-        eyebrow="Service Billing"
-        title="Audit"
-        sub={`${billableZero.total} billable with $0 · ${nonBillable.total} non-billable with charges · fix in ION, next scrape will clear`}
-        icon={<SearchCheck className="w-6 h-6" strokeWidth={1.8} />}
-      />
-      <Tabs
-        items={[
-          { href: "/service-billing/awaiting-invoice", label: "Awaiting Invoice" },
-          { href: "/service-billing/queue", label: "Ready to Process" },
-          { href: "/service-billing/needs-attention", label: "Needs Review" },
-          { href: "/service-billing/sent", label: "Processed" },
-          { href: "/service-billing/audit", label: "Audit" },
-        ]}
-      />
-
-      <div className="px-7 py-6 flex flex-col gap-6">
+    // Shared chrome (KPI strip + Tabs) from
+    // app/(shell)/service-billing/layout.tsx — this page just renders its
+    // two audit tables below.
+    <div className="px-7 py-6 flex flex-col gap-6">
         <Card>
           <CardHeader>
             <CardTitle>Billable · $0 subtotal</CardTitle>
-            <Pill tone="sun" className="ml-auto">{billableZero.total}</Pill>
+            <SearchBar
+              className="ml-auto"
+              paramName="zq"
+              resetParams={["zp"]}
+              placeholder="Search WO, customer, or invoice #…"
+            />
+            <Pill tone="sun">{billableZero.total}</Pill>
           </CardHeader>
           <div className="px-5 py-3 text-[11px] text-ink-mute border-b border-line-soft">
             Billable WOs that closed with no line items. Tech likely forgot to
@@ -114,7 +107,13 @@ export default async function AuditPage({ searchParams }: PageProps) {
         <Card>
           <CardHeader>
             <CardTitle>Non-billable · has charges or invoice</CardTitle>
-            <Pill tone="coral" className="ml-auto">{nonBillable.total}</Pill>
+            <SearchBar
+              className="ml-auto"
+              paramName="nq"
+              resetParams={["np"]}
+              placeholder="Search WO, customer, or invoice #…"
+            />
+            <Pill tone="coral">{nonBillable.total}</Pill>
           </CardHeader>
           <div className="px-5 py-3 text-[11px] text-ink-mute border-b border-line-soft">
             WOs flagged non-billable (cancelled etc.) but have charges or a QBO
@@ -140,7 +139,6 @@ export default async function AuditPage({ searchParams }: PageProps) {
           />
         </Card>
       </div>
-    </>
   )
 }
 

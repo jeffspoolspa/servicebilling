@@ -1,4 +1,3 @@
-import { Topbar } from "@/components/shell/topbar"
 import { ObjectHeader } from "@/components/shell/object-header"
 import { ClipboardList } from "lucide-react"
 import { Pill } from "@/components/ui/pill"
@@ -24,6 +23,7 @@ import { WorkOrderPanel } from "@/components/work-orders/detail/work-order-panel
 import { InvoicePanel } from "@/components/work-orders/detail/invoice-panel"
 import { SummaryCard } from "@/components/work-orders/detail/summary-card"
 import { PreProcessingCard } from "@/components/work-orders/detail/pre-processing-card"
+import { BonusCard } from "@/components/work-orders/detail/bonus-card"
 
 export const dynamic = "force-dynamic"
 
@@ -98,15 +98,6 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
 
   return (
     <>
-      <Topbar
-        back
-        backFallbackHref="/work-orders"
-        crumbs={[
-          { label: "Work Orders", href: "/work-orders" },
-          { label: wo.wo_number },
-        ]}
-      />
-
       <ObjectHeader
         eyebrow={`${wo.type} · ${wo.office_name ?? "—"}`}
         title={`WO ${wo.wo_number}`}
@@ -138,11 +129,24 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
                 )}
               </>
             )}
-            <SkipButton
-              woNumber={wo.wo_number}
-              skipped={skipped}
-              skippedReason={wo.skipped_reason}
-            />
+            {/* Skip is only a pre-processing option — once the invoice is
+                ready_to_process or later, skipping would abandon work we've
+                already done. Always show Unskip so a prior skip can be
+                reversed even if the invoice has since moved forward. */}
+            {(() => {
+              const canSkip = !invoice ||
+                invoice.billing_status === "awaiting_pre_processing"
+              if (skipped || canSkip) {
+                return (
+                  <SkipButton
+                    woNumber={wo.wo_number}
+                    skipped={skipped}
+                    skippedReason={wo.skipped_reason}
+                  />
+                )
+              }
+              return null
+            })()}
           </div>
         }
       />
@@ -198,6 +202,13 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
         {/* Right 1/3 — persistent sidebar (summary + pre-processing + processing) */}
         <div className="flex flex-col gap-5">
           <SummaryCard wo={wo} invoice={invoice} status={status} />
+          {invoice && (
+            <BonusCard
+              woNumber={wo.wo_number}
+              initialOverride={wo.included_in_bonus}
+              qboClass={invoice.qbo_class}
+            />
+          )}
           <PreProcessingCard wo={wo} invoice={invoice} />
           {invoice && <ProcessingCard attempt={processAttempt} />}
         </div>

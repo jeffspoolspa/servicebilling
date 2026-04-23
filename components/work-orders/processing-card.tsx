@@ -73,37 +73,47 @@ export function ProcessingCard({
             <>
               <Row label="Attempted" value={new Date(attempt.attempted_at).toLocaleString()} />
               <Row label="Payment method" value={attempt.payment_method ?? "—"} />
-              <Row
-                label="Amount"
-                value={
-                  attempt.charge_amount != null
-                    ? formatCurrency(Number(attempt.charge_amount))
-                    : "—"
-                }
-                mono
-              />
-              {attempt.charge_id && (
+              {/* Charge row — surfaces the charge outcome with the right
+                  context. Three paths:
+                  1. Card charged → show Amount + Charge ID
+                  2. Invoice-email path (no charge by design) → explicit note
+                  3. on_file but zero balance (credit-covered / paid externally)
+                     → explicit "skipped" note */}
+              {attempt.charge_id ? (
+                <>
+                  <Row
+                    label="Amount charged"
+                    value={
+                      attempt.charge_amount != null
+                        ? formatCurrency(Number(attempt.charge_amount))
+                        : "—"
+                    }
+                    mono
+                  />
+                  <Row
+                    label="Charge ID"
+                    value={attempt.charge_id}
+                    mono
+                    hint="Intuit Payments reference"
+                  />
+                </>
+              ) : attempt.payment_method === "invoice" ? (
                 <Row
-                  label="Charge ID"
-                  value={attempt.charge_id}
-                  mono
-                  hint="Intuit Payments reference"
+                  label="Charge"
+                  value="n/a — invoice email only"
                 />
-              )}
+              ) : Number(attempt.charge_amount ?? 0) === 0 ? (
+                <Row
+                  label="Charge"
+                  value="skipped — no balance to collect"
+                />
+              ) : null}
               {attempt.qbo_payment_id && (
                 <Row
                   label="QBO Payment ID"
                   value={attempt.qbo_payment_id}
                   mono
                   hint="Ledger record"
-                />
-              )}
-              {attempt.idempotency_key && (
-                <Row
-                  label="Idempotency key"
-                  value={attempt.idempotency_key}
-                  mono
-                  hint="Reused on retry to prevent double-charge"
                 />
               )}
               {attempt.email_sent != null && (

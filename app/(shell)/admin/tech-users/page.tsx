@@ -1,4 +1,3 @@
-import { Topbar } from "@/components/shell/topbar"
 import { ObjectHeader } from "@/components/shell/object-header"
 import { KeyRound } from "lucide-react"
 import { createSupabaseServer } from "@/lib/supabase/server"
@@ -26,7 +25,6 @@ export default async function TechUsersPage() {
 
   return (
     <>
-      <Topbar crumbs={[{ label: "Admin", href: "/admin" }, { label: "Tech Users" }]} />
       <ObjectHeader
         eyebrow="Admin"
         title="Tech Users"

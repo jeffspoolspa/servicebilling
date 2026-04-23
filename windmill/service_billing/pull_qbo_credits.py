@@ -1,28 +1,12 @@
-# Pull unapplied QBO payments and credit memos into billing.open_credits.
-#
-# UnappliedAmt is NOT a queryable field in QBO's WHERE clause (computed field).
-# So we fetch recent Payments (last 6 months by default) and filter client-side
-# for UnappliedAmt > 0. CreditMemos are fewer, so we pull all and filter for
-# RemainingCredit > 0.
-#
-# Upserts into billing.open_credits. Removes rows where the QBO entity no
-# longer has unapplied balance (credit was applied elsewhere).
-#
-# The Postgres trigger fn_on_invoice_number_change reads from this table
-# to auto-match credits to work orders when invoice_number is set.
-#
-# Schedule: every 30 minutes.
-
 import requests
 import wmill
 import psycopg2
 import psycopg2.extras
-import json
 from datetime import datetime, timezone, timedelta
 
 QBO_RESOURCE = "u/carter/quickbooks_api"
 SUPABASE_RESOURCE = "u/carter/supabase"
-LOOKBACK_DAYS = 180  # 6 months of payments to scan
+LOOKBACK_DAYS = 180
 
 
 def refresh_qbo_token():
@@ -72,111 +56,197 @@ def qbo_query_all(query, entity, access_token, realm_id):
     return all_results
 
 
-def main(lookback_days: int = 180):
-    """Pull unapplied payments + credit memos from QBO into billing.open_credits.
+def fetch_payment_method_map(access_token, realm_id):
+    """One-shot PaymentMethod entity query -> {id: name}.
 
-    Args:
-        lookback_days: How far back to scan for payments (default 6 months).
+    QBO's Payment query returns PaymentMethodRef.value but NOT .name, so we
+    have to resolve names separately. There are usually only ~15-30 methods
+    total (Check, Cash, Credit Card, Discover, MasterCard, ACH, etc.), so
+    this is a single cheap query.
     """
+    methods = qbo_query_all("SELECT * FROM PaymentMethod", "PaymentMethod", access_token, realm_id)
+    return {m.get("Id"): m.get("Name") for m in methods if m.get("Id")}
+
+
+def upsert_payment(cur, row, now):
+    """Upsert into billing.customer_payments.
+    Keeps fully-applied rows as history (don't delete -- we need them for
+    the applied-payments UI and reconciliation).
+    """
+    cur.execute("""
+        INSERT INTO billing.customer_payments
+            (qbo_payment_id, qbo_customer_id, type, unapplied_amt,
+             total_amt, txn_date, ref_num, memo,
+             payment_method_id, payment_method_name,
+             raw, fetched_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+        ON CONFLICT (qbo_payment_id) DO UPDATE SET
+            unapplied_amt = EXCLUDED.unapplied_amt, total_amt = EXCLUDED.total_amt,
+            txn_date = EXCLUDED.txn_date, ref_num = EXCLUDED.ref_num,
+            memo = EXCLUDED.memo,
+            payment_method_id = EXCLUDED.payment_method_id,
+            payment_method_name = EXCLUDED.payment_method_name,
+            raw = EXCLUDED.raw, fetched_at = EXCLUDED.fetched_at
+    """, (
+        row["qbo_payment_id"], row["qbo_customer_id"], row["type"],
+        row["unapplied_amt"], row["total_amt"], row["txn_date"],
+        row["ref_num"], row["memo"],
+        row["payment_method_id"], row["payment_method_name"],
+        psycopg2.extras.Json(row["raw"]), now,
+    ))
+
+
+def upsert_links_from_raw(cur, payment_id, raw, known_invoice_ids, txn_date):
+    """Parse raw.Line[].LinkedTxn[] -> billing.payment_invoice_links.
+    applied_via='external_qbo' because QBO already matched it; we're just
+    mirroring the state. Skips invoices not in our billing.invoices table.
+
+    applied_at is set to the payment's txn_date (when QBO records the
+    payment as happening) rather than now() -- otherwise the "Applied"
+    column in the UI reflects when OUR pull script first noticed the
+    link, which can drift hundreds of days from reality. For manual /
+    auto_match rows written elsewhere, applied_at = now() is correct
+    because that IS the real event time.
+    """
+    written = 0
+    lines = (raw or {}).get("Line") or []
+    for line in lines:
+        amount = line.get("Amount") or 0
+        if amount <= 0:
+            continue
+        for lt in (line.get("LinkedTxn") or []):
+            if lt.get("TxnType") != "Invoice":
+                continue
+            invoice_id = str(lt.get("TxnId") or "")
+            if not invoice_id or invoice_id not in known_invoice_ids:
+                continue
+            cur.execute("""
+                INSERT INTO billing.payment_invoice_links
+                    (payment_id, invoice_id, amount, applied_via, applied_at)
+                VALUES (%s, %s, %s, 'external_qbo', COALESCE(%s::timestamptz, now()))
+                ON CONFLICT (payment_id, invoice_id) DO UPDATE SET
+                    amount = EXCLUDED.amount
+                    -- Preserve applied_via + applied_at on updates: if we
+                    -- originally tracked this as 'manual' or 'auto_match',
+                    -- don't downgrade it to 'external_qbo' just because QBO
+                    -- also sees it now.
+            """, (payment_id, invoice_id, float(amount), txn_date))
+            written += 1
+    return written
+
+
+def main(lookback_days: int = 180):
     print(f"=== pull_qbo_credits started (lookback={lookback_days} days) ===")
     access_token, realm_id = refresh_qbo_token()
     conn = get_db_conn()
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
-    # Fetch recent Payments, filter client-side (UnappliedAmt not queryable)
-    print(f"Fetching payments since {cutoff}...")
+    # Resolve PaymentMethod.id -> .name once per run
+    print("Fetching PaymentMethod lookup...")
+    pm_map = fetch_payment_method_map(access_token, realm_id)
+    print(f"  {len(pm_map)} payment methods: {sorted(pm_map.values())}")
+
+    # Load known invoice IDs so link-writes don't FK-fail on invoices we don't track
+    cur = conn.cursor()
+    cur.execute("SELECT qbo_invoice_id FROM billing.invoices")
+    known_invoice_ids = {r[0] for r in cur.fetchall()}
+    print(f"Known billing.invoices rows: {len(known_invoice_ids)}")
+    cur.close()
+
+    print(f"Fetching ALL payments since {cutoff}...")
     all_payments = qbo_query_all(
         f"SELECT * FROM Payment WHERE TxnDate >= '{cutoff}'",
-        "Payment", access_token, realm_id
+        "Payment", access_token, realm_id,
     )
-    unapplied_payments = [p for p in all_payments if float(p.get("UnappliedAmt", 0)) > 0]
-    print(f"  {len(all_payments)} total, {len(unapplied_payments)} with unapplied balance")
+    print(f"  {len(all_payments)} payments")
 
-    # Fetch all CreditMemos, filter client-side
-    print("Fetching credit memos...")
-    all_credit_memos = qbo_query_all("SELECT * FROM CreditMemo", "CreditMemo", access_token, realm_id)
-    unapplied_cms = [cm for cm in all_credit_memos if float(cm.get("RemainingCredit", 0)) > 0]
-    print(f"  {len(all_credit_memos)} total, {len(unapplied_cms)} with remaining credit")
+    print("Fetching ALL credit memos...")
+    all_credit_memos = qbo_query_all(
+        "SELECT * FROM CreditMemo", "CreditMemo", access_token, realm_id,
+    )
+    print(f"  {len(all_credit_memos)} credit memos")
 
-    # Build unified list
-    credits = []
-    for pmt in unapplied_payments:
-        credits.append({
+    rows = []
+    for pmt in all_payments:
+        pmref = pmt.get("PaymentMethodRef") or {}
+        pm_id = pmref.get("value")
+        rows.append({
             "qbo_payment_id": pmt.get("Id"),
-            "qbo_customer_id": pmt.get("CustomerRef", {}).get("value"),
+            "qbo_customer_id": (pmt.get("CustomerRef") or {}).get("value"),
             "type": "payment",
-            "unapplied_amt": float(pmt.get("UnappliedAmt", 0)),
-            "total_amt": float(pmt.get("TotalAmt", 0)),
+            "unapplied_amt": float(pmt.get("UnappliedAmt") or 0),
+            "total_amt": float(pmt.get("TotalAmt") or 0),
             "txn_date": pmt.get("TxnDate"),
             "ref_num": pmt.get("PaymentRefNum"),
             "memo": pmt.get("PrivateNote"),
+            "payment_method_id": pm_id,
+            "payment_method_name": pm_map.get(pm_id) if pm_id else None,
             "raw": pmt,
         })
-    for cm in unapplied_cms:
-        credits.append({
+    for cm in all_credit_memos:
+        rows.append({
             "qbo_payment_id": f"CM-{cm.get('Id')}",
-            "qbo_customer_id": cm.get("CustomerRef", {}).get("value"),
+            "qbo_customer_id": (cm.get("CustomerRef") or {}).get("value"),
             "type": "credit_memo",
-            "unapplied_amt": float(cm.get("RemainingCredit", 0)),
-            "total_amt": float(cm.get("TotalAmt", 0)),
+            "unapplied_amt": float(cm.get("RemainingCredit") or 0),
+            "total_amt": float(cm.get("TotalAmt") or 0),
             "txn_date": cm.get("TxnDate"),
             "ref_num": cm.get("DocNumber"),
             "memo": cm.get("PrivateNote"),
+            "payment_method_id": None,
+            "payment_method_name": None,
             "raw": cm,
         })
+    print(f"Total rows to upsert: {len(rows)}")
 
-    print(f"Total to upsert: {len(credits)}")
-
-    # Upsert
     cur = conn.cursor()
     upserted = 0
-    for c in credits:
-        cur.execute("""
-            INSERT INTO billing.open_credits
-                (qbo_payment_id, qbo_customer_id, type, unapplied_amt,
-                 total_amt, txn_date, ref_num, memo, raw, fetched_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
-            ON CONFLICT (qbo_payment_id) DO UPDATE SET
-                unapplied_amt = EXCLUDED.unapplied_amt, total_amt = EXCLUDED.total_amt,
-                txn_date = EXCLUDED.txn_date, ref_num = EXCLUDED.ref_num,
-                memo = EXCLUDED.memo, raw = EXCLUDED.raw, fetched_at = EXCLUDED.fetched_at
-        """, (
-            c["qbo_payment_id"], c["qbo_customer_id"], c["type"],
-            c["unapplied_amt"], c["total_amt"], c["txn_date"],
-            c["ref_num"], c["memo"], psycopg2.extras.Json(c["raw"]), now,
-        ))
+    links_written = 0
+    for r in rows:
+        upsert_payment(cur, r, now)
         upserted += 1
+        links_written += upsert_links_from_raw(
+            cur, r["qbo_payment_id"], r["raw"], known_invoice_ids,
+            r.get("txn_date"),
+        )
     conn.commit()
 
-    # Remove stale
-    live_ids = [c["qbo_payment_id"] for c in credits]
-    if live_ids:
-        cur.execute("DELETE FROM billing.open_credits WHERE qbo_payment_id != ALL(%s)", (live_ids,))
-    else:
-        cur.execute("DELETE FROM billing.open_credits")
-    removed = cur.rowcount
-    conn.commit()
-
-    # Summary
-    cur.execute("SELECT type, count(*), sum(unapplied_amt) FROM billing.open_credits GROUP BY type")
-    by_type = {r[0]: {"count": r[1], "total": float(r[2])} for r in cur.fetchall()}
-    cur.execute("SELECT count(*) FROM billing.open_credits WHERE ref_num IS NOT NULL AND ref_num ~ '^\\d{5,}$'")
-    wo_tagged = cur.fetchone()[0]
+    cur.execute("""
+        SELECT type,
+               count(*) AS rows,
+               count(*) FILTER (WHERE unapplied_amt > 0) AS open_rows,
+               sum(unapplied_amt) AS total_unapplied,
+               count(*) FILTER (WHERE was_charged) AS charged_rows
+        FROM billing.customer_payments
+        GROUP BY type
+    """)
+    by_type = {}
+    for r in cur.fetchall():
+        by_type[r[0]] = {
+            "rows": r[1], "open_rows": r[2],
+            "total_unapplied": float(r[3] or 0),
+            "charged_rows": r[4],
+        }
+    cur.execute("SELECT count(*) FROM billing.payment_invoice_links")
+    total_links = cur.fetchone()[0]
     cur.close()
     conn.close()
 
-    total_unapplied = sum(t["total"] for t in by_type.values())
-    print(f"=== done: {upserted} upserted, {removed} removed ===")
+    total_unapplied = sum(t["total_unapplied"] for t in by_type.values())
+    print(f"=== done: {upserted} payments upserted, {links_written} links written ===")
     print(f"  by type: {by_type}")
-    print(f"  WO-tagged: {wo_tagged}")
-    print(f"  total: ${total_unapplied:,.2f}")
+    print(f"  total_invoice_links in DB: {total_links}")
+    print(f"  total unapplied: ${total_unapplied:,.2f}")
 
     return {
-        "status": "success", "upserted": upserted, "removed": removed,
-        "by_type": by_type, "wo_tagged_credits": wo_tagged,
+        "status": "success",
+        "upserted": upserted,
+        "links_written_this_run": links_written,
+        "total_links_in_db": total_links,
+        "by_type": by_type,
         "total_unapplied": total_unapplied,
         "qbo_payments_scanned": len(all_payments),
-        "qbo_payments_unapplied": len(unapplied_payments),
-        "qbo_credit_memos_unapplied": len(unapplied_cms),
+        "qbo_credit_memos_scanned": len(all_credit_memos),
+        "payment_methods_resolved": len(pm_map),
     }

@@ -66,6 +66,11 @@ interface Props {
   mode: Mode
   /** For process mode: helps pick the right stage list and confirmation text. */
   paymentMethod?: "on_file" | "invoice" | null
+  /** True when this run will actually charge a card. When false (balance
+   *  was already 0 — paid externally or fully covered by credits), we skip
+   *  the charge + record-payment steps and show the short email-only
+   *  track so the stage list matches what actually runs server-side. */
+  willCharge?: boolean
   /** Stages of the caller - used to detect that processing actually STARTED.
    *  Modal opens before the script fires, so we need to wait for first Realtime
    *  event to flip from "queued" → active. */
@@ -78,6 +83,7 @@ export function ProgressModal({
   qboInvoiceId,
   mode,
   paymentMethod,
+  willCharge = true,
   triggeredAt,
 }: Props) {
   const router = useRouter()
@@ -90,8 +96,12 @@ export function ProgressModal({
 
   const stages: Stage[] = useMemo(() => {
     if (mode === "pre_process") return PRE_PROCESS_STAGES
-    return paymentMethod === "on_file" ? PROCESS_STAGES_ON_FILE : PROCESS_STAGES_INVOICE
-  }, [mode, paymentMethod])
+    // Zero-balance on_file runs skip the charge step entirely server-side,
+    // so show the short email-only track instead of a four-step charge
+    // list with "Amount: $0.00" that reads like a real charge happened.
+    if (paymentMethod === "on_file" && willCharge) return PROCESS_STAGES_ON_FILE
+    return PROCESS_STAGES_INVOICE
+  }, [mode, paymentMethod, willCharge])
 
   // Reset when modal re-opens (allows reuse across multiple runs)
   useEffect(() => {

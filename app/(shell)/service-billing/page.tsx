@@ -1,35 +1,10 @@
-import { Topbar } from "@/components/shell/topbar"
-import { ObjectHeader } from "@/components/shell/object-header"
-import { Tabs } from "@/components/shell/tabs"
-import { Card, CardBody } from "@/components/ui/card"
-import { BarChart3 } from "lucide-react"
+import { redirect } from "next/navigation"
 
-export default function ServiceBillingPage() {
-  return (
-    <>
-      <Topbar crumbs={[{ label: "Service Billing" }]} />
-      <ObjectHeader
-        eyebrow="Module"
-        title="Service Billing"
-        sub="Daily billing workflow for completed work orders"
-        icon={<BarChart3 className="w-6 h-6" strokeWidth={1.8} />}
-      />
-      <Tabs
-        items={[
-          { href: "/service-billing", label: "Overview" },
-          { href: "/service-billing/queue", label: "Billing Queue" },
-          { href: "/service-billing/needs-attention", label: "Needs Attention" },
-          { href: "/service-billing/revenue", label: "Revenue" },
-          { href: "/service-billing/activity", label: "Activity" },
-        ]}
-      />
-      <div className="px-7 py-6">
-        <Card>
-          <CardBody className="text-ink-dim text-sm">
-            Service billing module home — overview of pending work, recent processing runs, KPIs.
-          </CardBody>
-        </Card>
-      </div>
-    </>
-  )
+/**
+ * /service-billing lands on the Awaiting Invoice tab — the entry point of
+ * the daily workflow. The shared layout provides the KPI strip + tabs,
+ * so the landing page doesn't need its own overview card.
+ */
+export default function ServiceBillingIndex() {
+  redirect("/service-billing/awaiting-invoice" as never)
 }

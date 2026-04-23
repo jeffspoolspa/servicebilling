@@ -14,8 +14,10 @@ import { BatchProgressModal, type BatchInvoiceSummary } from "./batch-progress-m
  * Owns the selection state and renders the table body with a checkbox column.
  * Headers + page chrome stay in the server component.
  *
- * The confirmation step for LIVE processing requires the user to type the literal
- * string "CHARGE" — guards against accidental clicks since real money moves.
+ * One click fires processing — the pre-checks (credit recheck, default-only
+ * card picker, live QBO fetch per invoice, per-invoice advisory lock,
+ * idempotency_key) already ensure every charge is deliberate. Dry-run sits
+ * next to Process Selected for inspection without money moving.
  */
 
 export interface QueueRow {
@@ -56,8 +58,6 @@ export function QueueActions({
   // SortableHeader so clicks round-trip through the URL.
   const sortable = sort !== undefined && dir !== undefined
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [showConfirm, setShowConfirm] = useState<"live" | null>(null)
-  const [confirmText, setConfirmText] = useState("")
   const [busy, setBusy] = useState<"dry" | "live" | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
@@ -140,9 +140,7 @@ export function QueueActions({
         const txt = await resp.text()
         throw new Error(txt.slice(0, 300) || `HTTP ${resp.status}`)
       }
-      // Close confirmation modal, open progress modal
-      setShowConfirm(null)
-      setConfirmText("")
+      // Open progress modal immediately
       setBatchModal({
         open: true,
         invoices: modalInvoices,
@@ -311,7 +309,7 @@ export function QueueActions({
             <Button
               size="sm"
               variant="primary"
-              onClick={() => setShowConfirm("live")}
+              onClick={() => fire(false)}
               disabled={busy !== null}
             >
               <CreditCard className="w-3.5 h-3.5" strokeWidth={2} />
@@ -329,77 +327,6 @@ export function QueueActions({
         dryRun={batchModal.dryRun}
         triggeredAt={batchModal.triggeredAt}
       />
-
-      {/* Live confirmation modal — type CHARGE to enable button */}
-      {showConfirm === "live" && (
-        <div
-          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm grid place-items-center"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              setShowConfirm(null)
-              setConfirmText("")
-            }
-          }}
-        >
-          <div className="bg-[#0E1C2A] border border-line rounded-xl shadow-2xl max-w-md w-full mx-6 p-6 space-y-4">
-            <h3 className="text-lg font-medium text-ink">Process {selected.size} invoice(s)?</h3>
-            <div className="text-sm text-ink-dim space-y-2">
-              <p>
-                This will <span className="text-coral font-medium">charge real cards</span>{" "}
-                via QBO Payments and send invoice emails. Action is logged but charges
-                cannot be undone from this UI — refunds must be done in QBO.
-              </p>
-              <div className="bg-bg-elev rounded-lg p-3 space-y-1 font-mono text-xs">
-                <div>
-                  <span className="text-ink-mute">Total to charge:</span>{" "}
-                  <span className="text-sun font-medium">{formatCurrency(selectedTotal)}</span>
-                </div>
-                <div>
-                  <span className="text-ink-mute">Cards on file:</span>{" "}
-                  <span className="text-cyan">{selectedOnFile}</span>
-                </div>
-                <div>
-                  <span className="text-ink-mute">Invoice-only (email):</span>{" "}
-                  <span className="text-ink">{selectedInvoiceOnly}</span>
-                </div>
-              </div>
-              <p className="text-xs">
-                Type{" "}
-                <code className="bg-bg-elev px-1.5 py-0.5 rounded text-coral">CHARGE</code>{" "}
-                below to enable the button.
-              </p>
-            </div>
-            <input
-              type="text"
-              value={confirmText}
-              onChange={(e) => setConfirmText(e.target.value)}
-              autoFocus
-              placeholder="Type CHARGE"
-              className="w-full bg-bg-elev border border-line rounded-md px-3 py-2 text-sm text-ink font-mono focus:outline-none focus:border-cyan"
-            />
-            <div className="flex justify-end gap-2 pt-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setShowConfirm(null)
-                  setConfirmText("")
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={() => fire(false)}
-                disabled={confirmText !== "CHARGE" || busy !== null}
-              >
-                {busy === "live" ? "Processing..." : `Charge ${formatCurrency(selectedTotal)}`}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
 }

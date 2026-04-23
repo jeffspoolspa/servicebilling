@@ -1,4 +1,3 @@
-import { Topbar } from "@/components/shell/topbar"
 import { ObjectHeader } from "@/components/shell/object-header"
 import { Card, CardBody } from "@/components/ui/card"
 import { HardHat } from "lucide-react"
@@ -6,7 +5,6 @@ import { HardHat } from "lucide-react"
 export default function EmployeesPage() {
   return (
     <>
-      <Topbar crumbs={[{ label: "Employees" }]} />
       <ObjectHeader
         eyebrow="Entity"
         title="Employees"

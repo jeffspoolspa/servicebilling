@@ -1,4 +1,3 @@
-import { Topbar } from "@/components/shell/topbar"
 import { ObjectHeader } from "@/components/shell/object-header"
 import { Tabs } from "@/components/shell/tabs"
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
@@ -19,14 +18,6 @@ export default async function CustomerDetailPage({ params }: PageProps) {
 
   return (
     <>
-      <Topbar
-        back
-        backFallbackHref="/customers"
-        crumbs={[
-          { label: "Customers", href: "/customers" },
-          { label: customer.display_name },
-        ]}
-      />
       <ObjectHeader
         eyebrow="Customer"
         title={customer.display_name}
