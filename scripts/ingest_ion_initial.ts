@@ -800,7 +800,16 @@ async function main() {
     // Derive day_of_week, tech, sequence, and office ALL from the 2-week
     // event snapshot at this location. Last Visit is intentionally not used
     // because it reflects pre-reroute state.
-    const events = eventsByLoc.get(t.service_location_id) ?? []
+    //
+    // QC events (price = $0) are EXCLUDED from the mode calculation so a
+    // supervisor's quality-check visit doesn't pull the task's tech/day off
+    // the regular service slot. QC events still flow through as visits, just
+    // with visit_type='qc' (handled in the visits upsert below).
+    const allEvents = eventsByLoc.get(t.service_location_id) ?? []
+    const events = allEvents.filter((e) => {
+      const cents = parsePriceCents(e.price)
+      return cents !== null && cents > 0
+    })
 
     const dowCounts = new Map<number, number>()
     const techCounts = new Map<string, number>()
@@ -870,7 +879,7 @@ async function main() {
     scheduled_tech_id: string | null
     actual_tech_id: string | null
     status: "scheduled"
-    visit_type: "route"
+    visit_type: "route" | "qc"
     price_cents: number | null
     snapshot_frequency: Frequency | null
     office: string | null
@@ -886,6 +895,10 @@ async function main() {
   const visitUpserts: VisitUpsert[] = []
   for (const e of resolvedEvents) {
     const taskMatch = taskByLoc.get(e.service_location_id) ?? null
+    const priceCents = parsePriceCents(e.price)
+    // $0 events are QCs (supervisor quality-check visits) — tagged so
+    // routes pages exclude them and visits page can pill them differently.
+    const visitType: "route" | "qc" = priceCents === 0 ? "qc" : "route"
     visitUpserts.push({
       service_location_id: e.service_location_id,
       scheduled_date: e.iso_date,
@@ -893,8 +906,8 @@ async function main() {
       scheduled_tech_id: e.tech_employee_id,
       actual_tech_id: e.tech_employee_id,
       status: "scheduled",
-      visit_type: "route",
-      price_cents: parsePriceCents(e.price),
+      visit_type: visitType,
+      price_cents: priceCents,
       snapshot_frequency: taskMatch?.frequency ?? null,
       office: (e.office ?? "").trim() || null,
       external_source: "ion",
@@ -1048,15 +1061,22 @@ async function main() {
     office: v.office,
     external_source: v.external_source,
   }))
-  // Dedup by (service_location_id, scheduled_date) — multi-task locations
-  // (where ION has route + QC tasks at the same address) can produce two
-  // events on the same date. Postgres ON CONFLICT can't process both in
-  // the same statement. We keep the first occurrence (which in the ingest
-  // order is the primary task's event).
+  // Dedup by (service_location_id, scheduled_date). Multi-task locations
+  // (route + QC tasks at the same address) often produce two events on the
+  // same date. Postgres ON CONFLICT can't process both in one statement.
+  // Prefer the route visit over the QC so the customer's actual service
+  // visit wins; the QC is dropped (we lose visibility on it for that date,
+  // but it's typically just a redundant supervisor stop).
   const visitDedup = new Map<string, typeof visitRows[number]>()
   for (const v of visitRows) {
     const k = `${v.service_location_id}|${v.scheduled_date}`
-    if (!visitDedup.has(k)) visitDedup.set(k, v)
+    const existing = visitDedup.get(k)
+    if (!existing) {
+      visitDedup.set(k, v)
+    } else if (existing.visit_type === "qc" && v.visit_type === "route") {
+      // Replace QC with route visit — route wins.
+      visitDedup.set(k, v)
+    }
   }
   const visitRowsDedup = [...visitDedup.values()]
   if (visitRowsDedup.length !== visitRows.length) {
