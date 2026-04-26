@@ -612,16 +612,16 @@ async function main() {
   const unresolvedTechs = new Set<string>()
 
   // ────────────────────────────────────────────
-  // Resolve recurring tasks → (service_location_id, day_of_week from Last Visit)
+  // Resolve recurring tasks → service_location_id
   // ────────────────────────────────────────────
-  // Last Visit is per-task; its day_of_week is the canonical day this task is
-  // serviced. This is what disambiguates multi-task locations (twice-weekly
-  // customers represented as two tasks on different days). If Last Visit is
-  // empty (brand-new task with no service history), we fall back to deriving
-  // day from this period's events for that location.
+  // Earlier versions used the task's "Last Visit" date to derive day_of_week,
+  // but Last Visit is from BEFORE any recent re-routes — using it pollutes
+  // tech/day attribution for any customer that was re-routed since their
+  // last service. The 2-week event snapshot is the canonical source: if
+  // Aaron is doing 11 stops on the upcoming Monday, that's Aaron's Monday
+  // route, regardless of what the customer's last completed visit looked like.
   type ResolvedTask = RecurringTaskRow & {
     service_location_id: number
-    initial_day_of_week: number | null
   }
   const resolvedTasks: ResolvedTask[] = []
   for (const t of tasksRaw) {
@@ -631,13 +631,9 @@ async function main() {
       failures.push({ source: "recurring-tasks", reason: "service_location address not found", raw: t })
       continue
     }
-    const lastVisitIso = parseISO(t.last_visit)
-    const lastVisitDow = lastVisitIso ? dayOfWeek(lastVisitIso) : null
-    resolvedTasks.push({ ...t, service_location_id: loc.id, initial_day_of_week: lastVisitDow })
+    resolvedTasks.push({ ...t, service_location_id: loc.id })
   }
   console.log(`Resolved tasks: ${resolvedTasks.length}/${tasksRaw.length} matched to service_locations`)
-  const tasksWithDayCount = resolvedTasks.filter((t) => t.initial_day_of_week !== null).length
-  console.log(`  ${tasksWithDayCount}/${resolvedTasks.length} have day_of_week from Last Visit`)
 
   // ────────────────────────────────────────────
   // Group events by service_location_id
@@ -670,22 +666,14 @@ async function main() {
   }
   console.log(`Resolved events: ${resolvedEvents.length}/${taskEvents.length} matched to service_locations`)
 
-  // Events keyed two ways:
-  //   - by service_location_id (for fallback when task has no Last Visit day)
-  //   - by (service_location_id, day_of_week) (the canonical lookup)
+  // Events keyed by service_location_id — the 2-week event snapshot is the
+  // source of truth for tech/day attribution. We derive task fields by
+  // taking the mode across all events at that location.
   const eventsByLoc = new Map<number, ResolvedEvent[]>()
-  const eventsByLocDay = new Map<string, ResolvedEvent[]>()
   for (const e of resolvedEvents) {
     const arr = eventsByLoc.get(e.service_location_id) ?? []
     arr.push(e)
     eventsByLoc.set(e.service_location_id, arr)
-    const dow = dayOfWeek(e.iso_date)
-    if (dow !== null) {
-      const k = `${e.service_location_id}|${dow}`
-      const arr2 = eventsByLocDay.get(k) ?? []
-      arr2.push(e)
-      eventsByLocDay.set(k, arr2)
-    }
   }
 
   // ────────────────────────────────────────────
@@ -741,6 +729,7 @@ async function main() {
     price_per_visit_cents: number | null
     sequence: number | null
     status: "active"
+    office: string | null
     starts_on: string | null
     ends_on: string | null
     notes: string | null
@@ -808,32 +797,28 @@ async function main() {
   for (const t of resolvedTasks) {
     if (!primaryTaskIds.has(t.ion_task_id)) continue
 
-    // Day-of-week selection: prefer Last Visit (per-task signal); fall back
-    // to mode of all events at this location.
-    let claimDay: number | null = t.initial_day_of_week
-    let events: ResolvedEvent[] = []
-    if (claimDay !== null) {
-      events = eventsByLocDay.get(`${t.service_location_id}|${claimDay}`) ?? []
-    } else {
-      events = eventsByLoc.get(t.service_location_id) ?? []
-      const dowCounts = new Map<number, number>()
-      for (const e of events) {
-        const dow = dayOfWeek(e.iso_date)
-        if (dow !== null) dowCounts.set(dow, (dowCounts.get(dow) ?? 0) + 1)
-      }
-      claimDay = modeOf(dowCounts)
-    }
+    // Derive day_of_week, tech, sequence, and office ALL from the 2-week
+    // event snapshot at this location. Last Visit is intentionally not used
+    // because it reflects pre-reroute state.
+    const events = eventsByLoc.get(t.service_location_id) ?? []
 
-    // Derive tech + sequence from events.
+    const dowCounts = new Map<number, number>()
     const techCounts = new Map<string, number>()
     const seqCounts = new Map<number, number>()
+    const officeCounts = new Map<string, number>()
     for (const e of events) {
+      const dow = dayOfWeek(e.iso_date)
+      if (dow !== null) dowCounts.set(dow, (dowCounts.get(dow) ?? 0) + 1)
       if (e.tech_employee_id) techCounts.set(e.tech_employee_id, (techCounts.get(e.tech_employee_id) ?? 0) + 1)
       const seq = Number(e.sequence)
       if (Number.isFinite(seq) && seq !== 999) seqCounts.set(seq, (seqCounts.get(seq) ?? 0) + 1)
+      const off = (e.office ?? "").trim()
+      if (off) officeCounts.set(off, (officeCounts.get(off) ?? 0) + 1)
     }
+    const claimDay = modeOf(dowCounts)
     const techMode = modeOf(techCounts)
     const seqMode = modeOf(seqCounts)
+    const officeMode = modeOf(officeCounts)
 
     // Refine biweekly A/B from first event ISO-week parity.
     let frequency = parseFrequency(t.service_repeat)
@@ -851,6 +836,7 @@ async function main() {
       price_per_visit_cents: parsePriceCents(t.task_price),
       sequence: seqMode,
       status: "active",
+      office: officeMode,
       starts_on: parseISO(t.task_start),
       ends_on: parseISO(t.task_end),
       notes: t.recurring_notes || null,
@@ -887,6 +873,7 @@ async function main() {
     visit_type: "route"
     price_cents: number | null
     snapshot_frequency: Frequency | null
+    office: string | null
     external_source: "ion"
     // task_id filled in after task upsert
     _ion_task_id: string | null
@@ -909,6 +896,7 @@ async function main() {
       visit_type: "route",
       price_cents: parsePriceCents(e.price),
       snapshot_frequency: taskMatch?.frequency ?? null,
+      office: (e.office ?? "").trim() || null,
       external_source: "ion",
       _ion_task_id: taskMatch?.ion_task_id ?? null,
       _ion_seq: Number.isFinite(Number(e.sequence)) ? Number(e.sequence) : null,
@@ -999,6 +987,7 @@ async function main() {
     price_per_visit_cents: u.price_per_visit_cents,
     sequence: u.sequence,
     status: u.status,
+    office: u.office,
     starts_on: u.starts_on,
     ends_on: u.ends_on,
     notes: u.notes,
@@ -1056,6 +1045,7 @@ async function main() {
     visit_type: v.visit_type,
     price_cents: v.price_cents,
     snapshot_frequency: v.snapshot_frequency,
+    office: v.office,
     external_source: v.external_source,
   }))
   // Dedup by (service_location_id, scheduled_date) — multi-task locations

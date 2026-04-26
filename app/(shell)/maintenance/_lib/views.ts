@@ -25,6 +25,7 @@ export interface VisitContextRow {
   snapshot_frequency: string | null
   work_order_wo_number: string | null
   ion_work_order_id: string | null
+  office: string | null
   notes: string | null
   service_location_street: string | null
   service_location_city: string | null
@@ -49,6 +50,7 @@ export interface TaskContextRow {
   ends_on: string | null
   notes: string | null
   ion_task_id: string | null
+  office: string | null
   service_location_street: string | null
   service_location_city: string | null
   customer_id: number | null
@@ -57,6 +59,7 @@ export interface TaskContextRow {
 }
 
 export interface RouteSummaryRow {
+  office: string | null
   tech_employee_id: string
   tech_name: string | null
   day_of_week: number
