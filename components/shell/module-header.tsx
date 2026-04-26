@@ -47,8 +47,36 @@ const SERVICE_LINKS: ModuleLink[] = [
   },
 ]
 
-/** Module link set per top-level department. Add more modules (Maintenance
- *  sub-nav, Admin sub-nav) as the app grows. */
+const MAINTENANCE_LINKS: ModuleLink[] = [
+  {
+    href: "/maintenance/dashboard",
+    label: "Dashboard",
+    matches: ["/maintenance/dashboard"],
+  },
+  {
+    href: "/maintenance/routes",
+    label: "Routes",
+    matches: ["/maintenance/routes"],
+  },
+  {
+    href: "/maintenance/visits",
+    label: "Visits",
+    matches: ["/maintenance/visits"],
+  },
+  {
+    href: "/maintenance/inventory",
+    label: "Inventory",
+    matches: ["/maintenance/inventory"],
+  },
+  {
+    href: "/maintenance/techs",
+    label: "Techs",
+    matches: ["/maintenance/techs"],
+  },
+]
+
+/** Module link set per top-level department. Add more modules (Admin sub-nav)
+ *  as the app grows. */
 function moduleLinksFor(path: string): ModuleLink[] | null {
   if (
     path.startsWith("/service") ||
@@ -58,7 +86,10 @@ function moduleLinksFor(path: string): ModuleLink[] | null {
   ) {
     return SERVICE_LINKS
   }
-  // /home, /maintenance, /admin/*, /employees have no module sub-nav yet.
+  if (path.startsWith("/maintenance")) {
+    return MAINTENANCE_LINKS
+  }
+  // /home, /admin/*, /employees have no module sub-nav yet.
   return null
 }
 
@@ -79,6 +110,7 @@ export function ModuleHeader() {
     /^\/$/,
     /^\/home$/,
     /^\/maintenance$/,
+    /^\/maintenance\/(dashboard|routes|visits|inventory|techs)$/,
     /^\/service$/,
     /^\/service-billing$/,
     /^\/service-billing\/(awaiting-invoice|queue|needs-attention|sent|audit|triage|activity|payment-methods|past-due|revenue)$/,
@@ -162,7 +194,19 @@ interface Crumb {
 function deriveCrumbs(path: string): Crumb[] {
   if (path === "/" || path === "") return []
   if (path === "/home") return [{ label: "Home" }]
-  if (path === "/maintenance") return [{ label: "Maintenance" }]
+
+  // /maintenance/* → Maintenance · <tab> · <deep>
+  if (path.startsWith("/maintenance")) {
+    const parts = path.split("/").filter(Boolean) // ['maintenance', 'visits', '<id>']
+    const crumbs: Crumb[] = [{ label: "Maintenance", href: "/maintenance/dashboard" }]
+    if (parts.length > 1) {
+      crumbs.push({ label: titleize(parts[1]), href: `/maintenance/${parts[1]}` })
+    }
+    if (parts.length > 2) {
+      crumbs.push({ label: parts.slice(2).join(" / ") })
+    }
+    return crumbs
+  }
 
   // /service → Service · Dashboard
   if (path === "/service") {
