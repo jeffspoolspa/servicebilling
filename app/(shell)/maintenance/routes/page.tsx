@@ -82,7 +82,7 @@ export default async function RoutesPage({
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {list.map((r) => (
                   <Link
-                    key={`${r.tech_employee_id}-${r.day_of_week}`}
+                    key={`${r.office ?? "_"}-${r.tech_employee_id}-${r.day_of_week}`}
                     href={`/maintenance/routes/${r.tech_employee_id}/${r.day_of_week}` as never}
                     className="block"
                   >
