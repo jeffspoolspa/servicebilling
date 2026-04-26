@@ -42,3 +42,9 @@ windmill/**/secret-*
 
 # claude code local state
 .claude/
+
+# supabase CLI temp/auth files
+supabase/.temp/
+
+# one-shot script outputs (regenerated each run)
+ingest_*.json

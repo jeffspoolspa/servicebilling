@@ -24,7 +24,7 @@ export async function listVisits(opts?: {
   techEmployeeId?: string
   status?: VisitStatus
   visitType?: VisitType
-  serviceLocationId?: string
+  serviceLocationId?: number
   limit?: number
 }): Promise<Visit[]> {
   const supabase = await createSupabaseServer()
@@ -54,6 +54,7 @@ export async function listVisitsForRoute(
   techEmployeeId: string,
   visitDate: string,
 ): Promise<Visit[]> {
+  // unchanged signature; service_location_id type changed elsewhere
   const supabase = await createSupabaseServer()
   const { data } = await supabase
     .schema("maintenance")
@@ -79,7 +80,7 @@ function enrich(row: Record<string, unknown>): Visit {
 
   return {
     id: row.id as string,
-    service_location_id: row.service_location_id as string,
+    service_location_id: Number(row.service_location_id),
     task_id: (row.task_id as string) ?? null,
     scheduled_date,
     visit_date,
@@ -95,7 +96,7 @@ function enrich(row: Record<string, unknown>): Visit {
         ? null
         : Number(row.price_cents),
     snapshot_frequency: (row.snapshot_frequency as SnapshotFrequency) ?? null,
-    work_order_id: (row.work_order_id as string) ?? null,
+    work_order_wo_number: (row.work_order_wo_number as string) ?? null,
     ion_work_order_id: (row.ion_work_order_id as string) ?? null,
     skimmer_visit_id: (row.skimmer_visit_id as string) ?? null,
     external_source: (row.external_source as string) ?? null,

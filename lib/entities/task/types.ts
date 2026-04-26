@@ -18,7 +18,7 @@ export type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6
 
 export interface Task {
   id: string
-  service_location_id: string
+  service_location_id: number
   tech_employee_id: string | null
   day_of_week: DayOfWeek | null
   frequency: TaskFrequency | null

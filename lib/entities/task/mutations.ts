@@ -22,7 +22,7 @@ const WRITABLE_FIELDS = [
  * task — caller should close the old one first.
  */
 export async function createTask(input: {
-  service_location_id: string
+  service_location_id: number
   tech_employee_id?: string | null
   day_of_week?: DayOfWeek | null
   frequency?: TaskFrequency | null

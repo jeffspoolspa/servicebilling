@@ -18,7 +18,7 @@ export async function getTask(id: string): Promise<Task | null> {
  * a partial unique index that guarantees at most one such row.
  */
 export async function getOpenTaskForServiceLocation(
-  serviceLocationId: string,
+  serviceLocationId: number,
 ): Promise<Task | null> {
   const supabase = await createSupabaseServer()
   const { data } = await supabase
@@ -73,7 +73,7 @@ export async function listRouteStops(
 function enrich(row: Record<string, unknown>): Task {
   return {
     id: row.id as string,
-    service_location_id: row.service_location_id as string,
+    service_location_id: Number(row.service_location_id),
     tech_employee_id: (row.tech_employee_id as string) ?? null,
     day_of_week: (row.day_of_week as Task["day_of_week"]) ?? null,
     frequency: (row.frequency as TaskFrequency) ?? null,

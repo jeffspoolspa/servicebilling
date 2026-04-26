@@ -16,7 +16,7 @@ GRANT USAGE ON SCHEMA maintenance TO authenticated, service_role;
 
 CREATE TABLE IF NOT EXISTS public.pools (
   id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  service_location_id  uuid NOT NULL REFERENCES public.service_locations(id) ON DELETE CASCADE,
+  service_location_id  bigint NOT NULL REFERENCES public.service_locations(id) ON DELETE CASCADE,
   name                 text,
   kind                 text,
   gallons              integer,
@@ -59,7 +59,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_pools_ion_pool_id
 
 CREATE TABLE IF NOT EXISTS maintenance.tasks (
   id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  service_location_id    uuid NOT NULL REFERENCES public.service_locations(id),
+  service_location_id    bigint NOT NULL REFERENCES public.service_locations(id),
   tech_employee_id       uuid REFERENCES public.employees(id),
   day_of_week            smallint,
   frequency              text,
@@ -198,7 +198,7 @@ CREATE TRIGGER pools_updated_at
 
 CREATE TABLE IF NOT EXISTS maintenance.visits (
   id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  service_location_id  uuid NOT NULL REFERENCES public.service_locations(id),
+  service_location_id  bigint NOT NULL REFERENCES public.service_locations(id),
   task_id              uuid REFERENCES maintenance.tasks(id),
   -- Scheduled (locked at generation) vs Actual (mutable). Divergence = manual reassignment.
   scheduled_date       date NOT NULL,
@@ -213,8 +213,8 @@ CREATE TABLE IF NOT EXISTS maintenance.visits (
   -- Snapshots locked at generation/creation
   price_cents          integer,
   snapshot_frequency   text,
-  -- Linkage out
-  work_order_id        uuid,
+  -- Linkage out: work_orders.PK is wo_number (text), not a numeric id.
+  work_order_wo_number text REFERENCES public.work_orders(wo_number),
   -- External source-of-truth IDs
   ion_work_order_id    text,
   skimmer_visit_id     text,

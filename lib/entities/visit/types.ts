@@ -30,7 +30,7 @@ export type SnapshotFrequency = "weekly" | "biweekly_a" | "biweekly_b" | "monthl
 
 export interface Visit {
   id: string
-  service_location_id: string
+  service_location_id: number
   task_id: string | null
 
   // Scheduled (locked at generation) vs Actual (mutable)
@@ -50,8 +50,8 @@ export interface Visit {
   price_cents: number | null
   snapshot_frequency: SnapshotFrequency | null
 
-  // Linkage out
-  work_order_id: string | null
+  // Linkage out (work_orders.PK is wo_number text)
+  work_order_wo_number: string | null
 
   // External source-of-truth IDs
   ion_work_order_id: string | null

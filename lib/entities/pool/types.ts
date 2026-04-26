@@ -11,7 +11,7 @@ export type PoolSanitizer = "chlorine" | "salt" | "bromine" | "mineral"
 
 export interface Pool {
   id: string
-  service_location_id: string
+  service_location_id: number
   name: string | null
   kind: PoolKind | null
   gallons: number | null

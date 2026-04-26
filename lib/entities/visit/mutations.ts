@@ -11,7 +11,7 @@ const WRITABLE_FIELDS = [
   "started_at",
   "ended_at",
   "notes",
-  "work_order_id",
+  "work_order_wo_number",
   "price_cents",
 ] as const
 
@@ -20,7 +20,7 @@ const WRITABLE_FIELDS = [
  * visits flow in via the Windmill generator, not this entry point.
  */
 export async function createAdHocVisit(input: {
-  service_location_id: string
+  service_location_id: number
   visit_date: string
   scheduled_date?: string
   visit_type: Exclude<VisitType, "route">
@@ -136,9 +136,9 @@ export async function setVisitStatus(
 /** Link a billable work order to this visit (called by service-billing flow). */
 export async function attachWorkOrder(
   id: string,
-  workOrderId: string,
+  workOrderWoNumber: string,
 ): Promise<Visit | null> {
-  return updateVisit(id, { work_order_id: workOrderId })
+  return updateVisit(id, { work_order_wo_number: workOrderWoNumber })
 }
 
 /**
@@ -147,7 +147,7 @@ export async function attachWorkOrder(
  * (service_location_id, scheduled_date) unique index.
  */
 export async function generateRouteVisit(input: {
-  service_location_id: string
+  service_location_id: number
   task_id: string
   scheduled_date: string
   scheduled_tech_id: string | null

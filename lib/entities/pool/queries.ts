@@ -9,7 +9,7 @@ export async function getPool(id: string): Promise<Pool | null> {
 }
 
 export async function listPoolsForServiceLocation(
-  serviceLocationId: string,
+  serviceLocationId: number,
   opts?: { activeOnly?: boolean },
 ): Promise<Pool[]> {
   const supabase = await createSupabaseServer()
@@ -43,7 +43,7 @@ export async function listPools(opts?: { activeOnly?: boolean; limit?: number })
 function enrich(row: Record<string, unknown>): Pool {
   return {
     id: row.id as string,
-    service_location_id: row.service_location_id as string,
+    service_location_id: Number(row.service_location_id),
     name: (row.name as string) ?? null,
     kind: (row.kind as PoolKind) ?? null,
     gallons: row.gallons === null || row.gallons === undefined ? null : Number(row.gallons),
