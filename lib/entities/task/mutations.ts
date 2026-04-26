@@ -1,37 +1,27 @@
 import { createSupabaseServer } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
-import type { DayOfWeek, Task, TaskFrequency } from "./types"
+import type { Task } from "./types"
 import { assertTaskRules, assertValidStatusTransition } from "./rules"
 import { getTask } from "./queries"
 
 const WRITABLE_FIELDS = [
-  "tech_employee_id",
-  "day_of_week",
-  "frequency",
-  "price_per_visit_cents",
   "chem_budget_cents",
   "included_items",
-  "sequence",
   "notes",
   "ends_on",
 ] as const
 
 /**
- * Create a new task for a service location. The "one open task per location"
- * partial unique index will reject if there's already an active or paused
- * task — caller should close the old one first.
+ * Create a new task for a service location. Customer-level shell only —
+ * tech/day/frequency/price live on `task_schedules` rows attached to this
+ * task. The "one open task per location" partial unique index will reject
+ * if there's already an active or paused task.
  */
 export async function createTask(input: {
   service_location_id: number
-  tech_employee_id?: string | null
-  day_of_week?: DayOfWeek | null
-  frequency?: TaskFrequency | null
-  price_per_visit_cents?: number | null
   chem_budget_cents?: number | null
-  sequence?: number | null
   starts_on?: string
   notes?: string | null
-  skimmer_id?: string | null
   external_source?: string | null
 }): Promise<Task> {
   const supabase = await createSupabaseServer()
@@ -40,15 +30,9 @@ export async function createTask(input: {
     .from("tasks")
     .insert({
       service_location_id: input.service_location_id,
-      tech_employee_id: input.tech_employee_id ?? null,
-      day_of_week: input.day_of_week ?? null,
-      frequency: input.frequency ?? null,
-      price_per_visit_cents: input.price_per_visit_cents ?? null,
       chem_budget_cents: input.chem_budget_cents ?? null,
-      sequence: input.sequence ?? null,
       starts_on: input.starts_on ?? new Date().toISOString().slice(0, 10),
       notes: input.notes ?? null,
-      skimmer_id: input.skimmer_id ?? null,
       external_source: input.external_source ?? "manual",
       status: "active",
     })
@@ -62,9 +46,9 @@ export async function createTask(input: {
 }
 
 /**
- * Generic partial update. Only fields in WRITABLE_FIELDS are applied. Use the
- * named helpers below (`pauseTask`, `closeTask`) for status transitions so
- * the FSM rule fires.
+ * Generic partial update. Only fields in WRITABLE_FIELDS are applied. Use
+ * the named helpers below for status transitions so the FSM rule fires.
+ * Slot-level changes (tech, day, price) go through task_schedules mutations.
  */
 export async function updateTask(id: string, patch: Partial<Task>): Promise<Task | null> {
   const current = await getTask(id)
@@ -128,10 +112,7 @@ export async function activateTask(id: string): Promise<Task | null> {
   return getTask(id)
 }
 
-/**
- * Close a task. Terminal — to resume service to the location, open a new
- * task instead. Sets ends_on to today.
- */
+/** Close a task. Terminal — to resume service open a new task instead. */
 export async function closeTask(id: string): Promise<Task | null> {
   const current = await getTask(id)
   if (!current) throw new Error(`Task ${id} not found`)

@@ -26,7 +26,9 @@ export default async function RouteDetailPage({
 
   const stops = await listRouteStops(tech, dayNum)
   const techName = stops[0]?.tech_name ?? "(no tech)"
+  const office = stops[0]?.office ?? null
   const totalCents = stops.reduce((s, r) => s + (r.price_per_visit_cents ?? 0), 0)
+  const flatCount = stops.filter((s) => s.billing_method === "flat_rate_monthly").length
 
   return (
     <div className="px-7 pt-6 pb-10 space-y-4">
@@ -38,7 +40,9 @@ export default async function RouteDetailPage({
 
       <div className="flex items-end justify-between">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.14em] text-ink-mute">{dayLabel}</div>
+          <div className="text-[10px] uppercase tracking-[0.14em] text-ink-mute">
+            {office ? `${office} · ` : ""}{dayLabel}
+          </div>
           <h2 className="font-display text-[18px] mt-0.5">{techName}</h2>
         </div>
         <div className="text-right">
@@ -55,13 +59,14 @@ export default async function RouteDetailPage({
               <th className="px-4 py-2 font-medium">Customer</th>
               <th className="px-4 py-2 font-medium">Address</th>
               <th className="px-4 py-2 font-medium">Frequency</th>
-              <th className="px-4 py-2 font-medium text-right">Price</th>
+              <th className="px-4 py-2 font-medium">Billing</th>
+              <th className="px-4 py-2 font-medium text-right">Per visit</th>
             </tr>
           </thead>
           <tbody>
             {stops.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-ink-mute">
+                <td colSpan={6} className="px-4 py-8 text-center text-ink-mute">
                   No active stops on this route.
                 </td>
               </tr>
@@ -83,17 +88,29 @@ export default async function RouteDetailPage({
                     <Pill tone={FREQ_TONE[s.frequency] ?? "neutral"} dot>{s.frequency}</Pill>
                   ) : "—"}
                 </td>
+                <td className="px-4 py-2.5">
+                  {s.billing_method === "flat_rate_monthly" ? (
+                    <Pill tone="sun">flat / mo</Pill>
+                  ) : (
+                    <span className="text-ink-mute text-[11px]">per visit</span>
+                  )}
+                </td>
                 <td className="px-4 py-2.5 text-right font-mono num text-ink">
                   {s.price_per_visit_cents != null
                     ? formatCurrency(s.price_per_visit_cents / 100)
                     : "—"}
+                  {s.billing_method === "flat_rate_monthly" && s.flat_rate_monthly_cents != null && (
+                    <div className="text-[10px] text-ink-mute font-sans">
+                      ${(s.flat_rate_monthly_cents / 100).toFixed(2)}/mo
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
             {stops.length > 0 && (
               <tr className="border-t border-line-soft/60 bg-white/[0.02]">
-                <td colSpan={4} className="px-4 py-2.5 text-right text-ink-mute text-[11px] uppercase tracking-wide">
-                  Per-cycle total
+                <td colSpan={5} className="px-4 py-2.5 text-right text-ink-mute text-[11px] uppercase tracking-wide">
+                  Per-cycle total{flatCount > 0 ? ` (${flatCount} flat-rate normalized)` : ""}
                 </td>
                 <td className="px-4 py-2.5 text-right font-mono num text-ink font-semibold">
                   {formatCurrency(totalCents / 100)}

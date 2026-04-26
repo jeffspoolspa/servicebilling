@@ -434,6 +434,7 @@ function inferSanitizer(serviceProfile: string): "salt" | "chlorine" | null {
 }
 
 type Frequency = "daily" | "weekly" | "biweekly_a" | "biweekly_b" | "monthly"
+type BillingMethod = "per_visit" | "flat_rate_monthly"
 
 function parseFrequency(serviceRepeat: string): Frequency | null {
   const r = serviceRepeat.toLowerCase().trim()
@@ -445,6 +446,30 @@ function parseFrequency(serviceRepeat: string): Frequency | null {
   }
   if (r === "monthly") return "monthly"
   return null
+}
+
+/**
+ * ION's "Billing Type" / "Invoice Type" tells us whether the Task Price field
+ * is the per-visit charge or the monthly flat-rate amount. "Flat Rate (...)"
+ * variants are flat-rate; everything else (Per Visit Summary/Itemized) is
+ * per-visit.
+ */
+function parseBillingMethod(billingType: string): BillingMethod {
+  return billingType.trim().toLowerCase().startsWith("flat rate")
+    ? "flat_rate_monthly"
+    : "per_visit"
+}
+
+/** Average visits per month by cadence — used to convert flat-rate monthly to per-visit. */
+function visitsPerMonth(frequency: Frequency | null): number {
+  switch (frequency) {
+    case "daily": return 22 // ~22 weekdays/mo
+    case "weekly": return 4
+    case "biweekly_a":
+    case "biweekly_b": return 2
+    case "monthly": return 1
+    default: return 4
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -720,20 +745,27 @@ async function main() {
   // ────────────────────────────────────────────
   // Tasks — merge Pull A with derived (tech, day, sequence, biweekly cycle)
   // ────────────────────────────────────────────
-  type TaskUpsert = {
-    ion_task_id: string
+  type TaskRow = {
     service_location_id: number
-    tech_employee_id: string | null
-    day_of_week: number | null
-    frequency: Frequency | null
-    price_per_visit_cents: number | null
-    sequence: number | null
     status: "active"
-    office: string | null
     starts_on: string | null
     ends_on: string | null
     notes: string | null
     external_data: Record<string, unknown>
+    external_source: "ion"
+  }
+  type ScheduleUpsert = {
+    service_location_id: number  // helper for visit linkage; not a column
+    ion_task_id: string
+    tech_employee_id: string | null
+    day_of_week: number | null
+    frequency: Frequency | null
+    price_per_visit_cents: number | null
+    billing_method: BillingMethod
+    flat_rate_monthly_cents: number | null
+    sequence: number | null
+    office: string | null
+    active: true
     external_source: "ion"
   }
   function modeOf<T>(m: Map<T, number>): T | null {
@@ -744,72 +776,87 @@ async function main() {
   }
 
   // ────────────────────────────────────────────
-  // Detect multi-task locations and pick primaries.
+  // Group ION tasks by location. Filter $0 tasks (QCs) entirely — they
+  // don't become tasks/schedules. Their events still come through as
+  // visits with visit_type='qc'.
   //
-  // Our model enforces ONE active task per service_location. ION's report
-  // can have multiple — those extras are how ION represents QC inspections
-  // and green-pool follow-up visits. We model those as visits with
-  // visit_type='qc' / 'service_call', not separate tasks.
-  //
-  // For each multi-task location, we keep the task with the lowest
-  // ion_task_id (oldest task = the original recurring service). The
-  // others are flagged as duplicates and listed in the failures file
-  // for review.
+  // For each remaining ION task at a location: one task_schedules row.
+  // For each unique location: one tasks row (parent).
   // ────────────────────────────────────────────
-  const tasksByLoc = new Map<number, ResolvedTask[]>()
-  for (const t of resolvedTasks) {
+  type ResolvedTaskWithBilling = ResolvedTask & {
+    task_price_cents: number
+    billing_method: BillingMethod
+    parsed_frequency: Frequency | null
+  }
+  const enriched: ResolvedTaskWithBilling[] = resolvedTasks
+    .map((t) => ({
+      ...t,
+      task_price_cents: parsePriceCents(t.task_price) ?? 0,
+      billing_method: parseBillingMethod(t.billing_type),
+      parsed_frequency: parseFrequency(t.service_repeat),
+    }))
+
+  const qcTasks = enriched.filter((t) => t.task_price_cents === 0)
+  const serviceTasks = enriched.filter((t) => t.task_price_cents > 0)
+  console.log(`  ${qcTasks.length} ION tasks dropped as QC (price = $0)`)
+  console.log(`  ${serviceTasks.length} ION tasks classified as real service slots`)
+
+  const tasksByLoc = new Map<number, ResolvedTaskWithBilling[]>()
+  for (const t of serviceTasks) {
     const arr = tasksByLoc.get(t.service_location_id) ?? []
     arr.push(t)
     tasksByLoc.set(t.service_location_id, arr)
   }
-  const multiTaskLocs = [...tasksByLoc.values()].filter((arr) => arr.length > 1)
-  console.log(`  ${multiTaskLocs.length} service_locations violate one-active-task-per-location`)
+  const multiSlotLocs = [...tasksByLoc.values()].filter((arr) => arr.length > 1)
+  console.log(`  ${multiSlotLocs.length} service_locations have >1 schedule (multi-day customers)`)
 
-  const primaryTaskIds = new Set<string>()
-  for (const [, arr] of tasksByLoc) {
-    if (arr.length === 1) {
-      primaryTaskIds.add(arr[0].ion_task_id)
-      continue
-    }
-    // Sort by numeric ion_task_id ascending; oldest task wins.
-    const sorted = [...arr].sort((a, b) => {
-      const an = Number(a.ion_task_id)
-      const bn = Number(b.ion_task_id)
+  // Build one TaskRow per location (customer-level shell).
+  const taskRowsByLoc = new Map<number, TaskRow>()
+  for (const [locId, group] of tasksByLoc) {
+    // Use the lowest ion_task_id as the "primary" for shared/customer-level fields.
+    const primary = [...group].sort((a, b) => {
+      const an = Number(a.ion_task_id), bn = Number(b.ion_task_id)
       return (Number.isFinite(an) ? an : Number.MAX_SAFE_INTEGER) -
              (Number.isFinite(bn) ? bn : Number.MAX_SAFE_INTEGER)
+    })[0]
+    taskRowsByLoc.set(locId, {
+      service_location_id: locId,
+      status: "active",
+      starts_on: parseISO(primary.task_start),
+      ends_on: parseISO(primary.task_end),
+      notes: primary.recurring_notes || null,
+      external_data: {
+        ion_cust_id: primary.cust_id,
+        service_type: primary.service_type,
+        service_profile: primary.service_profile,
+        billing_type: primary.billing_type,
+        lock_combo: primary.lock_combo,
+        ion_zone: primary.zone,
+        facility_description: primary.facility_description,
+        customer_type: primary.customer_type,
+        slot_count: group.length,
+      },
+      external_source: "ion",
     })
-    primaryTaskIds.add(sorted[0].ion_task_id)
-    for (let i = 1; i < sorted.length; i++) {
-      failures.push({
-        source: "recurring-tasks",
-        reason: `multi-task location: extra ION task at same address as primary task ${sorted[0].ion_task_id} — likely QC or green-pool task. Should be modeled as a visit, not a task.`,
-        raw: sorted[i],
-      })
-    }
   }
-  const skippedTasks = resolvedTasks.length - primaryTaskIds.size
-  console.log(`  ${skippedTasks} extra tasks at multi-task locations skipped (logged as duplicates)`)
 
-  // ────────────────────────────────────────────
-  // Build task upserts (primaries only)
-  // ────────────────────────────────────────────
-  const taskUpserts: TaskUpsert[] = []
-  for (const t of resolvedTasks) {
-    if (!primaryTaskIds.has(t.ion_task_id)) continue
-
-    // Derive day_of_week, tech, sequence, and office ALL from the 2-week
-    // event snapshot at this location. Last Visit is intentionally not used
-    // because it reflects pre-reroute state.
-    //
-    // QC events (price = $0) are EXCLUDED from the mode calculation so a
-    // supervisor's quality-check visit doesn't pull the task's tech/day off
-    // the regular service slot. QC events still flow through as visits, just
-    // with visit_type='qc' (handled in the visits upsert below).
-    const allEvents = eventsByLoc.get(t.service_location_id) ?? []
-    const events = allEvents.filter((e) => {
-      const cents = parsePriceCents(e.price)
-      return cents !== null && cents > 0
+  // Build ScheduleUpsert per non-zero ION task with derived tech/day/office
+  // from price-matched events at the location.
+  const scheduleUpserts: ScheduleUpsert[] = []
+  for (const t of serviceTasks) {
+    const allLocEvents = (eventsByLoc.get(t.service_location_id) ?? [])
+    // Filter to events at this slot's price; if none match (e.g. flat-rate
+    // monthly ≠ event prices in some imports), fall back to all non-zero
+    // events at the location.
+    const priceMatched = allLocEvents.filter((e) => {
+      const c = parsePriceCents(e.price)
+      return c !== null && c > 0 && c === t.task_price_cents
     })
+    const fallback = allLocEvents.filter((e) => {
+      const c = parsePriceCents(e.price)
+      return c !== null && c > 0
+    })
+    const events = priceMatched.length > 0 ? priceMatched : fallback
 
     const dowCounts = new Map<number, number>()
     const techCounts = new Map<string, number>()
@@ -829,43 +876,38 @@ async function main() {
     const seqMode = modeOf(seqCounts)
     const officeMode = modeOf(officeCounts)
 
-    // Refine biweekly A/B from first event ISO-week parity.
-    let frequency = parseFrequency(t.service_repeat)
+    let frequency = t.parsed_frequency
     if (frequency === "biweekly_a" && events.length > 0) {
       const wk = isoWeek(events[0].iso_date)
       frequency = wk % 2 === 0 ? "biweekly_a" : "biweekly_b"
     }
 
-    taskUpserts.push({
-      ion_task_id: t.ion_task_id,
+    // Compute effective per-visit price. For flat-rate, divide monthly by
+    // visits-per-month so summing visits gives correct revenue.
+    const flatRateMonthlyCents =
+      t.billing_method === "flat_rate_monthly" ? t.task_price_cents : null
+    const pricePerVisitCents =
+      t.billing_method === "flat_rate_monthly"
+        ? Math.round(t.task_price_cents / visitsPerMonth(frequency))
+        : t.task_price_cents
+
+    scheduleUpserts.push({
       service_location_id: t.service_location_id,
+      ion_task_id: t.ion_task_id,
       tech_employee_id: techMode,
       day_of_week: claimDay,
       frequency,
-      price_per_visit_cents: parsePriceCents(t.task_price),
+      price_per_visit_cents: pricePerVisitCents,
+      billing_method: t.billing_method,
+      flat_rate_monthly_cents: flatRateMonthlyCents,
       sequence: seqMode,
-      status: "active",
       office: officeMode,
-      starts_on: parseISO(t.task_start),
-      ends_on: parseISO(t.task_end),
-      notes: t.recurring_notes || null,
-      external_data: {
-        ion_cust_id: t.cust_id,
-        service_type: t.service_type,
-        service_profile: t.service_profile,
-        billing_type: t.billing_type,
-        invoice_type_in_events: events.find((e) => e.invoice_type)?.invoice_type ?? null,
-        lock_combo: t.lock_combo,
-        ion_zone: t.zone,
-        raw_route_name: t.route_name,
-        facility_description: t.facility_description,
-        last_visit: t.last_visit,
-        customer_type: t.customer_type,
-      },
+      active: true,
       external_source: "ion",
     })
   }
-  console.log(`Tasks to upsert: ${taskUpserts.length}`)
+  console.log(`Tasks to upsert: ${taskRowsByLoc.size}`)
+  console.log(`Schedules to upsert: ${scheduleUpserts.length}`)
 
   // ────────────────────────────────────────────
   // Visits — from event rows, snapshotting price/tech/date
@@ -881,24 +923,54 @@ async function main() {
     status: "scheduled"
     visit_type: "route" | "qc"
     price_cents: number | null
+    billing_method: BillingMethod
+    flat_rate_monthly_cents: number | null
     snapshot_frequency: Frequency | null
     office: string | null
     external_source: "ion"
-    // task_id filled in after task upsert
-    _ion_task_id: string | null
+    // helpers populated after upsert
+    _location_id: number
     _ion_seq: number | null
   }
-  // Single primary task per location → simple location-keyed lookup.
-  const taskByLoc = new Map<number, TaskUpsert>()
-  for (const u of taskUpserts) taskByLoc.set(u.service_location_id, u)
+
+  // Index schedules by (location, price) for visit→schedule attribution
+  // (price match — same heuristic used for derivation), and by location
+  // for the parent task lookup.
+  const schedulesByLocPrice = new Map<string, ScheduleUpsert>()
+  const schedulesByLocFirst = new Map<number, ScheduleUpsert>()
+  for (const s of scheduleUpserts) {
+    const k = `${s.service_location_id}|${s.price_per_visit_cents}`
+    if (!schedulesByLocPrice.has(k)) schedulesByLocPrice.set(k, s)
+    if (!schedulesByLocFirst.has(s.service_location_id)) schedulesByLocFirst.set(s.service_location_id, s)
+  }
 
   const visitUpserts: VisitUpsert[] = []
   for (const e of resolvedEvents) {
-    const taskMatch = taskByLoc.get(e.service_location_id) ?? null
-    const priceCents = parsePriceCents(e.price)
-    // $0 events are QCs (supervisor quality-check visits) — tagged so
-    // routes pages exclude them and visits page can pill them differently.
-    const visitType: "route" | "qc" = priceCents === 0 ? "qc" : "route"
+    const eventCents = parsePriceCents(e.price)
+    // QC if event price is $0; otherwise route.
+    const isQc = eventCents === 0
+    const visitType: "route" | "qc" = isQc ? "qc" : "route"
+
+    // Match this event to a schedule. For QCs (no real schedule), fall back
+    // to whatever task is at the location.
+    let matchedSchedule: ScheduleUpsert | null = null
+    if (!isQc && eventCents !== null) {
+      const k = `${e.service_location_id}|${eventCents}`
+      matchedSchedule = schedulesByLocPrice.get(k) ?? schedulesByLocFirst.get(e.service_location_id) ?? null
+    } else {
+      matchedSchedule = schedulesByLocFirst.get(e.service_location_id) ?? null
+    }
+
+    // For visit price: if matched schedule is flat-rate, use the schedule's
+    // computed per-visit price (so visit summing produces correct revenue).
+    // Otherwise use event price as-is.
+    const billingMethod: BillingMethod = matchedSchedule?.billing_method ?? "per_visit"
+    const flatRateMonthlyCents = matchedSchedule?.flat_rate_monthly_cents ?? null
+    const effectivePriceCents =
+      billingMethod === "flat_rate_monthly" && matchedSchedule
+        ? matchedSchedule.price_per_visit_cents
+        : eventCents
+
     visitUpserts.push({
       service_location_id: e.service_location_id,
       scheduled_date: e.iso_date,
@@ -907,16 +979,17 @@ async function main() {
       actual_tech_id: e.tech_employee_id,
       status: "scheduled",
       visit_type: visitType,
-      price_cents: priceCents,
-      snapshot_frequency: taskMatch?.frequency ?? null,
+      price_cents: effectivePriceCents,
+      billing_method: billingMethod,
+      flat_rate_monthly_cents: flatRateMonthlyCents,
+      snapshot_frequency: matchedSchedule?.frequency ?? null,
       office: (e.office ?? "").trim() || null,
       external_source: "ion",
-      _ion_task_id: taskMatch?.ion_task_id ?? null,
+      _location_id: e.service_location_id,
       _ion_seq: Number.isFinite(Number(e.sequence)) ? Number(e.sequence) : null,
     })
   }
-  const visitsLinked = visitUpserts.filter((v) => v._ion_task_id !== null).length
-  console.log(`Visits to upsert: ${visitUpserts.length}  (${visitsLinked} linked to a task)`)
+  console.log(`Visits to upsert: ${visitUpserts.length}`)
 
   // ────────────────────────────────────────────
   // Summary + dry-run gate
@@ -987,61 +1060,148 @@ async function main() {
   }
 
   // ────────────────────────────────────────────
-  // Tasks upsert (maintenance.tasks)
+  // Tasks: one row per service_location. Lookup-or-insert pattern since
+  // there's no unique constraint on service_location_id alone (only the
+  // partial "one open per location" index, which PostgREST upsert won't use).
   // ────────────────────────────────────────────
   console.log("Writing tasks ...")
-  // Strip the helper underscore fields not in the table; status enum already correct.
-  const taskRows = taskUpserts.map((u) => ({
-    ion_task_id: u.ion_task_id,
-    service_location_id: u.service_location_id,
-    tech_employee_id: u.tech_employee_id,
-    day_of_week: u.day_of_week,
-    frequency: u.frequency,
-    price_per_visit_cents: u.price_per_visit_cents,
-    sequence: u.sequence,
-    status: u.status,
-    office: u.office,
-    starts_on: u.starts_on,
-    ends_on: u.ends_on,
-    notes: u.notes,
-    external_data: u.external_data,
-    external_source: u.external_source,
-  }))
-  // Chunk to avoid hitting payload limits.
   const CHUNK = 200
-  let tasksWritten = 0
-  for (let i = 0; i < taskRows.length; i += CHUNK) {
-    const slice = taskRows.slice(i, i + CHUNK)
-    const { error } = await supabase
-      .schema("maintenance")
-      .from("tasks")
-      .upsert(slice, { onConflict: "ion_task_id" })
-    if (error) {
-      console.error(`  tasks upsert chunk ${i}: ${error.message}`)
-    } else {
-      tasksWritten += slice.length
-    }
-  }
-  console.log(`  ${tasksWritten} tasks upserted`)
+  const taskIdByLoc = new Map<number, string>()
+  const taskRowEntries = [...taskRowsByLoc.entries()]
 
-  // ────────────────────────────────────────────
-  // Re-fetch tasks to get UUID for visits.task_id linkage
-  // ────────────────────────────────────────────
-  const ionTaskIds = [...new Set(taskRows.map((r) => r.ion_task_id))]
-  const taskIdByIon = new Map<string, string>()
-  for (let i = 0; i < ionTaskIds.length; i += 500) {
-    const slice = ionTaskIds.slice(i, i + 500)
+  // Look up existing active/paused tasks per location.
+  const locIds = taskRowEntries.map(([locId]) => locId)
+  for (let i = 0; i < locIds.length; i += 500) {
+    const slice = locIds.slice(i, i + 500)
     const { data, error } = await supabase
       .schema("maintenance")
       .from("tasks")
-      .select("id, ion_task_id")
-      .in("ion_task_id", slice)
+      .select("id, service_location_id, status")
+      .in("service_location_id", slice)
+      .in("status", ["active", "paused"])
     if (error) {
-      console.error(`  task id lookup chunk: ${error.message}`)
+      console.error(`  tasks lookup chunk: ${error.message}`)
       continue
     }
-    for (const r of data ?? []) taskIdByIon.set(r.ion_task_id as string, r.id as string)
+    for (const r of data ?? []) {
+      taskIdByLoc.set(Number(r.service_location_id), r.id as string)
+    }
   }
+
+  // Insert tasks for locations that don't have one yet.
+  const newTaskRows = taskRowEntries
+    .filter(([locId]) => !taskIdByLoc.has(locId))
+    .map(([, row]) => row)
+  if (newTaskRows.length > 0) {
+    for (let i = 0; i < newTaskRows.length; i += CHUNK) {
+      const slice = newTaskRows.slice(i, i + CHUNK)
+      const { data, error } = await supabase
+        .schema("maintenance")
+        .from("tasks")
+        .insert(slice)
+        .select("id, service_location_id")
+      if (error) {
+        console.error(`  tasks insert chunk ${i}: ${error.message}`)
+      } else {
+        for (const r of data ?? []) taskIdByLoc.set(Number(r.service_location_id), r.id as string)
+      }
+    }
+  }
+  // Update existing tasks' notes/external_data/external_source/starts/ends.
+  const existingUpdates = taskRowEntries
+    .filter(([locId]) => taskIdByLoc.has(locId))
+  let tasksUpdated = 0
+  for (const [locId, row] of existingUpdates) {
+    const id = taskIdByLoc.get(locId)!
+    const { error } = await supabase
+      .schema("maintenance")
+      .from("tasks")
+      .update({
+        starts_on: row.starts_on,
+        ends_on: row.ends_on,
+        notes: row.notes,
+        external_data: row.external_data,
+        external_source: row.external_source,
+      })
+      .eq("id", id)
+    if (!error) tasksUpdated++
+  }
+  console.log(`  ${newTaskRows.length} tasks inserted, ${tasksUpdated} updated`)
+
+  // ────────────────────────────────────────────
+  // Schedules upsert (maintenance.task_schedules)
+  // ────────────────────────────────────────────
+  // Deactivate all ION-sourced schedules first so the (task_id, day_of_week,
+  // frequency) WHERE active unique index doesn't fire during upsert. The
+  // upsert will re-activate (active=true) every schedule that's still in
+  // the report; anything dropped from ION naturally stays inactive.
+  console.log("Deactivating existing ION schedules before upsert ...")
+  const { error: deactErr } = await supabase
+    .schema("maintenance")
+    .from("task_schedules")
+    .update({ active: false })
+    .eq("external_source", "ion")
+    .eq("active", true)
+  if (deactErr) console.error(`  deactivate failed: ${deactErr.message}`)
+
+  console.log("Writing schedules ...")
+  const scheduleRowsRaw = scheduleUpserts
+    .map((s) => {
+      const taskId = taskIdByLoc.get(s.service_location_id)
+      if (!taskId) return null
+      return {
+        task_id: taskId,
+        ion_task_id: s.ion_task_id,
+        tech_employee_id: s.tech_employee_id,
+        day_of_week: s.day_of_week,
+        frequency: s.frequency,
+        price_per_visit_cents: s.price_per_visit_cents,
+        billing_method: s.billing_method,
+        flat_rate_monthly_cents: s.flat_rate_monthly_cents,
+        sequence: s.sequence,
+        office: s.office,
+        active: s.active,
+        external_source: s.external_source,
+      }
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+
+  // Dedup by (task_id, day_of_week, frequency) — multiple ION tasks at the
+  // same location can land on the same derived day if our price-based
+  // event attribution couldn't differentiate them. Keep the first; the
+  // dropped ones are real customers but we couldn't distinguish their slot.
+  const dedupKey = (r: typeof scheduleRowsRaw[number]) =>
+    `${r.task_id}|${r.day_of_week ?? "_"}|${r.frequency ?? "_"}`
+  const seen = new Set<string>()
+  const scheduleRows: typeof scheduleRowsRaw = []
+  let collidedSchedules = 0
+  for (const r of scheduleRowsRaw) {
+    const k = dedupKey(r)
+    if (seen.has(k)) {
+      collidedSchedules++
+      continue
+    }
+    seen.add(k)
+    scheduleRows.push(r)
+  }
+  if (collidedSchedules > 0) {
+    console.log(`  ${collidedSchedules} schedules dropped (collision on task+day+frequency)`)
+  }
+
+  let schedulesWritten = 0
+  for (let i = 0; i < scheduleRows.length; i += CHUNK) {
+    const slice = scheduleRows.slice(i, i + CHUNK)
+    const { error } = await supabase
+      .schema("maintenance")
+      .from("task_schedules")
+      .upsert(slice, { onConflict: "ion_task_id" })
+    if (error) {
+      console.error(`  schedules upsert chunk ${i}: ${error.message}`)
+    } else {
+      schedulesWritten += slice.length
+    }
+  }
+  console.log(`  ${schedulesWritten} schedules upserted`)
 
   // ────────────────────────────────────────────
   // Visits upsert (maintenance.visits)
@@ -1049,7 +1209,7 @@ async function main() {
   console.log("Writing visits ...")
   const visitRows = visitUpserts.map((v) => ({
     service_location_id: v.service_location_id,
-    task_id: v._ion_task_id ? (taskIdByIon.get(v._ion_task_id) ?? null) : null,
+    task_id: taskIdByLoc.get(v._location_id) ?? null,
     scheduled_date: v.scheduled_date,
     visit_date: v.visit_date,
     scheduled_tech_id: v.scheduled_tech_id,
@@ -1057,6 +1217,8 @@ async function main() {
     status: v.status,
     visit_type: v.visit_type,
     price_cents: v.price_cents,
+    billing_method: v.billing_method,
+    flat_rate_monthly_cents: v.flat_rate_monthly_cents,
     snapshot_frequency: v.snapshot_frequency,
     office: v.office,
     external_source: v.external_source,
@@ -1102,11 +1264,12 @@ async function main() {
   console.log("")
   console.log("─".repeat(60))
   console.log("Done.")
-  console.log(`  Tasks upserted:   ${tasksWritten}`)
-  console.log(`  Visits upserted:  ${visitsWritten}`)
-  console.log(`  Pools written:    ${poolUpserts.length}`)
-  console.log(`  Failures:         ${failures.length}  (see ${basename(failuresPath)})`)
-  console.log(`  Unresolved techs: ${unresolvedTechs.size}`)
+  console.log(`  Tasks (locations):  ${taskIdByLoc.size}`)
+  console.log(`  Schedules upserted: ${schedulesWritten}`)
+  console.log(`  Visits upserted:    ${visitsWritten}`)
+  console.log(`  Pools written:      ${poolUpserts.length}`)
+  console.log(`  Failures:           ${failures.length}  (see ${basename(failuresPath)})`)
+  console.log(`  Unresolved techs:   ${unresolvedTechs.size}`)
 }
 
 main().catch((e) => {

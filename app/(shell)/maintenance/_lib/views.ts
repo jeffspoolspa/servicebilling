@@ -6,12 +6,19 @@ import { createSupabaseServer } from "@/lib/supabase/server"
  * The views denormalize customer/service-location/employee display info onto
  * each row so pages can render flat tables without doing client-side joins
  * or fragile multi-FK PostgREST embeds.
+ *
+ * Phase 2 split: tasks are customer-level (one per service_location);
+ * task_schedules are slot-level (one per (task, day)). Routes view
+ * aggregates schedules. v_active_techs counts active schedules.
  */
+
+export type BillingMethod = "per_visit" | "flat_rate_monthly"
 
 export interface VisitContextRow {
   id: string
   service_location_id: number
   task_id: string | null
+  task_schedule_id: string | null
   scheduled_date: string
   visit_date: string
   scheduled_tech_id: string | null
@@ -22,6 +29,8 @@ export interface VisitContextRow {
   status: "scheduled" | "in_progress" | "completed" | "skipped" | "canceled"
   visit_type: "route" | "qc" | "makeup" | "service_call" | "repair" | "seasonal"
   price_cents: number | null
+  billing_method: BillingMethod
+  flat_rate_monthly_cents: number | null
   snapshot_frequency: string | null
   work_order_wo_number: string | null
   ion_work_order_id: string | null
@@ -38,24 +47,40 @@ export interface VisitContextRow {
 export interface TaskContextRow {
   id: string
   service_location_id: number
-  tech_employee_id: string | null
-  day_of_week: number | null
-  frequency: string | null
-  price_per_visit_cents: number | null
   chem_budget_cents: number | null
-  sequence: number | null
   status: "active" | "paused" | "closed"
   pause_reason: string | null
   starts_on: string
   ends_on: string | null
   notes: string | null
-  ion_task_id: string | null
+  service_location_street: string | null
+  service_location_city: string | null
+  customer_id: number | null
+  customer_name: string | null
+}
+
+/** A schedule slot — one (tech, day, frequency, price) for a task. */
+export interface TaskScheduleContextRow {
+  id: string
+  task_id: string
+  task_status: "active" | "paused" | "closed"
+  service_location_id: number
+  tech_employee_id: string | null
+  day_of_week: number | null
+  frequency: string | null
+  price_per_visit_cents: number | null
+  billing_method: BillingMethod
+  flat_rate_monthly_cents: number | null
+  sequence: number | null
   office: string | null
+  ion_task_id: string | null
+  active: boolean
   service_location_street: string | null
   service_location_city: string | null
   customer_id: number | null
   customer_name: string | null
   tech_name: string | null
+  chem_budget_cents: number | null
 }
 
 export interface RouteSummaryRow {
@@ -65,6 +90,8 @@ export interface RouteSummaryRow {
   day_of_week: number
   stop_count: number
   total_price_cents: number | null
+  flat_rate_per_visit_cents: number | null
+  per_visit_cents: number | null
   weekly_count: number
   biweekly_count: number
   monthly_count: number
@@ -128,18 +155,19 @@ export async function listRouteSummary(): Promise<RouteSummaryRow[]> {
 export async function listRouteStops(
   techEmployeeId: string,
   dayOfWeek: number,
-): Promise<TaskContextRow[]> {
+): Promise<TaskScheduleContextRow[]> {
   const supabase = await createSupabaseServer()
   const { data, error } = await supabase
     .schema("maintenance")
-    .from("v_tasks_with_context")
+    .from("v_task_schedules_with_context")
     .select("*")
-    .eq("status", "active")
+    .eq("active", true)
+    .eq("task_status", "active")
     .eq("tech_employee_id", techEmployeeId)
     .eq("day_of_week", dayOfWeek)
     .order("sequence", { ascending: true, nullsFirst: false })
   if (error) throw error
-  return (data ?? []) as unknown as TaskContextRow[]
+  return (data ?? []) as unknown as TaskScheduleContextRow[]
 }
 
 export async function listActiveTechs(): Promise<ActiveTechRow[]> {
@@ -165,10 +193,9 @@ export interface DashboardKpis {
 export async function getMaintenanceDashboardKpis(): Promise<DashboardKpis> {
   const supabase = await createSupabaseServer()
 
-  // Compute date bounds in JS — Postgres now() in the DB might be UTC.
   const today = new Date().toISOString().slice(0, 10)
   const sunday = new Date()
-  sunday.setDate(sunday.getDate() - sunday.getDay()) // Sunday this week
+  sunday.setDate(sunday.getDate() - sunday.getDay())
   const weekStart = sunday.toISOString().slice(0, 10)
   const weekEnd = new Date(sunday)
   weekEnd.setDate(weekEnd.getDate() + 7)
