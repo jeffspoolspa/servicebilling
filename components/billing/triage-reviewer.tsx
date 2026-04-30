@@ -286,17 +286,59 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
     [snapshot],
   )
 
-  // Called by OpenCreditsPanel on override success. Patches the invoice
-  // with credit_review_overridden_at so downstream panels update.
+  // Called by OpenCreditsPanel on override success.
+  //
+  // Override is a pure DB-side action — no QBO write involved. The flow:
+  //   override_credit_review RPC sets credit_review_overridden_at
+  //     → trg_recheck_on_invoice_change fires
+  //     → billing.recheck_invoice_status() strips the credit_review reason
+  //       (preserving non-credit reasons like subtotal_mismatch) and
+  //       recomputes billing_status. If all criteria are clean AND
+  //       enrichment_ok is true → billing_status flips to ready_to_process.
+  //
+  // That whole chain runs synchronously in Postgres before the API
+  // returns. The only delay between "override clicked" and "card
+  // disappears from triage" is the Supabase Realtime websocket
+  // round-trip (~500ms–1s), which is enough to feel laggy.
+  //
+  // We mirror the trigger's logic locally so the auto-advance useEffect
+  // fires immediately. Realtime confirms a moment later (no visible
+  // change) or, if our local strip diverges from the server regex,
+  // corrects the row in place.
   const onOverrodeCreditReview = useCallback(() => {
     if (!snapshot) return
-    setFreshInvoices((prev) => ({
-      ...prev,
-      [snapshot.qbo_invoice_id]: {
-        ...(prev[snapshot.qbo_invoice_id] ?? {}),
-        credit_review_overridden_at: new Date().toISOString(),
-      },
-    }))
+    const cur = snapshot
+    setFreshInvoices((prev) => {
+      const live = { ...(prev[cur.qbo_invoice_id] ?? {}) }
+      // Strip the deterministic credit_review reason from the existing
+      // string. Mirrors the regex in recheck_invoice_status (we keep the
+      // logic simple here — if it diverges from the server, Realtime will
+      // correct us within the round-trip).
+      const prevReason = (live.needs_review_reason ?? cur.needs_review_reason ?? "") as string
+      let stripped = prevReason
+        .replace(
+          /credit_review \(\d+ unmatched credit\(s\), \$[\d,.]+ unapplied\)/g,
+          "",
+        )
+        .replace(/(, ){2,}/g, ", ")
+        .replace(/^(,\s*)+/, "")
+        .replace(/(\s*,)+\s*$/, "")
+        .trim()
+      const enrichment = (live.enrichment_ok ?? cur.enrichment_ok ?? null) as boolean | null
+      const optimisticStatus =
+        stripped.length === 0 && enrichment !== false
+          ? "ready_to_process"
+          : (live.billing_status ?? cur.billing_status ?? null)
+      return {
+        ...prev,
+        [cur.qbo_invoice_id]: {
+          ...live,
+          credit_review_overridden_at: new Date().toISOString(),
+          needs_review_reason: stripped.length > 0 ? stripped : null,
+          billing_status: optimisticStatus,
+        },
+      }
+    })
   }, [snapshot])
 
   // Reset card-level state when we move to a new invoice
@@ -1235,7 +1277,6 @@ function OpenCreditsPanel({
   const credits = row.open_credits ?? []
   const [overrideOpen, setOverrideOpen] = useState(false)
   const [overrideNote, setOverrideNote] = useState("")
-  const [overrideDone, setOverrideDone] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   // Authoritative apply outcome — populated only after QBO confirms. Drives
@@ -1313,10 +1354,14 @@ function OpenCreditsPanel({
       if (!resp.ok) throw new Error((await resp.text()).slice(0, 200))
       setOverrideOpen(false)
       setOverrideNote("")
-      setOverrideDone(true)
       onOverrodeCreditReview()
-      // DO NOT router.refresh() — see applyCredit for why. User can hit
-      // Approve (a) to move it to ready_to_process and advance, or Skip.
+      // No explicit "approved" UI — onOverrodeCreditReview optimistically
+      // patches billing_status to ready_to_process when the override clears
+      // the only remaining reason. The auto-advance useEffect in the parent
+      // sees the flip and advances the cursor with the standard flash. If
+      // there were OTHER reasons (subtotal_mismatch, memo_low_confidence),
+      // the optimistic patch leaves status as needs_review and the card
+      // stays so the user can address them.
     } catch (e) {
       setErr(e instanceof Error ? e.message : "override failed")
     } finally {
@@ -1376,16 +1421,6 @@ function OpenCreditsPanel({
               </>
             )}
             <span className="text-ink-mute"> · hit Approve to move forward or Skip.</span>
-          </span>
-        </div>
-      )}
-
-      {/* Overridden confirmation */}
-      {overrideDone && !applied && (
-        <div className="rounded-md border border-cyan/40 bg-cyan/[0.06] px-3 py-2 text-[12px] flex items-center gap-2">
-          <Check className="w-3.5 h-3.5 text-cyan" strokeWidth={2.5} />
-          <span className="text-ink-dim">
-            Credit review overridden. Hit <Kbd k="a" /> to approve + advance.
           </span>
         </div>
       )}
