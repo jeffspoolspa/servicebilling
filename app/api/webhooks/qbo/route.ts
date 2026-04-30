@@ -161,9 +161,11 @@ export async function POST(req: NextRequest) {
       }
 
       // Confirm any matching pending expectation (closes the loop on our
-      // own writes). Best-effort — if there's no expectation, the function
-      // returns 0 and we move on.
-      void sb.rpc("confirm_webhook_expectation", {
+      // own writes). Awaited because Vercel serverless terminates the lambda
+      // when the route handler returns — fire-and-forget RPCs (`void sb.rpc`)
+      // would be killed mid-flight before they reach Postgres. The call is
+      // ~50-100ms; we have plenty of room under Intuit's 5s timeout.
+      await sb.rpc("confirm_webhook_expectation", {
         p_entity_type: entity.name,
         p_entity_id: entity.id,
       })
@@ -174,8 +176,10 @@ export async function POST(req: NextRequest) {
       const mapping = REFRESH_SCRIPTS[entity.name]
       if (!mapping) {
         // We're not subscribed to this entity type — log and skip.
+        // Awaited (not voided) for the same Vercel-lambda-lifecycle reason
+        // as the expectation confirm above.
         if (logId) {
-          void sb.rpc("mark_webhook_processed", {
+          await sb.rpc("mark_webhook_processed", {
             p_id: logId,
             p_status: "succeeded",
             p_error_message: "no refresh script configured (skipped)",
