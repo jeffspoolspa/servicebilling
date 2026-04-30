@@ -128,6 +128,12 @@ export async function POST(req: NextRequest) {
   const sb = createSupabaseAdmin()
   const dispatchPromises: Promise<unknown>[] = []
 
+  // We talk to Postgres via PostgREST RPC functions in the public schema
+  // (log_qbo_webhook, mark_webhook_processed, confirm_webhook_expectation)
+  // because Supabase only exposes the `public` schema by default. The
+  // SECURITY DEFINER functions run with postgres privileges and write to
+  // billing.* on our behalf. Migration: 20260430..._webhook_rpc_wrappers.
+
   // Loop through all entity changes. One webhook can carry many.
   for (const notif of body.eventNotifications ?? []) {
     for (const entity of notif.dataChangeEvent?.entities ?? []) {
@@ -135,20 +141,14 @@ export async function POST(req: NextRequest) {
 
       // Log the receipt. We do this synchronously (await) so we never lose a
       // webhook to a crash between receipt and log. The dispatch is async.
-      const { data: logRow, error: logErr } = await sb
-        .schema("billing")
-        .from("webhook_log")
-        .insert({
-          source: "qbo",
-          event_type: eventType,
-          entity_type: entity.name,
-          entity_id: entity.id,
-          realm_id: notif.realmId,
-          payload: entity as unknown as Record<string, unknown>,
-          status: "received",
-        })
-        .select()
-        .single()
+      const { data: logId, error: logErr } = await sb.rpc("log_qbo_webhook", {
+        p_source: "qbo",
+        p_event_type: eventType,
+        p_entity_type: entity.name,
+        p_entity_id: entity.id,
+        p_realm_id: notif.realmId,
+        p_payload: entity as unknown as Record<string, unknown>,
+      })
 
       if (logErr) {
         console.error("[qbo webhook] failed to log receipt:", logErr)
@@ -157,17 +157,12 @@ export async function POST(req: NextRequest) {
       }
 
       // Confirm any matching pending expectation (closes the loop on our
-      // own writes). Best-effort — if there's no expectation, this no-ops.
-      void sb
-        .schema("billing")
-        .from("webhook_expectations")
-        .update({
-          webhook_received_at: new Date().toISOString(),
-          status: "confirmed",
-        })
-        .eq("entity_id", entity.id)
-        .eq("entity_type", entity.name)
-        .eq("status", "pending")
+      // own writes). Best-effort — if there's no expectation, the function
+      // returns 0 and we move on.
+      void sb.rpc("confirm_webhook_expectation", {
+        p_entity_type: entity.name,
+        p_entity_id: entity.id,
+      })
 
       // Dispatch the actual cache refresh to Windmill. Don't await — fire
       // and forget so we return 200 fast. The script is idempotent so even
@@ -175,16 +170,12 @@ export async function POST(req: NextRequest) {
       const mapping = REFRESH_SCRIPTS[entity.name]
       if (!mapping) {
         // We're not subscribed to this entity type — log and skip.
-        if (logRow) {
-          void sb
-            .schema("billing")
-            .from("webhook_log")
-            .update({
-              processed_at: new Date().toISOString(),
-              status: "succeeded",
-              error_message: "no refresh script configured (skipped)",
-            })
-            .eq("id", logRow.id)
+        if (logId) {
+          void sb.rpc("mark_webhook_processed", {
+            p_id: logId,
+            p_status: "succeeded",
+            p_error_message: "no refresh script configured (skipped)",
+          })
         }
         continue
       }
@@ -194,15 +185,12 @@ export async function POST(req: NextRequest) {
           await triggerScript(mapping.script, {
             [mapping.argName]: entity.id,
           })
-          if (logRow) {
-            await sb
-              .schema("billing")
-              .from("webhook_log")
-              .update({
-                processed_at: new Date().toISOString(),
-                status: "succeeded",
-              })
-              .eq("id", logRow.id)
+          if (logId) {
+            await sb.rpc("mark_webhook_processed", {
+              p_id: logId,
+              p_status: "succeeded",
+              p_error_message: null,
+            })
           }
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
@@ -210,16 +198,12 @@ export async function POST(req: NextRequest) {
             `[qbo webhook] dispatch failed for ${entity.name}:${entity.id}:`,
             msg,
           )
-          if (logRow) {
-            await sb
-              .schema("billing")
-              .from("webhook_log")
-              .update({
-                status: "failed",
-                error_message: msg.slice(0, 500),
-                retry_count: 1,
-              })
-              .eq("id", logRow.id)
+          if (logId) {
+            await sb.rpc("mark_webhook_processed", {
+              p_id: logId,
+              p_status: "failed",
+              p_error_message: msg.slice(0, 500),
+            })
           }
         }
       })()
