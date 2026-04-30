@@ -92,12 +92,15 @@ function verifySignature(rawBody: string, signature: string | null): boolean {
  * haven't wired up yet. Add entries here as we build the matching scripts.
  *
  * Currently wired:
- *   Invoice  → refresh_invoice    (cache: billing.invoices)
- *   Payment  → refresh_payment    (cache: billing.customer_payments;
- *                                  also rechecks linked invoice statuses)
- *   Customer → refresh_customer   (cache: public."Customers";
- *                                  also propagates display_name renames
- *                                  to billing.invoices.customer_name)
+ *   Invoice    → refresh_invoice      (cache: billing.invoices)
+ *   Payment    → refresh_payment      (cache: billing.customer_payments;
+ *                                      also rechecks linked invoice statuses)
+ *   CreditMemo → refresh_credit_memo  (cache: billing.customer_payments
+ *                                      with type='credit_memo',
+ *                                      qbo_payment_id='CM-{Id}')
+ *   Customer   → refresh_customer     (cache: public."Customers";
+ *                                      also propagates display_name renames
+ *                                      to billing.invoices.customer_name)
  *
  * Not yet wired:
  *   Estimate, Bill, Vendor, Item, JournalEntry — add when we build their
@@ -112,6 +115,10 @@ const REFRESH_SCRIPTS: Record<string, { script: string; argName: string }> = {
   Payment: {
     script: "f/service_billing/refresh_payment",
     argName: "qbo_payment_id",
+  },
+  CreditMemo: {
+    script: "f/service_billing/refresh_credit_memo",
+    argName: "qbo_credit_memo_id",
   },
   Customer: {
     script: "f/service_billing/refresh_customer",
