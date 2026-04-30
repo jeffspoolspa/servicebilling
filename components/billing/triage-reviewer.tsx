@@ -398,6 +398,12 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
 
   const isDirty = current ? Boolean(edits[current.qbo_invoice_id]) : false
 
+  // Memo low-confidence flag — drives the smart "Lock memo & approve" label
+  // and means approve should fire even with no edits (lock affirms the memo).
+  const memoLowConfidence = (current?.needs_review_reason ?? "").includes(
+    "memo_low_confidence",
+  )
+
   const advance = useCallback(() => {
     setCursor((c) => Math.min(rows.length, c + 1))
   }, [rows.length])
@@ -467,10 +473,25 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
     if (!current || busy) return
     setBusy("approve"); setErr(null)
     try {
-      await saveEdits()
-      const resp = await fetch(`/api/billing/invoices/${current.qbo_invoice_id}/mark-ready`, {
-        method: "POST",
-      })
+      // Use save-and-mark-ready (push_invoice_edits) — pushes user's edits
+      // to QBO + locks memo + marks enriched + recheck flips status to
+      // ready_to_process if no other reasons remain. Replaces the old
+      // edit + mark-ready chain that didn't actually push to QBO.
+      const e = current ? edits[current.qbo_invoice_id] : undefined
+      const resp = await fetch(
+        `/api/billing/invoices/${current.qbo_invoice_id}/save-and-mark-ready`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            qbo_class: e?.qbo_class ?? current.qbo_class ?? null,
+            payment_method: e?.payment_method ?? current.payment_method ?? null,
+            memo: e?.memo ?? current.memo ?? null,
+            statement_memo:
+              e?.statement_memo ?? e?.memo ?? current.statement_memo ?? current.memo ?? null,
+          }),
+        },
+      )
       if (!resp.ok) throw new Error((await resp.text()).slice(0, 200))
 
       // Flash the current card, then advance. 180ms keeps the rhythm fast.
@@ -487,7 +508,7 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
       setErr(e instanceof Error ? e.message : "approve failed")
       setBusy(null)
     }
-  }, [current, busy, saveEdits, advance])
+  }, [current, busy, edits, advance])
 
   const skip = useCallback(() => {
     if (!current || busy) return
@@ -667,6 +688,9 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
         memoInputRef={memoInputRef}
         onAppliedCredit={onAppliedCredit}
         onOverrodeCreditReview={onOverrodeCreditReview}
+        isDirty={isDirty}
+        memoLowConfidence={memoLowConfidence}
+        onApprove={approve}
       />
 
       {/* Action bar */}
@@ -720,10 +744,14 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
           variant="primary"
           onClick={approve}
           disabled={busy !== null}
-          title="Save + mark ready to process (a or Enter)"
+          title="Push edits to QBO + lock memo + flip to ready_to_process (a or Enter)"
         >
           <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
-          {busy === "approve" ? "Approving..." : isDirty ? "Save & approve" : "Approve"}
+          {busy === "approve"
+            ? "Saving…"
+            : memoLowConfidence && !isDirty
+              ? "Lock memo & mark ready"
+              : "Save & mark ready"}
         </Button>
       </div>
 
@@ -759,6 +787,9 @@ function Card({
   memoInputRef,
   onAppliedCredit,
   onOverrodeCreditReview,
+  isDirty,
+  memoLowConfidence,
+  onApprove,
 }: {
   row: TriageRow
   flash: boolean
@@ -769,7 +800,16 @@ function Card({
   memoInputRef: React.MutableRefObject<HTMLInputElement | null>
   onAppliedCredit: (args: AppliedCreditPatchArgs) => void
   onOverrodeCreditReview: () => void
+  isDirty: boolean
+  memoLowConfidence: boolean
+  onApprove: () => void
 }) {
+  const approveLabel =
+    busy === "approve"
+      ? "Saving…"
+      : memoLowConfidence && !isDirty
+        ? "Lock memo & mark ready"
+        : "Save & mark ready"
   return (
     <div
       className={`triage-card-enter rounded-xl border border-line bg-[#0E1C2A] p-5 space-y-4 ${
@@ -846,8 +886,15 @@ function Card({
 
       {/* Editable classification */}
       <div className="rounded-lg border border-line-soft bg-bg-elev/60 p-3 space-y-3">
-        <div className="text-[10px] uppercase tracking-[0.1em] text-ink-mute">
-          Classification — edit if needed, then approve
+        <div className="flex items-center gap-2">
+          <div className="text-[10px] uppercase tracking-[0.1em] text-ink-mute">
+            Classification
+          </div>
+          {memoLowConfidence && (
+            <span className="text-[10px] uppercase tracking-[0.08em] text-sun font-medium">
+              memo needs review
+            </span>
+          )}
         </div>
         <Field label="Memo">
           <input
@@ -883,6 +930,21 @@ function Card({
               <option value="invoice">Invoice (email only)</option>
             </select>
           </Field>
+        </div>
+        {/* Inline action button — same flow as the bottom toolbar's Approve,
+            placed here so the action is visually anchored to the fields it
+            applies to. Pushes edits to QBO, locks memo, flips to ready. */}
+        <div className="flex items-center justify-end pt-1">
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={onApprove}
+            disabled={busy !== null}
+            title="Push edits to QBO + lock memo + mark ready"
+          >
+            <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
+            {approveLabel}
+          </Button>
         </div>
       </div>
 
