@@ -85,22 +85,26 @@ function verifySignature(rawBody: string, signature: string | null): boolean {
  * Map QBO entity name → Windmill script that knows how to refresh that entity
  * type. Each script must accept a single id parameter and be idempotent — they
  * fetch from QBO and upsert into the cache, no side effects on duplicate runs.
+ *
+ * Entities NOT in this map still land in billing.webhook_log (with status=
+ * 'succeeded' + a "no refresh script configured" message) — the architecture
+ * intentionally fails-graceful when we receive a webhook for an entity type we
+ * haven't wired up yet. Add entries here as we build the matching scripts.
+ *
+ * Currently wired:
+ *   Invoice  → refresh_invoice                  (exists, used by detail page sync)
+ *
+ * Not yet wired (webhooks will be logged + skipped until we build these):
+ *   Payment  → would need f/service_billing/refresh_payment
+ *   Customer → would need f/service_billing/refresh_customer
+ *              (refresh_customer_credits already exists for the credits subset)
  */
 const REFRESH_SCRIPTS: Record<string, { script: string; argName: string }> = {
   Invoice: {
     script: "f/service_billing/refresh_invoice",
     argName: "qbo_invoice_id",
   },
-  Payment: {
-    script: "f/service_billing/refresh_payment",
-    argName: "qbo_payment_id",
-  },
-  Customer: {
-    script: "f/service_billing/qbo_customer_sync",
-    argName: "qbo_customer_id",
-  },
-  // Add more as we wire them up:
-  //   Estimate, Bill, Vendor, Item, JournalEntry, etc.
+  // Add more as we wire them up — see note above.
 }
 
 export async function POST(req: NextRequest) {
