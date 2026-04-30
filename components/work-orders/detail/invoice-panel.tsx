@@ -130,6 +130,7 @@ export function InvoicePanel({
                 statement_memo: invoice.statement_memo,
               }}
               canMarkReady={invoice.billing_status === "needs_review"}
+              needsReviewReason={invoice.needs_review_reason}
             />
           ) : (
             <LockedClassification invoice={invoice} />
