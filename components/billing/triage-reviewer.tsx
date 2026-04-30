@@ -45,6 +45,7 @@ type InvoicePatch = Partial<
     | "memo"
     | "statement_memo"
     | "needs_review_reason"
+    | "billing_status"
     | "subtotal_ok"
     | "enrichment_ok"
     | "credit_review_overridden_at"
@@ -69,6 +70,7 @@ function extractInvoicePatch(inv: Record<string, unknown>): InvoicePatch {
     memo: (inv.memo ?? null) as string | null,
     statement_memo: (inv.statement_memo ?? null) as string | null,
     needs_review_reason: (inv.needs_review_reason ?? null) as string | null,
+    billing_status: (inv.billing_status ?? null) as TriageRow["billing_status"],
     subtotal_ok: (inv.subtotal_ok ?? null) as boolean | null,
     enrichment_ok: (inv.enrichment_ok ?? null) as boolean | null,
     credit_review_overridden_at:
@@ -304,6 +306,7 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
     setFlash(false)
   }, [cursor])
 
+
   // Realtime patch — subscribe to billing.invoices UPDATE events and patch
   // freshInvoices when any invoice in our snapshot changes. This is what
   // makes "I edited it in QBO and came back to the same triage card"
@@ -402,6 +405,44 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
   const retreat = useCallback(() => {
     setCursor((c) => Math.max(0, c - 1))
   }, [])
+
+  // Auto-advance when the active card has been resolved by the reactive
+  // system (recheck stripped all reasons → billing_status flipped to
+  // ready_to_process or beyond) WITHOUT the user explicitly approving.
+  // Examples that trigger this:
+  //   - User edits subtotal in QBO → webhook → recheck strips
+  //     subtotal_mismatch → billing_status='ready_to_process'
+  //   - Credit landed externally → trigger fan-out → recheck strips
+  //     credit_review → billing_status='ready_to_process'
+  //   - Override was applied via UI button → trigger fires → same
+  //
+  // We mark the outcome as "approved" (it effectively self-approved)
+  // and flash + advance so the user sees the card disappear with
+  // visual feedback rather than being confused that nothing happened.
+  useEffect(() => {
+    if (!current || busy) return
+    if (outcomes[current.qbo_invoice_id]) return
+    const status = current.billing_status
+    if (status === "ready_to_process" || status === "processed") {
+      setOutcomes((prev) => ({
+        ...prev,
+        [current.qbo_invoice_id]: "approved",
+      }))
+      setFlash(true)
+      const t = setTimeout(() => {
+        setFlash(false)
+        advance()
+      }, 600)
+      return () => clearTimeout(t)
+    }
+  }, [
+    current?.qbo_invoice_id,
+    current?.billing_status,
+    busy,
+    outcomes,
+    advance,
+    current,
+  ])
 
   const saveEdits = useCallback(async (): Promise<boolean> => {
     if (!current || !isDirty) return true

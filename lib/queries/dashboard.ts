@@ -756,6 +756,10 @@ export interface TriageRow {
   statement_memo: string | null
   // Why the invoice is in needs_review
   needs_review_reason: string | null
+  // Effective status (always 'needs_review' at snapshot time, but the
+  // realtime patch in the triage component may flip it once the reactive
+  // recheck runs — that's the signal to auto-advance the card).
+  billing_status: string | null
   subtotal_ok: boolean | null
   enrichment_ok: boolean | null
   // Credit review override state (user acknowledged credits not applicable)
@@ -782,7 +786,7 @@ export async function getNeedsReviewTriageQueue(
   const { data: invoices, error } = await sb
     .from("billing_invoices")
     .select(
-      "qbo_invoice_id, qbo_customer_id, doc_number, customer_name, balance, total_amt, subtotal, email_status, line_items, payment_method, qbo_class, memo, statement_memo, needs_review_reason, subtotal_ok, enrichment_ok, credit_review_overridden_at, pre_processed_at",
+      "qbo_invoice_id, qbo_customer_id, doc_number, customer_name, balance, total_amt, subtotal, email_status, line_items, payment_method, qbo_class, memo, statement_memo, needs_review_reason, billing_status, subtotal_ok, enrichment_ok, credit_review_overridden_at, pre_processed_at",
     )
     .eq("billing_status", "needs_review")
     .order("pre_processed_at", { ascending: false })
@@ -864,6 +868,7 @@ export async function getNeedsReviewTriageQueue(
         memo: (inv.memo ?? null) as string | null,
         statement_memo: (inv.statement_memo ?? null) as string | null,
         needs_review_reason: (inv.needs_review_reason ?? null) as string | null,
+        billing_status: (inv.billing_status ?? null) as string | null,
         subtotal_ok: (inv.subtotal_ok ?? null) as boolean | null,
         enrichment_ok: (inv.enrichment_ok ?? null) as boolean | null,
         credit_review_overridden_at: (inv.credit_review_overridden_at ?? null) as string | null,
