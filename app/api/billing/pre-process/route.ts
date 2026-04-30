@@ -7,6 +7,12 @@ import { triggerScript } from "@/lib/windmill"
  *
  * Triggers f/service_billing/pre_process_invoice for a single invoice.
  * Returns the Windmill jobId immediately (async).
+ *
+ * IMPORTANT: must pass `bulk_all: false` explicitly. The script's `main()`
+ * defaults `bulk_all=True`, so omitting this would cause the script to
+ * scan ALL needs_review invoices instead of just the one we passed.
+ * (Footgun caught in production — a "Re-run" button on a single WO
+ * page accidentally re-fired every needs_review invoice.)
  */
 export async function POST(request: NextRequest) {
   const body = await request.json()
@@ -21,6 +27,7 @@ export async function POST(request: NextRequest) {
 
   const { jobId } = await triggerScript("f/service_billing/pre_process_invoice", {
     qbo_invoice_id,
+    bulk_all: false,
     force,
   })
 

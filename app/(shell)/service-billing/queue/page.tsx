@@ -4,6 +4,7 @@ import { Pagination } from "@/components/ui/pagination"
 import { SearchBar } from "@/components/ui/search-bar"
 import { getBillingQueue, DEFAULT_SORT } from "@/lib/queries/dashboard"
 import { QueueActions } from "@/components/billing/queue-actions"
+import { LiveBillingPage } from "@/components/billing/live-billing-page"
 
 export const dynamic = "force-dynamic"
 
@@ -36,6 +37,12 @@ export default async function QueuePage({ searchParams }: PageProps) {
     // app/(shell)/service-billing/layout.tsx — this page only renders its
     // own content card below the shared chrome.
     <div className="px-7 py-6 pb-20">
+      {/* Subscribes to billing.invoices + public.work_orders Realtime; calls
+          router.refresh() (debounced) so the table updates in place when
+          pre-processing flips invoice statuses, when webhooks land external
+          edits, etc. No client-side cache to manage — server still owns the
+          query, we just re-run it when something changes. */}
+      <LiveBillingPage />
       <Card>
         <CardHeader>
           <CardTitle>Ready to Process</CardTitle>

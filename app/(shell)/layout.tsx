@@ -1,5 +1,7 @@
 import { Sidebar } from "@/components/shell/sidebar"
 import { ModuleHeader } from "@/components/shell/module-header"
+import { PreProcessActivity } from "@/components/shell/pre-process-activity"
+import { RealtimeBridge } from "@/components/shell/realtime-bridge"
 
 /**
  * Shell layout — wraps every page inside the (shell) route group.
@@ -23,6 +25,14 @@ export default function ShellLayout({ children }: { children: React.ReactNode })
         <ModuleHeader />
         <main className="flex-1 flex flex-col min-w-0">{children}</main>
       </div>
+      {/* Global pre-processing activity toast — fixed-positioned, only
+          renders when there's pre-process work in flight (single re-run,
+          bulk re-run, sync-from-QBO trigger cascade, anywhere). */}
+      <PreProcessActivity />
+      {/* Realtime → TanStack Query bridge. Mounts once, invalidates query
+          keys when the underlying tables change in Postgres. Pages using
+          useQuery on the registered key prefixes become live for free. */}
+      <RealtimeBridge />
     </div>
   )
 }

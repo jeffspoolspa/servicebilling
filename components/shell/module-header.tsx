@@ -64,6 +64,11 @@ const MAINTENANCE_LINKS: ModuleLink[] = [
     matches: ["/maintenance/visits"],
   },
   {
+    href: "/maintenance/customers",
+    label: "Customers",
+    matches: ["/maintenance/customers"],
+  },
+  {
     href: "/maintenance/inventory",
     label: "Inventory",
     matches: ["/maintenance/inventory"],
@@ -110,7 +115,7 @@ export function ModuleHeader() {
     /^\/$/,
     /^\/home$/,
     /^\/maintenance$/,
-    /^\/maintenance\/(dashboard|routes|visits|inventory|techs)$/,
+    /^\/maintenance\/(dashboard|routes|visits|customers|inventory|techs)$/,
     /^\/service$/,
     /^\/service-billing$/,
     /^\/service-billing\/(awaiting-invoice|queue|needs-attention|sent|audit|triage|activity|payment-methods|past-due|revenue)$/,

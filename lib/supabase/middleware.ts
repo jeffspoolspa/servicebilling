@@ -25,6 +25,14 @@ export async function updateSession(request: NextRequest) {
     return response
   }
 
+  // Early exit for inbound webhooks (QBO, future integrations). External
+  // systems call these without a session cookie; they authenticate via
+  // their own signed-payload mechanism (HMAC, etc.) inside the route
+  // handler. Anything under /api/webhooks/* bypasses auth entirely.
+  if (path.startsWith("/api/webhooks/")) {
+    return response
+  }
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

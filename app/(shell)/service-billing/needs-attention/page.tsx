@@ -8,6 +8,8 @@ import { ListChecks } from "lucide-react"
 import Link from "next/link"
 import { getBillingQueue, DEFAULT_SORT } from "@/lib/queries/dashboard"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
+import { BulkRerunButton } from "@/components/billing/bulk-rerun-button"
+import { LiveBillingPage } from "@/components/billing/live-billing-page"
 
 export const dynamic = "force-dynamic"
 
@@ -39,6 +41,8 @@ export default async function NeedsAttentionPage({ searchParams }: PageProps) {
     // Shared KPI strip + Tabs from app/(shell)/service-billing/layout.tsx.
     // The per-page "Triage mode" button moved into the card header below.
     <div className="px-7 py-6">
+      {/* Live updates: re-runs server query on Realtime changes. */}
+      <LiveBillingPage />
       <Card>
         <CardHeader>
           <CardTitle>Needs Review</CardTitle>
@@ -50,6 +54,17 @@ export default async function NeedsAttentionPage({ searchParams }: PageProps) {
               </Button>
             </Link>
           )}
+          {/* Bulk re-run on the rows currently visible (post search/sort/page).
+              For "drain everything", clear the search; this submits the
+              ~25 rows on the current page so the toast doesn't get
+              flooded. To re-run more at once, paginate or widen the
+              search criteria. */}
+          <BulkRerunButton
+            qboInvoiceIds={rows
+              .map((r) => r.qbo_invoice_id)
+              .filter((id): id is string => Boolean(id))}
+            label={`Re-run pre-process (${rows.filter((r) => r.qbo_invoice_id).length})`}
+          />
           <SearchBar className="ml-auto" placeholder="Search WO, customer, or invoice #…" />
           <Pill tone="coral">{total}</Pill>
         </CardHeader>

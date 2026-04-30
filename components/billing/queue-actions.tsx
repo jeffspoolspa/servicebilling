@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { SortableHeader } from "@/components/ui/sortable-header"
-import { CreditCard, Eye, X } from "lucide-react"
+import { CreditCard, Eye, RefreshCw, X } from "lucide-react"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
 import { BatchProgressModal, type BatchInvoiceSummary } from "./batch-progress-modal"
 
@@ -58,8 +58,9 @@ export function QueueActions({
   // SortableHeader so clicks round-trip through the URL.
   const sortable = sort !== undefined && dir !== undefined
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [busy, setBusy] = useState<"dry" | "live" | null>(null)
+  const [busy, setBusy] = useState<"dry" | "live" | "rerun" | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [rerunNote, setRerunNote] = useState<string | null>(null)
 
   // Batch progress modal — opens after firing the script. We snapshot the
   // invoice metadata AT FIRE TIME so the modal has stable labels even if the
@@ -148,6 +149,56 @@ export function QueueActions({
         triggeredAt: Date.now(),
       })
       setSelected(new Set())
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : "unknown error")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /**
+   * Bulk re-run pre-processing on the selected invoices. Different from
+   * `fire()` (which charges cards / sends invoices) — this just re-fires
+   * the memo/credit/class enrichment pipeline. Useful when the queue
+   * shows stale memos or you want to re-evaluate after data changes.
+   *
+   * Each id triggers an independent pre_process_invoice job; progress is
+   * surfaced by the global PreProcessActivity toast in the shell. We
+   * don't open a modal here — the toast is the canonical place to watch
+   * pre-processing state.
+   */
+  async function rerunPreProcess() {
+    setBusy("rerun")
+    setErrorMsg(null)
+    setRerunNote(null)
+    try {
+      const ids = selectedRows
+        .map((r) => r.qbo_invoice_id)
+        .filter((id): id is string => Boolean(id))
+      if (ids.length === 0) {
+        throw new Error("No qbo_invoice_id present on selected rows.")
+      }
+      const resp = await fetch("/api/billing/bulk-pre-process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ qbo_invoice_ids: ids, force: true }),
+      })
+      if (!resp.ok) {
+        const txt = await resp.text()
+        throw new Error(txt.slice(0, 300) || `HTTP ${resp.status}`)
+      }
+      const body = (await resp.json()) as {
+        queued: number
+        failed: number
+      }
+      setSelected(new Set())
+      setRerunNote(
+        body.failed > 0
+          ? `Queued ${body.queued} (${body.failed} failed to queue) — watch the toast`
+          : `Queued ${body.queued} for re-processing — watch the toast`,
+      )
+      // Auto-clear the note after a few seconds.
+      setTimeout(() => setRerunNote(null), 5000)
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "unknown error")
     } finally {
@@ -297,6 +348,27 @@ export function QueueActions({
                 {errorMsg}
               </span>
             )}
+            {rerunNote && !errorMsg && (
+              <span
+                className="text-xs text-cyan max-w-[400px] truncate"
+                title={rerunNote}
+              >
+                {rerunNote}
+              </span>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={rerunPreProcess}
+              disabled={busy !== null}
+              title="Re-run the pre-processing pipeline (memo + credits + class) on selected invoices. Doesn't charge cards."
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${busy === "rerun" ? "animate-spin" : ""}`}
+                strokeWidth={2}
+              />
+              {busy === "rerun" ? "Queueing..." : "Re-run pre-process"}
+            </Button>
             <Button
               size="sm"
               variant="default"

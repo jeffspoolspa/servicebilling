@@ -12,6 +12,7 @@ import {
   PanelLeftOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
+import { SyncIssuesBadge } from "@/components/sync/sync-issues-badge"
 
 /**
  * Collapsible left sidebar — top-level department/module switcher.
@@ -155,8 +156,9 @@ export function Sidebar() {
         ))}
       </div>
 
-      {/* Footer: Admin */}
-      <div className="px-2 py-3 border-t border-line-soft">
+      {/* Footer: sync issues badge (visible only when total > 0) + Admin */}
+      <div className="px-2 py-3 border-t border-line-soft flex flex-col gap-0.5">
+        <SyncIssuesBadge collapsed={collapsed} />
         <SidebarLink item={ADMIN_ITEM} path={path} collapsed={collapsed} />
       </div>
     </aside>

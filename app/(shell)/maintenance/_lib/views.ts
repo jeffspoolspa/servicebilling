@@ -223,6 +223,248 @@ export async function getMaintenanceDashboardKpis(): Promise<DashboardKpis> {
   }
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Customer-detail queries — for /maintenance/customers and detail page.
+// "Active maintenance customer" = a customer with at least one active task
+// at any of their service_locations.
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface MaintenanceCustomerListRow {
+  customer_id: number
+  display_name: string | null
+  active_task_count: number
+  active_schedule_count: number
+  total_per_visit_cents: number
+  total_flat_rate_monthly_cents: number
+  primary_office: string | null
+  service_location_count: number
+}
+
+export async function listMaintenanceCustomers(): Promise<MaintenanceCustomerListRow[]> {
+  const supabase = await createSupabaseServer()
+  // Pull active task→schedule rows with denormalized customer info, then
+  // aggregate in JS (PostgREST has no good GROUP BY).
+  const { data, error } = await supabase
+    .schema("maintenance")
+    .from("v_task_schedules_with_context")
+    .select(
+      "customer_id, customer_name, service_location_id, office, price_per_visit_cents, billing_method, flat_rate_monthly_cents, task_id",
+    )
+    .eq("active", true)
+    .eq("task_status", "active")
+  if (error) throw error
+  const rows = (data ?? []) as Array<{
+    customer_id: number | null
+    customer_name: string | null
+    service_location_id: number
+    office: string | null
+    price_per_visit_cents: number | null
+    billing_method: BillingMethod
+    flat_rate_monthly_cents: number | null
+    task_id: string
+  }>
+
+  type Agg = {
+    customer_id: number
+    display_name: string | null
+    tasks: Set<string>
+    locations: Set<number>
+    offices: Map<string, number>
+    schedule_count: number
+    total_per_visit_cents: number
+    total_flat_rate_monthly_cents: number
+    flat_tasks_seen: Set<string>
+  }
+  const byCustomer = new Map<number, Agg>()
+  for (const r of rows) {
+    if (r.customer_id == null) continue
+    let agg = byCustomer.get(r.customer_id)
+    if (!agg) {
+      agg = {
+        customer_id: r.customer_id,
+        display_name: r.customer_name,
+        tasks: new Set(),
+        locations: new Set(),
+        offices: new Map(),
+        schedule_count: 0,
+        total_per_visit_cents: 0,
+        total_flat_rate_monthly_cents: 0,
+        flat_tasks_seen: new Set(),
+      }
+      byCustomer.set(r.customer_id, agg)
+    }
+    agg.tasks.add(r.task_id)
+    agg.locations.add(r.service_location_id)
+    if (r.office) agg.offices.set(r.office, (agg.offices.get(r.office) ?? 0) + 1)
+    agg.schedule_count++
+    agg.total_per_visit_cents += r.price_per_visit_cents ?? 0
+    if (r.billing_method === "flat_rate_monthly" && !agg.flat_tasks_seen.has(r.task_id)) {
+      agg.total_flat_rate_monthly_cents += r.flat_rate_monthly_cents ?? 0
+      agg.flat_tasks_seen.add(r.task_id)
+    }
+  }
+  const out: MaintenanceCustomerListRow[] = []
+  for (const a of byCustomer.values()) {
+    let primaryOffice: string | null = null
+    let bestN = 0
+    for (const [o, n] of a.offices) if (n > bestN) { bestN = n; primaryOffice = o }
+    out.push({
+      customer_id: a.customer_id,
+      display_name: a.display_name,
+      active_task_count: a.tasks.size,
+      active_schedule_count: a.schedule_count,
+      total_per_visit_cents: a.total_per_visit_cents,
+      total_flat_rate_monthly_cents: a.total_flat_rate_monthly_cents,
+      primary_office: primaryOffice,
+      service_location_count: a.locations.size,
+    })
+  }
+  out.sort((a, b) => (a.display_name ?? "").localeCompare(b.display_name ?? ""))
+  return out
+}
+
+export interface MaintenanceCustomerDetail {
+  customer: {
+    id: number
+    display_name: string | null
+    qbo_customer_id: string | null
+    is_active: boolean
+    email: string | null
+    phone: string | null
+    customer_type: string | null
+  }
+  service_locations: Array<{
+    id: number
+    street: string | null
+    city: string | null
+    state: string | null
+    zip: string | null
+    is_primary: boolean
+  }>
+  tasks: TaskContextRow[]
+  schedules: TaskScheduleContextRow[]
+  visits: VisitContextRow[]
+  audit: Array<{
+    kind: "task" | "schedule"
+    id: number
+    target_id: string
+    changed_at: string
+    operation: string
+    diff: Record<string, unknown> | null
+  }>
+}
+
+export async function getMaintenanceCustomerDetail(
+  customerId: number,
+): Promise<MaintenanceCustomerDetail | null> {
+  const supabase = await createSupabaseServer()
+  const { data: cust } = await supabase
+    .from("Customers")
+    .select("id, display_name, qbo_customer_id, is_active, email, phone, customer_type")
+    .eq("id", customerId)
+    .maybeSingle()
+  if (!cust) return null
+
+  const { data: locs } = await supabase
+    .from("service_locations")
+    .select("id, street, city, state, zip, is_primary")
+    .eq("account_id", customerId)
+    .order("is_primary", { ascending: false })
+    .order("id", { ascending: true })
+  const locations = (locs ?? []) as MaintenanceCustomerDetail["service_locations"]
+  const locIds = locations.map((l) => l.id)
+  if (locIds.length === 0) {
+    return {
+      customer: cust as MaintenanceCustomerDetail["customer"],
+      service_locations: [],
+      tasks: [],
+      schedules: [],
+      visits: [],
+      audit: [],
+    }
+  }
+
+  const [tasksRes, schedulesRes, visitsRes] = await Promise.all([
+    supabase
+      .schema("maintenance")
+      .from("v_tasks_with_context")
+      .select("*")
+      .in("service_location_id", locIds)
+      .order("status", { ascending: true })
+      .order("starts_on", { ascending: false }),
+    supabase
+      .schema("maintenance")
+      .from("v_task_schedules_with_context")
+      .select("*")
+      .in("service_location_id", locIds)
+      .order("active", { ascending: false })
+      .order("day_of_week", { ascending: true, nullsFirst: false }),
+    supabase
+      .schema("maintenance")
+      .from("v_visits_with_context")
+      .select("*")
+      .in("service_location_id", locIds)
+      .order("visit_date", { ascending: false })
+      .limit(150),
+  ])
+
+  const tasks = (tasksRes.data ?? []) as TaskContextRow[]
+  const schedules = (schedulesRes.data ?? []) as TaskScheduleContextRow[]
+  const visits = (visitsRes.data ?? []) as VisitContextRow[]
+  const taskIds = tasks.map((t) => t.id)
+  const scheduleIds = schedules.map((s) => s.id)
+
+  const audit: MaintenanceCustomerDetail["audit"] = []
+  if (taskIds.length > 0) {
+    const { data: ta } = await supabase
+      .schema("maintenance")
+      .from("tasks_audit")
+      .select("id, task_id, changed_at, operation, diff")
+      .in("task_id", taskIds)
+      .order("changed_at", { ascending: false })
+      .limit(60)
+    for (const r of ta ?? []) {
+      audit.push({
+        kind: "task",
+        id: Number(r.id),
+        target_id: r.task_id as string,
+        changed_at: r.changed_at as string,
+        operation: r.operation as string,
+        diff: (r.diff as Record<string, unknown>) ?? null,
+      })
+    }
+  }
+  if (scheduleIds.length > 0) {
+    const { data: sa } = await supabase
+      .schema("maintenance")
+      .from("task_schedules_audit")
+      .select("id, task_schedule_id, changed_at, operation, diff")
+      .in("task_schedule_id", scheduleIds)
+      .order("changed_at", { ascending: false })
+      .limit(120)
+    for (const r of sa ?? []) {
+      audit.push({
+        kind: "schedule",
+        id: Number(r.id),
+        target_id: r.task_schedule_id as string,
+        changed_at: r.changed_at as string,
+        operation: r.operation as string,
+        diff: (r.diff as Record<string, unknown>) ?? null,
+      })
+    }
+  }
+  audit.sort((a, b) => (a.changed_at < b.changed_at ? 1 : -1))
+
+  return {
+    customer: cust as MaintenanceCustomerDetail["customer"],
+    service_locations: locations,
+    tasks,
+    schedules,
+    visits,
+    audit,
+  }
+}
+
 export const DAY_NAMES = [
   "Sunday",
   "Monday",

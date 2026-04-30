@@ -37,8 +37,11 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  // bulk_all: false is REQUIRED — script defaults bulk_all=True, omitting
+  // it makes this single-WO retry scan every needs_review invoice.
   const { jobId } = await triggerScript("f/service_billing/pre_process_invoice", {
     qbo_invoice_id: wo.qbo_invoice_id,
+    bulk_all: false,
     force: true,
   })
 
