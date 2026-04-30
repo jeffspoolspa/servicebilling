@@ -245,12 +245,21 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Vercel serverless: keep the promises alive after we respond. Without
-  // this, the function may be killed before dispatches complete. The new
-  // Next.js `after` API or `waitUntil` would be cleaner, but Promise.allSettled
-  // works for now since the dispatches are individually fast (just an
-  // HTTP POST to Windmill — actual work happens in Windmill).
-  void Promise.allSettled(dispatchPromises)
+  // Vercel serverless terminates the lambda the moment we return the
+  // response. `void Promise.allSettled(...)` does NOT keep the promises
+  // alive — the dispatch IIFEs (which call triggerScript and then mark
+  // the webhook_log row succeeded/failed) get cancelled mid-flight,
+  // leaving rows stuck at status='received' and refresh scripts never
+  // running. We hit this in production: invoice 62744 (The Farm) had a
+  // valid webhook arrive at 21:02:39 with status='received' but
+  // processed_at=null because the dispatch was killed. The cache stayed
+  // stale until a manual refresh_invoice run.
+  //
+  // The fix is to AWAIT the dispatches before returning. Each dispatch
+  // is fast (~200ms triggerScript + ~50ms mark_webhook_processed RPC),
+  // so total handler time stays well under Intuit's 5s timeout even
+  // for batched events with multiple entities.
+  await Promise.allSettled(dispatchPromises)
 
   return NextResponse.json({
     ok: true,
