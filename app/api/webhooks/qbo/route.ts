@@ -92,19 +92,31 @@ function verifySignature(rawBody: string, signature: string | null): boolean {
  * haven't wired up yet. Add entries here as we build the matching scripts.
  *
  * Currently wired:
- *   Invoice  → refresh_invoice                  (exists, used by detail page sync)
+ *   Invoice  → refresh_invoice    (cache: billing.invoices)
+ *   Payment  → refresh_payment    (cache: billing.customer_payments;
+ *                                  also rechecks linked invoice statuses)
+ *   Customer → refresh_customer   (cache: public."Customers";
+ *                                  also propagates display_name renames
+ *                                  to billing.invoices.customer_name)
  *
- * Not yet wired (webhooks will be logged + skipped until we build these):
- *   Payment  → would need f/service_billing/refresh_payment
- *   Customer → would need f/service_billing/refresh_customer
- *              (refresh_customer_credits already exists for the credits subset)
+ * Not yet wired:
+ *   Estimate, Bill, Vendor, Item, JournalEntry — add when we build their
+ *   refresh scripts. The webhook handler will gracefully skip them in the
+ *   meantime if we subscribe to their events in Intuit's dashboard.
  */
 const REFRESH_SCRIPTS: Record<string, { script: string; argName: string }> = {
   Invoice: {
     script: "f/service_billing/refresh_invoice",
     argName: "qbo_invoice_id",
   },
-  // Add more as we wire them up — see note above.
+  Payment: {
+    script: "f/service_billing/refresh_payment",
+    argName: "qbo_payment_id",
+  },
+  Customer: {
+    script: "f/service_billing/refresh_customer",
+    argName: "qbo_customer_id",
+  },
 }
 
 export async function POST(req: NextRequest) {
