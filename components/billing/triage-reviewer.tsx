@@ -26,6 +26,7 @@ import { ExpandableText } from "@/components/ui/expandable-text"
 import type { TriageRow, LineItem, OpenCredit } from "@/lib/queries/dashboard"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
 import { useFreshResource } from "@/lib/hooks/use-fresh-resource"
+import { createSupabaseBrowser } from "@/lib/supabase/client"
 
 // Subset of TriageRow fields that the /api/qbo/refresh/invoice endpoint
 // can authoritatively refresh (balance, status, classification, etc.).
@@ -302,6 +303,47 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
     setBusy(null)
     setFlash(false)
   }, [cursor])
+
+  // Realtime patch — subscribe to billing.invoices UPDATE events and patch
+  // freshInvoices when any invoice in our snapshot changes. This is what
+  // makes "I edited it in QBO and came back to the same triage card"
+  // actually work: the webhook → refresh_invoice → cache UPDATE → Realtime
+  // → this handler → freshInvoices patch → card re-renders with new data.
+  //
+  // Without this, the useFreshResource hook above only runs on cursor
+  // change with a 60s TTL — so if you edit a same-card invoice in QBO
+  // and come back within 60s, the card stays stale.
+  useEffect(() => {
+    // Build a Set of invoice IDs we care about — the snapshot rows.
+    const tracked = new Set(rows.map((r) => r.qbo_invoice_id))
+    if (tracked.size === 0) return
+
+    const sb = createSupabaseBrowser()
+    const channel = sb
+      .channel("triage-invoices-live")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "billing", table: "invoices" },
+        (payload) => {
+          const row = (payload as { new?: Record<string, unknown> }).new
+          if (!row) return
+          const id = String(row.qbo_invoice_id ?? "")
+          if (!tracked.has(id)) return
+          setFreshInvoices((prev) => ({
+            ...prev,
+            [id]: {
+              ...(prev[id] ?? {}),
+              ...extractInvoicePatch(row),
+            },
+          }))
+        },
+      )
+      .subscribe()
+
+    return () => {
+      void sb.removeChannel(channel)
+    }
+  }, [rows])
 
   const counts = useMemo(() => {
     const c = { approved: 0, skipped: 0, reprocessed: 0, errored: 0 }
