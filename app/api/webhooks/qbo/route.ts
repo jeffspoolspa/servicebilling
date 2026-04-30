@@ -202,8 +202,14 @@ export async function POST(req: NextRequest) {
 
       const dispatchPromise = (async () => {
         try {
+          // Pass the QBO operation as a hint to refresh scripts that
+          // care (e.g. refresh_invoice routes Void → handle_voided).
+          // Scripts that don't care about it (refresh_payment,
+          // refresh_customer) ignore the parameter — Windmill scripts
+          // accept extra unknown args harmlessly.
           await triggerScript(mapping.script, {
             [mapping.argName]: entity.id,
+            operation: entity.operation,
           })
           if (logId) {
             await sb.rpc("mark_webhook_processed", {
