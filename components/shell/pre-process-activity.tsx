@@ -90,6 +90,15 @@ export function PreProcessActivity() {
   // see the final summary; reset on any new activity.
   const [lingerUntil, setLingerUntil] = useState<number | null>(null)
   const [, forceTick] = useState(0)
+  // Track which invoice IDs we've actually seen as in-flight in this
+  // session. Critical because billing.invoices.pre_process_stage stays at
+  // 'done' permanently after the original pre-processing finishes — and
+  // ANY subsequent UPDATE on the row (charge, payment recorded, balance
+  // change from refresh_invoice, etc.) fires Realtime with stage='done'.
+  // Without this guard, every process_invoice run would falsely surface
+  // those invoices as "Pre-processing complete" in the toast. Only show
+  // 'done' transitions for IDs we previously saw at a non-done stage.
+  const seenInFlightRef = useRef<Set<string>>(new Set())
 
   // One periodic tick that does double duty: forces a re-render so the
   // "elapsed Ns" counters tick, AND evicts stale in-flight rows where
@@ -134,6 +143,8 @@ export function PreProcessActivity() {
           const fetchedAt = r.fetched_at ? new Date(String(r.fetched_at)).getTime() : 0
           if (fetchedAt < cutoff) continue
           const id = String(r.qbo_invoice_id)
+          // Mark as seen so a later 'done' transition fires the recent toast.
+          seenInFlightRef.current.add(id)
           next.set(id, {
             qbo_invoice_id: id,
             doc_number: (r.doc_number as string | null) ?? null,
@@ -176,6 +187,8 @@ export function PreProcessActivity() {
           const customerName = (row.customer_name as string | null) ?? null
 
           if (stage && stage !== "done") {
+            // Real pre-processing in flight — track it.
+            seenInFlightRef.current.add(id)
             setInFlight((prev) => {
               const next = new Map(prev)
               const existing = next.get(id)
@@ -195,12 +208,23 @@ export function PreProcessActivity() {
           }
 
           if (stage === "done") {
+            // CRITICAL guard: pre_process_stage='done' is the PERMANENT
+            // terminal value left over from the original pre-processing
+            // (which may have happened weeks ago). ANY UPDATE on the row
+            // — charge processed, payment recorded, balance refreshed,
+            // memo edited, anything — fires Realtime with stage='done'.
+            // Without this guard, every process_invoice run would falsely
+            // surface the invoice as a "Pre-processing complete" event.
+            // Only fire the completion toast for IDs we actually saw at
+            // a non-done stage in this session.
+            if (!seenInFlightRef.current.has(id)) return
+            seenInFlightRef.current.delete(id)
+
             // Compute outcome from billing_status + needs_review_reason.
-            // We may have never seen the in-flight transitions if the script
-            // ran very fast — that's fine, we still show the completion.
             let outcome: Recent["outcome"] = "ready"
             if (billingStatus === "needs_review") outcome = "review"
             else if (billingStatus === "ready_to_process") outcome = "ready"
+            else if (billingStatus === "processed") outcome = "ready"
             else outcome = "error"
 
             setInFlight((prev) => {
