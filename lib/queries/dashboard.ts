@@ -231,11 +231,23 @@ export interface QueueRow {
   qbo_invoice_id: string | null
   // Invoice-owned fields (null if WO isn't yet linked to an invoice)
   billing_status: string | null
+  /** Legacy channel decision ('invoice' | 'on_file'). Dual-written by
+   *  pre_process_invoice during the rollout; goes away when readers all
+   *  switch to preferred_payment_type. */
   payment_method: string | null
+  /** New channel decision ('email' | 'ach' | 'credit_card'). Source of
+   *  truth — payment_method is derived from this. */
+  preferred_payment_type: string | null
   qbo_class: string | null
   needs_review_reason: string | null
   qbo_balance: number | null
   qbo_email_status: string | null
+  /** What's "on file" — the target_payment_method_id JOINed to cpm. NULL
+   *  for email-channel invoices (no PM attached). type is 'credit_card' |
+   *  'ach', brand is the card brand (e.g. 'Visa') or bank name. */
+  target_pm_type: string | null
+  target_pm_brand: string | null
+  target_pm_last_four: string | null
 }
 
 export type QueueStatus = "ready_to_process" | "needs_review" | "processed" | "awaiting_invoice"
@@ -315,10 +327,14 @@ export async function getBillingQueue(opts: {
     qbo_invoice_id: (r.qbo_invoice_id ?? null) as string | null,
     billing_status: (r.billing_status ?? null) as string | null,
     payment_method: (r.payment_method ?? null) as string | null,
+    preferred_payment_type: (r.preferred_payment_type ?? null) as string | null,
     qbo_class: (r.qbo_class ?? null) as string | null,
     needs_review_reason: (r.needs_review_reason ?? null) as string | null,
     qbo_balance: (r.qbo_balance ?? null) as number | null,
     qbo_email_status: (r.qbo_email_status ?? null) as string | null,
+    target_pm_type: (r.target_pm_type ?? null) as string | null,
+    target_pm_brand: (r.target_pm_brand ?? null) as string | null,
+    target_pm_last_four: (r.target_pm_last_four ?? null) as string | null,
   }))
 
   return { rows, total: count ?? 0 }
@@ -412,6 +428,7 @@ export interface NeedsReviewRow {
   invoice_number: string | null
   qbo_class: string | null
   payment_method: string | null
+  preferred_payment_type: string | null
   subtotal_ok: boolean | null
   enrichment_ok: boolean | null
 }
@@ -421,7 +438,7 @@ export async function getNeedsReview(limit = 10): Promise<NeedsReviewRow[]> {
   const { data: invoices } = await sb
     .from("billing_invoices")
     .select(
-      "qbo_invoice_id, doc_number, needs_review_reason, qbo_class, payment_method, subtotal_ok, enrichment_ok, pre_processed_at",
+      "qbo_invoice_id, doc_number, needs_review_reason, qbo_class, payment_method, preferred_payment_type, subtotal_ok, enrichment_ok, pre_processed_at",
     )
     .eq("billing_status", "needs_review")
     .order("pre_processed_at", { ascending: false, nullsFirst: false })
@@ -449,6 +466,7 @@ export async function getNeedsReview(limit = 10): Promise<NeedsReviewRow[]> {
       invoice_number: (inv.doc_number ?? null) as string | null,
       qbo_class: (inv.qbo_class ?? null) as string | null,
       payment_method: (inv.payment_method ?? null) as string | null,
+      preferred_payment_type: (inv.preferred_payment_type ?? null) as string | null,
       subtotal_ok: (inv.subtotal_ok ?? null) as boolean | null,
       enrichment_ok: (inv.enrichment_ok ?? null) as boolean | null,
     }
@@ -596,9 +614,15 @@ export interface InvoiceDetail {
   // Credit-review override state (user acknowledged credits not applicable)
   credit_review_overridden_at: string | null
   credit_review_overridden_note: string | null
-  // Per-invoice card-vs-ach override set from the detail page's payment
-  // methods card. NULL = picker uses most recently added default.
-  preferred_payment_type: "card" | "ach" | null
+  // The channel decision for this invoice — set by pre_process_invoice via
+  // billing.resolve_preferred_payment_type. 'email' takes the email path,
+  // 'ach'/'credit_card' take the charge path. Read via paymentChannel()
+  // helper which falls back to legacy payment_method when null.
+  preferred_payment_type: "email" | "ach" | "credit_card" | null
+  // The specific PM uuid the picker chose at pre-process time. process_invoice
+  // charges this row (no re-pick) so any per-invoice override is preserved.
+  // NULL when channel = 'email' or no PM is on file.
+  target_payment_method_id: string | null
 }
 
 export interface CreditApplied {
@@ -723,7 +747,15 @@ export interface ProcessAttempt {
   idempotency_key: string | null
   charge_id: string | null
   qbo_payment_id: string | null
+  /** Legacy payment_method ('invoice' | 'on_file'). Dual-written by
+   *  process_invoice during the rollout; goes away when readers all
+   *  switch to channel. */
   payment_method: string | null
+  /** New channel ('email' | 'ach' | 'credit_card'). Set in create_attempt. */
+  channel: string | null
+  /** FK to billing.customer_payment_methods.id — the specific PM that was
+   *  charged. NULL when channel='email'. */
+  customer_payment_method_id: string | null
   charge_amount: number | string | null
   error_message: string | null
   attempted_at: string
@@ -898,7 +930,7 @@ export async function getLatestProcessAttempt(
   const { data } = await sb
     .from("billing_processing_attempts")
     .select(
-      "id, qbo_invoice_id, wo_number, stage, status, idempotency_key, charge_id, qbo_payment_id, payment_method, charge_amount, error_message, attempted_at, email_sent, charge_result, raw_result",
+      "id, qbo_invoice_id, wo_number, stage, status, idempotency_key, charge_id, qbo_payment_id, payment_method, channel, customer_payment_method_id, charge_amount, error_message, attempted_at, email_sent, charge_result, raw_result",
     )
     .eq("qbo_invoice_id", qboInvoiceId)
     .eq("stage", "process")
@@ -907,6 +939,27 @@ export async function getLatestProcessAttempt(
     .limit(1)
     .maybeSingle()
   return (data ?? null) as ProcessAttempt | null
+}
+
+/**
+ * All non-dry-run process attempts for an invoice, newest first. Powers
+ * the AttemptTimeline component on the WO detail page so the user can see
+ * the full retry history (succeeded → declined → re-processed → succeeded etc).
+ */
+export async function getProcessAttempts(
+  qboInvoiceId: string,
+): Promise<ProcessAttempt[]> {
+  const sb = createAnon("public")
+  const { data } = await sb
+    .from("billing_processing_attempts")
+    .select(
+      "id, qbo_invoice_id, wo_number, stage, status, idempotency_key, charge_id, qbo_payment_id, payment_method, channel, customer_payment_method_id, charge_amount, error_message, attempted_at, email_sent, charge_result, raw_result",
+    )
+    .eq("qbo_invoice_id", qboInvoiceId)
+    .eq("stage", "process")
+    .eq("dry_run", false)
+    .order("attempted_at", { ascending: false })
+  return (data ?? []) as ProcessAttempt[]
 }
 
 export async function getWorkOrderDetail(

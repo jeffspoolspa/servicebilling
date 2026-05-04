@@ -5,6 +5,7 @@ import { notFound } from "next/navigation"
 import {
   getWorkOrderDetail,
   getLatestProcessAttempt,
+  getProcessAttempts,
   getAppliedPaymentsForInvoice,
 } from "@/lib/queries/dashboard"
 import { formatDate } from "@/lib/utils/format"
@@ -14,7 +15,8 @@ import { RevertButton } from "@/components/work-orders/revert-button"
 import { SyncButton } from "@/components/work-orders/sync-button"
 import { SkipButton } from "@/components/work-orders/skip-button"
 import { RecoveryBanner } from "@/components/work-orders/recovery-banner"
-import { ProcessingCard } from "@/components/work-orders/processing-card"
+import { AttemptTimeline } from "@/components/work-orders/attempt-timeline"
+import { LiveWorkOrderDetail } from "@/components/work-orders/live-work-order-detail"
 import {
   DetailTabs,
   type DetailTab,
@@ -81,11 +83,17 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
   const activeTab: DetailTab =
     requestedTab ?? (invoice ? "invoice" : "work")
 
-  // Parallel fetch what the panels need
-  const [processAttempt, appliedPayments] = await Promise.all([
+  // Parallel fetch what the panels need.
+  // - processAttempt: latest only (still used by RecoveryBanner)
+  // - processAttempts: full timeline for the AttemptTimeline card
+  // - appliedPayments: for the applied-payments card
+  const [processAttempt, processAttempts, appliedPayments] = await Promise.all([
     invoice?.qbo_invoice_id
       ? getLatestProcessAttempt(invoice.qbo_invoice_id)
       : Promise.resolve(null),
+    invoice?.qbo_invoice_id
+      ? getProcessAttempts(invoice.qbo_invoice_id)
+      : Promise.resolve([]),
     invoice?.qbo_invoice_id
       ? getAppliedPaymentsForInvoice(invoice.qbo_invoice_id)
       : Promise.resolve([]),
@@ -98,6 +106,11 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
 
   return (
     <>
+      {/* Subscribes to billing.invoices, billing.processing_attempts,
+          billing.customer_payments, public.work_orders. Triggers
+          router.refresh() (debounced 350ms) when any change. Without this
+          the detail page is stale until manual reload. */}
+      <LiveWorkOrderDetail />
       <ObjectHeader
         eyebrow={`${wo.type} · ${wo.office_name ?? "—"}`}
         title={`WO ${wo.wo_number}`}
@@ -210,7 +223,7 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
             />
           )}
           <PreProcessingCard wo={wo} invoice={invoice} />
-          {invoice && <ProcessingCard attempt={processAttempt} />}
+          {invoice && <AttemptTimeline attempts={processAttempts} />}
         </div>
       </div>
     </>

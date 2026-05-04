@@ -3,12 +3,13 @@ import { createAnon } from "@/lib/supabase/anon"
 
 /**
  * POST /api/billing/invoices/[id]/preferred-payment-type
- * Body: { type: "card" | "ach" | null }
+ * Body: { type: "email" | "ach" | "credit_card" | null }   (legacy "card" also accepted)
  *
- * Per-invoice override for which payment-method type to charge. Honored by
- * process_invoice.get_active_payment_method — when a default of the given
- * type exists, it wins over the "most recently added default" fallback.
- * Pass null to clear the override.
+ * Per-invoice override for the payment channel. Updates
+ * invoices.preferred_payment_type AND re-picks invoices.target_payment_method_id
+ * so process_invoice charges the right PM (it doesn't re-pick at charge time).
+ * Pass null to clear the override (next pre_process_invoice run will re-derive
+ * from the customer-level rules).
  */
 export async function POST(
   request: NextRequest,
@@ -16,17 +17,17 @@ export async function POST(
 ) {
   const { id } = await params
 
-  let type: "card" | "ach" | null
+  let type: "email" | "ach" | "credit_card" | "card" | null
   try {
     const body = await request.json()
     const t = body?.type
-    if (t === "card" || t === "ach") {
+    if (t === "email" || t === "ach" || t === "credit_card" || t === "card") {
       type = t
     } else if (t === null) {
       type = null
     } else {
       return NextResponse.json(
-        { error: "type must be 'card', 'ach', or null" },
+        { error: "type must be 'email', 'ach', 'credit_card', or null" },
         { status: 400 },
       )
     }

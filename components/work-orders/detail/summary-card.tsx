@@ -2,6 +2,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { formatCurrency } from "@/lib/utils/format"
 import type { InvoiceDetail, WorkOrderDetail } from "@/lib/queries/dashboard"
+import { isChargeChannel, paymentChannelShortLabel } from "@/lib/payment-channel"
 
 /**
  * Sidebar summary — persists across Work Order and Invoice tabs.
@@ -77,17 +78,11 @@ export function SummaryCard({ wo, invoice, status }: Props) {
               ) : (
                 <span className="text-ink-mute">not sent</span>
               )}
-              {invoice!.payment_method && (
+              {(invoice!.payment_method || invoice!.preferred_payment_type) && (
                 <>
                   <span className="text-ink-mute">·</span>
-                  <span
-                    className={
-                      invoice!.payment_method === "on_file"
-                        ? "text-cyan"
-                        : "text-ink-dim"
-                    }
-                  >
-                    {invoice!.payment_method === "on_file" ? "on file" : "invoice"}
+                  <span className={isChargeChannel(invoice!) ? "text-cyan" : "text-ink-dim"}>
+                    {paymentChannelShortLabel(invoice!).toLowerCase()}
                   </span>
                 </>
               )}

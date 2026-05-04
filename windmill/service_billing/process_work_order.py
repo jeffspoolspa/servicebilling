@@ -137,17 +137,26 @@ def latest_process_attempt(conn, qbo_invoice_id):
 
 
 def create_attempt(conn, qbo_invoice_id, wo_number, invoice_number, payment_method,
-                   charge_amount, dry_run):
-    """WRITE-AHEAD: insert pending attempt with fresh idempotency_key BEFORE any external call."""
+                   charge_amount, dry_run, channel=None, customer_payment_method_id=None):
+    """WRITE-AHEAD: insert pending attempt with fresh idempotency_key BEFORE any external call.
+
+    channel / customer_payment_method_id are the new fields that supersede
+    the legacy payment_method text. They're set up-front from the invoice's
+    preferred_payment_type + target_payment_method_id, so the audit row
+    knows what was attempted before the external call fires. Legacy
+    payment_method is dual-written for the duration of the rollout.
+    """
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""
         INSERT INTO billing.processing_attempts (
             wo_number, invoice_number, qbo_invoice_id, stage, status,
-            idempotency_key, payment_method, charge_amount, dry_run
-        ) VALUES (%s, %s, %s, 'process', 'pending', %s, %s, %s, %s)
+            idempotency_key, payment_method, charge_amount, dry_run,
+            channel, customer_payment_method_id
+        ) VALUES (%s, %s, %s, 'process', 'pending', %s, %s, %s, %s, %s, %s)
         RETURNING *
     """, (wo_number, invoice_number, qbo_invoice_id, str(uuid.uuid4()),
-          payment_method, charge_amount, dry_run))
+          payment_method, charge_amount, dry_run,
+          channel, customer_payment_method_id))
     conn.commit()
     row = cur.fetchone(); cur.close()
     return dict(row)
@@ -171,6 +180,41 @@ def mark_invoice_processed(conn, qbo_invoice_id):
         WHERE qbo_invoice_id = %s
     """, (qbo_invoice_id,))
     conn.commit(); cur.close()
+
+
+# How long we expect QBO webhooks to arrive after we make a write. If they
+# don't show up within this window, cdc_reconciler will flip the expectation
+# to 'missing' and surface in the UI for human investigation.
+WEBHOOK_GRACE_MINUTES = 5
+
+
+def insert_webhook_expectation(conn, entity_type, entity_id):
+    """Record an expectation that QBO will send a webhook for this entity
+    within the grace window. The webhook handler at /api/webhooks/qbo calls
+    confirm_webhook_expectation(entity_type, entity_id) which matches by
+    those two fields and flips status='pending' → 'confirmed'.
+
+    Use this immediately after any QBO write whose effect we want to verify
+    independently. It's optional — failure here doesn't fail the write
+    (the webhook is the verification layer; this just lets us catch missed
+    confirmations). Best-effort only.
+    """
+    if not entity_id:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO billing.webhook_expectations (
+                entity_type, entity_id, expected_by, source, status
+            ) VALUES (%s, %s, now() + (%s || ' minutes')::interval,
+                      'self_initiated', 'pending')
+        """, (entity_type, entity_id, str(WEBHOOK_GRACE_MINUTES)))
+        conn.commit(); cur.close()
+    except Exception as e:
+        # Don't fail the write — log + continue. cdc_reconciler is the
+        # safety net; missed expectation rows just mean we'd see the
+        # change via webhook but no green-check confirmation in the UI.
+        print(f"  (webhook_expectation insert warning [{entity_type}:{entity_id}]: {e})")
 
 
 def refresh_invoice_cache(conn, qbo_invoice_id, qbo_invoice):
@@ -234,6 +278,38 @@ def load_applicable_credits(conn, qbo_customer_id):
     return rows
 
 
+def load_payment_method_by_id(conn, cpm_id):
+    """Load a specific PM row by uuid. Used at charge time to look up the
+    target_payment_method_id that pre_process_invoice picked.
+
+    Returns the same shape as get_active_payment_method's result dict, OR
+    a {has_method: False, error: ...} dict if the row is missing or not
+    is_active. Caller treats both failure modes the same — surface to UI
+    + flag the invoice for re-pre-processing (which will pick a fresh
+    target_payment_method_id, or fall back to email if nothing's left).
+    """
+    if not cpm_id:
+        return {"has_method": False, "error": "no target_payment_method_id set on invoice"}
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""
+        SELECT id, qbo_payment_method_id, type, card_brand, last_four,
+               is_default, is_active, raw, auto_disabled_at, auto_disabled_reason
+        FROM billing.customer_payment_methods
+        WHERE id = %s
+    """, (cpm_id,))
+    row = cur.fetchone(); cur.close()
+    if not row:
+        return {"has_method": False, "error": f"target_payment_method_id {cpm_id} not found"}
+    if not row.get("is_active"):
+        # PM was deactivated between pre_process and process. Could be QBO
+        # sync (customer removed the card) or the 3-strike trigger.
+        reason = row.get("auto_disabled_reason") or "manually deactivated"
+        return {"has_method": False,
+                "error": f"target PM is no longer active ({reason})",
+                "stale_cpm_id": str(row["id"])}
+    return _pm_row_to_result(dict(row), picked_reason="invoice_target")
+
+
 def get_active_payment_method(conn, customer_id, preferred_type=None):
     """Pick the payment instrument to charge, FROM THE DB cache.
 
@@ -264,8 +340,11 @@ def get_active_payment_method(conn, customer_id, preferred_type=None):
     """
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    # 1. User override — try to satisfy preferred_type if it's a valid default
-    if preferred_type in ("card", "ach"):
+    # 1. User override — try to satisfy preferred_type if it's a valid default.
+    # Accept both new ('credit_card') and legacy ('card') values for backwards
+    # compat. Normalize to the schema's current value before querying.
+    if preferred_type in ("card", "credit_card", "ach"):
+        normalized = "credit_card" if preferred_type in ("card", "credit_card") else "ach"
         cur.execute("""
             SELECT id, qbo_payment_method_id, type, card_brand, last_four,
                    is_default, raw
@@ -276,7 +355,7 @@ def get_active_payment_method(conn, customer_id, preferred_type=None):
               AND type = %s
             ORDER BY (raw->>'created') DESC NULLS LAST
             LIMIT 1
-        """, (customer_id, preferred_type))
+        """, (customer_id, normalized))
         row = cur.fetchone()
         if row:
             cur.close()
@@ -304,14 +383,16 @@ def _pm_row_to_result(row, picked_reason):
     raw = row.get("raw") or {}
     base = {
         "has_method": True,
-        "payment_type": row["type"],
+        "payment_type": row["type"],   # 'credit_card' | 'ach' (post-rename schema)
         "method_id": row["qbo_payment_method_id"],
         "cpm_id": str(row["id"]),
         "last4": row.get("last_four"),
         "is_default": bool(row.get("is_default")),
         "picked_reason": picked_reason,
     }
-    if row["type"] == "card":
+    # Accept both 'credit_card' (new) and 'card' (legacy, in case a stale cpm
+    # row still uses the old value during transition). Same payload either way.
+    if row["type"] in ("credit_card", "card"):
         return {**base,
                 "card_type": row.get("card_brand"),
                 "exp_month": raw.get("expMonth"),
@@ -350,6 +431,65 @@ def _classify_charge_response(resp, payment_type):
         return "uncertain"
 
 
+def extract_charge_error(resp, body=None):
+    """Build the most useful human-readable error from a charge response.
+
+    Intuit puts error info in different places depending on the failure mode:
+      - Standard 4xx with errors array → errors[0].message + code + detail
+      - 4xx with non-standard body → body.message or body.detail
+      - 5xx with no body → "HTTP 502: <text fragment>"
+      - 5xx with HTML body → "HTTP 503: text=..."
+      - 200 with explicit failure status → "status=DECLINED" + any detail
+      - Pre-classified body with no errors structure → fall back to dump
+    Returns a string suitable for processing_attempts.error_message — never
+    None if there's anything useful at all (which lets the UI always surface
+    something instead of a blank).
+    """
+    if resp is None:
+        return "no response from Intuit (network error)"
+
+    # Try parsing body if not provided
+    if body is None:
+        try:
+            body = resp.json()
+        except Exception:
+            body = None
+
+    sc = resp.status_code
+
+    # Body unparseable — fall back to raw text
+    if body is None:
+        text = (resp.text or "").strip()
+        # HTML responses (gateway errors) are too long to dump verbatim
+        if text.startswith("<") or "<html" in text[:200].lower():
+            return f"HTTP {sc}: gateway returned HTML (likely 5xx upstream)"
+        return f"HTTP {sc}: {text[:300] if text else 'empty body'}"
+
+    # Standard Intuit errors array
+    errors = body.get("errors") or []
+    if errors:
+        e = errors[0] if isinstance(errors[0], dict) else {}
+        parts = []
+        if e.get("message"):
+            parts.append(e["message"])
+        if e.get("detail") and e.get("detail") != e.get("message"):
+            parts.append(e["detail"])
+        if e.get("code"):
+            parts.append(f"code={e['code']}")
+        if e.get("moreInfo"):
+            parts.append(f"info={e['moreInfo']}")
+        if parts:
+            return f"HTTP {sc}: " + " | ".join(parts)
+
+    # Some failures put it on the top level (rare but observed)
+    if body.get("status") and body.get("status") not in ("CAPTURED", "PENDING", "SUCCEEDED"):
+        msg = body.get("message") or body.get("detail") or ""
+        return f"HTTP {sc}: status={body.get('status')}" + (f" | {msg}" if msg else "")
+
+    # Catch-all: dump a slice of the body
+    return f"HTTP {sc}: " + json.dumps(body)[:300]
+
+
 def charge_card(card_id, amount, request_id, invoice_num, customer_name, access_token):
     """Charge a stored card. request_id is the persisted idempotency key."""
     payload = {
@@ -374,14 +514,14 @@ def charge_card(card_id, amount, request_id, invoice_num, customer_name, access_
     classification = _classify_charge_response(resp, "card")
     base = {"classification": classification, "request_id": request_id, "payment_type": "card",
             "status_code": resp.status_code, "amount_requested": amount}
+    body = None
     try:
         body = resp.json()
         base["raw_response"] = body
     except Exception:
         base["raw_text"] = resp.text[:500]
-        return base
 
-    if classification == "success":
+    if classification == "success" and body:
         return {**base,
                 "charge_id": body.get("id"),
                 "amount": float(body.get("amount", 0)),
@@ -391,8 +531,9 @@ def charge_card(card_id, amount, request_id, invoice_num, customer_name, access_
                 "card_type": (body.get("card") or {}).get("cardType"),
                 "created": body.get("created")}
 
-    err = body.get("errors", [{}])[0].get("message") if body.get("errors") else None
-    return {**base, "error": err or f"status={body.get('status')}"}
+    # Failure of any kind (declined, uncertain, or success-with-no-body) —
+    # capture a useful error message regardless of body shape.
+    return {**base, "error": extract_charge_error(resp, body)}
 
 
 def charge_bank_account(bank_id, amount, request_id, invoice_num, customer_name, access_token):
@@ -418,14 +559,14 @@ def charge_bank_account(bank_id, amount, request_id, invoice_num, customer_name,
     classification = _classify_charge_response(resp, "ach")
     base = {"classification": classification, "request_id": request_id, "payment_type": "ach",
             "status_code": resp.status_code, "amount_requested": amount}
+    body = None
     try:
         body = resp.json()
         base["raw_response"] = body
     except Exception:
         base["raw_text"] = resp.text[:500]
-        return base
 
-    if classification == "success":
+    if classification == "success" and body:
         return {**base,
                 "charge_id": body.get("id"),
                 "amount": float(body.get("amount", 0)),
@@ -435,8 +576,7 @@ def charge_bank_account(bank_id, amount, request_id, invoice_num, customer_name,
                 "card_type": "ACH",
                 "created": body.get("created")}
 
-    err = body.get("errors", [{}])[0].get("message") if body.get("errors") else None
-    return {**base, "error": err or f"status={body.get('status')}"}
+    return {**base, "error": extract_charge_error(resp, body)}
 
 
 # =============================================================================
@@ -475,7 +615,29 @@ def record_qbo_payment(customer_id, invoice_id, amount, charge_result, wo_num, i
 
     resp = qbo_post("payment", access_token, realm_id, payment_data)
     if not resp.ok:
-        return {"success": False, "error": resp.text[:400], "status_code": resp.status_code}
+        # QBO uses a different error envelope from Intuit Payments. Try the
+        # standard QBO Fault structure first, then fall back to extract_charge_error.
+        body = None
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        err_msg = None
+        if body:
+            fault = (body.get("Fault") or {}).get("Error") or []
+            if fault:
+                f = fault[0] if isinstance(fault[0], dict) else {}
+                parts = [
+                    f.get("Message"),
+                    f.get("Detail"),
+                    f"code={f.get('code')}" if f.get("code") else None,
+                ]
+                err_msg = " | ".join(p for p in parts if p)
+        if not err_msg:
+            err_msg = extract_charge_error(resp, body)
+        return {"success": False, "error": err_msg,
+                "status_code": resp.status_code,
+                "raw_response": body or resp.text[:500]}
 
     payment = resp.json().get("Payment", {})
     return {"success": True,
@@ -546,11 +708,35 @@ def process_one(conn, qbo_invoice_id, access_token, realm_id,
     invoice_number = invoice.get("doc_number")
     customer_id = invoice.get("qbo_customer_id")
     customer_name = invoice.get("customer_name") or ""
-    payment_method = invoice.get("payment_method")
 
-    if payment_method not in ("on_file", "invoice"):
-        return _result(qbo_invoice_id, "error",
-                       error=f"invalid payment_method '{payment_method}' (must be on_file or invoice)")
+    # The route decision (charge vs email) lives on invoices.preferred_payment_type
+    # now: 'email' → email path, 'ach'/'credit_card' → charge path.
+    # Legacy invoices.payment_method ('on_file'/'invoice') is dual-written by
+    # pre_process_invoice during the rollout for safety. We accept either,
+    # preferring the new field. Once the legacy column is dropped, this falls
+    # back to a hard error if preferred_payment_type is missing.
+    preferred_type = invoice.get("preferred_payment_type")
+    payment_method = invoice.get("payment_method")  # legacy, dual-written
+
+    if preferred_type not in ("email", "ach", "credit_card"):
+        # Fall back to legacy if new field is unset (e.g. very old invoice
+        # that's never been re-pre-processed). Derive what we'd have set.
+        if payment_method == "invoice":
+            preferred_type = "email"
+        elif payment_method == "on_file":
+            # Can't tell ach vs credit_card from legacy alone; the target_payment_method_id
+            # path will handle picking one. If both are NULL, we'll fail below.
+            preferred_type = "credit_card"  # pessimistic default — picker will refine
+        else:
+            return _result(qbo_invoice_id, "error",
+                           error=f"invalid preferred_payment_type '{preferred_type}' "
+                                 f"and no legacy payment_method to fall back to "
+                                 f"(re-run pre_process_invoice)")
+
+    # Channel for this attempt mirrors the decision: 'email' for email path,
+    # else the type that'll be charged. Stored on processing_attempts.channel
+    # so audit queries don't need to JOIN to cpm.
+    channel = preferred_type
 
     if invoice.get("billing_status") != "ready_to_process" and not (force or recover_orphan):
         return _result(qbo_invoice_id, "skipped",
@@ -594,7 +780,39 @@ def process_one(conn, qbo_invoice_id, access_token, realm_id,
                        attempt_id=str(prior["id"]))
 
     if prior and prior["status"] == "charge_declined" and not force:
-        return _result(qbo_invoice_id, "needs_human", reason="charge_declined",
+        # Only halt if the new attempt would do the SAME THING the declined
+        # attempt did. The decline is specific to a (channel, PM) pair — if
+        # the user has switched channels (e.g. credit_card → email) OR
+        # picked a different PM (different card on the same channel), it's
+        # a fresh attempt path, not a retry of the failed one.
+        #
+        # Practical example: prior attempt charged Visa-ending-1234 and was
+        # declined. User edits the invoice to email-only and clicks Process.
+        # We should email, not block on the prior card decline.
+        new_target_pm_id = invoice.get("target_payment_method_id")
+        new_target_pm_id_str = (
+            str(new_target_pm_id) if new_target_pm_id else None
+        )
+        prior_pm_id_str = (
+            str(prior.get("customer_payment_method_id"))
+            if prior.get("customer_payment_method_id") else None
+        )
+        same_attempt_path = (
+            prior.get("channel") == channel
+            and prior_pm_id_str == new_target_pm_id_str
+            and channel != "email"  # email path always safe to re-attempt
+        )
+        if same_attempt_path:
+            return _result(qbo_invoice_id, "needs_human", reason="charge_declined",
+                           error=prior.get("error_message"),
+                           attempt_id=str(prior["id"]),
+                           note="prior attempt declined this same PM; "
+                                "change channel/PM or pass force=true to retry")
+
+    # Reconciler couldn't determine charge state — human investigation required.
+    # Force=True bypasses this (admin override after manual verification).
+    if prior and prior["status"] == "needs_reconcile_review" and not force:
+        return _result(qbo_invoice_id, "needs_human", reason="needs_reconcile_review",
                        error=prior.get("error_message"),
                        attempt_id=str(prior["id"]))
 
@@ -612,18 +830,87 @@ def process_one(conn, qbo_invoice_id, access_token, realm_id,
         mark_invoice_processed(conn, qbo_invoice_id)
         return _result(qbo_invoice_id, "already_paid_and_sent")
 
-    # 3. Reuse existing pending/uncertain attempt (preserves idempotency_key) or create new
-    if prior and prior["status"] in ("pending", "charge_uncertain"):
+    # 3. Reuse existing pending/uncertain attempt (preserves idempotency_key)
+    #    OR create new with a fresh key. Three policies based on prior status:
+    #
+    #    - 'pending'                    → reuse. No external call has fired,
+    #                                     so the same key is safe.
+    #
+    #    - 'charge_uncertain' (<24h old) → reuse. Within Intuit's idempotency
+    #                                     window; reusing the same key returns
+    #                                     the cached response (or processes
+    #                                     fresh if the original timed out
+    #                                     before reaching Intuit). Either way
+    #                                     no double-charge possible.
+    #
+    #    - 'charge_uncertain' (>24h old) → AUTO-PROMOTE to expired + create
+    #                                     fresh attempt. Intuit's cache has
+    #                                     expired so the same key would be
+    #                                     treated as new anyway. But before
+    #                                     we issue a NEW key, we ideally want
+    #                                     reconcile_payments to confirm no
+    #                                     charge landed. If reconciler has
+    #                                     run, status will already be
+    #                                     'charge_uncertain_expired' (see
+    #                                     below). If reconciler hasn't run
+    #                                     yet, fall through with caution —
+    #                                     log + create new attempt anyway.
+    #
+    #    - 'charge_uncertain_expired'   → reconciler verified no charge.
+    #                                     Create fresh attempt with new key.
+    #
+    #    Anything else (succeeded, declined, payment_orphan, etc) was
+    #    handled in earlier branches — fall through to fresh attempt.
+    target_pm_id = invoice.get("target_payment_method_id")
+
+    def _create_fresh():
+        return create_attempt(
+            conn, qbo_invoice_id, wo_number, invoice_number,
+            payment_method, qbo_balance, dry_run,
+            channel=channel,
+            customer_payment_method_id=str(target_pm_id) if target_pm_id else None,
+        )
+
+    if prior and prior["status"] == "pending":
         attempt = prior
+    elif prior and prior["status"] == "charge_uncertain":
+        # Within idempotency window vs expired — make the call here.
+        attempted_at = prior.get("attempted_at")
+        from datetime import datetime, timezone, timedelta
+        if attempted_at and attempted_at.tzinfo is None:
+            attempted_at = attempted_at.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - attempted_at) if attempted_at else timedelta()
+        if age > timedelta(hours=24):
+            # Idempotency window expired. Mark old attempt as expired and
+            # create a fresh one. Note: reconcile_payments would normally
+            # promote this status itself + verify no charge landed; if we're
+            # here it means reconciler hasn't caught up yet, so we proceed
+            # cautiously. The fresh attempt's new key avoids any cached
+            # response and the worst case is a *missing* charge (not double).
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE billing.processing_attempts
+                SET status='charge_uncertain_expired',
+                    error_message=COALESCE(error_message, '')
+                                  || ' | manually expired after 24h by process_invoice'
+                WHERE id = %s
+            """, (prior["id"],))
+            conn.commit(); cur.close()
+            attempt = _create_fresh()
+        else:
+            attempt = prior
+    elif prior and prior["status"] == "charge_uncertain_expired":
+        # Reconciler verified no charge — safe to retry with fresh key.
+        attempt = _create_fresh()
     else:
-        attempt = create_attempt(conn, qbo_invoice_id, wo_number, invoice_number,
-                                  payment_method, qbo_balance, dry_run)
+        attempt = _create_fresh()
 
     # 4. DRY-RUN short-circuit
     if dry_run:
         plan = _build_dry_run_plan(payment_method, qbo_balance, qbo_email_sent,
                                     customer_id, conn, attempt,
-                                    preferred_type=invoice.get("preferred_payment_type"))
+                                    preferred_type=preferred_type,
+                                    target_pm_id=invoice.get("target_payment_method_id"))
         # Tie the dry-run attempt to the exact payment method row that WOULD
         # have been charged, so the audit trail mirrors live runs.
         pm_on_file = plan.get("payment_method_on_file") or {}
@@ -635,26 +922,56 @@ def process_one(conn, qbo_invoice_id, access_token, realm_id,
                        attempt_id=str(attempt["id"]),
                        plan=plan)
 
-    # 5. ROUTE
-    if payment_method == "invoice":
-        return _process_invoice_only(conn, attempt, invoice, qbo_inv, customer_id,
-                                      access_token, realm_id)
-
-    # payment_method == 'on_file'
-    return _process_charge_path(conn, attempt, invoice, qbo_inv, customer_id, customer_name,
-                                 wo_number, invoice_number, qbo_balance, access_token, realm_id)
+    # 5. ROUTE — based on the new preferred_payment_type. Wrapped in a
+    # safety-net try/except so any uncaught exception doesn't leave the
+    # write-ahead attempt row stuck at status='pending' forever. We flip
+    # to 'charge_uncertain' on crash because we don't know whether the
+    # external call (charge or email) actually fired or not — the
+    # reconciler will resolve charges; email path is no-op safe (its
+    # internal retries handle their own state, so reaching this except
+    # means something deeper crashed).
+    try:
+        if preferred_type == "email":
+            return _process_invoice_only(conn, attempt, invoice, qbo_inv, customer_id,
+                                          access_token, realm_id)
+        # preferred_type IN ('ach', 'credit_card') → charge path
+        return _process_charge_path(conn, attempt, invoice, qbo_inv, customer_id, customer_name,
+                                     wo_number, invoice_number, qbo_balance, access_token, realm_id)
+    except Exception as e:
+        # Don't leave a pending row orphaned. Mark as charge_uncertain so
+        # reconcile_payments queries Intuit and resolves it on next tick.
+        try:
+            update_attempt(
+                conn, attempt["id"],
+                status="charge_uncertain",
+                error_message=f"process_one crashed mid-flight: {str(e)[:300]}",
+            )
+        except Exception as inner:
+            print(f"  WARN: failed to mark attempt charge_uncertain: {inner}")
+        # Re-raise so the bulk loop's except still captures it for stats.
+        raise
 
 
 def _build_dry_run_plan(payment_method, balance, email_already_sent, customer_id,
-                         conn, attempt, preferred_type=None):
+                         conn, attempt, preferred_type=None, target_pm_id=None):
+    """Predicts what a live run would do without making external calls.
+
+    target_pm_id (when present) is the invoices.target_payment_method_id
+    that pre_process_invoice picked. We load it directly instead of
+    re-running the picker — same source of truth as the live path.
+    Falls back to get_active_payment_method only when target_pm_id is
+    missing (legacy invoice that hasn't been re-pre-processed).
+    """
+    is_charge = preferred_type in ("ach", "credit_card") if preferred_type else (payment_method == "on_file")
     plan = {
         "payment_method": payment_method,
-        "amount_to_charge": balance if payment_method == "on_file" and balance > 0 else 0,
+        "preferred_payment_type": preferred_type,
+        "amount_to_charge": balance if is_charge and balance > 0 else 0,
         "would_send_invoice_email": not email_already_sent,
-        "would_send_receipt": payment_method == "on_file" and balance > 0,
+        "would_send_receipt": is_charge and balance > 0,
         "idempotency_key": attempt["idempotency_key"],
     }
-    if payment_method == "on_file" and balance > 0:
+    if is_charge and balance > 0:
         # Mirror the live halts in the plan so dry-run accurately predicts
         # what WOULD happen — surfaces credit-check blocks and missing
         # payment methods without actually charging.
@@ -670,13 +987,20 @@ def _build_dry_run_plan(payment_method, balance, email_already_sent, customer_id
                 for c in remaining_credits
             ]
             plan["credits_total_unapplied"] = total
-        # Dry-run plan uses the same preferred_type as the live path so
-        # what you see in the plan is what you'd get.
-        pm = get_active_payment_method(conn, customer_id,
-                                        preferred_type=preferred_type)
+
+        # Use the target_payment_method_id pre_process picked if present.
+        # That's the row the live path will charge — load it as-is so the
+        # dry-run reflects reality.
+        if target_pm_id:
+            pm = load_payment_method_by_id(conn, str(target_pm_id))
+        else:
+            # Legacy fallback: invoice never had target_payment_method_id set.
+            # Use the picker with whatever preferred_type we have.
+            pm = get_active_payment_method(conn, customer_id,
+                                            preferred_type=preferred_type)
         plan["payment_method_on_file"] = pm
         if not pm.get("has_method"):
-            plan["would_fail"] = "no_payment_method"
+            plan["would_fail"] = pm.get("error") or "no_payment_method"
     return plan
 
 
@@ -726,13 +1050,25 @@ def _process_charge_path(conn, attempt, invoice, qbo_inv, customer_id, customer_
                        credits_found=len(remaining_credits),
                        total_unapplied=total_unapplied)
 
-    # Get payment instrument from the DB cache (pull script refreshes every 4h;
-    # process_invoice links the exact DB row to the attempt for audit).
-    # invoice.preferred_payment_type ('card' or 'ach') is the per-invoice
-    # user override set from the detail page — honored when it's a valid
-    # default method on file.
-    pm = get_active_payment_method(conn, customer_id,
-                                    preferred_type=invoice.get("preferred_payment_type"))
+    # Load the payment method that pre_process_invoice picked. We do NOT
+    # re-pick at charge time — the decision was made at pre-process time
+    # so it stays stable across the user's UI session, and any per-invoice
+    # type override (set via the UI) is preserved by reading the stored
+    # target_payment_method_id rather than re-running the picker.
+    #
+    # If the target is missing (legacy invoice that never got pre-processed
+    # under the new model) OR no longer active (PM removed in QBO between
+    # pre-process and process, or auto-disabled by the 3-strike trigger),
+    # we surface the failure clearly and tell the user to re-run pre-process.
+    target_pm_id = invoice.get("target_payment_method_id")
+    if not target_pm_id:
+        # Legacy fallback: invoice has no target set (very old). Use the picker
+        # once, just for backwards compat. Drops out when legacy column dies.
+        pm = get_active_payment_method(conn, customer_id,
+                                        preferred_type=invoice.get("preferred_payment_type"))
+    else:
+        pm = load_payment_method_by_id(conn, str(target_pm_id))
+
     if not pm.get("has_method"):
         update_attempt(conn, attempt["id"], status="charge_declined",
                         error_message=pm.get("error", "no payment method"),
@@ -744,10 +1080,13 @@ def _process_charge_path(conn, attempt, invoice, qbo_inv, customer_id, customer_
     # Pin the attempt to the chosen payment method NOW — before we fire any
     # external calls. Idempotency_key + cpm_id together form the full audit
     # trail even if the charge request fails or the row is later deactivated.
+    # (For the target_payment_method_id path this is usually redundant since
+    # create_attempt set it up-front, but legacy fallback path needs it.)
     update_attempt(conn, attempt["id"], customer_payment_method_id=pm["cpm_id"])
 
-    # CHARGE — pass attempt.idempotency_key as Request-Id (this is what makes retry safe)
-    if pm["payment_type"] == "card":
+    # CHARGE — pass attempt.idempotency_key as Request-Id (this is what makes retry safe).
+    # Accept both 'credit_card' (post-rename) and 'card' (legacy in-flight rows).
+    if pm["payment_type"] in ("credit_card", "card"):
         cr = charge_card(pm["method_id"], balance, attempt["idempotency_key"],
                           invoice_number, customer_name, access_token)
     else:
@@ -795,6 +1134,22 @@ def _process_charge_path(conn, attempt, invoice, qbo_inv, customer_id, customer_
                        error=pay.get("error"))
 
     update_attempt(conn, attempt["id"], qbo_payment_id=pay["payment_id"])
+
+    # Webhook confirmation: QBO fires Payment.Create for the Payment we made.
+    # /api/webhooks/qbo's confirm_webhook_expectation('Payment', payment_id)
+    # matches this row and flips status='confirmed'. If it never arrives,
+    # cdc_reconciler flips it to 'missing' — that's our signal that QBO
+    # didn't actually commit despite returning 200.
+    insert_webhook_expectation(conn, "Payment", pay["payment_id"])
+
+    # NOTE: We deliberately do NOT insert an Invoice expectation here even
+    # though the invoice's balance changed. QBO does NOT fire Invoice.Update
+    # webhooks for balance changes driven by Payment application — only for
+    # direct PATCHes on the invoice (memo, due date, etc.). Empirically
+    # observed: every Invoice expectation we used to insert here went to
+    # 'missing'. The Payment.Create webhook is sufficient — refresh_payment
+    # updates the invoice cache as a side effect, and the auto-promote
+    # trigger flips billing_status to processed.
 
     # Send receipt (best-effort — financial state already correct)
     receipt = send_payment_receipt(pay["payment_id"], customer_id, access_token, realm_id)
@@ -845,6 +1200,11 @@ def _retry_record_payment_for_orphan(conn, prior, invoice, customer_id, customer
 
     update_attempt(conn, prior["id"], qbo_payment_id=pay["payment_id"])
 
+    # Same webhook-confirmation pattern as the primary charge path:
+    # Payment.Create fires; Invoice.Update for balance change does not
+    # (so we don't insert an Invoice expectation here either).
+    insert_webhook_expectation(conn, "Payment", pay["payment_id"])
+
     receipt = send_payment_receipt(pay["payment_id"], customer_id, access_token, realm_id)
     update_attempt(conn, prior["id"], email_sent=receipt["success"])
 
@@ -864,7 +1224,7 @@ def _retry_record_payment_for_orphan(conn, prior, invoice, customer_id, customer
 
 
 def _process_invoice_only(conn, attempt, invoice, qbo_inv, customer_id, access_token, realm_id):
-    """payment_method='invoice' — email IS the deliverable. Auto-retry email up to N times."""
+    """preferred_payment_type='email' — email IS the deliverable. Auto-retry email up to N times."""
     qbo_invoice_id = invoice["qbo_invoice_id"]
     last_err = None
     for i in range(EMAIL_RETRY_MAX):
@@ -872,6 +1232,11 @@ def _process_invoice_only(conn, attempt, invoice, qbo_inv, customer_id, access_t
         if email["success"]:
             update_attempt(conn, attempt["id"], status="succeeded", email_sent=True,
                             raw_result=json.dumps({"email": email, "attempts": i + 1}))
+            # Webhook confirmation: QBO fires Invoice.Emailed when send succeeds.
+            # If 'skipped' (EmailStatus was already EmailSent), the webhook
+            # already happened — no need to expect another.
+            if not email.get("skipped"):
+                insert_webhook_expectation(conn, "Invoice", qbo_invoice_id)
             mark_invoice_processed(conn, qbo_invoice_id)
             fresh, _ = fetch_qbo_invoice(qbo_invoice_id, access_token, realm_id)
             if fresh:

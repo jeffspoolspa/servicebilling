@@ -8,6 +8,7 @@ import { ListChecks } from "lucide-react"
 import Link from "next/link"
 import { getBillingQueue, DEFAULT_SORT } from "@/lib/queries/dashboard"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
+import { paymentChannel, paymentChannelShortLabel } from "@/lib/payment-channel"
 import { BulkRerunButton } from "@/components/billing/bulk-rerun-button"
 import { LiveBillingPage } from "@/components/billing/live-billing-page"
 
@@ -97,12 +98,12 @@ export default async function NeedsAttentionPage({ searchParams }: PageProps) {
                     <td className="text-sun text-[11px] max-w-[300px] truncate">{row.needs_review_reason ?? "—"}</td>
                     <td className="text-ink-dim text-xs">{row.qbo_class ?? "—"}</td>
                     <td className="text-xs">
-                      {row.payment_method === "on_file" ? (
-                        <span className="text-cyan">On file</span>
-                      ) : row.payment_method === "invoice" ? (
-                        <span className="text-ink-mute">Invoice</span>
-                      ) : (
+                      {row.payment_method == null && row.preferred_payment_type == null ? (
                         <span className="text-ink-mute">—</span>
+                      ) : (
+                        <span className={paymentChannel(row) === "email" ? "text-ink-mute" : "text-cyan"}>
+                          {paymentChannelShortLabel(row)}
+                        </span>
                       )}
                     </td>
                     <td className="text-xs">

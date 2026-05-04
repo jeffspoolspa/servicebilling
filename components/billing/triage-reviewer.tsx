@@ -27,6 +27,11 @@ import type { TriageRow, LineItem, OpenCredit } from "@/lib/queries/dashboard"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
 import { useFreshResource } from "@/lib/hooks/use-fresh-resource"
 import { createSupabaseBrowser } from "@/lib/supabase/client"
+import {
+  isChargeChannel,
+  paymentChannel,
+  paymentChannelLabel,
+} from "@/lib/payment-channel"
 
 // Subset of TriageRow fields that the /api/qbo/refresh/invoice endpoint
 // can authoritatively refresh (balance, status, classification, etc.).
@@ -89,16 +94,25 @@ function extractInvoicePatch(inv: Record<string, unknown>): InvoicePatch {
  *
  * ARCHITECTURE
  *
- *   - Props: server-loaded snapshot of `needs_review` invoices with full WO
- *     context (TriageRow[]). This is stable across the session — the view
- *     doesn't refetch. Stale entries (invoice changed status elsewhere) are
- *     handled gracefully at action time via the mark_invoice_ready RPC's
- *     precondition check.
- *   - State: `cursor` index + per-invoice `edits` map + `actions` log.
- *   - Actions fire RPCs, advance the cursor on success, keep the card in
- *     place on failure with an error message inline.
- *   - Animations: `triage-card-enter` keyed on qbo_invoice_id for the swap,
- *     `triage-approve-flash` on the card before advancing after approve.
+ *   - Props: server-loaded snapshot of `needs_review` invoices (TriageRow[]).
+ *     The PROP is frozen across the session, but the visible queue is not:
+ *     `liveRows` is a derived filter over `rows` that drops cards whose
+ *     merged billing_status is no longer 'needs_review' (override fired,
+ *     external QBO edit, payment landed, etc.) AND cards the user already
+ *     acted on this session (approved / skipped / reprocessed).
+ *   - State: `cursor` indexes into liveRows. As liveRows shrinks, the card
+ *     at the cursor's index is naturally replaced by the next one — no
+ *     manual setCursor call required for advancement.
+ *   - Live data: `freshInvoices` (Realtime + per-card refresh hook) and
+ *     `freshCredits` (per-customer refresh hook) layer over the snapshot.
+ *     Their updates flow into liveRows automatically via the useMemo dep.
+ *   - Actions: approve / skip / reprocess just write into `outcomes` (and
+ *     possibly call an API). They do NOT manipulate the cursor — the
+ *     liveRows filter does. Calling advance() on top of a filter shrink
+ *     would skip a card.
+ *   - Animations: `triage-card-enter` keyed on qbo_invoice_id for the
+ *     swap, `triage-approve-flash` plays on the active card before its
+ *     outcome is written (which removes it from liveRows).
  *
  * KEYBOARD
  *   a / Enter  — approve (save + mark ready + advance)
@@ -146,7 +160,32 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
   const [freshInvoices, setFreshInvoices] = useState<Record<string, InvoicePatch>>({})
   const [freshCredits, setFreshCredits] = useState<Record<string, OpenCredit[]>>({})
 
-  const snapshot = rows[cursor]
+  // ─── Live queue ─────────────────────────────────────────────────────────
+  // Filter the frozen `rows` snapshot down to cards that still belong in
+  // needs_review THIS SESSION. A card drops out when:
+  //   - its merged billing_status is no longer 'needs_review' (override
+  //     fired, external QBO edit fixed the subtotal, payment landed, etc.)
+  //   - the user acted on it this session (approved / skipped / reprocessed)
+  //
+  // The cursor indexes into liveRows, not rows. As liveRows shrinks, the
+  // card at `cursor` naturally becomes the next one — no setCursor call
+  // needed. The "all done" screen falls out for free when liveRows is
+  // empty or cursor is past the end.
+  //
+  // Note `rows` (the original prop) is still used by the Realtime
+  // subscription's tracked Set — we want to receive updates for invoices
+  // even after they've left the visible queue, in case the user navigates
+  // back via a refresh / new session.
+  const liveRows = useMemo(() => {
+    return rows.filter((r) => {
+      const merged = { ...r, ...(freshInvoices[r.qbo_invoice_id] ?? {}) }
+      if (merged.billing_status !== "needs_review") return false
+      if (outcomes[r.qbo_invoice_id]) return false
+      return true
+    })
+  }, [rows, freshInvoices, outcomes])
+
+  const snapshot = liveRows[cursor]
   // Resolve the active card from snapshot + live overrides.
   const current: TriageRow | undefined = useMemo(() => {
     if (!snapshot) return undefined
@@ -297,25 +336,24 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
   //       enrichment_ok is true → billing_status flips to ready_to_process.
   //
   // That whole chain runs synchronously in Postgres before the API
-  // returns. The only delay between "override clicked" and "card
-  // disappears from triage" is the Supabase Realtime websocket
-  // round-trip (~500ms–1s), which is enough to feel laggy.
+  // returns. The only delay between "override clicked" and "card vanishes
+  // from the queue" is the Supabase Realtime websocket round-trip
+  // (~500ms–1s).
   //
-  // We mirror the trigger's logic locally so the auto-advance useEffect
-  // fires immediately. Realtime confirms a moment later (no visible
-  // change) or, if our local strip diverges from the server regex,
-  // corrects the row in place.
+  // We mirror the trigger's logic locally so the liveRows filter drops
+  // this card immediately instead of waiting for Realtime. Realtime
+  // confirms a moment later (no visible change) or, if our local strip
+  // diverges from the server regex, corrects the row in place.
   const onOverrodeCreditReview = useCallback(() => {
     if (!snapshot) return
     const cur = snapshot
     setFreshInvoices((prev) => {
       const live = { ...(prev[cur.qbo_invoice_id] ?? {}) }
       // Strip the deterministic credit_review reason from the existing
-      // string. Mirrors the regex in recheck_invoice_status (we keep the
-      // logic simple here — if it diverges from the server, Realtime will
-      // correct us within the round-trip).
+      // string. Mirrors the regex in recheck_invoice_status; if it
+      // diverges from the server, Realtime will correct us within ~1s.
       const prevReason = (live.needs_review_reason ?? cur.needs_review_reason ?? "") as string
-      let stripped = prevReason
+      const stripped = prevReason
         .replace(
           /credit_review \(\d+ unmatched credit\(s\), \$[\d,.]+ unapplied\)/g,
           "",
@@ -446,51 +484,22 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
     "memo_low_confidence",
   )
 
-  const advance = useCallback(() => {
-    setCursor((c) => Math.min(rows.length, c + 1))
-  }, [rows.length])
-
+  // Keyboard-only navigation. Actions (approve/skip/reprocess) don't call
+  // these — they set an outcome and let the liveRows filter naturally
+  // shrink the queue, sliding the next card into the cursor's position.
+  // Calling advance() on top of a filter shrink would skip a card.
   const retreat = useCallback(() => {
     setCursor((c) => Math.max(0, c - 1))
   }, [])
 
-  // Auto-advance when the active card has been resolved by the reactive
-  // system (recheck stripped all reasons → billing_status flipped to
-  // ready_to_process or beyond) WITHOUT the user explicitly approving.
-  // Examples that trigger this:
-  //   - User edits subtotal in QBO → webhook → recheck strips
-  //     subtotal_mismatch → billing_status='ready_to_process'
-  //   - Credit landed externally → trigger fan-out → recheck strips
-  //     credit_review → billing_status='ready_to_process'
-  //   - Override was applied via UI button → trigger fires → same
+  // Cursor clamp: if liveRows shrinks below the cursor while user is
+  // mid-session (e.g., they acted on the LAST card so the array now has
+  // length cursor), the cursor naturally points past the end → "all done"
+  // screen renders. No clamp needed for that case.
   //
-  // We mark the outcome as "approved" (it effectively self-approved)
-  // and flash + advance so the user sees the card disappear with
-  // visual feedback rather than being confused that nothing happened.
-  useEffect(() => {
-    if (!current || busy) return
-    if (outcomes[current.qbo_invoice_id]) return
-    const status = current.billing_status
-    if (status === "ready_to_process" || status === "processed") {
-      setOutcomes((prev) => ({
-        ...prev,
-        [current.qbo_invoice_id]: "approved",
-      }))
-      setFlash(true)
-      const t = setTimeout(() => {
-        setFlash(false)
-        advance()
-      }, 600)
-      return () => clearTimeout(t)
-    }
-  }, [
-    current?.qbo_invoice_id,
-    current?.billing_status,
-    busy,
-    outcomes,
-    advance,
-    current,
-  ])
+  // The case we DO need to handle: liveRows becomes non-empty after being
+  // empty, or the user navigates and lands on an out-of-bounds cursor.
+  // For now, the early-return checks below cover it.
 
   const saveEdits = useCallback(async (): Promise<boolean> => {
     if (!current || !isDirty) return true
@@ -536,27 +545,35 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
       )
       if (!resp.ok) throw new Error((await resp.text()).slice(0, 200))
 
-      // Flash the current card, then advance. 180ms keeps the rhythm fast.
-      // Do NOT call router.refresh() here — it would refetch the server rows
-      // prop underneath our cursor and skip the next card. The list is
-      // refreshed only on exit / finish.
-      setOutcomes((prev) => ({ ...prev, [current.qbo_invoice_id]: "approved" }))
+      // Flash the current card briefly, then mark the outcome — the
+      // liveRows filter drops this card on the same render that processes
+      // the outcome write, sliding the next card into view. We sequence
+      // flash BEFORE setOutcomes so the green pulse is visible on this
+      // card before it disappears.
+      //
+      // Do NOT call router.refresh() here — it would refetch the server
+      // rows prop underneath our cursor. The list is refreshed only on
+      // exit / finish.
       setFlash(true)
       setTimeout(() => {
         setFlash(false)
-        advance()
+        setOutcomes((prev) => ({
+          ...prev,
+          [current.qbo_invoice_id]: "approved",
+        }))
       }, 180)
     } catch (e) {
       setErr(e instanceof Error ? e.message : "approve failed")
       setBusy(null)
     }
-  }, [current, busy, edits, advance])
+  }, [current, busy, edits])
 
   const skip = useCallback(() => {
     if (!current || busy) return
+    // Setting outcome = skipped triggers the liveRows filter to drop this
+    // card. Cursor stays put; the card at the new index slides in.
     setOutcomes((prev) => ({ ...prev, [current.qbo_invoice_id]: "skipped" }))
-    advance()
-  }, [current, busy, advance])
+  }, [current, busy])
 
   const reprocess = useCallback(async () => {
     if (!current || busy) return
@@ -570,13 +587,12 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
       })
       if (!resp.ok) throw new Error((await resp.text()).slice(0, 200))
       setOutcomes((prev) => ({ ...prev, [current.qbo_invoice_id]: "reprocessed" }))
-      advance()
       // Do NOT router.refresh() — same reason as approve(). Refresh on exit.
     } catch (e) {
       setErr(e instanceof Error ? e.message : "reprocess failed")
       setBusy(null)
     }
-  }, [current, busy, saveEdits, advance])
+  }, [current, busy, saveEdits])
 
   const openDetail = useCallback(() => {
     if (!current) return
@@ -637,6 +653,8 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
   }, [approve, skip, reprocess, openDetail, retreat, exit])
 
   // ─── Empty / done states ──────────────────────────────────────────────────
+  // "Nothing in needs review" — original prop was empty (server had no
+  // needs_review invoices when the page rendered).
   if (rows.length === 0) {
     return (
       <div className="px-7 py-16 flex flex-col items-center text-center gap-3">
@@ -649,7 +667,9 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
     )
   }
 
-  if (cursor >= rows.length) {
+  // "Done with this session" — original list had work to do, but liveRows
+  // is now empty (every card resolved or got skipped). cursor is past end.
+  if (cursor >= liveRows.length || liveRows.length === 0) {
     return (
       <div className="px-7 py-16 flex flex-col items-center text-center gap-3">
         <div className="w-12 h-12 rounded-full bg-grass/15 border border-grass/30 grid place-items-center">
@@ -673,11 +693,14 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
     )
   }
 
-  // At this point `cursor < rows.length` is guaranteed by the early
-  // returns above, so `current` is defined.
+  // At this point `cursor < liveRows.length` is guaranteed, so `current`
+  // is defined.
   if (!current) return null
-  const remaining = rows.length - cursor
-  const progressPct = rows.length > 0 ? (cursor / rows.length) * 100 : 0
+  // Counter math is now over the LIVE queue size, which shrinks as the
+  // user works through it. "X of Y" reflects the current queue, not the
+  // original snapshot — Y goes down as cards drop out.
+  const remaining = liveRows.length - cursor
+  const progressPct = liveRows.length > 0 ? (cursor / liveRows.length) * 100 : 0
 
   return (
     <div className="px-7 py-6 max-w-3xl mx-auto">
@@ -689,7 +712,7 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
           </div>
           <div className="text-ink mt-0.5">
             <span className="font-medium">
-              {cursor + 1} of {rows.length}
+              {cursor + 1} of {liveRows.length}
             </span>
             <span className="text-ink-mute text-[12px] ml-2">
               {remaining - 1} remaining
@@ -1054,9 +1077,9 @@ function ContextAndLineItems({
           label={`WO ${formatCurrency(Number(row.sub_total ?? 0))}`}
         />
         <MetaItem
-          icon={row.payment_method === "on_file" ? CreditCard : Mail}
-          label={row.payment_method === "on_file" ? "Card on file" : "Email only"}
-          accent={row.payment_method === "on_file"}
+          icon={paymentChannel(row) === "email" ? Mail : CreditCard}
+          label={paymentChannelLabel(row)}
+          accent={isChargeChannel(row)}
         />
       </div>
 

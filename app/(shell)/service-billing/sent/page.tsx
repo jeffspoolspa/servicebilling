@@ -6,6 +6,7 @@ import { SearchBar } from "@/components/ui/search-bar"
 import Link from "next/link"
 import { getBillingQueue, DEFAULT_SORT } from "@/lib/queries/dashboard"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
+import { paymentChannel, paymentChannelShortLabel } from "@/lib/payment-channel"
 
 export const dynamic = "force-dynamic"
 
@@ -69,11 +70,9 @@ export default async function SentPage({ searchParams }: PageProps) {
                     <td className="text-ink truncate max-w-[200px]">{row.customer ?? "—"}</td>
                     <td className="text-ink-dim text-xs">{row.qbo_class ?? "—"}</td>
                     <td className="text-xs">
-                      {row.payment_method === "on_file" ? (
-                        <span className="text-cyan">On file</span>
-                      ) : (
-                        <span className="text-ink-mute">Invoice</span>
-                      )}
+                      <span className={paymentChannel(row) === "email" ? "text-ink-mute" : "text-cyan"}>
+                        {paymentChannelShortLabel(row)}
+                      </span>
                     </td>
                     <td className="text-xs num">
                       {Number(row.qbo_balance ?? 0) === 0 ? (

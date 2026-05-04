@@ -9,6 +9,7 @@ import type {
   WorkOrderDetail,
 } from "@/lib/queries/dashboard"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
+import { paymentChannelLabel } from "@/lib/payment-channel"
 import { ClassificationEditor } from "@/components/work-orders/classification-editor"
 import { CreditReviewCard } from "@/components/work-orders/credit-review-card"
 import { AppliedPaymentsCard } from "./applied-payments-card"
@@ -238,11 +239,9 @@ function LockedClassification({ invoice }: { invoice: InvoiceDetail }) {
         <Field
           label="Payment method"
           value={
-            invoice.payment_method === "on_file"
-              ? "On file"
-              : invoice.payment_method === "invoice"
-                ? "Invoice (email)"
-                : "—"
+            invoice.payment_method == null && invoice.preferred_payment_type == null
+              ? "—"
+              : paymentChannelLabel(invoice)
           }
         />
         <Field label="Memo" value={invoice.memo ?? "—"} />

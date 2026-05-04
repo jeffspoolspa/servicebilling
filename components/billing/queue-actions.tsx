@@ -7,6 +7,11 @@ import { SortableHeader } from "@/components/ui/sortable-header"
 import { CreditCard, Eye, RefreshCw, X } from "lucide-react"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
 import { BatchProgressModal, type BatchInvoiceSummary } from "./batch-progress-modal"
+import {
+  isChargeChannel,
+  paymentChannel,
+  paymentChannelShortLabel,
+} from "@/lib/payment-channel"
 
 /**
  * Bulk-select + Process Selected / Dry-run Selected for the billing queue.
@@ -28,12 +33,18 @@ export interface QueueRow {
   type: string | null
   qbo_class: string | null
   payment_method: string | null
+  preferred_payment_type: string | null
   assigned_to: string | null
   office_name: string | null
   qbo_email_status: string | null
   qbo_balance: number | string | null
   completed: string | null
   total_due: number | string | null
+  /** From v_billing_queue's LEFT JOIN to customer_payment_methods on
+   *  target_payment_method_id. NULL when channel='email' or no PM. */
+  target_pm_type: string | null
+  target_pm_brand: string | null
+  target_pm_last_four: string | null
 }
 
 interface Props {
@@ -105,12 +116,18 @@ export function QueueActions({
     (acc, r) => acc + Number(r.qbo_balance ?? 0),
     0,
   )
-  const selectedOnFile = selectedRows.filter((r) => r.payment_method === "on_file").length
+  const selectedOnFile = selectedRows.filter(isChargeChannel).length
   const selectedInvoiceOnly = selectedRows.length - selectedOnFile
 
   async function fire(dry: boolean) {
     setBusy(dry ? "dry" : "live")
     setErrorMsg(null)
+    // Capture trigger time BEFORE the API call so we don't include any
+    // attempt rows the script might create between the request firing and
+    // the modal opening. The modal filters processing_attempts.attempted_at
+    // >= this value so historical declines from prior runs don't
+    // immediately show as "Card declined" before the new run even starts.
+    const triggeredAt = Date.now()
     try {
       const ids = selectedRows
         .map((r) => r.qbo_invoice_id)
@@ -146,7 +163,7 @@ export function QueueActions({
         open: true,
         invoices: modalInvoices,
         dryRun: dry,
-        triggeredAt: Date.now(),
+        triggeredAt,
       })
       setSelected(new Set())
     } catch (e) {
@@ -238,6 +255,7 @@ export function QueueActions({
               <HeaderCell label="Customer" column="customer" sortable={sortable} sort={sort} dir={dir} preserve={preserve} basePath={basePath} defaultDir="asc" />
               <HeaderCell label="Class" column="qbo_class" sortable={sortable} sort={sort} dir={dir} preserve={preserve} basePath={basePath} defaultDir="asc" />
               <HeaderCell label="Method" column="payment_method" sortable={sortable} sort={sort} dir={dir} preserve={preserve} basePath={basePath} defaultDir="asc" />
+              <HeaderCell label="On file" column="target_pm_last_four" sortable={sortable} sort={sort} dir={dir} preserve={preserve} basePath={basePath} />
               <HeaderCell label="Tech" column="assigned_to" sortable={sortable} sort={sort} dir={dir} preserve={preserve} basePath={basePath} defaultDir="asc" />
               <HeaderCell label="Sent" column="qbo_email_status" sortable={sortable} sort={sort} dir={dir} preserve={preserve} basePath={basePath} defaultDir="asc" />
               <HeaderCell label="Balance" column="qbo_balance" sortable={sortable} sort={sort} dir={dir} preserve={preserve} basePath={basePath} className="num" />
@@ -280,10 +298,21 @@ export function QueueActions({
                   <td className="text-ink truncate max-w-[200px]">{row.customer ?? "—"}</td>
                   <td className="text-ink-dim text-xs">{row.qbo_class ?? "—"}</td>
                   <td className="text-xs">
-                    {row.payment_method === "on_file" ? (
-                      <span className="text-cyan">On file</span>
+                    <span className={paymentChannel(row) === "email" ? "text-ink-mute" : "text-cyan"}>
+                      {paymentChannelShortLabel(row)}
+                    </span>
+                  </td>
+                  <td className="text-xs font-mono text-ink-dim">
+                    {row.target_pm_last_four ? (
+                      <>
+                        <span className="text-ink-mute">
+                          {row.target_pm_brand ??
+                            (row.target_pm_type === "ach" ? "ACH" : "Card")}
+                        </span>{" "}
+                        {row.target_pm_last_four}
+                      </>
                     ) : (
-                      <span className="text-ink-mute">Invoice</span>
+                      <span className="text-ink-mute">—</span>
                     )}
                   </td>
                   <td className="text-ink-mute text-xs font-mono">

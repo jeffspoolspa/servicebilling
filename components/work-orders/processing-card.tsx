@@ -2,6 +2,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import type { ProcessAttempt } from "@/lib/queries/dashboard"
 import { formatCurrency } from "@/lib/utils/format"
+import { paymentChannel } from "@/lib/payment-channel"
 
 /**
  * Processing card on the WO detail page.
@@ -29,7 +30,14 @@ function statusTone(
     case "pending":
     case "charge_uncertain":
       return "cyan"
+    case "charge_uncertain_expired":
+      // Reconciler verified no charge landed AND idempotency window passed.
+      // Process_invoice will create a fresh attempt with a new key on next run.
+      return "sun"
     case "payment_orphan":
+      return "coral"
+    case "needs_reconcile_review":
+      // Reconciler couldn't determine state — human investigation required.
       return "coral"
     case "charge_declined":
     case "email_failed":
@@ -97,7 +105,7 @@ export function ProcessingCard({
                     hint="Intuit Payments reference"
                   />
                 </>
-              ) : attempt.payment_method === "invoice" ? (
+              ) : paymentChannel(attempt) === "email" ? (
                 <Row
                   label="Charge"
                   value="n/a — invoice email only"

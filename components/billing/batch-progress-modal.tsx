@@ -15,6 +15,10 @@ import {
 import { createSupabaseBrowser } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { formatCurrency } from "@/lib/utils/format"
+import {
+  paymentChannelAction,
+  paymentChannelPastTense,
+} from "@/lib/payment-channel"
 
 /**
  * Live batch-processing progress modal.
@@ -112,9 +116,19 @@ export function BatchProgressModal({
     const invoiceIds = invoices.map((i) => i.qbo_invoice_id)
     let cancelled = false
 
+    // Filter to attempts created BY THIS RUN. Without this, an invoice
+    // with a charge_declined attempt from a prior batch would show "Card
+    // declined" the moment the modal opens — before this run has touched
+    // it. We use triggeredAt minus a small grace (5s) to handle clock
+    // skew between client and DB and to catch the rare case where the
+    // script created an attempt between the API call and our modal open.
+    const since = triggeredAt
+      ? new Date(triggeredAt - 5_000).toISOString()
+      : null
+
     async function refresh() {
       if (cancelled) return
-      const { data } = await sb
+      let q = sb
         .from("billing_processing_attempts")
         .select(
           "qbo_invoice_id, status, charge_id, qbo_payment_id, email_sent, error_message, attempted_at, dry_run, stage",
@@ -123,6 +137,8 @@ export function BatchProgressModal({
         .eq("stage", "process")
         .eq("dry_run", dryRun)
         .order("attempted_at", { ascending: false })
+      if (since) q = q.gte("attempted_at", since)
+      const { data } = await q
       if (cancelled || !data) return
 
       // Take only the most recent attempt per invoice (query is desc-ordered)
@@ -175,6 +191,10 @@ export function BatchProgressModal({
           if (!invoiceIds.includes(qid)) return
           if (row.stage !== "process") return
           if (row.dry_run !== dryRun) return
+          // Skip events on attempt rows older than our trigger time —
+          // those are historical, not from this run.
+          if (since && typeof row.attempted_at === "string"
+              && row.attempted_at < since) return
           refresh()
         },
       )
@@ -375,7 +395,7 @@ function Row({
 
   const popClass = justPopped ? "row-complete-pop" : ""
 
-  const methodHint = invoice.payment_method === "on_file" ? "Charge card" : "Send email"
+  const methodHint = paymentChannelAction(invoice)
 
   return (
     <div className={`${base} ${styles[status]} ${popClass}`}>
@@ -402,7 +422,7 @@ function Row({
       <div className="flex-shrink-0 text-right">
         {status === "done" ? (
           <span className="text-[12px] text-grass num">
-            {invoice.payment_method === "on_file" ? "charged" : "sent"}
+            {paymentChannelPastTense(invoice)}
           </span>
         ) : (
           <span className="text-[12px] text-ink-dim num">

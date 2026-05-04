@@ -20,6 +20,21 @@ import { formatDate } from "@/lib/utils/format"
  *   2. Else the most-recently-created default wins (matches QBO intent in
  *      98%+ of cases observed in production data).
  */
+/** PM-card subset of preferred_payment_type — only the values that can name
+ *  a specific payment instrument. 'email' isn't surfaced here because it
+ *  doesn't pick a card/ACH; that case is handled by the empty state below. */
+type PmCardChannel = "credit_card" | "ach"
+
+/** Normalize legacy 'card' → 'credit_card' so this component can safely
+ *  accept both vocab eras during the rollout. */
+function normalizeChannel(
+  v: string | null | undefined,
+): PmCardChannel | null {
+  if (v === "credit_card" || v === "card") return "credit_card"
+  if (v === "ach") return "ach"
+  return null
+}
+
 export function PaymentMethodsCard({
   qboInvoiceId,
   methods,
@@ -28,9 +43,12 @@ export function PaymentMethodsCard({
 }: {
   qboInvoiceId: string
   methods: PaymentMethod[]
-  preferredPaymentType: "card" | "ach" | null
+  /** Accepts the new vocab ('email' | 'ach' | 'credit_card') from invoices.preferred_payment_type
+   *  AND legacy ('card' | 'ach') for backwards compat. Normalized internally. */
+  preferredPaymentType: "email" | "ach" | "credit_card" | "card" | null
   disabled?: boolean
 }) {
+  const normalizedPreferred = normalizeChannel(preferredPaymentType)
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -48,14 +66,15 @@ export function PaymentMethodsCard({
 
   // Determine the selected one
   const selected = (() => {
-    if (preferredPaymentType) {
-      const match = defaults.find((m) => m.type === preferredPaymentType)
+    if (normalizedPreferred) {
+      // cpm.type uses 'credit_card' | 'ach' post-rename; match exact.
+      const match = defaults.find((m) => normalizeChannel(m.type) === normalizedPreferred)
       if (match) return match
     }
     return defaults[0] ?? null
   })()
 
-  async function switchTo(targetType: "card" | "ach" | null) {
+  async function switchTo(targetType: PmCardChannel | null) {
     setError(null)
     const res = await fetch(
       `/api/billing/invoices/${qboInvoiceId}/preferred-payment-type`,
@@ -100,14 +119,17 @@ export function PaymentMethodsCard({
           const isSelected = selected?.id === m.id
           const canSwitchTo = !isSelected && defaults.length > 1
           const isUserOverride =
-            isSelected && preferredPaymentType === m.type
+            isSelected && normalizedPreferred === normalizeChannel(m.type)
 
           return (
             <button
               key={m.id}
               type="button"
               disabled={!canSwitchTo || disabled || pending}
-              onClick={() => switchTo(m.type as "card" | "ach")}
+              onClick={() => {
+                const ch = normalizeChannel(m.type)
+                if (ch) switchTo(ch)
+              }}
               className={
                 "px-5 py-3 border-b border-line-soft last:border-b-0 text-left " +
                 "flex items-center justify-between text-[12px] transition-colors " +
@@ -119,7 +141,7 @@ export function PaymentMethodsCard({
               }
               title={
                 canSwitchTo
-                  ? `Switch to ${m.type === "card" ? "card" : "ACH"}`
+                  ? `Switch to ${normalizeChannel(m.type) === "credit_card" ? "card" : "ACH"}`
                   : isSelected
                     ? "This is the method that will be charged"
                     : undefined
@@ -129,16 +151,16 @@ export function PaymentMethodsCard({
                 <span
                   className={
                     "inline-flex shrink-0 w-8 h-8 rounded-full items-center justify-center text-[10px] uppercase tracking-wider font-medium " +
-                    (m.type === "card"
+                    (normalizeChannel(m.type) === "credit_card"
                       ? "bg-cyan/10 text-cyan"
                       : "bg-teal/10 text-teal")
                   }
                 >
-                  {m.type === "card" ? "Card" : "ACH"}
+                  {normalizeChannel(m.type) === "credit_card" ? "Card" : "ACH"}
                 </span>
                 <div className="min-w-0">
                   <div className="text-ink truncate">
-                    {m.card_brand ?? (m.type === "card" ? "Card" : "Bank")}
+                    {m.card_brand ?? (normalizeChannel(m.type) === "credit_card" ? "Card" : "Bank")}
                     <span className="text-ink-mute"> · </span>
                     <span className="font-mono">
                       ···{m.last_four ?? "—"}
@@ -172,7 +194,7 @@ export function PaymentMethodsCard({
           {error}
         </CardBody>
       )}
-      {preferredPaymentType && defaults.length > 1 && (
+      {normalizedPreferred && defaults.length > 1 && (
         <CardBody className="border-t border-line-soft text-[11px] text-ink-mute flex items-center justify-between">
           <span>Using override — QBO&apos;s default is the other one.</span>
           <button
