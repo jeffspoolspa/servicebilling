@@ -59,7 +59,21 @@ export interface BatchInvoiceSummary {
   wo_number?: string | null
 }
 
-type RowStatus = "queued" | "active" | "done" | "failed" | "uncertain"
+// Possible statuses per row in the modal:
+//   queued    — no attempt row yet (script hasn't gotten here, or no prior history)
+//   active    — attempt row exists with mid-flight status (pending, charge_succeeded)
+//   done      — succeeded
+//   failed    — terminal failure from THIS run (charge_declined, payment_orphan, etc.)
+//   uncertain — charge_uncertain (reconciler will resolve)
+//   blocked   — script halted on this invoice via pre-flight check; latest attempt
+//               is from a prior run with halt status. No new attempt was created.
+type RowStatus =
+  | "queued"
+  | "active"
+  | "done"
+  | "failed"
+  | "uncertain"
+  | "blocked"
 
 interface AttemptSnapshot {
   status: string
@@ -92,6 +106,13 @@ export function BatchProgressModal({
   const [snapshots, setSnapshots] = useState<Map<string, AttemptSnapshot>>(
     new Map(),
   )
+  // Stale (pre-triggeredAt) snapshots — used to display "blocked" for
+  // invoices that the script halted via pre-flight check without creating
+  // a new attempt row. Without this fallback, those invoices show "queued"
+  // forever even though they'll never be processed in this run.
+  const [priorSnapshots, setPriorSnapshots] = useState<Map<string, AttemptSnapshot>>(
+    new Map(),
+  )
   // Track rows that just transitioned into `done` so we can play the one-shot
   // "pop" animation without re-triggering on every re-render.
   const [justDone, setJustDone] = useState<Set<string>>(new Set())
@@ -104,6 +125,7 @@ export function BatchProgressModal({
   useEffect(() => {
     if (open) {
       setSnapshots(new Map())
+      setPriorSnapshots(new Map())
       setJustDone(new Set())
       doneSeenRef.current = new Set()
     }
@@ -125,6 +147,34 @@ export function BatchProgressModal({
     const since = triggeredAt
       ? new Date(triggeredAt - 5_000).toISOString()
       : null
+
+    // Seed priorSnapshots: latest attempt PER invoice from BEFORE
+    // triggeredAt. Used to display "blocked" status for invoices the
+    // script will halt on via pre-flight check (charge_declined,
+    // payment_orphan, etc.) without creating a new attempt row.
+    // Stale by definition — load once per batch open, no re-fetch needed.
+    async function seedPriorSnapshots() {
+      if (cancelled || !since) return
+      const { data } = await sb
+        .from("billing_processing_attempts")
+        .select(
+          "qbo_invoice_id, status, charge_id, qbo_payment_id, email_sent, error_message, attempted_at, dry_run, stage",
+        )
+        .in("qbo_invoice_id", invoiceIds)
+        .eq("stage", "process")
+        .eq("dry_run", false)
+        .lt("attempted_at", since)
+        .order("attempted_at", { ascending: false })
+      if (cancelled || !data) return
+      const byId = new Map<string, AttemptSnapshot>()
+      for (const row of data as (AttemptSnapshot & { qbo_invoice_id: string })[]) {
+        if (!byId.has(row.qbo_invoice_id)) {
+          byId.set(row.qbo_invoice_id, row)
+        }
+      }
+      setPriorSnapshots(byId)
+    }
+    seedPriorSnapshots()
 
     async function refresh() {
       if (cancelled) return
@@ -210,13 +260,29 @@ export function BatchProgressModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, triggeredAt, dryRun])
 
-  // Derive per-row status from its attempt snapshot
+  // Derive per-row status from its attempt snapshot. If no NEW attempt
+  // exists for this invoice, fall back to the prior snapshot — if it's
+  // a halt state, show as "blocked" (script halted on pre-flight without
+  // creating a new attempt). Otherwise show as queued.
   const rowStatus = useMemo(() => {
     const m = new Map<string, RowStatus>()
     for (const inv of invoices) {
       const snap = snapshots.get(inv.qbo_invoice_id)
       if (!snap) {
-        m.set(inv.qbo_invoice_id, "queued")
+        // No new attempt for this run. Check if a prior attempt has a
+        // halt status — if so, the script's pre-flight will halt this
+        // invoice and we want to show that immediately rather than
+        // leave it stuck at "queued" forever.
+        const prior = priorSnapshots.get(inv.qbo_invoice_id)
+        if (prior && (
+          prior.status === "charge_declined"
+          || prior.status === "payment_orphan"
+          || prior.status === "needs_reconcile_review"
+        )) {
+          m.set(inv.qbo_invoice_id, "blocked")
+        } else {
+          m.set(inv.qbo_invoice_id, "queued")
+        }
         continue
       }
       switch (snap.status) {
@@ -239,10 +305,10 @@ export function BatchProgressModal({
       }
     }
     return m
-  }, [invoices, snapshots])
+  }, [invoices, snapshots, priorSnapshots])
 
   const counts = useMemo(() => {
-    const c = { queued: 0, active: 0, done: 0, failed: 0, uncertain: 0 }
+    const c = { queued: 0, active: 0, done: 0, failed: 0, uncertain: 0, blocked: 0 }
     rowStatus.forEach((s) => {
       c[s]++
     })
@@ -250,7 +316,8 @@ export function BatchProgressModal({
   }, [rowStatus])
 
   const total = invoices.length
-  const completed = counts.done + counts.failed + counts.uncertain
+  // Blocked counts toward "completed" — the script is done with these (won't try them).
+  const completed = counts.done + counts.failed + counts.uncertain + counts.blocked
   const progressPct = total > 0 ? (completed / total) * 100 : 0
   const allDone = completed === total
   const totalAmount = invoices.reduce((a, i) => a + (i.balance || 0), 0)
@@ -327,13 +394,19 @@ export function BatchProgressModal({
         <div className="overflow-y-auto flex-1 p-3 space-y-1.5">
           {invoices.map((inv) => {
             const st = rowStatus.get(inv.qbo_invoice_id) ?? "queued"
-            const snap = snapshots.get(inv.qbo_invoice_id)
+            // For blocked rows, the relevant attempt is the PRIOR one
+            // (which is what triggered the halt). For everything else,
+            // use the new snapshot from this run.
+            const snap =
+              st === "blocked"
+                ? priorSnapshots.get(inv.qbo_invoice_id) ?? null
+                : snapshots.get(inv.qbo_invoice_id) ?? null
             return (
               <Row
                 key={inv.qbo_invoice_id}
                 invoice={inv}
                 status={st}
-                snapshot={snap ?? null}
+                snapshot={snap}
                 justPopped={justDone.has(inv.qbo_invoice_id)}
               />
             )
@@ -391,6 +464,7 @@ function Row({
     done: "border-grass/30 bg-grass/[0.04]",
     failed: "border-coral/40 bg-coral/[0.06]",
     uncertain: "border-sun/40 bg-sun/[0.06]",
+    blocked: "border-sun/40 bg-sun/[0.05]",
   }
 
   const popClass = justPopped ? "row-complete-pop" : ""
@@ -451,6 +525,8 @@ function StatusIcon({
         return <X className="w-3.5 h-3.5 text-coral" strokeWidth={3} />
       case "uncertain":
         return <AlertTriangle className="w-3.5 h-3.5 text-sun" strokeWidth={2.5} />
+      case "blocked":
+        return <AlertTriangle className="w-3.5 h-3.5 text-sun" strokeWidth={2.5} />
       case "active":
         return <Loader2 className="w-3.5 h-3.5 text-cyan animate-spin" strokeWidth={2} />
       case "queued":
@@ -471,6 +547,7 @@ function StatusIcon({
     done: "bg-grass/15 border border-grass/40",
     failed: "bg-coral/15 border border-coral/40",
     uncertain: "bg-sun/15 border border-sun/40",
+    blocked: "bg-sun/10 border border-sun/30",
   }
 
   return (
@@ -518,6 +595,20 @@ function StatusText({
   }
   if (status === "uncertain") {
     return <span className="text-sun">Uncertain — reconciliation will resolve</span>
+  }
+  if (status === "blocked") {
+    // Pre-flight halt — the script won't try this invoice again because
+    // a prior attempt is in a terminal halt state (charge_declined,
+    // payment_orphan, etc.) and the new attempt would do the same thing.
+    const reason =
+      snapshot?.status === "charge_declined"
+        ? "Blocked — prior attempt declined this same PM"
+        : snapshot?.status === "payment_orphan"
+          ? "Blocked — prior attempt orphaned (needs human)"
+          : snapshot?.status === "needs_reconcile_review"
+            ? "Blocked — needs reconciliation review"
+            : "Blocked — prior attempt requires resolution"
+    return <span className="text-sun">{reason}</span>
   }
   if (status === "failed") {
     const reason =
