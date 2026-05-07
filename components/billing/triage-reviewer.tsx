@@ -32,6 +32,7 @@ import {
   paymentChannel,
   paymentChannelLabel,
 } from "@/lib/payment-channel"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 // Subset of TriageRow fields that the /api/qbo/refresh/invoice endpoint
 // can authoritatively refresh (balance, status, classification, etc.).
@@ -138,6 +139,7 @@ type RowOutcome = "approved" | "skipped" | "reprocessed" | "errored"
 const QBO_CLASS_OPTIONS = ["Service", "Delivery", "Maintenance", "Renovation"] as const
 
 export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
+  const _canWriteService = useCanWrite("service")
   const router = useRouter()
   const [cursor, setCursor] = useState(0)
   const [edits, setEdits] = useState<Record<string, Edits>>({})
@@ -702,6 +704,8 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
   const remaining = liveRows.length - cursor
   const progressPct = liveRows.length > 0 ? (cursor / liveRows.length) * 100 : 0
 
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
   return (
     <div className="px-7 py-6 max-w-3xl mx-auto">
       {/* Header: progress + counts + exit */}

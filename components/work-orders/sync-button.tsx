@@ -4,6 +4,7 @@ import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { CloudDownload } from "lucide-react"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Manual per-WO sync from QBO.
@@ -17,6 +18,7 @@ import { CloudDownload } from "lucide-react"
  * want to wait for the next 4h pull cycle.
  */
 export function SyncButton({ woNumber }: { woNumber: string }) {
+  const _canWriteService = useCanWrite("service")
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [, startTransition] = useTransition()
@@ -38,6 +40,8 @@ export function SyncButton({ woNumber }: { woNumber: string }) {
     }
   }
 
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
   return (
     <div className="flex items-center gap-2">
       <Button size="sm" variant="default" onClick={onClick} disabled={loading}>

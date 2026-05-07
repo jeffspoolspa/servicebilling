@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { triggerScript } from "@/lib/windmill"
+import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/billing/sync-all
@@ -11,6 +12,8 @@ import { triggerScript } from "@/lib/windmill"
  * Manual trigger for the same job that runs every 4h on cron.
  */
 export async function POST() {
+  const guard = await guardApi("service", { write: true })
+  if (guard instanceof NextResponse) return guard
   const { jobId } = await triggerScript("f/service_billing/pull_qbo_invoices", {})
   return NextResponse.json({ jobId, status: "triggered" })
 }

@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { RefreshCw } from "lucide-react"
 import { ProgressModal } from "./progress-modal"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Triggers f/service_billing/pre_process_invoice for the given invoice and
@@ -11,6 +12,7 @@ import { ProgressModal } from "./progress-modal"
  * Supabase Realtime and animates through each pre-process stage.
  */
 export function PreProcessButton({ qboInvoiceId }: { qboInvoiceId: string }) {
+  const _canWriteService = useCanWrite("service")
   const [modalOpen, setModalOpen] = useState(false)
   const [triggeredAt, setTriggeredAt] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
@@ -40,6 +42,8 @@ export function PreProcessButton({ qboInvoiceId }: { qboInvoiceId: string }) {
     }
   }
 
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
   return (
     <>
       <div className="flex items-center gap-2">

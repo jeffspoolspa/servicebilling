@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { createAnon } from "@/lib/supabase/anon"
+import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/billing/invoices/[id]/mark-ready
@@ -12,6 +13,8 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const guard = await guardApi("service", { write: true })
+  if (guard instanceof NextResponse) return guard
   const { id } = await params
   const sb = createAnon("public")
   const { data, error } = await sb.rpc("mark_invoice_ready", {

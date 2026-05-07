@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { createAnon } from "@/lib/supabase/anon"
+import { guardApi } from "@/lib/auth/api"
 
 interface RouteContext {
   params: Promise<{ wo_number: string }>
@@ -13,6 +14,8 @@ interface RouteContext {
  *   Clear the override — billable will re-derive from schedule_status.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
+  const guard = await guardApi("service", { write: true })
+  if (guard instanceof NextResponse) return guard
   const { wo_number } = await context.params
   const body = await request.json().catch(() => ({}))
   const override = body?.override
@@ -33,6 +36,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
 }
 
 export async function DELETE(_request: NextRequest, context: RouteContext) {
+  const guard = await guardApi("service", { write: true })
+  if (guard instanceof NextResponse) return guard
   const { wo_number } = await context.params
   const sb = createAnon("public")
   const { data, error } = await sb.rpc("clear_wo_billable_override", { p_wo_number: wo_number })

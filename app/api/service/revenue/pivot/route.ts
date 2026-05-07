@@ -4,6 +4,7 @@ import {
   type Dimension,
   type Measure,
 } from "@/lib/queries/revenue"
+import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/service/revenue/pivot
@@ -15,6 +16,8 @@ import {
  * directly from the server component.
  */
 export async function POST(req: NextRequest) {
+  const guard = await guardApi("service")
+  if (guard instanceof NextResponse) return guard
   let body: {
     dimension?: Dimension
     measure?: Measure

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { getMonthlyBonuses } from "@/lib/queries/bonuses"
+import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/service/bonuses
@@ -10,6 +11,8 @@ import { getMonthlyBonuses } from "@/lib/queries/bonuses"
  * changes the month picker.
  */
 export async function POST(req: NextRequest) {
+  const guard = await guardApi("service")
+  if (guard instanceof NextResponse) return guard
   let body: { month?: string } = {}
   try {
     body = await req.json()

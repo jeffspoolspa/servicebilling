@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react"
 import { Check } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Inline bonus-inclusion toggle — tiny checkbox that flips
@@ -33,6 +34,7 @@ export function BonusToggle({
   qboClass: string | null
   size?: "sm" | "md"
 }) {
+  const _canWriteService = useCanWrite("service")
   const [included, setIncluded] = useState(initialIncluded)
   const [override, setOverride] = useState(initialOverride)
   const [pending, startTransition] = useTransition()
@@ -81,6 +83,8 @@ export function BonusToggle({
       ? `Override: ${included ? "included" : "excluded"} · ${defaultLabel}`
       : defaultLabel
 
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
   return (
     <button
       type="button"

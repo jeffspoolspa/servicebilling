@@ -2,7 +2,7 @@
 
 import { z } from "zod"
 import { revalidatePath } from "next/cache"
-import { requireRole } from "@/lib/auth/require-role"
+import { requireModuleWrite } from "@/lib/auth/access"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { createSupabaseServer } from "@/lib/supabase/server"
 import { isTechUsername, usernameToSyntheticEmail, MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
@@ -19,7 +19,7 @@ export async function createTechUser(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  await requireRole("service-billing/admin")
+  await requireModuleWrite("admin")
 
   const parsed = createSchema.safeParse({
     employee_id: formData.get("employee_id"),
@@ -81,7 +81,7 @@ export async function resetTechPassword(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  await requireRole("service-billing/admin")
+  await requireModuleWrite("admin")
 
   const parsed = resetSchema.safeParse({
     employee_id: formData.get("employee_id"),
@@ -113,7 +113,7 @@ export async function deactivateTechUser(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  await requireRole("service-billing/admin")
+  await requireModuleWrite("admin")
 
   const parsed = deactivateSchema.safeParse({
     employee_id: formData.get("employee_id"),

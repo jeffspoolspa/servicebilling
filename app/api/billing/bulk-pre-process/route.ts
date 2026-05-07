@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { triggerScript } from "@/lib/windmill"
+import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/billing/bulk-pre-process
@@ -20,6 +21,8 @@ import { triggerScript } from "@/lib/windmill"
  * first.
  */
 export async function POST(request: NextRequest) {
+  const guard = await guardApi("service", { write: true })
+  if (guard instanceof NextResponse) return guard
   let body: { qbo_invoice_ids?: unknown; force?: boolean } = {}
   try {
     body = await request.json()

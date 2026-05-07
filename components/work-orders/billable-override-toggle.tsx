@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Tri-state billable override on a WO.
@@ -26,6 +27,7 @@ export function BillableOverrideToggle({
   override,
   effective,
 }: BillableOverrideToggleProps) {
+  const _canWriteService = useCanWrite("service")
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [, startTransition] = useTransition()
@@ -55,6 +57,8 @@ export function BillableOverrideToggle({
   const overrideLabel =
     override === true ? "forced billable" : override === false ? "forced non-billable" : "auto"
 
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">

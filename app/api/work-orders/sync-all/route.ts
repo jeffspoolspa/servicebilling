@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { triggerFlow } from "@/lib/windmill"
+import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/work-orders/sync-all
@@ -12,6 +13,8 @@ import { triggerFlow } from "@/lib/windmill"
  * which hits /jobs/run/f/{path} instead of /jobs/run/p/{path}.
  */
 export async function POST() {
+  const guard = await guardApi("service", { write: true })
+  if (guard instanceof NextResponse) return guard
   const { jobId } = await triggerFlow("f/ION/work_orders", {})
   return NextResponse.json({ jobId, status: "triggered" })
 }

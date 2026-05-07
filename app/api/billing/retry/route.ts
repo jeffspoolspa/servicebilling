@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { createAnon } from "@/lib/supabase/anon"
 import { triggerScript } from "@/lib/windmill"
+import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/billing/retry
@@ -13,6 +14,8 @@ import { triggerScript } from "@/lib/windmill"
  * directly with qbo_invoice_id (saves a lookup).
  */
 export async function POST(request: NextRequest) {
+  const guard = await guardApi("service", { write: true })
+  if (guard instanceof NextResponse) return guard
   const body = await request.json()
   const { wo_number } = body
 

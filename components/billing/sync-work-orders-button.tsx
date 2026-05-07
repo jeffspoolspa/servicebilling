@@ -4,6 +4,7 @@ import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Workflow } from "lucide-react"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Manually trigger the ION work-orders scrape (f/ION/work_orders flow).
@@ -12,6 +13,7 @@ import { Workflow } from "lucide-react"
  * on-demand version.
  */
 export function SyncWorkOrdersButton({ size = "sm" }: { size?: "sm" | "md" }) {
+  const _canWriteService = useCanWrite("service")
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [, startTransition] = useTransition()
@@ -36,6 +38,8 @@ export function SyncWorkOrdersButton({ size = "sm" }: { size?: "sm" | "md" }) {
     }
   }
 
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
   return (
     <div className="inline-flex items-center gap-2">
       <Button size={size} variant="default" onClick={onClick} disabled={loading}>

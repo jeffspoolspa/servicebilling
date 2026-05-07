@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { CreditCard, Eye } from "lucide-react"
 import { formatCurrency } from "@/lib/utils/format"
 import { ProgressModal } from "./progress-modal"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Per-invoice Process button. Sits on the WO detail page when billing_status
@@ -25,6 +26,7 @@ interface Props {
 }
 
 export function ProcessButton({ qboInvoiceId, balance, paymentMethod }: Props) {
+  const _canWriteService = useCanWrite("service")
   const [busy, setBusy] = useState<"dry" | "live" | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
@@ -64,6 +66,8 @@ export function ProcessButton({ qboInvoiceId, balance, paymentMethod }: Props) {
   // a non-zero balance left to collect. Drives button label only.
   const willCharge = paymentMethod === "on_file" && balance > 0
 
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
   return (
     <div className="flex items-center gap-2">
       <Button size="sm" variant="default" onClick={() => fire(true)} disabled={busy !== null}>

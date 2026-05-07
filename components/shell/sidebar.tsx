@@ -13,6 +13,8 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { SyncIssuesBadge } from "@/components/sync/sync-issues-badge"
+import { useHasModule } from "@/components/providers/access-provider"
+import type { ModuleKey } from "@/lib/auth/modules"
 
 /**
  * Collapsible left sidebar — top-level department/module switcher.
@@ -44,10 +46,12 @@ interface Item {
   label: string
   /** Path-prefix set that should light this item up. */
   matches: string[]
+  /** Module gate. Item is hidden when the user lacks access. `null` = always show. */
+  module: ModuleKey | null
 }
 
 const ITEMS: Item[] = [
-  { href: "/home", icon: HomeIcon, label: "Home", matches: ["/home"] },
+  { href: "/home", icon: HomeIcon, label: "Home", matches: ["/home"], module: null },
   {
     href: "/service",
     icon: Waves,
@@ -59,12 +63,14 @@ const ITEMS: Item[] = [
       "/invoices",
       "/customers",
     ],
+    module: "service",
   },
   {
     href: "/maintenance",
     icon: Wrench,
     label: "Maintenance",
     matches: ["/maintenance"],
+    module: "maintenance",
   },
 ]
 
@@ -73,6 +79,7 @@ const ADMIN_ITEM: Item = {
   icon: Settings,
   label: "Admin",
   matches: ["/admin", "/employees"],
+  module: "admin",
 }
 
 export function Sidebar() {
@@ -144,10 +151,10 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* Main nav */}
+      {/* Main nav — items hidden when user lacks module access */}
       <div className="flex flex-col gap-0.5 px-2 py-3 flex-1">
         {ITEMS.map((item) => (
-          <SidebarLink
+          <GatedSidebarLink
             key={item.href}
             item={item}
             path={path}
@@ -156,10 +163,9 @@ export function Sidebar() {
         ))}
       </div>
 
-      {/* Footer: sync issues badge (visible only when total > 0) + Admin */}
+      {/* Footer: sync issues badge (admin only) + Admin link (admin only) */}
       <div className="px-2 py-3 border-t border-line-soft flex flex-col gap-0.5">
-        <SyncIssuesBadge collapsed={collapsed} />
-        <SidebarLink item={ADMIN_ITEM} path={path} collapsed={collapsed} />
+        <GatedAdminFooter path={path} collapsed={collapsed} />
       </div>
     </aside>
   )
@@ -192,5 +198,25 @@ function SidebarLink({
       <Icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.8} />
       {!collapsed && <span className="truncate">{item.label}</span>}
     </Link>
+  )
+}
+
+/** Wrapper that hides the link when the user lacks the item's module access. */
+function GatedSidebarLink({ item, path, collapsed }: { item: Item; path: string; collapsed: boolean }) {
+  const hasAccess = useHasModule(item.module ?? ("service" as ModuleKey))
+  // module=null → always show (e.g., Home)
+  if (item.module !== null && !hasAccess) return null
+  return <SidebarLink item={item} path={path} collapsed={collapsed} />
+}
+
+/** Footer renders Admin link + Sync Issues badge — both admin-only. */
+function GatedAdminFooter({ path, collapsed }: { path: string; collapsed: boolean }) {
+  const hasAdmin = useHasModule("admin")
+  if (!hasAdmin) return null
+  return (
+    <>
+      <SyncIssuesBadge collapsed={collapsed} />
+      <SidebarLink item={ADMIN_ITEM} path={path} collapsed={collapsed} />
+    </>
   )
 }

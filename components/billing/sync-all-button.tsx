@@ -4,6 +4,7 @@ import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { RefreshCw } from "lucide-react"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Manually trigger a full QBO invoice sync (same as the 4h cron).
@@ -12,6 +13,7 @@ import { RefreshCw } from "lucide-react"
  * next cycle.
  */
 export function SyncAllButton({ size = "sm" }: { size?: "sm" | "md" }) {
+  const _canWriteService = useCanWrite("service")
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [, startTransition] = useTransition()
@@ -36,6 +38,8 @@ export function SyncAllButton({ size = "sm" }: { size?: "sm" | "md" }) {
     }
   }
 
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
   return (
     <div className="inline-flex items-center gap-2">
       <Button size={size} variant="default" onClick={onClick} disabled={loading}>

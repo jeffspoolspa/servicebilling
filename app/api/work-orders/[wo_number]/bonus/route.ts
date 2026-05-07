@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { createAnon } from "@/lib/supabase/anon"
+import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/work-orders/[wo_number]/bonus
@@ -20,6 +21,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ wo_number: string }> },
 ) {
+  const guard = await guardApi("service", { write: true })
+  if (guard instanceof NextResponse) return guard
   const { wo_number: wo } = await params
   if (!wo) {
     return NextResponse.json({ error: "wo_number required" }, { status: 400 })

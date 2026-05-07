@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Lock,
 } from "lucide-react"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Editable classification panel for an invoice in needs_review or
@@ -60,6 +61,7 @@ export function ClassificationEditor({
   canMarkReady,
   needsReviewReason,
 }: Props) {
+  const _canWriteService = useCanWrite("service")
   const memoLowConfidence = (needsReviewReason ?? "").includes("memo_low_confidence")
   // Auto-expand when memo is flagged — that's the case where the user
   // actually needs to look at this. Otherwise stay collapsed by default.
@@ -153,6 +155,8 @@ export function ClassificationEditor({
     }
   }
 
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
   return (
     <Card>
       {/* Collapsible header. Click anywhere on the header row to toggle. */}

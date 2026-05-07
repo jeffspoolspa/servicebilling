@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { triggerScriptSync } from "@/lib/windmill"
 import { createAnon } from "@/lib/supabase/anon"
+import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/billing/invoices/[id]/apply-credit
@@ -42,6 +43,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const guard = await guardApi("service", { write: true })
+  if (guard instanceof NextResponse) return guard
   const { id } = await params
   let body: { credit_id?: string; amount?: number } = {}
   try {

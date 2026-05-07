@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { triggerScript } from "@/lib/windmill"
+import { guardApi } from "@/lib/auth/api"
 
 interface RouteContext {
   params: Promise<{ wo_number: string }>
@@ -17,6 +18,8 @@ interface RouteContext {
  * Returns the Windmill jobId immediately. Client polls/refreshes after a delay.
  */
 export async function POST(_request: NextRequest, context: RouteContext) {
+  const guard = await guardApi("service", { write: true })
+  if (guard instanceof NextResponse) return guard
   const { wo_number } = await context.params
 
   const { jobId } = await triggerScript("f/service_billing/pull_qbo_invoices", {

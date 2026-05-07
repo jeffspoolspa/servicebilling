@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { triggerScriptSync } from "@/lib/windmill"
+import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/qbo/refresh/customer/[id]/credits
@@ -44,6 +45,8 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const guard = await guardApi("service", { write: true })
+  if (guard instanceof NextResponse) return guard
   const { id } = await params
   if (!id) {
     return NextResponse.json({ error: "customer id required" }, { status: 400 })

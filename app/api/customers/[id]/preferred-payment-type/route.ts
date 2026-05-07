@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { createAnon } from "@/lib/supabase/anon"
+import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/customers/[id]/preferred-payment-type
@@ -20,6 +21,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const guard = await guardApi("service", { write: true })
+  if (guard instanceof NextResponse) return guard
   const { id: qboCustomerId } = await params
 
   let type: "email" | "ach" | "credit_card" | null

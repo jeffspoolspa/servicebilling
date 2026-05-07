@@ -4,6 +4,7 @@ import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { EyeOff, Eye } from "lucide-react"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Skip / unskip a WO from active queues and audit views.
@@ -20,6 +21,7 @@ interface SkipButtonProps {
 }
 
 export function SkipButton({ woNumber, skipped, skippedReason }: SkipButtonProps) {
+  const _canWriteService = useCanWrite("service")
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [, startTransition] = useTransition()
@@ -63,6 +65,8 @@ export function SkipButton({ woNumber, skipped, skippedReason }: SkipButtonProps
     }
   }
 
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
   return (
     <div className="flex items-center gap-2">
       {skipped ? (

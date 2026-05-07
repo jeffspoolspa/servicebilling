@@ -6,6 +6,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { Mail, CreditCard, Building2 } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Customer-level payment preference card.
@@ -51,6 +52,7 @@ export function CustomerPaymentPreferenceCard({
    *  skipped by the cascade. Surface this so the user knows what won't change. */
   needsReviewOverriddenCount: number
 }) {
+  const _canWriteService = useCanWrite("service")
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -80,6 +82,8 @@ export function CustomerPaymentPreferenceCard({
     })
   }
 
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
   return (
     <Card>
       <CardHeader className="justify-between">

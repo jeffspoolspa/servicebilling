@@ -4,6 +4,7 @@ import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Undo2 } from "lucide-react"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Flip a ready_to_process invoice back to needs_review so the user can edit
@@ -13,6 +14,7 @@ import { Undo2 } from "lucide-react"
  * Lightweight — no modal, just inline confirmation on second click.
  */
 export function RevertButton({ qboInvoiceId }: { qboInvoiceId: string }) {
+  const _canWriteService = useCanWrite("service")
   const [armed, setArmed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -37,6 +39,8 @@ export function RevertButton({ qboInvoiceId }: { qboInvoiceId: string }) {
     }
   }
 
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
   return (
     <div className="flex items-center gap-2">
       {armed ? (

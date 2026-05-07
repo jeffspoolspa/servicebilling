@@ -1,4 +1,5 @@
 import { MaintenanceTabs } from "./maintenance-tabs"
+import { requireModuleAccess } from "@/lib/auth/access"
 
 /**
  * Shared layout for every /maintenance/* sub-page. Renders persistent tabs
@@ -8,11 +9,12 @@ import { MaintenanceTabs } from "./maintenance-tabs"
  * Mirrors the service-billing layout pattern but minus the KPI strip until
  * we have data to surface.
  */
-export default function MaintenanceLayout({
+export default async function MaintenanceLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  await requireModuleAccess("maintenance")
   return (
     <>
       <div className="px-7 pt-6 pb-2">

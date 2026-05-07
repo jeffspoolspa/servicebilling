@@ -12,6 +12,7 @@ import {
   paymentChannel,
   paymentChannelShortLabel,
 } from "@/lib/payment-channel"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Bulk-select + Process Selected / Dry-run Selected for the billing queue.
@@ -65,6 +66,7 @@ export function QueueActions({
   preserve,
   basePath = "/service-billing/queue",
 }: Props) {
+  const _canWriteService = useCanWrite("service")
   // If the page didn't pass sort state, render plain headers. Otherwise wire
   // SortableHeader so clicks round-trip through the URL.
   const sortable = sort !== undefined && dir !== undefined
@@ -223,6 +225,8 @@ export function QueueActions({
     }
   }
 
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
   return (
     <>
       {/* Header row: select-all + count chip */}

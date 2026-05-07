@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { triggerScript } from "@/lib/windmill"
+import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/billing/pre-process
@@ -15,6 +16,8 @@ import { triggerScript } from "@/lib/windmill"
  * page accidentally re-fired every needs_review invoice.)
  */
 export async function POST(request: NextRequest) {
+  const guard = await guardApi("service", { write: true })
+  if (guard instanceof NextResponse) return guard
   const body = await request.json()
   const { qbo_invoice_id, force = false } = body
 

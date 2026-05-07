@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { AlertTriangle, AlertCircle, RefreshCw, Mail, Check } from "lucide-react"
 import type { ProcessAttempt } from "@/lib/queries/dashboard"
 import { formatCurrency } from "@/lib/utils/format"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Shows on WO detail page when the latest process attempt lands in a state
@@ -34,6 +35,7 @@ export function RecoveryBanner({
   attempt: ProcessAttempt
   qboInvoiceId: string
 }) {
+  const _canWriteService = useCanWrite("service")
   const router = useRouter()
   const [, startTransition] = useTransition()
   const [busy, setBusy] = useState<Action | null>(null)
@@ -93,6 +95,8 @@ export function RecoveryBanner({
 
   if (attempt.status === "payment_orphan") {
     const amount = Number(attempt.charge_amount ?? 0)
+  // UX gate (server enforces; this hides the button when viewer):
+  if (!_canWriteService) return null
     return (
       <div className="rounded-xl border border-coral/50 bg-coral/[0.08] p-4 space-y-3">
         <div className="flex items-start gap-3">

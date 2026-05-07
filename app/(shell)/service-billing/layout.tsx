@@ -5,6 +5,7 @@ import { SyncWorkOrdersButton } from "@/components/billing/sync-work-orders-butt
 import { BillingTabs } from "./billing-tabs"
 import { getDashboardKpis } from "@/lib/queries/dashboard"
 import { formatCurrency } from "@/lib/utils/format"
+import { requireModuleAccess } from "@/lib/auth/access"
 
 export const dynamic = "force-dynamic"
 
@@ -28,6 +29,9 @@ export default async function ServiceBillingLayout({
 }: {
   children: React.ReactNode
 }) {
+  // Module access guard — viewer or admin can read; writes are gated
+  // separately at the action / RPC level. Redirects /login or /unauthorized.
+  await requireModuleAccess("service")
   const kpis = await getDashboardKpis()
 
   return (
