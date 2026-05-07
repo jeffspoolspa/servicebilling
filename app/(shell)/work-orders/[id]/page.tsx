@@ -26,6 +26,8 @@ import { InvoicePanel } from "@/components/work-orders/detail/invoice-panel"
 import { SummaryCard } from "@/components/work-orders/detail/summary-card"
 import { PreProcessingCard } from "@/components/work-orders/detail/pre-processing-card"
 import { BonusCard } from "@/components/work-orders/detail/bonus-card"
+import { CustomerPaymentPreferenceCard } from "@/components/work-orders/detail/customer-payment-preference-card"
+import { createAnon } from "@/lib/supabase/anon"
 
 export const dynamic = "force-dynamic"
 
@@ -87,17 +89,50 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
   // - processAttempt: latest only (still used by RecoveryBanner)
   // - processAttempts: full timeline for the AttemptTimeline card
   // - appliedPayments: for the applied-payments card
-  const [processAttempt, processAttempts, appliedPayments] = await Promise.all([
-    invoice?.qbo_invoice_id
-      ? getLatestProcessAttempt(invoice.qbo_invoice_id)
-      : Promise.resolve(null),
-    invoice?.qbo_invoice_id
-      ? getProcessAttempts(invoice.qbo_invoice_id)
-      : Promise.resolve([]),
-    invoice?.qbo_invoice_id
-      ? getAppliedPaymentsForInvoice(invoice.qbo_invoice_id)
-      : Promise.resolve([]),
-  ])
+  // - customerPref + needsReviewCount: for CustomerPaymentPreferenceCard
+  const customerId = invoice?.qbo_customer_id ?? null
+  const sb = createAnon("public")
+  const [processAttempt, processAttempts, appliedPayments, custPrefRow, needsReviewCounts] =
+    await Promise.all([
+      invoice?.qbo_invoice_id
+        ? getLatestProcessAttempt(invoice.qbo_invoice_id)
+        : Promise.resolve(null),
+      invoice?.qbo_invoice_id
+        ? getProcessAttempts(invoice.qbo_invoice_id)
+        : Promise.resolve([]),
+      invoice?.qbo_invoice_id
+        ? getAppliedPaymentsForInvoice(invoice.qbo_invoice_id)
+        : Promise.resolve([]),
+      customerId
+        ? sb
+            .from("Customers")
+            .select("preferred_payment_type")
+            .eq("qbo_customer_id", customerId)
+            .maybeSingle()
+            .then((r) => r.data as { preferred_payment_type: string | null } | null)
+        : Promise.resolve(null),
+      // Two counts: needs_review invoices for this customer (a) without an
+      // override (cascade target), (b) with an override (would be skipped).
+      // Surface both so the user knows what'll change vs what won't.
+      customerId
+        ? Promise.all([
+            sb
+              .from("billing_invoices")
+              .select("qbo_invoice_id", { count: "exact", head: true })
+              .eq("qbo_customer_id", customerId)
+              .eq("billing_status", "needs_review")
+              .is("preferred_payment_type_overridden_at", null)
+              .then((r) => r.count ?? 0),
+            sb
+              .from("billing_invoices")
+              .select("qbo_invoice_id", { count: "exact", head: true })
+              .eq("qbo_customer_id", customerId)
+              .eq("billing_status", "needs_review")
+              .not("preferred_payment_type_overridden_at", "is", null)
+              .then((r) => r.count ?? 0),
+          ])
+        : Promise.resolve([0, 0] as [number, number]),
+    ])
 
   // Invoice tab should show an attention dot if there's something to look at
   const invoiceAttention =
@@ -223,6 +258,21 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
             />
           )}
           <PreProcessingCard wo={wo} invoice={invoice} />
+          {invoice && customerId && (
+            <CustomerPaymentPreferenceCard
+              qboCustomerId={customerId}
+              customerName={invoice.customer_name}
+              currentPreference={
+                (custPrefRow?.preferred_payment_type as
+                  | "email"
+                  | "ach"
+                  | "credit_card"
+                  | null) ?? null
+              }
+              needsReviewCount={needsReviewCounts[0]}
+              needsReviewOverriddenCount={needsReviewCounts[1]}
+            />
+          )}
           {invoice && <AttemptTimeline attempts={processAttempts} />}
         </div>
       </div>

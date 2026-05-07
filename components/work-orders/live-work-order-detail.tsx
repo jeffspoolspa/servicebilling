@@ -30,6 +30,10 @@ export function LiveWorkOrderDetail() {
       { schema: "billing" as const, table: "customer_payments" },
       // WO itself (skip flag, billable override, etc.) → drives WO panel.
       { schema: "public" as const, table: "work_orders" },
+      // Customer record — drives the CustomerPaymentPreferenceCard so the
+      // current pref + applied state stays live if it's changed elsewhere
+      // (e.g. from the customer detail page in another tab).
+      { schema: "public" as const, table: "Customers" },
     ],
     [],
   )

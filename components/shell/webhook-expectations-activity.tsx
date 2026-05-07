@@ -81,17 +81,10 @@ export function WebhookExpectationsActivity() {
 
   // Seed with recent expectations on mount — covers the case where the
   // user opened the app after kicking off writes from another tab.
+  // Uses a server-side API endpoint because PostgREST doesn't expose the
+  // billing schema directly; Realtime is wired up below for live updates.
   useEffect(() => {
     let cancelled = false
-    const sb = createSupabaseBrowser()
-    sb.from("webhook_expectations" as never)
-      // The table is in billing schema. We need a public-schema view OR
-      // a server-side helper. For now, fall back to fetching via API.
-      .select("*")
-      .then(() => {
-        // PostgREST won't expose billing schema; we'll rely on Realtime
-        // events and a small API endpoint instead.
-      })
 
     // Lightweight initial fetch via API
     fetch("/api/sync/expectations/recent")

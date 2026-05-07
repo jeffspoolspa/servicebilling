@@ -698,7 +698,12 @@ def record_qbo_payment(customer_id, invoice_id, amount, charge_result, wo_num, i
 
 
 def send_invoice_email(invoice_id, customer_id, access_token, realm_id):
-    """POST /invoice/{id}/send. If EmailStatus already EmailSent, skip."""
+    """POST /invoice/{id}/send. If EmailStatus already EmailSent, skip.
+
+    The skip is the desired behavior — we want exactly one customer-facing
+    email per invoice. If something else (office staff, QBO auto-send) has
+    already mailed it, calling here is a no-op. Only invoices that slipped
+    through actually get sent."""
     inv_resp = qbo_get(f"invoice/{invoice_id}", access_token, realm_id)
     if inv_resp.ok:
         inv = inv_resp.json().get("Invoice", {})
@@ -840,34 +845,45 @@ def process_one(conn, qbo_invoice_id, access_token, realm_id,
                        attempt_id=str(prior["id"]))
 
     if prior and prior["status"] == "charge_declined" and not force:
-        # Only halt if the new attempt would do the SAME THING the declined
-        # attempt did. The decline is specific to a (channel, PM) pair — if
-        # the user has switched channels (e.g. credit_card → email) OR
-        # picked a different PM (different card on the same channel), it's
-        # a fresh attempt path, not a retry of the failed one.
-        new_target_pm_id = invoice.get("target_payment_method_id")
-        new_target_pm_id_str = (
-            str(new_target_pm_id) if new_target_pm_id else None
-        )
-        prior_pm_id_str = (
-            str(prior.get("customer_payment_method_id"))
-            if prior.get("customer_payment_method_id") else None
-        )
-        same_attempt_path = (
-            prior.get("channel") == channel
-            and prior_pm_id_str == new_target_pm_id_str
-            and channel != "email"  # email path always safe to re-attempt
-        )
-        if same_attempt_path:
-            mark_invoice_needs_review(
-                conn, qbo_invoice_id,
-                f"charge_declined ({(prior.get('error_message') or 'declined')[:120]})",
+        # Distinguish a REAL card decline from a pre-charge halt that also
+        # writes status='charge_declined' (credits_available, no_payment_method).
+        # Real card declines have a populated charge_id (Intuit assigns one
+        # even on decline) — pre-charge halts never call Intuit so charge_id
+        # stays NULL. The gate only applies to real declines: replaying a
+        # PM that the bank actually rejected without first changing it is
+        # what we want to prevent. A pre-charge halt that's been resolved
+        # (e.g. credit_review_overridden_at set) should retry freely.
+        prior_was_real_decline = bool(prior.get("charge_id"))
+
+        if prior_was_real_decline:
+            # Only halt if the new attempt would do the SAME THING the declined
+            # attempt did. The decline is specific to a (channel, PM) pair —
+            # if the user has switched channels (e.g. credit_card → email)
+            # OR picked a different PM (different card on the same channel),
+            # it's a fresh attempt path, not a retry of the failed one.
+            new_target_pm_id = invoice.get("target_payment_method_id")
+            new_target_pm_id_str = (
+                str(new_target_pm_id) if new_target_pm_id else None
             )
-            return _result(qbo_invoice_id, "needs_human", reason="charge_declined",
-                           error=prior.get("error_message"),
-                           attempt_id=str(prior["id"]),
-                           note="prior attempt declined this same PM; "
-                                "change channel/PM or pass force=true to retry")
+            prior_pm_id_str = (
+                str(prior.get("customer_payment_method_id"))
+                if prior.get("customer_payment_method_id") else None
+            )
+            same_attempt_path = (
+                prior.get("channel") == channel
+                and prior_pm_id_str == new_target_pm_id_str
+                and channel != "email"  # email path always safe to re-attempt
+            )
+            if same_attempt_path:
+                mark_invoice_needs_review(
+                    conn, qbo_invoice_id,
+                    f"charge_declined ({(prior.get('error_message') or 'declined')[:120]})",
+                )
+                return _result(qbo_invoice_id, "needs_human", reason="charge_declined",
+                               error=prior.get("error_message"),
+                               attempt_id=str(prior["id"]),
+                               note="prior attempt declined this same PM; "
+                                    "change channel/PM or pass force=true to retry")
 
     # Reconciler couldn't determine charge state — human investigation required.
     if prior and prior["status"] == "needs_reconcile_review" and not force:
@@ -1071,7 +1087,9 @@ def _process_charge_path(conn, attempt, invoice, qbo_inv, customer_id, customer_
                           wo_number, invoice_number, balance, access_token, realm_id):
     qbo_invoice_id = invoice["qbo_invoice_id"]
 
-    # If balance is 0 (covered by credits in pre_process), skip charge — just send invoice email + mark done
+    # If balance is 0 (covered by credits in pre_process), skip charge — just send invoice email + mark done.
+    # send_invoice_email skips if QBO already shows EmailStatus=EmailSent so
+    # we never double-email — only invoices that slipped through actually get sent.
     if balance == 0:
         email = send_invoice_email(qbo_invoice_id, customer_id, access_token, realm_id)
         update_attempt(conn, attempt["id"], email_sent=email["success"],
@@ -1093,7 +1111,28 @@ def _process_charge_path(conn, attempt, invoice, qbo_inv, customer_id, customer_
     # credits + stale credits (>6 months) which are typically irrelevant.
     # If any applicable credit exists, halt and return the invoice to
     # needs_review so a human decides: apply it or charge through.
+    #
+    # Override semantics: when credit_review_overridden_at is set, the user
+    # explicitly reviewed credits during pre-process and chose to proceed.
+    # We ignore credits whose txn_date is on or before the override
+    # timestamp (they were known/visible at review time). Credits with
+    # txn_date AFTER the override are NEW info and still trigger the halt
+    # — Carter shouldn't have to re-override every time a credit appears.
     remaining_credits = load_applicable_credits(conn, customer_id)
+    override_at = invoice.get("credit_review_overridden_at")
+    if remaining_credits and override_at is not None:
+        cutoff = override_at.date() if hasattr(override_at, "date") else override_at
+        kept = []
+        for c in remaining_credits:
+            c_date = c.get("txn_date")
+            # Conservative: keep credits with no date (treat as new/unknown)
+            if c_date is None or c_date > cutoff:
+                kept.append(c)
+        if len(kept) < len(remaining_credits):
+            print(f"  credit override active (overridden_at={override_at.isoformat()}): "
+                  f"ignored {len(remaining_credits) - len(kept)} pre-override credit(s); "
+                  f"{len(kept)} new credit(s) remaining")
+        remaining_credits = kept
     if remaining_credits:
         total_unapplied = sum(float(c.get("unapplied_amt") or 0) for c in remaining_credits)
         reason = f"credits_available ({len(remaining_credits)} credit(s), ${total_unapplied:.2f} unapplied)"
@@ -1227,8 +1266,20 @@ def _process_charge_path(conn, attempt, invoice, qbo_inv, customer_id, customer_
     # updates the invoice cache as a side effect, and the auto-promote
     # trigger flips billing_status to processed.
 
-    # Send receipt (best-effort — financial state already correct)
+    # Send the now-paid invoice + payment receipt (best-effort — financial
+    # state is already correct). We always send the invoice itself even
+    # after a charge so the customer has a paid copy alongside the receipt;
+    # they're complementary documents and pre-charge sends are not always
+    # guaranteed (e.g. fresh invoice → immediate charge in same pre-process
+    # run). send_invoice_email is idempotent: if QBO already shows
+    # EmailStatus=EmailSent it returns {success: True, skipped: True}.
+    inv_email = send_invoice_email(qbo_invoice_id, customer_id, access_token, realm_id)
+    if inv_email.get("success") and not inv_email.get("skipped"):
+        # QBO fires Invoice.Emailed only when an actual send happens.
+        insert_webhook_expectation(conn, "Invoice", qbo_invoice_id)
     receipt = send_payment_receipt(pay["payment_id"], customer_id, access_token, realm_id)
+    # email_sent on the attempt tracks the receipt (the financial document);
+    # the invoice send is logged in raw_result for the audit trail.
     update_attempt(conn, attempt["id"], email_sent=receipt["success"])
 
     # Refresh cached balance
@@ -1237,13 +1288,16 @@ def _process_charge_path(conn, attempt, invoice, qbo_inv, customer_id, customer_
         refresh_invoice_cache(conn, qbo_invoice_id, fresh)
 
     update_attempt(conn, attempt["id"], status="succeeded",
-                    raw_result=_dumps({"payment": pay, "receipt": receipt}))
+                    raw_result=_dumps({"payment": pay, "receipt": receipt,
+                                        "invoice_email": inv_email}))
     mark_invoice_processed(conn, qbo_invoice_id)
     return _result(qbo_invoice_id, "succeeded",
                    attempt_id=str(attempt["id"]),
                    charge_id=cr["charge_id"],
                    qbo_payment_id=pay["payment_id"],
-                   receipt_sent=receipt["success"])
+                   receipt_sent=receipt["success"],
+                   invoice_email_sent=inv_email["success"],
+                   invoice_email_skipped=inv_email.get("skipped", False))
 
 
 def _retry_record_payment_for_orphan(conn, prior, invoice, customer_id, customer_name,
@@ -1285,6 +1339,10 @@ def _retry_record_payment_for_orphan(conn, prior, invoice, customer_id, customer
     # (so we don't insert an Invoice expectation here either).
     insert_webhook_expectation(conn, "Payment", pay["payment_id"])
 
+    # Same dual-send as the primary charge path: now-paid invoice + receipt.
+    inv_email = send_invoice_email(qbo_invoice_id, customer_id, access_token, realm_id, force=True)
+    if inv_email.get("success"):
+        insert_webhook_expectation(conn, "Invoice", qbo_invoice_id)
     receipt = send_payment_receipt(pay["payment_id"], customer_id, access_token, realm_id)
     update_attempt(conn, prior["id"], email_sent=receipt["success"])
 
@@ -1294,13 +1352,16 @@ def _retry_record_payment_for_orphan(conn, prior, invoice, customer_id, customer
 
     update_attempt(conn, prior["id"], status="succeeded",
                     raw_result=_dumps({"orphan_recovery": True, "payment": pay,
-                                            "receipt": receipt}))
+                                            "receipt": receipt,
+                                            "invoice_email": inv_email}))
     mark_invoice_processed(conn, qbo_invoice_id)
     return _result(qbo_invoice_id, "succeeded",
                    attempt_id=str(prior["id"]),
                    charge_id=charge_id,
                    qbo_payment_id=pay["payment_id"],
-                   recovered_from="orphan_or_charge_succeeded")
+                   recovered_from="orphan_or_charge_succeeded",
+                   invoice_email_sent=inv_email["success"],
+                   invoice_email_skipped=inv_email.get("skipped", False))
 
 
 def _process_invoice_only(conn, attempt, invoice, qbo_inv, customer_id, access_token, realm_id):

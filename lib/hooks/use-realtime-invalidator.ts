@@ -39,9 +39,13 @@ const SUBSCRIPTIONS: TableSubscription[] = [
   { schema: "billing", table: "drift_log", keyPrefix: "drift-log" },
   { schema: "billing", table: "webhook_expectations", keyPrefix: "webhook-expectations" },
 
-  // Public — work orders, customers, employees
+  // Public — work orders, customers, employees. NOTE: the customers table
+  // is "Customers" with a capital C (Supabase auto-generated quoted name
+  // from a CSV import). Realtime postgres_changes filters are case-sensitive
+  // and must match the actual table name in the publication, otherwise the
+  // subscription fails silently and takes the whole channel down with it.
   { schema: "public", table: "work_orders", keyPrefix: "work-orders" },
-  { schema: "public", table: "customers", keyPrefix: "customers" },
+  { schema: "public", table: "Customers", keyPrefix: "customers" },
   { schema: "public", table: "employees", keyPrefix: "employees" },
 ]
 
