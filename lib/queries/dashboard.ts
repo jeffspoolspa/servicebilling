@@ -61,25 +61,27 @@ export async function getDashboardKpis(): Promise<DashboardKpis> {
       .is("qbo_invoice_id", null)
       .gt("sub_total", 0),
     sumWorkOrderTotalsAwaiting(sb),
-    // Ready to process = invoice.billing_status = 'ready_to_process'
+    // Ready to process — reads v_billing_queue which already enforces
+    // (work_order linked + billable + not skipped). Without this filter the
+    // KPI inflated by maintenance autopay invoices that flip themselves to
+    // 'processed' / occasionally appear at other statuses without belonging
+    // to service-billing's pipeline.
     sb
-      .from("billing_invoices")
-      .select("qbo_invoice_id", { count: "exact", head: true })
-      .eq("billing_status", "ready_to_process"),
-    sumInvoiceTotals(sb, "ready_to_process"),
-    // Needs review = invoice.billing_status = 'needs_review'
+      .from("v_billing_queue")
+      .select("wo_number", { count: "exact", head: true }),
+    sumViewTotalAmt(sb, "v_billing_queue"),
+    // Needs review — same WO-link filter via v_needs_attention
     sb
-      .from("billing_invoices")
-      .select("qbo_invoice_id", { count: "exact", head: true })
-      .eq("billing_status", "needs_review"),
-    sumInvoiceTotals(sb, "needs_review"),
-    // Processed MTD = invoice.billing_status = 'processed' with processed_at in current month
+      .from("v_needs_attention")
+      .select("wo_number", { count: "exact", head: true }),
+    sumViewTotalAmt(sb, "v_needs_attention"),
+    // Processed MTD — v_processed enforces WO-link too; date filter is the
+    // same monthStartIso comparison on processed_at the view exposes.
     sb
-      .from("billing_invoices")
-      .select("qbo_invoice_id", { count: "exact", head: true })
-      .eq("billing_status", "processed")
+      .from("v_processed")
+      .select("wo_number", { count: "exact", head: true })
       .gte("processed_at", monthStartIso),
-    sumProcessedMtdInvoiceTotals(sb, monthStartIso),
+    sumViewTotalAmt(sb, "v_processed", { processedSinceIso: monthStartIso }),
     // Missing invoice alerts: billable WO with completed + no invoice_number (office hasn't entered it)
     sb
       .from("work_orders")
@@ -138,39 +140,30 @@ export async function getDashboardKpis(): Promise<DashboardKpis> {
 
 const PAGE = 1000
 
-async function sumInvoiceTotals(
+/**
+ * Sum total_amt across one of the queue views (v_billing_queue, v_processed,
+ * v_needs_attention). Reading from the views — instead of billing_invoices
+ * directly — guarantees the sum scopes to invoices that have a linked WO,
+ * are billable, and aren't skipped. This is the definition of "service
+ * billing population"; everything else (maintenance autopay etc.) lives in
+ * its own pipeline.
+ *
+ * Optional processedSinceIso constrains v_processed to current-month rows
+ * (or any window) — used by the Processed MTD KPI.
+ */
+async function sumViewTotalAmt(
   sb: ReturnType<typeof createAnon>,
-  status: string,
+  view: "v_billing_queue" | "v_needs_attention" | "v_processed",
+  opts: { processedSinceIso?: string } = {},
 ): Promise<number> {
   let total = 0
   let from = 0
   while (true) {
-    const { data, error } = await sb
-      .from("billing_invoices")
-      .select("total_amt")
-      .eq("billing_status", status)
-      .range(from, from + PAGE - 1)
-    if (error || !data || data.length === 0) break
-    total += data.reduce((a, r) => a + Number(r.total_amt ?? 0), 0)
-    if (data.length < PAGE) break
-    from += PAGE
-  }
-  return total
-}
-
-async function sumProcessedMtdInvoiceTotals(
-  sb: ReturnType<typeof createAnon>,
-  monthStartIso: string,
-): Promise<number> {
-  let total = 0
-  let from = 0
-  while (true) {
-    const { data, error } = await sb
-      .from("billing_invoices")
-      .select("total_amt")
-      .eq("billing_status", "processed")
-      .gte("processed_at", monthStartIso)
-      .range(from, from + PAGE - 1)
+    let q = sb.from(view).select("total_amt").range(from, from + PAGE - 1)
+    if (opts.processedSinceIso) {
+      q = q.gte("processed_at", opts.processedSinceIso)
+    }
+    const { data, error } = await q
     if (error || !data || data.length === 0) break
     total += data.reduce((a, r) => a + Number(r.total_amt ?? 0), 0)
     if (data.length < PAGE) break
