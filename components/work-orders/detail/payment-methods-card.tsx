@@ -181,26 +181,41 @@ export function PaymentMethodsCard({
           const isUserOverride =
             isSelected && normalizedPreferred === normalizeChannel(m.type)
 
+          // Row is a <div> not a <button>: we render REAL <button> children
+          // (the "Charge $X.XX" recovery action) and HTML doesn't allow
+          // button-in-button. Click-to-switch (when interactive) is wired
+          // via onClick + role="button" + keyboard handler. Disabled state
+          // is purely cosmetic on a div, so we still gate the onClick body.
+          const rowInteractive = canSwitchTo && !disabled && !pending
           return (
-            <button
+            <div
               key={m.id}
-              type="button"
-              disabled={!canSwitchTo || disabled || pending}
+              role={rowInteractive ? "button" : undefined}
+              tabIndex={rowInteractive ? 0 : undefined}
               onClick={() => {
+                if (!rowInteractive) return
                 const ch = normalizeChannel(m.type)
                 if (ch) switchTo(ch)
+              }}
+              onKeyDown={(e) => {
+                if (!rowInteractive) return
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  const ch = normalizeChannel(m.type)
+                  if (ch) switchTo(ch)
+                }
               }}
               className={
                 "px-5 py-3 border-b border-line-soft last:border-b-0 text-left " +
                 "flex items-center justify-between text-[12px] transition-colors " +
                 (isSelected
                   ? "bg-cyan/[0.06] border-l-2 border-l-cyan"
-                  : canSwitchTo
+                  : rowInteractive
                     ? "hover:bg-white/[0.02] cursor-pointer"
                     : "opacity-60")
               }
               title={
-                canSwitchTo
+                rowInteractive
                   ? `Switch to ${normalizeChannel(m.type) === "credit_card" ? "card" : "ACH"}`
                   : isSelected
                     ? "This is the method that will be charged"
@@ -236,22 +251,16 @@ export function PaymentMethodsCard({
                   </div>
                 </div>
               </div>
-              <div
-                className="flex items-center gap-2 shrink-0"
-                onClick={(e) => {
-                  // The outer <button> wraps the row and would re-fire
-                  // switchTo() if we don't stop propagation here. The
-                  // inner Charge button has its own onClick.
-                  if (canChargeBalance) e.stopPropagation()
-                }}
-              >
+              <div className="flex items-center gap-2 shrink-0">
                 {canChargeBalance ? (
                   <button
                     type="button"
                     disabled={chargingPmId !== null}
                     onClick={(e) => {
+                      // Outer row is now a div, so no parent-button event
+                      // re-fire concern. Still preventDefault for safety
+                      // in case the row gets keyboard focus + space-bar.
                       e.preventDefault()
-                      e.stopPropagation()
                       const ch = normalizeChannel(m.type)
                       if (ch) chargeBalance(m.id, ch)
                     }}
@@ -284,7 +293,7 @@ export function PaymentMethodsCard({
                   </Pill>
                 )}
               </div>
-            </button>
+            </div>
           )
         })}
       </div>
