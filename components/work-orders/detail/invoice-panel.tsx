@@ -214,15 +214,18 @@ export function InvoicePanel({
       />
 
       {/* Payment methods on file — every active PM in QBO's wallet, with
-          the would-charge one highlighted. Read-only on processed invoices
-          (the per-invoice override only matters before the invoice is
-          processed); the AppliedPaymentsCard above shows the historical
-          actual-method-used for processed cases. */}
+          the would-charge one highlighted. Read-only on processed
+          invoices, EXCEPT when balance > 0 — then each card row gets a
+          "Charge $X.XX" button so the user can recover an open balance
+          (e.g., emailed invoice that the customer never paid; we still
+          have their card on file and want to collect). The
+          AppliedPaymentsCard above shows the historical record. */}
       <PaymentMethodsCard
         qboInvoiceId={invoice.qbo_invoice_id}
         methods={paymentMethods}
         preferredPaymentType={invoice.preferred_payment_type}
         disabled={invoice.billing_status === "processed"}
+        invoiceBalance={Number(invoice.balance ?? 0)}
       />
     </div>
   )

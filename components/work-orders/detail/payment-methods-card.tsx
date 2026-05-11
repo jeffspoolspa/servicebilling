@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import type { PaymentMethod } from "@/lib/queries/dashboard"
-import { formatDate } from "@/lib/utils/format"
+import { formatCurrency, formatDate } from "@/lib/utils/format"
 
 /**
  * Payment methods card — shows EVERY active PM QBO has on file for the
@@ -43,6 +43,7 @@ export function PaymentMethodsCard({
   methods,
   preferredPaymentType,
   disabled = false,
+  invoiceBalance = null,
 }: {
   qboInvoiceId: string
   methods: PaymentMethod[]
@@ -50,6 +51,9 @@ export function PaymentMethodsCard({
    *  AND legacy ('card' | 'ach') for backwards compat. Normalized internally. */
   preferredPaymentType: "email" | "ach" | "credit_card" | "card" | null
   disabled?: boolean
+  /** Open balance on the invoice. When > 0 AND disabled (processed), each
+   *  card row gets a "Charge $X.XX" button to recover the balance. */
+  invoiceBalance?: number | null
 }) {
   const normalizedPreferred = normalizeChannel(preferredPaymentType)
   const router = useRouter()
@@ -100,6 +104,48 @@ export function PaymentMethodsCard({
     startTransition(() => router.refresh())
   }
 
+  // Tracks which PM is mid-charge so its row can show a spinner / lock.
+  const [chargingPmId, setChargingPmId] = useState<string | null>(null)
+
+  async function chargeBalance(pmId: string, channel: PmCardChannel) {
+    if (chargingPmId) return
+    if (!confirm(
+      `Charge ${formatCurrency(invoiceBalance ?? 0)} to this card? ` +
+      `This creates a new processing attempt and posts a QBO Payment when the charge clears.`
+    )) return
+    setError(null)
+    setChargingPmId(pmId)
+    try {
+      const res = await fetch(
+        `/api/billing/invoices/${qboInvoiceId}/charge-balance`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target_payment_method_id: pmId,
+            channel,
+          }),
+        },
+      )
+      if (!res.ok) {
+        const { error: msg } = await res.json().catch(() => ({ error: "charge failed" }))
+        throw new Error(msg || `${res.status}`)
+      }
+      startTransition(() => router.refresh())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "charge failed")
+    } finally {
+      setChargingPmId(null)
+    }
+  }
+
+  // True when a per-card "Charge $X.XX" button should render. Conditions:
+  //  - the card area is disabled (i.e. invoice already processed in the
+  //    primary flow — that's where this recovery action belongs), AND
+  //  - there's an actual open balance to recover.
+  const canChargeBalance =
+    disabled && invoiceBalance != null && invoiceBalance > 0
+
   if (active.length === 0) {
     return (
       <Card>
@@ -119,11 +165,13 @@ export function PaymentMethodsCard({
       <CardHeader>
         <CardTitle>Payment method on file</CardTitle>
         <span className="ml-auto text-[11px] text-ink-mute">
-          {disabled
-            ? "read-only — invoice is processed"
-            : active.length > 1
-              ? "click to switch"
-              : "on file"}
+          {canChargeBalance
+            ? `${formatCurrency(invoiceBalance ?? 0)} open balance`
+            : disabled
+              ? "read-only — invoice is processed"
+              : active.length > 1
+                ? "click to switch"
+                : "on file"}
         </span>
       </CardHeader>
       <div className="flex flex-col">
@@ -188,15 +236,49 @@ export function PaymentMethodsCard({
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {isSelected ? (
+              <div
+                className="flex items-center gap-2 shrink-0"
+                onClick={(e) => {
+                  // The outer <button> wraps the row and would re-fire
+                  // switchTo() if we don't stop propagation here. The
+                  // inner Charge button has its own onClick.
+                  if (canChargeBalance) e.stopPropagation()
+                }}
+              >
+                {canChargeBalance ? (
+                  <button
+                    type="button"
+                    disabled={chargingPmId !== null}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      const ch = normalizeChannel(m.type)
+                      if (ch) chargeBalance(m.id, ch)
+                    }}
+                    className={
+                      "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] " +
+                      "border transition-colors " +
+                      (chargingPmId === m.id
+                        ? "border-cyan bg-cyan/15 text-cyan opacity-80 cursor-wait"
+                        : "border-cyan/40 bg-cyan/10 text-cyan hover:border-cyan/70 hover:bg-cyan/20")
+                    }
+                    title={
+                      `Charge ${formatCurrency(invoiceBalance ?? 0)} to this card. ` +
+                      `Creates a new processing attempt.`
+                    }
+                  >
+                    {chargingPmId === m.id
+                      ? "Charging…"
+                      : `Charge ${formatCurrency(invoiceBalance ?? 0)}`}
+                  </button>
+                ) : isSelected ? (
                   <Pill tone="cyan" dot className="text-[10px]">
                     {disabled ? "selected" : "will charge"}
                   </Pill>
                 ) : !disabled ? (
                   <span className="text-[11px] text-cyan">use this →</span>
                 ) : null}
-                {isUserOverride && (
+                {isUserOverride && !canChargeBalance && (
                   <Pill tone="neutral" className="text-[10px]">
                     override
                   </Pill>
