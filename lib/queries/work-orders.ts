@@ -4,15 +4,27 @@ import { CTA_TECHS } from "@/lib/queries/bonuses"
 /**
  * Work Orders browser query layer.
  *
- * Backed by `public.v_revenue_by_month` (same view the dashboard uses) so
- * this page's numbers tie out exactly to the pivot. The view is
- * invoice-driven — it INNER JOINs billing.invoices and buckets by
- * invoice.txn_date — so /work-orders only ever shows invoiced WOs.
- * Uninvoiced WOs live under /service-billing/awaiting-invoice.
+ * Backed by `public.v_work_orders_browser` — every billable, non-skipped
+ * WO, LEFT JOINed to invoices so WOs without an invoice yet still appear
+ * (with NULL invoice_* columns). This is the operational backlog view.
+ *
+ * Different from v_revenue_by_month (used by the dashboard / bonus
+ * pool), which INNER JOINs invoices because those consumers compute
+ * monetary aggregates that only make sense for invoiced WOs.
  */
 
 export interface WorkOrderFilters {
   month?: string          // 'YYYY-MM' — bucketed by invoice.txn_date month
+  /**
+   * Date range filters (inclusive on both ends). YYYY-MM-DD format.
+   * Filters the same column the table sorts by — the COALESCE'd
+   * invoice.txn_date / wo.completed value. Either bound can be set
+   * independently. When both `month` and dateFrom/dateTo are set, all
+   * three apply (intersection — the user usually only sets one or the
+   * other but we don't enforce mutual exclusion).
+   */
+  dateFrom?: string
+  dateTo?: string
   office?: string         // location dimension
   tech?: string           // tech dimension (single person)
   department?: string     // employees.department name
@@ -79,7 +91,7 @@ export async function getWorkOrders(opts: {
   const sortDir = opts.sortDir ?? "desc"
 
   let q = sb
-    .from("v_revenue_by_month")
+    .from("v_work_orders_browser")
     .select(
       "wo_number, customer, wo_type, tech, location, department, completed, sub_total, total_due, qbo_invoice_id, invoice_doc_number, invoice_balance, invoice_qbo_class, invoice_memo, billing_status, included_in_bonus, bonus_override",
       { count: "exact" },
@@ -147,7 +159,7 @@ export async function getAllWorkOrders(opts: {
   let offset = 0
   while (offset < MAX_EXPORT_ROWS) {
     let q = sb
-      .from("v_revenue_by_month")
+      .from("v_work_orders_browser")
       .select(
         "wo_number, customer, wo_type, tech, location, department, completed, sub_total, total_due, qbo_invoice_id, invoice_doc_number, invoice_balance, invoice_qbo_class, invoice_memo, billing_status, included_in_bonus, bonus_override",
       )
@@ -213,7 +225,7 @@ export async function getWorkOrderTotals(
   let count = 0
   while (true) {
     let q = sb
-      .from("v_revenue_by_month")
+      .from("v_work_orders_browser")
       .select("sub_total", { count: "exact" })
       .range(offset, offset + PAGE - 1)
     q = applyFilters(q, filters)
@@ -260,7 +272,7 @@ export async function getWorkOrderFilterOptions(): Promise<FilterOptions> {
 
   while (true) {
     const { data } = await sb
-      .from("v_revenue_by_month")
+      .from("v_work_orders_browser")
       .select("location, tech, department, wo_type, month")
       .range(offset, offset + PAGE - 1)
     if (!data || data.length === 0) break
@@ -294,6 +306,7 @@ type PostgrestQuery = ReturnType<
 
 function applyFilters<Q extends {
   gte: (col: string, v: string) => Q
+  lte: (col: string, v: string) => Q
   lt: (col: string, v: string) => Q
   eq: (col: string, v: string | boolean) => Q
   neq: (col: string, v: string) => Q
@@ -304,6 +317,15 @@ function applyFilters<Q extends {
     const start = `${f.month}-01`
     const end = nextMonthIso(start)
     q = q.gte("month", start).lt("month", end)
+  }
+  // Date range filters apply to the same `completed` column the table
+  // sorts by (COALESCE'd invoice.txn_date / wo.completed). Inclusive on
+  // both ends. Either bound can be omitted independently.
+  if (f.dateFrom && /^\d{4}-\d{2}-\d{2}$/.test(f.dateFrom)) {
+    q = q.gte("completed", f.dateFrom)
+  }
+  if (f.dateTo && /^\d{4}-\d{2}-\d{2}$/.test(f.dateTo)) {
+    q = q.lte("completed", f.dateTo)
   }
   if (f.office) q = q.eq("location", f.office)
   if (f.tech) {

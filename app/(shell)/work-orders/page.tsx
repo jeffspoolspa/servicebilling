@@ -26,6 +26,8 @@ type Dir = "asc" | "desc"
 interface PageProps {
   searchParams: Promise<{
     month?: string
+    date_from?: string   // YYYY-MM-DD inclusive lower bound
+    date_to?: string     // YYYY-MM-DD inclusive upper bound
     office?: string
     tech?: string
     department?: string
@@ -44,6 +46,8 @@ export default async function WorkOrdersPage({ searchParams }: PageProps) {
   const sp = await searchParams
   const filters: WorkOrderFilters = {
     month: sp.month?.trim() || undefined,
+    dateFrom: sp.date_from?.trim() || undefined,
+    dateTo: sp.date_to?.trim() || undefined,
     office: sp.office?.trim() || undefined,
     tech: sp.tech?.trim() || undefined,
     department: sp.department?.trim() || undefined,
@@ -130,7 +134,7 @@ export default async function WorkOrdersPage({ searchParams }: PageProps) {
                     <SortableHeader label="Office" column="location" currentSort={sort} currentDir={dir} basePath={BASE} defaultDir="asc" />
                   </SortCell>
                   <SortCell>
-                    <SortableHeader label="Invoiced" column="completed" currentSort={sort} currentDir={dir} basePath={BASE} />
+                    <SortableHeader label="Date" column="completed" currentSort={sort} currentDir={dir} basePath={BASE} />
                   </SortCell>
                   <SortCell align="right" className="pr-5 num">
                     <SortableHeader label="Subtotal" column="sub_total" currentSort={sort} currentDir={dir} basePath={BASE} align="right" />

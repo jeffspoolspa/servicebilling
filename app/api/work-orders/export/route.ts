@@ -54,6 +54,8 @@ export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams
   const filters: WorkOrderFilters = {
     month: sp.get("month")?.trim() || undefined,
+    dateFrom: sp.get("date_from")?.trim() || undefined,
+    dateTo: sp.get("date_to")?.trim() || undefined,
     office: sp.get("office")?.trim() || undefined,
     tech: sp.get("tech")?.trim() || undefined,
     department: sp.get("department")?.trim() || undefined,
