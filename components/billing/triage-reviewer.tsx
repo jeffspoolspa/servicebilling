@@ -483,11 +483,20 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
 
   const isDirty = current ? Boolean(edits[current.qbo_invoice_id]) : false
 
-  // Memo low-confidence flag — drives the smart "Lock memo & approve" label
-  // and means approve should fire even with no edits (lock affirms the memo).
+  // Memo low-confidence flag — the user "approving" affirms the AI memo
+  // (sets memo_locked=true) even with no edits.
   const memoLowConfidence = (current?.needs_review_reason ?? "").includes(
     "memo_low_confidence",
   )
+
+  // The classification button is meaningful in exactly two cases:
+  //   1. The user has actual edits to push (Save Edits)
+  //   2. There's an enrichment error to acknowledge / lock (Approve & push through)
+  // Otherwise (e.g. needs_review reason is credit_review or subtotal_mismatch
+  // and the user hasn't touched classification), the button does nothing
+  // useful — pushing all-same values to QBO and re-projecting against
+  // unchanged indicators just rebuilds the same needs_review reason.
+  const canApprove = isDirty || memoLowConfidence
 
   // Keyboard-only navigation. Actions (approve/skip/reprocess) don't call
   // these — they set an outcome and let the liveRows filter naturally
@@ -527,6 +536,12 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
 
   const approve = useCallback(async () => {
     if (!current || busy) return
+    // No-op when there's nothing meaningful to do — same gate as the
+    // button's disabled state. Without this, pressing `a` on a card whose
+    // needs_review reason is credit_review/subtotal_mismatch would still
+    // hit the API, push QBO no-op writes, and rebuild the exact same
+    // reason from indicators. Confusing.
+    if (!isDirty && !memoLowConfidence) return
     setBusy("approve"); setErr(null)
     try {
       // Use save-and-mark-ready (push_invoice_edits) — pushes user's edits
@@ -577,7 +592,7 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
       // help because cursor didn't actually move.
       setBusy(null)
     }
-  }, [current, busy, edits])
+  }, [current, busy, edits, isDirty, memoLowConfidence])
 
   const skip = useCallback(() => {
     if (!current || busy) return
@@ -772,6 +787,7 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
         onOverrodeCreditReview={onOverrodeCreditReview}
         isDirty={isDirty}
         memoLowConfidence={memoLowConfidence}
+        canApprove={canApprove}
         onApprove={approve}
       />
 
@@ -813,7 +829,7 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
         <div className="flex-1" />
         <Button
           size="sm"
-          variant="default"
+          variant="primary"
           onClick={skip}
           disabled={busy !== null}
           title="Leave in needs_review, advance (s or →)"
@@ -821,26 +837,20 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
           <SkipForward className="w-3.5 h-3.5" strokeWidth={2} />
           Skip
         </Button>
-        <Button
-          size="sm"
-          variant="primary"
-          onClick={approve}
-          disabled={busy !== null}
-          title="Push edits to QBO + lock memo + flip to ready_to_process (a or Enter)"
-        >
-          <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
-          {busy === "approve"
-            ? "Saving…"
-            : memoLowConfidence && !isDirty
-              ? "Lock memo & mark ready"
-              : "Save & mark ready"}
-        </Button>
+        {/* The classification card carries the contextual primary action
+            ("Save Edits" / "Approve & push through"). Keyboard `a` still
+            triggers it via approve(), so the bottom toolbar only needs
+            navigation-level actions (Previous, Open detail, Re-run, Skip)
+            — not a duplicate of the card-level button. */}
       </div>
 
-      {/* Keyboard hint strip — presence reminds the user; not intrusive */}
+      {/* Keyboard hint strip — presence reminds the user; not intrusive.
+          `a` triggers the contextual action on the classification card
+          (Save Edits / Approve & push through). No-ops when neither
+          applies. */}
       <div className="mt-4 flex items-center gap-3 text-[10px] text-ink-mute">
         <Keyboard className="w-3 h-3" strokeWidth={1.8} />
-        <Kbd k="a" /> approve
+        <Kbd k="a" /> save / approve
         <Kbd k="s" /> skip
         <Kbd k="r" /> re-run
         <Kbd k="d" /> open
@@ -871,6 +881,7 @@ function Card({
   onOverrodeCreditReview,
   isDirty,
   memoLowConfidence,
+  canApprove,
   onApprove,
 }: {
   row: TriageRow
@@ -884,14 +895,27 @@ function Card({
   onOverrodeCreditReview: () => void
   isDirty: boolean
   memoLowConfidence: boolean
+  canApprove: boolean
   onApprove: () => void
 }) {
+  // Contextual label — explicit edits dominate over the AI-flag affirmation.
+  // When neither applies, the button stays at "Save & mark ready" but is
+  // disabled (so the user understands what the action would be without
+  // accidentally firing a no-op against an unchanged invoice).
   const approveLabel =
     busy === "approve"
       ? "Saving…"
-      : memoLowConfidence && !isDirty
-        ? "Lock memo & mark ready"
-        : "Save & mark ready"
+      : isDirty
+        ? "Save Edits"
+        : memoLowConfidence
+          ? "Approve & push through"
+          : "Save & mark ready"
+  const approveTitle = !canApprove
+    ? "No classification edits to save and the memo isn't flagged. " +
+      "Resolve the underlying issue (apply credit / fix subtotal) above."
+    : isDirty
+      ? "Push your edits to QBO + lock memo + re-evaluate (a or Enter)"
+      : "Lock the AI-generated memo + push to QBO + re-evaluate (a or Enter)"
   return (
     <div
       className={`triage-card-enter rounded-xl border border-line bg-[#0E1C2A] p-5 space-y-4 ${
@@ -1021,8 +1045,8 @@ function Card({
             size="sm"
             variant="primary"
             onClick={onApprove}
-            disabled={busy !== null}
-            title="Push edits to QBO + lock memo + mark ready"
+            disabled={busy !== null || !canApprove}
+            title={approveTitle}
           >
             <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
             {approveLabel}
