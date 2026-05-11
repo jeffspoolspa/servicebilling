@@ -1,8 +1,8 @@
 "use client"
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
-import { useCallback, useEffect, useRef, useState } from "react"
-import { X, Search as SearchIcon } from "lucide-react"
+import { useCallback } from "react"
+import { X } from "lucide-react"
 import type { FilterOptions } from "@/lib/queries/work-orders"
 import { cn } from "@/lib/utils/cn"
 
@@ -37,16 +37,6 @@ export function WorkOrdersFilterBar({ options }: Props) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
-  // Local q state so typing feels responsive — commits to URL on submit /
-  // Enter / blur (debounced).
-  const [qInput, setQInput] = useState(searchParams.get("q") ?? "")
-  const qDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Keep qInput in sync when URL changes externally (e.g. Back button).
-  useEffect(() => {
-    setQInput(searchParams.get("q") ?? "")
-  }, [searchParams])
-
   const setParam = useCallback(
     (key: string, value: string | null) => {
       const next = new URLSearchParams(searchParams.toString())
@@ -62,18 +52,6 @@ export function WorkOrdersFilterBar({ options }: Props) {
   const clearAll = useCallback(() => {
     router.replace(pathname as never)
   }, [router, pathname])
-
-  // Debounced commit for the search text.
-  useEffect(() => {
-    if (qDebounceRef.current) clearTimeout(qDebounceRef.current)
-    qDebounceRef.current = setTimeout(() => {
-      const current = searchParams.get("q") ?? ""
-      if (qInput !== current) setParam("q", qInput || null)
-    }, 300)
-    return () => {
-      if (qDebounceRef.current) clearTimeout(qDebounceRef.current)
-    }
-  }, [qInput, searchParams, setParam])
 
   const activeFilters = currentFilters(searchParams, options)
   const hasActive = activeFilters.length > 0
@@ -173,22 +151,10 @@ export function WorkOrdersFilterBar({ options }: Props) {
         </div>
       )}
 
-      {/* Row 3: search bar — its own row right above the table so it
-          stops fighting the filter dropdowns for horizontal space and
-          the placeholder copy stays readable on narrow viewports. */}
-      <div className="relative">
-        <SearchIcon
-          className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-mute"
-          strokeWidth={1.8}
-        />
-        <input
-          type="search"
-          value={qInput}
-          onChange={(e) => setQInput(e.target.value)}
-          placeholder="Search WO, customer, invoice #…"
-          className="w-full bg-bg-elev border border-line rounded-md pl-8 pr-2.5 py-1.5 text-[12px] text-ink placeholder:text-ink-mute focus:outline-none focus:border-cyan"
-        />
-      </div>
+      {/* Search field lives in the table CardHeader (mounted in
+          /work-orders/page.tsx) so it sits inline with the count pill,
+          totals, and Download CSV button — out of the dropdown row's
+          way. */}
     </div>
   )
 }

@@ -13,6 +13,7 @@ import {
 } from "@/lib/queries/work-orders"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
 import { WorkOrdersFilterBar } from "@/components/work-orders/filter-bar"
+import { WorkOrdersSearchInput } from "@/components/work-orders/search-input"
 import { BonusToggle } from "@/components/work-orders/bonus-toggle"
 import { DownloadCsvButton } from "@/components/work-orders/download-csv-button"
 
@@ -99,13 +100,16 @@ export default async function WorkOrdersPage({ searchParams }: PageProps) {
         <Card>
           <CardHeader>
             <CardTitle>Work Orders</CardTitle>
-            <Pill tone="cyan" className="ml-auto">
+            <Pill tone="cyan">
               {totals.count.toLocaleString()}
             </Pill>
             <div className="text-[12px] text-ink-dim font-mono num">
               {formatCurrency(totals.sub_total)}
             </div>
-            <DownloadCsvButton />
+            <div className="ml-auto flex items-center gap-3">
+              <WorkOrdersSearchInput />
+              <DownloadCsvButton />
+            </div>
           </CardHeader>
 
           <div className="overflow-x-auto">
