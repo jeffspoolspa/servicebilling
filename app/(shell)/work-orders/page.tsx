@@ -164,7 +164,7 @@ export default async function WorkOrdersPage({ searchParams }: PageProps) {
                       className="text-ink-dim text-xs truncate max-w-[280px]"
                       title={row.invoice_memo ?? undefined}
                     >
-                      {row.invoice_memo ?? "—"}
+                      {stripWoPrefix(row.invoice_memo) ?? "—"}
                     </td>
                     <td className="text-ink-mute text-xs">
                       {row.tech}
@@ -227,4 +227,17 @@ function SortCell({
       {children}
     </th>
   )
+}
+
+/**
+ * Strip the "WO#NNNNNNN: " prefix that pre_process composes into every
+ * memo. The WO number is already in the WO column on this table, so the
+ * prefix is redundant clutter that eats into the truncate budget.
+ *
+ * The full memo (with prefix) still lives in the cell's title tooltip
+ * and in the CSV export — only the visible table text is stripped.
+ */
+function stripWoPrefix(memo: string | null): string | null {
+  if (!memo) return memo
+  return memo.replace(/^\s*WO#\d+:\s*/i, "") || memo
 }
