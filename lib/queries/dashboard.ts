@@ -1007,15 +1007,20 @@ export async function getWorkOrderDetail(
           .gt("unapplied_amt", 0)
           .or(`txn_date.is.null,txn_date.gte.${cutoff}`)
           .order("txn_date", { ascending: true }),
-        // Only default methods — one default card + one default ACH per
-        // customer is QBO's model, and surfacing non-defaults would invite
-        // charging a card the customer doesn't consider their current one.
+        // Show every active PM in QBO's wallet for this customer. Whether
+        // any individual PM is flagged QBO-default is independent of
+        // whether the customer exists in our cache — and it's also
+        // independent of the customer's billing preference (email vs
+        // charge). The PaymentMethodsCard surfaces the QBO-default
+        // visually but doesn't hide non-defaults; without that the UI
+        // claimed "no card on file" for customers like Country Inn whose
+        // sole card just hadn't had the QBO default flag flipped on.
         sb
           .from("billing_customer_payment_methods")
           .select("id, type, card_brand, last_four, is_default, is_active, qbo_created_at")
           .eq("qbo_customer_id", invoice.qbo_customer_id)
           .eq("is_active", true)
-          .eq("is_default", true)
+          .order("is_default", { ascending: false, nullsFirst: false })
           .order("qbo_created_at", { ascending: false }),
       ])
       // Client-side maint filter (Postgrest NOT ILIKE is awkward to express)

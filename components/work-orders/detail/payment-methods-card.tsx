@@ -8,17 +8,20 @@ import type { PaymentMethod } from "@/lib/queries/dashboard"
 import { formatDate } from "@/lib/utils/format"
 
 /**
- * Payment methods card — shows only QBO-flagged defaults (one card + one ACH
- * max per customer). The one we'd charge is highlighted; if the other exists,
- * click it to override (`invoice.preferred_payment_type`). Matches
- * process_invoice.get_active_payment_method which filters to is_default=true
- * and honors the per-invoice override.
+ * Payment methods card — shows EVERY active PM QBO has on file for the
+ * customer, independent of billing preference. The card simply mirrors
+ * what's in QBO's wallet; whether we'd auto-charge it is a separate
+ * concern (driven by Customers.preferred_payment_type +
+ * invoices.preferred_payment_type).
  *
- * Selection rule (mirrors the backend):
- *   1. If invoice.preferred_payment_type is set AND a default of that type
- *      exists, that one is highlighted.
- *   2. Else the most-recently-created default wins (matches QBO intent in
- *      98%+ of cases observed in production data).
+ * Selection rule (which row is highlighted as "will charge"):
+ *   1. If invoice.preferred_payment_type is set AND an active PM of
+ *      that type exists, that PM wins (per-invoice override).
+ *   2. Else the QBO-flagged default wins (most recent if multiple).
+ *   3. Else the most-recently-added active PM (handles the common case
+ *      where QBO's default flag was never toggled, e.g. Country Inn).
+ *
+ * "is_default" is preserved as a visual badge but no longer gates display.
  */
 /** PM-card subset of preferred_payment_type — only the values that can name
  *  a specific payment instrument. 'email' isn't surfaced here because it
@@ -53,25 +56,30 @@ export function PaymentMethodsCard({
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
-  // Already defaults-only + ordered qbo_created_at desc by the query.
-  // Belt-and-suspenders: enforce both here too so this works even if the
-  // caller passes an unfiltered list.
-  const defaults = methods
-    .filter((m) => m.is_default && m.is_active !== false)
+  // All active PMs, ordered: defaults first, then most-recently-added.
+  // Defense in depth — server orders the same way; this re-sort handles
+  // any caller that passes an unsorted list.
+  const active = methods
+    .filter((m) => m.is_active !== false)
     .sort((a, b) => {
+      // Defaults float to top
+      const ad0 = a.is_default ? 0 : 1
+      const bd0 = b.is_default ? 0 : 1
+      if (ad0 !== bd0) return ad0 - bd0
       const ad = a.qbo_created_at ?? ""
       const bd = b.qbo_created_at ?? ""
       return bd.localeCompare(ad)
     })
 
-  // Determine the selected one
+  // Determine the selected one — three-tier priority (override → default → newest).
   const selected = (() => {
     if (normalizedPreferred) {
-      // cpm.type uses 'credit_card' | 'ach' post-rename; match exact.
-      const match = defaults.find((m) => normalizeChannel(m.type) === normalizedPreferred)
+      const match = active.find((m) => normalizeChannel(m.type) === normalizedPreferred)
       if (match) return match
     }
-    return defaults[0] ?? null
+    const def = active.find((m) => m.is_default)
+    if (def) return def
+    return active[0] ?? null
   })()
 
   async function switchTo(targetType: PmCardChannel | null) {
@@ -92,7 +100,7 @@ export function PaymentMethodsCard({
     startTransition(() => router.refresh())
   }
 
-  if (defaults.length === 0) {
+  if (active.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -100,7 +108,7 @@ export function PaymentMethodsCard({
           <span className="ml-auto text-[11px] text-ink-mute">none</span>
         </CardHeader>
         <CardBody className="text-ink-mute text-sm">
-          No default card or ACH on file — invoice will be emailed.
+          No card or ACH on file — invoice will be emailed.
         </CardBody>
       </Card>
     )
@@ -111,13 +119,13 @@ export function PaymentMethodsCard({
       <CardHeader>
         <CardTitle>Payment method on file</CardTitle>
         <span className="ml-auto text-[11px] text-ink-mute">
-          {defaults.length === 2 ? "click to switch" : "QBO default"}
+          {active.length > 1 ? "click to switch" : "on file"}
         </span>
       </CardHeader>
       <div className="flex flex-col">
-        {defaults.map((m) => {
+        {active.map((m) => {
           const isSelected = selected?.id === m.id
-          const canSwitchTo = !isSelected && defaults.length > 1
+          const canSwitchTo = !isSelected && active.length > 1
           const isUserOverride =
             isSelected && normalizedPreferred === normalizeChannel(m.type)
 
@@ -166,8 +174,13 @@ export function PaymentMethodsCard({
                       ···{m.last_four ?? "—"}
                     </span>
                   </div>
-                  <div className="text-ink-mute text-[10px] mt-0.5">
-                    added {m.qbo_created_at ? formatDate(m.qbo_created_at) : "—"}
+                  <div className="text-ink-mute text-[10px] mt-0.5 flex items-center gap-1.5">
+                    <span>added {m.qbo_created_at ? formatDate(m.qbo_created_at) : "—"}</span>
+                    {m.is_default && (
+                      <span className="text-[9px] uppercase tracking-[0.06em] text-ink-dim border border-line-soft rounded px-1 py-px">
+                        QBO default
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -194,9 +207,9 @@ export function PaymentMethodsCard({
           {error}
         </CardBody>
       )}
-      {normalizedPreferred && defaults.length > 1 && (
+      {normalizedPreferred && active.length > 1 && (
         <CardBody className="border-t border-line-soft text-[11px] text-ink-mute flex items-center justify-between">
-          <span>Using override — QBO&apos;s default is the other one.</span>
+          <span>Per-invoice override — clear to fall back to the QBO default selection.</span>
           <button
             type="button"
             disabled={pending}
