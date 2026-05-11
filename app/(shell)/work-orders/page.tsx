@@ -14,6 +14,7 @@ import {
 import { formatCurrency, formatDate } from "@/lib/utils/format"
 import { WorkOrdersFilterBar } from "@/components/work-orders/filter-bar"
 import { BonusToggle } from "@/components/work-orders/bonus-toggle"
+import { DownloadCsvButton } from "@/components/work-orders/download-csv-button"
 
 export const dynamic = "force-dynamic"
 
@@ -100,6 +101,7 @@ export default async function WorkOrdersPage({ searchParams }: PageProps) {
             <div className="text-[12px] text-ink-dim font-mono num">
               {formatCurrency(totals.sub_total)}
             </div>
+            <DownloadCsvButton />
           </CardHeader>
 
           <div className="overflow-x-auto">
@@ -116,7 +118,7 @@ export default async function WorkOrdersPage({ searchParams }: PageProps) {
                     <SortableHeader label="Customer" column="customer" currentSort={sort} currentDir={dir} basePath={BASE} defaultDir="asc" />
                   </SortCell>
                   <SortCell>
-                    <SortableHeader label="Type" column="wo_type" currentSort={sort} currentDir={dir} basePath={BASE} defaultDir="asc" />
+                    <SortableHeader label="Memo" column="invoice_memo" currentSort={sort} currentDir={dir} basePath={BASE} defaultDir="asc" />
                   </SortCell>
                   <SortCell>
                     <SortableHeader label="Tech" column="tech" currentSort={sort} currentDir={dir} basePath={BASE} defaultDir="asc" />
@@ -158,7 +160,12 @@ export default async function WorkOrdersPage({ searchParams }: PageProps) {
                     <td className="text-ink truncate max-w-[200px]" title={row.customer ?? undefined}>
                       {row.customer ?? "—"}
                     </td>
-                    <td className="text-ink-dim text-xs">{row.wo_type ?? "—"}</td>
+                    <td
+                      className="text-ink-dim text-xs truncate max-w-[280px]"
+                      title={row.invoice_memo ?? undefined}
+                    >
+                      {row.invoice_memo ?? "—"}
+                    </td>
                     <td className="text-ink-mute text-xs">
                       {row.tech}
                     </td>

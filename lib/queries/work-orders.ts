@@ -52,6 +52,7 @@ export interface WorkOrderRow {
   invoice_doc_number: string | null
   invoice_balance: number | null
   invoice_qbo_class: string | null
+  invoice_memo: string | null
   billing_status: string | null
   /** Effective bonus-inclusion value (override if set, else computed from qbo_class). */
   included_in_bonus: boolean
@@ -80,7 +81,7 @@ export async function getWorkOrders(opts: {
   let q = sb
     .from("v_revenue_by_month")
     .select(
-      "wo_number, customer, wo_type, tech, location, department, completed, sub_total, total_due, qbo_invoice_id, invoice_doc_number, invoice_balance, invoice_qbo_class, billing_status, included_in_bonus, bonus_override",
+      "wo_number, customer, wo_type, tech, location, department, completed, sub_total, total_due, qbo_invoice_id, invoice_doc_number, invoice_balance, invoice_qbo_class, invoice_memo, billing_status, included_in_bonus, bonus_override",
       { count: "exact" },
     )
     .order(sortBy, { ascending: sortDir === "asc", nullsFirst: false })
@@ -110,6 +111,7 @@ export async function getWorkOrders(opts: {
       invoice_balance:
         r.invoice_balance == null ? null : Number(r.invoice_balance),
       invoice_qbo_class: (r.invoice_qbo_class ?? null) as string | null,
+      invoice_memo: (r.invoice_memo ?? null) as string | null,
       billing_status: (r.billing_status ?? null) as string | null,
       included_in_bonus: Boolean(r.included_in_bonus),
       bonus_override:
@@ -119,6 +121,74 @@ export async function getWorkOrders(opts: {
     })),
     total: count ?? 0,
   }
+}
+
+/**
+ * Page through every row matching the current filter set. Used by the
+ * CSV export endpoint — the on-screen table is paginated, but the CSV
+ * needs the FULL filtered dataset, not just one page.
+ *
+ * Caps at MAX_EXPORT_ROWS (50k) to avoid runaway exports on a "no
+ * filters" click. The route handler returns a clear error if the cap
+ * would be hit so the user knows to narrow their filter.
+ */
+const MAX_EXPORT_ROWS = 50_000
+
+export async function getAllWorkOrders(opts: {
+  filters: WorkOrderFilters
+  sortBy?: string
+  sortDir?: "asc" | "desc"
+}): Promise<{ rows: WorkOrderRow[]; truncated: boolean }> {
+  const sb = createAnon("public")
+  const sortBy = opts.sortBy ?? "completed"
+  const sortDir = opts.sortDir ?? "desc"
+  const PAGE = 1000
+  const all: WorkOrderRow[] = []
+  let offset = 0
+  while (offset < MAX_EXPORT_ROWS) {
+    let q = sb
+      .from("v_revenue_by_month")
+      .select(
+        "wo_number, customer, wo_type, tech, location, department, completed, sub_total, total_due, qbo_invoice_id, invoice_doc_number, invoice_balance, invoice_qbo_class, invoice_memo, billing_status, included_in_bonus, bonus_override",
+      )
+      .order(sortBy, { ascending: sortDir === "asc", nullsFirst: false })
+      .range(offset, offset + PAGE - 1)
+    q = applyFilters(q, opts.filters)
+    const { data, error } = await q
+    if (error) {
+      console.error("getAllWorkOrders error:", error)
+      break
+    }
+    if (!data || data.length === 0) break
+    for (const r of data as Array<Record<string, unknown>>) {
+      all.push({
+        wo_number: String(r.wo_number ?? ""),
+        customer: (r.customer ?? null) as string | null,
+        wo_type: (r.wo_type ?? null) as string | null,
+        tech: (r.tech ?? "Unassigned") as string,
+        location: (r.location ?? null) as string | null,
+        department: (r.department ?? "Unassigned") as string,
+        completed: String(r.completed ?? ""),
+        sub_total: Number(r.sub_total ?? 0),
+        total_due: Number(r.total_due ?? 0),
+        qbo_invoice_id: (r.qbo_invoice_id ?? null) as string | null,
+        invoice_doc_number: (r.invoice_doc_number ?? null) as string | null,
+        invoice_balance:
+          r.invoice_balance == null ? null : Number(r.invoice_balance),
+        invoice_qbo_class: (r.invoice_qbo_class ?? null) as string | null,
+        invoice_memo: (r.invoice_memo ?? null) as string | null,
+        billing_status: (r.billing_status ?? null) as string | null,
+        included_in_bonus: Boolean(r.included_in_bonus),
+        bonus_override:
+          r.bonus_override === null || r.bonus_override === undefined
+            ? null
+            : Boolean(r.bonus_override),
+      })
+    }
+    if (data.length < PAGE) break
+    offset += PAGE
+  }
+  return { rows: all, truncated: all.length >= MAX_EXPORT_ROWS }
 }
 
 /** Totals for the currently-filtered set — rendered above the table so
