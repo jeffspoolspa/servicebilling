@@ -381,12 +381,15 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
     })
   }, [snapshot])
 
-  // Reset card-level state when we move to a new invoice
+  // Reset card-level state when we move to a new invoice. Watch the actual
+  // invoice ID (not just cursor) — when liveRows drops a card and the next
+  // one slides into the same cursor index, cursor doesn't change but
+  // current.qbo_invoice_id does, and we still want to reset.
   useEffect(() => {
     setErr(null)
     setBusy(null)
     setFlash(false)
-  }, [cursor])
+  }, [cursor, current?.qbo_invoice_id])
 
 
   // Realtime patch — subscribe to billing.invoices UPDATE events and patch
@@ -566,6 +569,12 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
       }, 180)
     } catch (e) {
       setErr(e instanceof Error ? e.message : "approve failed")
+    } finally {
+      // Always clear busy on completion — without this, when the approved
+      // card drops from liveRows and the next card slides into the SAME
+      // cursor index, busy stays "approve" and the new card's button
+      // shows "Saving…" indefinitely. The cursor-change useEffect doesn't
+      // help because cursor didn't actually move.
       setBusy(null)
     }
   }, [current, busy, edits])
@@ -592,6 +601,10 @@ export function TriageReviewer({ rows }: { rows: TriageRow[] }) {
       // Do NOT router.refresh() — same reason as approve(). Refresh on exit.
     } catch (e) {
       setErr(e instanceof Error ? e.message : "reprocess failed")
+    } finally {
+      // Always clear busy — same reasoning as approve(): when the card
+      // drops from liveRows the next one slides into the same cursor index
+      // and the cursor-change useEffect doesn't fire.
       setBusy(null)
     }
   }, [current, busy, saveEdits])
