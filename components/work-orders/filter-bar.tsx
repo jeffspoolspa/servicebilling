@@ -87,6 +87,7 @@ export function WorkOrdersFilterBar({ options }: Props) {
 
   return (
     <div className="flex flex-col gap-2.5">
+      {/* Row 1: filter dropdowns + Clear all */}
       <div className="flex flex-wrap items-center gap-2">
         <SelectFilter
           label="Month"
@@ -143,32 +144,18 @@ export function WorkOrdersFilterBar({ options }: Props) {
             { value: "false", label: "Excluded" },
           ]}
         />
-
-        <div className="relative ml-auto">
-          <SearchIcon
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-mute"
-            strokeWidth={1.8}
-          />
-          <input
-            type="search"
-            value={qInput}
-            onChange={(e) => setQInput(e.target.value)}
-            placeholder="Search WO, customer, invoice #…"
-            className="bg-bg-elev border border-line rounded-md pl-8 pr-2.5 py-1.5 text-[12px] text-ink w-64 placeholder:text-ink-mute focus:outline-none focus:border-cyan"
-          />
-        </div>
-
         {hasActive && (
           <button
             type="button"
             onClick={clearAll}
-            className="text-[11px] text-ink-mute hover:text-ink transition-colors px-2 py-1"
+            className="ml-auto text-[11px] text-ink-mute hover:text-ink transition-colors px-2 py-1"
           >
             Clear all
           </button>
         )}
       </div>
 
+      {/* Row 2: filter chips (only when active) */}
       {hasActive && (
         <div className="flex flex-wrap gap-1.5">
           {activeFilters.map((f) => (
@@ -185,6 +172,23 @@ export function WorkOrdersFilterBar({ options }: Props) {
           ))}
         </div>
       )}
+
+      {/* Row 3: search bar — its own row right above the table so it
+          stops fighting the filter dropdowns for horizontal space and
+          the placeholder copy stays readable on narrow viewports. */}
+      <div className="relative">
+        <SearchIcon
+          className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-mute"
+          strokeWidth={1.8}
+        />
+        <input
+          type="search"
+          value={qInput}
+          onChange={(e) => setQInput(e.target.value)}
+          placeholder="Search WO, customer, invoice #…"
+          className="w-full bg-bg-elev border border-line rounded-md pl-8 pr-2.5 py-1.5 text-[12px] text-ink placeholder:text-ink-mute focus:outline-none focus:border-cyan"
+        />
+      </div>
     </div>
   )
 }
