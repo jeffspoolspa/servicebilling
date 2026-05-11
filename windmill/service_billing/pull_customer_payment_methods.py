@@ -66,11 +66,18 @@ def fetch_methods_for_customer(customer_id: str, access_token: str) -> list[dict
             for c in cards:
                 if c.get("status") == "ACTIVE":
                     methods.append({
-                        "type": "card",
+                        # cpm_type_check requires 'credit_card' or 'ach'.
+                        # The legacy 'card' value crashed every scheduled
+                        # run since the constraint was tightened.
+                        "type": "credit_card",
                         "qbo_payment_method_id": c.get("id"),
                         "card_brand": c.get("cardType"),
                         "last_four": (c.get("number") or "")[-4:],
-                        "is_default": False,
+                        # QBO returns `default: true/false` on each card
+                        # (not nullable). Read it through; ACH does the
+                        # same below. Without this, every card came in
+                        # is_default=false, breaking PM-type resolution.
+                        "is_default": bool(c.get("default")),
                         "raw": c,
                     })
     except Exception as e:
@@ -147,43 +154,62 @@ def main(force_refresh: bool = False):
 
     stats = {"customers": 0, "with_methods": 0, "total_methods": 0, "cards": 0, "ach": 0}
 
+    stats["customer_errors"] = 0
     for i, cid in enumerate(customer_ids):
-        methods = fetch_methods_for_customer(cid, access_token)
-        stats["customers"] += 1
+        try:
+            methods = fetch_methods_for_customer(cid, access_token)
+            stats["customers"] += 1
 
-        # Deactivate old entries for this customer
-        cur.execute(
-            "UPDATE billing.customer_payment_methods SET is_active = false WHERE qbo_customer_id = %s",
-            (cid,),
-        )
+            # Deactivate old entries for this customer
+            cur.execute(
+                "UPDATE billing.customer_payment_methods SET is_active = false WHERE qbo_customer_id = %s",
+                (cid,),
+            )
 
-        if methods:
-            stats["with_methods"] += 1
-            for m in methods:
-                cur.execute("""
-                    INSERT INTO billing.customer_payment_methods
-                        (qbo_customer_id, qbo_payment_method_id, type, card_brand,
-                         last_four, is_default, is_active, raw, fetched_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, true, %s::jsonb, %s)
-                    ON CONFLICT (qbo_customer_id, qbo_payment_method_id) DO UPDATE SET
-                        type = EXCLUDED.type, card_brand = EXCLUDED.card_brand,
-                        last_four = EXCLUDED.last_four, is_default = EXCLUDED.is_default,
-                        is_active = true, raw = EXCLUDED.raw, fetched_at = EXCLUDED.fetched_at
-                """, (
-                    cid, m["qbo_payment_method_id"], m["type"],
-                    m["card_brand"], m["last_four"], m["is_default"],
-                    psycopg2.extras.Json(m.get("raw", {})), now,
-                ))
-                stats["total_methods"] += 1
-                if m["type"] == "card":
-                    stats["cards"] += 1
-                else:
-                    stats["ach"] += 1
+            if methods:
+                stats["with_methods"] += 1
+                for m in methods:
+                    cur.execute("""
+                        INSERT INTO billing.customer_payment_methods
+                            (qbo_customer_id, qbo_payment_method_id, type, card_brand,
+                             last_four, is_default, is_active, raw, fetched_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, true, %s::jsonb, %s)
+                        ON CONFLICT (qbo_customer_id, qbo_payment_method_id) DO UPDATE SET
+                            type = EXCLUDED.type, card_brand = EXCLUDED.card_brand,
+                            last_four = EXCLUDED.last_four, is_default = EXCLUDED.is_default,
+                            is_active = true, raw = EXCLUDED.raw, fetched_at = EXCLUDED.fetched_at
+                    """, (
+                        cid, m["qbo_payment_method_id"], m["type"],
+                        m["card_brand"], m["last_four"], m["is_default"],
+                        psycopg2.extras.Json(m.get("raw", {})), now,
+                    ))
+                    stats["total_methods"] += 1
+                    if m["type"] == "credit_card":
+                        stats["cards"] += 1
+                    else:
+                        stats["ach"] += 1
 
-        conn.commit()
+            conn.commit()
+        except Exception as e:
+            # Per-customer isolation. Without this, one bad row (a new
+            # cardType QBO returns that we don't model, an unexpected
+            # constraint, etc.) crashes the entire sweep and every
+            # downstream customer goes unfetched — exactly how RIGBY's
+            # card got missed for days. Roll back the failed transaction,
+            # log, and keep going.
+            stats["customer_errors"] += 1
+            print(f"  ERROR on customer {cid}: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            # Re-acquire cursor — psycopg2 cursors can become unusable
+            # after a transaction abort.
+            cur.close()
+            cur = conn.cursor()
 
         if (i + 1) % 50 == 0:
-            print(f"  ... {i + 1}/{len(customer_ids)} customers")
+            print(f"  ... {i + 1}/{len(customer_ids)} customers (errors so far: {stats['customer_errors']})")
 
     cur.close()
     conn.close()
