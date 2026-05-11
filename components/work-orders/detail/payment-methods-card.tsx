@@ -119,7 +119,11 @@ export function PaymentMethodsCard({
       <CardHeader>
         <CardTitle>Payment method on file</CardTitle>
         <span className="ml-auto text-[11px] text-ink-mute">
-          {active.length > 1 ? "click to switch" : "on file"}
+          {disabled
+            ? "read-only — invoice is processed"
+            : active.length > 1
+              ? "click to switch"
+              : "on file"}
         </span>
       </CardHeader>
       <div className="flex flex-col">
@@ -187,11 +191,11 @@ export function PaymentMethodsCard({
               <div className="flex items-center gap-2 shrink-0">
                 {isSelected ? (
                   <Pill tone="cyan" dot className="text-[10px]">
-                    will charge
+                    {disabled ? "selected" : "will charge"}
                   </Pill>
-                ) : (
+                ) : !disabled ? (
                   <span className="text-[11px] text-cyan">use this →</span>
-                )}
+                ) : null}
                 {isUserOverride && (
                   <Pill tone="neutral" className="text-[10px]">
                     override
@@ -207,7 +211,7 @@ export function PaymentMethodsCard({
           {error}
         </CardBody>
       )}
-      {normalizedPreferred && active.length > 1 && (
+      {normalizedPreferred && active.length > 1 && !disabled && (
         <CardBody className="border-t border-line-soft text-[11px] text-ink-mute flex items-center justify-between">
           <span>Per-invoice override — clear to fall back to the QBO default selection.</span>
           <button
