@@ -5,6 +5,7 @@ import { Check, RotateCcw, Coins } from "lucide-react"
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils/cn"
+import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
  * Bonus-inclusion card on the WO detail page.
@@ -27,6 +28,7 @@ export function BonusCard({
   initialOverride: boolean | null
   qboClass: string | null
 }) {
+  const canWriteService = useCanWrite("service")
   const [override, setOverride] = useState<boolean | null>(initialOverride)
   const [pending, startTransition] = useTransition()
   const [err, setErr] = useState<string | null>(null)
@@ -90,40 +92,57 @@ export function BonusCard({
             <span className="text-ink-mute">
               (invoice class {qboClass ? `= ${qboClass}` : "unknown"})
             </span>
-            . Toggle below to override.
+            {canWriteService && ". Toggle below to override."}
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant={effective ? "primary" : "default"}
-            onClick={() => post(!effective)}
-            disabled={pending}
-          >
-            {effective ? "Remove from bonus" : "Include in bonus"}
-          </Button>
-          {hasOverride && !overrideMatchesDefault && (
+        {/* Action row: only render for users with service-write access. The
+            POST endpoint enforces the same — this is purely UX so viewers
+            don't see buttons that 403 on click. The status pill above
+            (Included / Excluded) and the override badge below stay visible
+            so viewers still see the current state. */}
+        {canWriteService && (
+          <div className="flex items-center gap-2">
             <Button
               size="sm"
-              variant="ghost"
-              onClick={() => post(null)}
+              variant={effective ? "primary" : "default"}
+              onClick={() => post(!effective)}
               disabled={pending}
-              title="Clear the user override and follow the computed default"
             >
-              <RotateCcw className="w-3.5 h-3.5" strokeWidth={2} />
-              Reset to default
+              {effective ? "Remove from bonus" : "Include in bonus"}
             </Button>
-          )}
-          {hasOverride && (
-            <span
-              className="ml-auto text-[10px] uppercase tracking-[0.12em] text-sun"
-              title={`Explicit override: ${override ? "included" : "excluded"}`}
-            >
-              · override
-            </span>
-          )}
-        </div>
+            {hasOverride && !overrideMatchesDefault && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => post(null)}
+                disabled={pending}
+                title="Clear the user override and follow the computed default"
+              >
+                <RotateCcw className="w-3.5 h-3.5" strokeWidth={2} />
+                Reset to default
+              </Button>
+            )}
+            {hasOverride && (
+              <span
+                className="ml-auto text-[10px] uppercase tracking-[0.12em] text-sun"
+                title={`Explicit override: ${override ? "included" : "excluded"}`}
+              >
+                · override
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Viewer-only override badge (since the action row above is hidden) */}
+        {!canWriteService && hasOverride && (
+          <div
+            className="inline-flex text-[10px] uppercase tracking-[0.12em] text-sun"
+            title={`Explicit override: ${override ? "included" : "excluded"}`}
+          >
+            · override
+          </div>
+        )}
 
         {err && (
           <div className="text-[11px] text-coral bg-coral/[0.06] border border-coral/30 rounded px-2.5 py-1.5">

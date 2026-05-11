@@ -34,7 +34,7 @@ export function BonusToggle({
   qboClass: string | null
   size?: "sm" | "md"
 }) {
-  const _canWriteService = useCanWrite("service")
+  const canWriteService = useCanWrite("service")
   const [included, setIncluded] = useState(initialIncluded)
   const [override, setOverride] = useState(initialOverride)
   const [pending, startTransition] = useTransition()
@@ -83,8 +83,35 @@ export function BonusToggle({
       ? `Override: ${included ? "included" : "excluded"} · ${defaultLabel}`
       : defaultLabel
 
-  // UX gate (server enforces; this hides the button when viewer):
-  if (!_canWriteService) return null
+  // Viewer gate: render the SAME visual indicator as the editable button,
+  // but as a non-interactive <span>. Read-only users still need to see
+  // whether each WO is in the bonus pool — they just can't toggle it.
+  // Server-side guard (POST /api/work-orders/[wo]/bonus) is the real
+  // enforcement; this is purely UX so viewers don't get error toasts.
+  if (!canWriteService) {
+    return (
+      <span
+        title={title}
+        aria-label={included ? "Included in bonus pool (read-only)" : "Excluded from bonus pool (read-only)"}
+        className={cn(
+          "relative inline-flex items-center justify-center rounded border",
+          dimension,
+          included
+            ? "bg-cyan/15 border-cyan/60 text-cyan"
+            : "bg-bg-elev border-line text-transparent",
+        )}
+      >
+        {included && <Check className="w-3 h-3" strokeWidth={2.5} />}
+        {override !== null && (
+          <span
+            className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-sun shadow-[0_0_0_1px_rgb(var(--bg-elev))]"
+            title="User override"
+          />
+        )}
+      </span>
+    )
+  }
+
   return (
     <button
       type="button"
