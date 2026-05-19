@@ -3,35 +3,44 @@
 import type { Office } from "./types"
 
 // ── Email (Resend) ─────────────────────────────────────────────────────────
-// Each office sends from a brand-appropriate domain. Replies route back to a
-// monitored inbox per office. Resend requires the FROM domain to be verified
-// in your Resend account before sends succeed.
+// All offices send from a single shared marketing domain
+// (jeffspoolspasales.com). Brand identity comes through the From display
+// name. Replies route to the office's monitored inbox via Reply-To, and the
+// office address is BCC'd on every send so the team has a copy in their
+// own inbox (preserves Gmail-sent-folder-style visibility without exposing
+// internal addresses to the recipient).
+//
+// Resend requires jeffspoolspasales.com to be a verified sending domain
+// (SPF + DKIM records added in Resend's Domains UI). Reply-To and BCC
+// addresses don't need verification — they're just headers.
 
 export interface EmailOfficeBranding {
   from_name: string
   from_address: string
   reply_to: string
-  auto_cc: readonly string[]
+  auto_bcc: readonly string[]
 }
+
+const SHARED_FROM_ADDRESS = "quotes@jeffspoolspasales.com"
 
 export const EMAIL_OFFICE_BRANDING: Record<Office, EmailOfficeBranding> = {
   richmond_hill: {
     from_name: "Perfect Pools",
-    from_address: "quotes@perfectpoolscleaning.com",
+    from_address: SHARED_FROM_ADDRESS,
     reply_to: "info@perfectpoolscleaning.com",
-    auto_cc: ["info@perfectpoolscleaning.com"],
+    auto_bcc: ["info@perfectpoolscleaning.com"],
   },
   brunswick: {
     from_name: "Jeff's Pool & Spa Service",
-    from_address: "quotes@jeffspoolspa.com",
+    from_address: SHARED_FROM_ADDRESS,
     reply_to: "jpsbilling@jeffspoolspa.com",
-    auto_cc: [],
+    auto_bcc: ["jpsbilling@jeffspoolspa.com"],
   },
   st_marys: {
     from_name: "Jeff's Pool & Spa Service",
-    from_address: "quotes@jeffspoolspa.com",
+    from_address: SHARED_FROM_ADDRESS,
     reply_to: "jpsbilling@jeffspoolspa.com",
-    auto_cc: [],
+    auto_bcc: ["jpsbilling@jeffspoolspa.com"],
   },
 }
 

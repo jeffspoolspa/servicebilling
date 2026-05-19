@@ -61,7 +61,10 @@ export async function sendEmail(req: SendEmailRequest): Promise<SendEmailResult>
 
   const fromName = req.from_name_override ?? branding.from_name
   const fromHeader = `${fromName} <${branding.from_address}>`
-  const mergedCc = dedupeAddresses(branding.auto_cc, req.cc ?? [], req.to)
+  // Caller's explicit CCs are visible to the recipient. The office archive
+  // address goes in BCC so the customer never sees internal email addresses.
+  const cc = req.cc && req.cc.length ? dedupeAddresses([], req.cc, req.to) : []
+  const mergedBcc = dedupeAddresses(branding.auto_bcc, req.bcc ?? [], req.to)
 
   // Phase 1: pre-write parent + child rows BEFORE the network call.
   let communicationId: string
@@ -85,8 +88,8 @@ export async function sendEmail(req: SendEmailRequest): Promise<SendEmailResult>
       subject: req.subject,
       body_html: req.body_html,
       body_text: req.body_text,
-      cc: mergedCc.length ? mergedCc : undefined,
-      bcc: req.bcc,
+      cc: cc.length ? cc : undefined,
+      bcc: mergedBcc.length ? mergedBcc : undefined,
       in_reply_to: req.in_reply_to,
       email_references: req.email_references,
     })
@@ -109,8 +112,8 @@ export async function sendEmail(req: SendEmailRequest): Promise<SendEmailResult>
       replyTo: branding.reply_to,
       subject: req.subject,
     }
-    if (mergedCc.length) payload.cc = mergedCc
-    if (req.bcc && req.bcc.length) payload.bcc = req.bcc
+    if (cc.length) payload.cc = cc
+    if (mergedBcc.length) payload.bcc = mergedBcc
     if (req.body_html) payload.html = req.body_html
     if (req.body_text) payload.text = req.body_text
     if (Object.keys(headers).length) payload.headers = headers
