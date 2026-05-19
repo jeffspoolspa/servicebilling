@@ -33,6 +33,14 @@ export async function updateSession(request: NextRequest) {
     return response
   }
 
+  // Same logic for service-to-service comms transport endpoints. These
+  // authenticate via the X-Internal-Token header (see lib/comms/server/auth.ts);
+  // there's no session cookie because the caller is the website's Vercel
+  // function or a Windmill script, not a logged-in user.
+  if (path.startsWith("/api/comms/")) {
+    return response
+  }
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
