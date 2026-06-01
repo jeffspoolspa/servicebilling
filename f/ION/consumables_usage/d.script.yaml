@@ -1,0 +1,5 @@
+summary: extract_report
+description: This script was edited in place of flow f/ION/consumables_usage by carter.
+lock: '!inline f/ION/consumables_usage/d.script.lock'
+kind: script
+schema: null

@@ -1,0 +1,6 @@
+summary: ION login + cookie-based authed fetch helpers
+description: Two-stage Fluidra login with cookie capture for cookie-only ION fetches.
+lock: '!inline f/ION/_lib/session.script.lock'
+kind: script
+schema: null
+tag: chromium
