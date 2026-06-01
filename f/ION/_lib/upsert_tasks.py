@@ -58,10 +58,14 @@ LIFECYCLE
                              address+name, then address-only-if-unique); attach to
                              the loc's open task if one exists, else INSERT task +
                              one minimal schedule (no day/tech)
-  - ion_task_id absent from the report -> soft-deactivate: slot.active=false,
-                             ends_on; then task.status='closed' once it has no
-                             active slot left. (Carter: mark closed, never delete.
-                             'closed' also frees the loc from tasks_one_open_per_loc.)
+  - ion_task_id absent from the report -> cancellation. soft-deactivate:
+                             slot.active=false; then task.status='closed' once it
+                             has no active slot left. ends_on (slot + task) is
+                             dated to the task's LAST VISIT (max maintenance.visits
+                             .visit_date), per Carter -- a cancellation ends when
+                             service last happened, not at sync time. (Mark closed,
+                             never delete; 'closed' also frees the loc from
+                             tasks_one_open_per_loc.)
   (*external_data/starts_on refreshed only for un-merged tasks; merged tasks get
     status/updated_at only, since one report row can't own a merged row's metadata.)
 
@@ -263,6 +267,9 @@ def sync_recurring_tasks(tasks, supabase_connection, dry_run=True, source="ion")
         "new_slots_inserted": 0,
         "attached_slots_to_existing_task": 0,
         "new_resolved_by": defaultdict(int),
+        "new_task_examples": [],       # brand-new-location tasks
+        "attached_examples": [],       # 2nd-contract-at-loc (incl. ION task-id rotation)
+        "closed_examples": [],         # tasks soft-closed (no replacement in report)
         "unresolved_new": 0,
         "unresolved_examples": [],
         "deactivated_slots": 0,
@@ -383,6 +390,14 @@ def sync_recurring_tasks(tasks, supabase_connection, dry_run=True, source="ion")
                              ppv, flat, starts_on, ends_on, source),
                         )
                         stats["attached_slots_to_existing_task"] += 1
+                        if len(stats["attached_examples"]) < 60:
+                            stats["attached_examples"].append({
+                                "ion_task_id": ion_task_id,
+                                "customer": row.get("customerName"),
+                                "address": row.get("serviceAddress"),
+                                "service_type": row.get("serviceType"),
+                                "resolved_by": how,
+                            })
                     else:
                         cur.execute(
                             """INSERT INTO maintenance.tasks
@@ -398,6 +413,15 @@ def sync_recurring_tasks(tasks, supabase_connection, dry_run=True, source="ion")
                         # location later in the run attaches instead of double-inserting.
                         r["open_task_by_loc"][sl_id] = new_task_id
                         stats["new_tasks_inserted"] += 1
+                        if len(stats["new_task_examples"]) < 60:
+                            stats["new_task_examples"].append({
+                                "ion_task_id": ion_task_id,
+                                "customer": row.get("customerName"),
+                                "address": row.get("serviceAddress"),
+                                "city": row.get("city"),
+                                "service_type": row.get("serviceType"),
+                                "resolved_by": how,
+                            })
 
                         cur.execute(
                             """INSERT INTO maintenance.task_schedules
@@ -415,32 +439,61 @@ def sync_recurring_tasks(tasks, supabase_connection, dry_run=True, source="ion")
             # Slots first.
             if report_ids:
                 cur.execute(
-                    """UPDATE maintenance.task_schedules
+                    """UPDATE maintenance.task_schedules ts
                        SET active=false,
-                           ends_on=COALESCE(ends_on, %s::date),
+                           ends_on=COALESCE(
+                             (SELECT max(v.visit_date) FROM maintenance.visits v
+                              WHERE v.task_id = ts.task_id),
+                             ts.ends_on, %s::date),
                            updated_at=now()
-                       WHERE external_source=%s
-                         AND active=true
-                         AND ion_task_id IS NOT NULL
-                         AND NOT (ion_task_id = ANY(%s))""",
+                       WHERE ts.external_source=%s
+                         AND ts.active=true
+                         AND ts.ion_task_id IS NOT NULL
+                         AND NOT (ts.ion_task_id = ANY(%s))""",
                     (today, source, report_ids),
                 )
                 stats["deactivated_slots"] = cur.rowcount
 
                 # Tasks with no active slot left -> closed (allowed statuses:
                 # active|paused|closed). 'closed' also exits tasks_one_open_per_loc.
+                # CTE returns the closed rows joined to customer/address so the
+                # dry-run can show exactly which tasks would close (no replacement
+                # ion_task_id anywhere in the active report).
                 cur.execute(
-                    """UPDATE maintenance.tasks t
-                       SET status='closed', updated_at=now()
-                       WHERE t.external_source=%s
-                         AND t.status <> 'closed'
-                         AND NOT EXISTS (
-                           SELECT 1 FROM maintenance.task_schedules ts
-                           WHERE ts.task_id=t.id AND ts.active=true
-                         )""",
+                    """WITH closed AS (
+                           UPDATE maintenance.tasks t
+                           SET status='closed',
+                               ends_on=COALESCE(
+                                 (SELECT max(v.visit_date) FROM maintenance.visits v
+                                  WHERE v.task_id = t.id),
+                                 t.ends_on),
+                               updated_at=now()
+                           WHERE t.external_source=%s
+                             AND t.status <> 'closed'
+                             AND NOT EXISTS (
+                               SELECT 1 FROM maintenance.task_schedules ts
+                               WHERE ts.task_id=t.id AND ts.active=true
+                             )
+                           RETURNING t.id, t.service_location_id,
+                                     t.external_data->>'service_type' AS service_type,
+                                     t.ends_on
+                       )
+                       SELECT cl.id::text, sl.street, c.display_name,
+                              cl.service_type, cl.ends_on
+                       FROM closed cl
+                       JOIN public.service_locations sl ON sl.id = cl.service_location_id
+                       JOIN public."Customers" c ON c.id = sl.account_id""",
                     (source,),
                 )
-                stats["deactivated_tasks"] = cur.rowcount
+                closed_rows = cur.fetchall()
+                stats["deactivated_tasks"] = len(closed_rows)
+                for _tid, street, display_name, service_type, end_dt in closed_rows[:60]:
+                    stats["closed_examples"].append({
+                        "customer": display_name,
+                        "address": street,
+                        "service_type": service_type,
+                        "ended_on": end_dt.isoformat() if end_dt else None,
+                    })
 
         if dry_run:
             conn.rollback()
