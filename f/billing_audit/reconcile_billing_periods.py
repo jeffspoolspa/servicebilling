@@ -40,7 +40,8 @@ ROLLBACK. Set dry_run=False to commit.
 import datetime
 from f.ION._lib.upsert import _connect
 
-LABOR_PATTERNS = ("POOL MAINTENANCE", "HALF HOUR MAINTENANCE", "FLAT RATE")
+LABOR_PATTERNS = ("POOL MAINTENANCE", "HALF HOUR MAINTENANCE", "FLAT RATE",
+                  "CHEMICAL TESTING", "GREEN POOL", "SPA CLEAN", "QUALITY CONTROL")
 PARTIAL_MONTHS = {datetime.date(2026, 4, 1)}  # visits sync started 2026-04-06
 
 FETCH_PROMISES = """
