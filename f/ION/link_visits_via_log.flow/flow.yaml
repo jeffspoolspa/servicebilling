@@ -1,0 +1,62 @@
+summary: >-
+  link_visits_via_log: authoritative visit->task linker via ION service log
+  (loglist -> LogID -> addLog -> EventID)
+description: >-
+  Fallback linker for visits the day/window resolver misses. Step a = task-less
+  visits (+ion_cust hint). Step b = per visit: resolve ION customer, fetch loglist
+  (date -> LogID), open addLog.cfm?LogID -> EventID (the task id ION recorded on
+  the service log -- ground truth). Step c = set visit.task_id to the task whose
+  task_schedules.ion_task_id = EventID. dry_run default rolls back. EventID
+  overrides day/window inference (ION can log a visit against a task whose recorded
+  window doesn't cover the visit date). sl_mismatch flags links whose task lives on
+  a different service_location (e.g. junk-sl strandings) -- a separate cleanup.
+value:
+  modules:
+    - id: a
+      summary: task-less visits + ion cust hint
+      value:
+        type: script
+        input_transforms:
+          supabase_connection:
+            type: static
+            value: '$res:u/carter/supabase'
+        path: f/ION/_lib/taskless_visits
+      continue_on_error: false
+    - id: b
+      summary: loglist -> LogID -> addLog -> EventID
+      value:
+        type: script
+        input_transforms:
+          visits:
+            type: javascript
+            expr: results.a.visits
+        path: f/ION/api/resolve_visit_tasks_via_log
+      timeout: 900
+      continue_on_error: false
+    - id: c
+      summary: link visit.task_id by EventID
+      value:
+        type: script
+        input_transforms:
+          links:
+            type: javascript
+            expr: results.b.links
+          supabase_connection:
+            type: static
+            value: '$res:u/carter/supabase'
+          dry_run:
+            type: javascript
+            expr: flow_input.dry_run ?? true
+        path: f/ION/_lib/link_visits_by_event
+      continue_on_error: false
+schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  order:
+    - dry_run
+  properties:
+    dry_run:
+      type: boolean
+      default: true
+      description: If true (default), roll back and report. Set false to commit the links.
+  required: []
