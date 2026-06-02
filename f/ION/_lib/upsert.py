@@ -152,51 +152,87 @@ def build_resolvers(conn):
         for item_id, item_name in cur.fetchall():
             items_by_name[item_name.upper().strip()] = item_id
 
-    # Active task per service_location + their schedule slots.
-    # Pre-loading these avoids a per-row query.
-    task_by_sl = {}  # service_location_id -> task_uuid
-    schedules_by_task = defaultdict(list)  # task_uuid -> [(task_schedule_id, dow, tech_id)]
+    # Active tasks per service_location, WITH their rate/billing so a per-pool
+    # visit can attribute to the RIGHT task at a multi-contract location
+    # (e.g. WINDING RIVER = a $85 POOL MAINTENANCE task + $50 CHEMICAL TESTING
+    # tasks). Keyed by sl -> [task meta]; each meta carries the (max) per-visit
+    # rate, flat amount, billing_method, and its (day, tech) schedule slots.
+    tasks_by_sl = defaultdict(list)
+    task_meta = {}  # task_id -> meta dict (also the element stored in tasks_by_sl)
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT t.id, t.service_location_id, ts.id, ts.day_of_week, ts.tech_employee_id
+            SELECT t.id, t.service_location_id,
+                   ts.id, ts.day_of_week, ts.tech_employee_id,
+                   ts.billing_method, ts.price_per_visit_cents, ts.flat_rate_monthly_cents
             FROM maintenance.tasks t
             LEFT JOIN maintenance.task_schedules ts ON ts.task_id = t.id AND ts.active = true
             WHERE t.status IN ('active','paused')
         """)
-        for task_id, sl_id, sched_id, dow, tech_id in cur.fetchall():
-            # Multiple tasks per sl shouldn't happen given the partial unique
-            # index, but we're defensive — first wins.
-            if sl_id not in task_by_sl:
-                task_by_sl[sl_id] = task_id
+        for task_id, sl_id, sched_id, dow, tech_id, bm, rate, flat in cur.fetchall():
+            m = task_meta.get(task_id)
+            if m is None:
+                m = {"task_id": task_id, "rate": None, "flat": None,
+                     "billing_method": None, "schedules": []}
+                task_meta[task_id] = m
+                tasks_by_sl[sl_id].append(m)
+            if rate is not None and (m["rate"] is None or rate > m["rate"]):
+                m["rate"] = rate
+            if flat is not None and m["flat"] is None:
+                m["flat"] = flat
+            if bm and not m["billing_method"]:
+                m["billing_method"] = bm
             if sched_id is not None:
-                schedules_by_task[task_id].append((sched_id, dow, tech_id))
+                m["schedules"].append((sched_id, dow, tech_id))
 
     return {
         "sl_by_addr_name": sl_by_addr_name,
         "sl_by_addr_only": sl_by_addr_only,
         "tech_by_username": tech_by_username,
         "items_by_name": items_by_name,
-        "task_by_sl": task_by_sl,
-        "schedules_by_task": dict(schedules_by_task),
+        "tasks_by_sl": dict(tasks_by_sl),
     }
 
 
-def resolve_task_and_schedule(resolvers, service_location_id, visit_date, actual_tech_id):
+def _choose_task(candidates, price_cents, billing_method):
+    """Pick which of a location's active tasks a visit belongs to.
+
+    Single task -> it. Multi-contract location -> attribute by RATE so each
+    visit lands on the task billed at its price (a $85 POOL MAINTENANCE visit ->
+    the $85 task; a $50 CHEMICAL TESTING visit -> a $50 task). Same-rate ties are
+    arbitrary but harmless: the customer-month expected (sum of rate x visits) is
+    identical whichever same-rate task wins.
+    """
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    if billing_method == "flat_rate_monthly":
+        flats = [c for c in candidates if c["billing_method"] == "flat_rate_monthly"]
+        return flats[0] if flats else candidates[0]
+    pool = [c for c in candidates if c["billing_method"] != "flat_rate_monthly"] or candidates
+    exact = [c for c in pool if c["rate"] is not None and c["rate"] == price_cents]
+    if exact:
+        return exact[0]
+    return min(pool, key=lambda c: abs((c["rate"] or 0) - (price_cents or 0)))
+
+
+def resolve_task_and_schedule(resolvers, service_location_id, visit_date, actual_tech_id,
+                              price_cents=None, billing_method=None):
     """Returns (task_id, task_schedule_id, scheduled_tech_id) or all None if no task.
 
-    Match strategy for schedule slot:
-      1. task_schedules with matching day_of_week AND tech_employee_id == actual_tech
-         (the tech actually did their normally-scheduled visit)
-      2. task_schedules with matching day_of_week (any tech) — when there was a
-         reassignment, this still surfaces the slot the visit "belonged to"
-      3. None — visit happened but doesn't map to any active schedule slot
-         (could be a make-up visit, QC, etc.)
+    Step 1: pick the task at this location whose rate matches the visit (handles
+    multi-contract communities). Step 2: pick the (day, tech) schedule slot:
+      1. matching day_of_week AND tech_employee_id == actual_tech
+      2. matching day_of_week (any tech) — reassignment case
+      3. None — off-schedule (make-up, QC, etc.)
     """
-    task_id = resolvers["task_by_sl"].get(service_location_id)
-    if task_id is None:
+    candidates = resolvers["tasks_by_sl"].get(service_location_id, [])
+    chosen = _choose_task(candidates, price_cents, billing_method)
+    if chosen is None:
         return None, None, None
+    task_id = chosen["task_id"]
 
-    schedules = resolvers["schedules_by_task"].get(task_id, [])
+    schedules = chosen["schedules"]
     if not schedules:
         return task_id, None, None
 
@@ -384,7 +420,7 @@ def upsert_canonical(canonical_rows, supabase_connection, source="ion"):
             #   scheduled_tech_id — who SHOULD have done it per the schedule
             # If actual_tech_id != scheduled_tech_id, it's a reassignment.
             task_id, task_schedule_id, scheduled_tech = resolve_task_and_schedule(
-                resolvers, sl_id, visit_date, tech_id
+                resolvers, sl_id, visit_date, tech_id, price_cents, billing_method
             )
             if task_id is not None:
                 stats.setdefault("tasks_linked", 0)
