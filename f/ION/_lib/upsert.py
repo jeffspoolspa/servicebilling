@@ -398,6 +398,8 @@ def upsert_canonical(canonical_rows, supabase_connection, source="ion"):
 
             visit_buffer.append({
                 "service_location_id": sl_id,
+                "pool_id": pool_id,
+                "service_type": v.get("_service_type"),
                 "task_id": task_id,
                 "task_schedule_id": task_schedule_id,
                 "scheduled_date": visit_date,
@@ -433,18 +435,18 @@ def upsert_canonical(canonical_rows, supabase_connection, source="ion"):
                 cur.execute(
                     """
                     INSERT INTO maintenance.visits
-                      (service_location_id, task_id, task_schedule_id,
+                      (service_location_id, pool_id, service_type, task_id, task_schedule_id,
                        scheduled_date, visit_date,
                        scheduled_tech_id, actual_tech_id, started_at, ended_at,
                        status, visit_type, price_cents, billing_method,
                        office, notes, external_source)
                     VALUES
-                      (%(service_location_id)s, %(task_id)s, %(task_schedule_id)s,
+                      (%(service_location_id)s, %(pool_id)s, %(service_type)s, %(task_id)s, %(task_schedule_id)s,
                        %(scheduled_date)s, %(visit_date)s,
                        %(scheduled_tech_id)s, %(actual_tech_id)s, %(started_at)s, %(ended_at)s,
                        %(status)s, %(visit_type)s, %(price_cents)s, %(billing_method)s,
                        %(office)s, %(notes)s, %(external_source)s)
-                    ON CONFLICT (service_location_id, scheduled_date) DO UPDATE SET
+                    ON CONFLICT (service_location_id, scheduled_date, pool_id, service_type) DO UPDATE SET
                       task_id             = COALESCE(EXCLUDED.task_id, maintenance.visits.task_id),
                       task_schedule_id    = COALESCE(EXCLUDED.task_schedule_id, maintenance.visits.task_schedule_id),
                       visit_date          = EXCLUDED.visit_date,
