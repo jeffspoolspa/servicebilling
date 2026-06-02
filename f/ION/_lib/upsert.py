@@ -482,7 +482,7 @@ def upsert_canonical(canonical_rows, supabase_connection, source="ion"):
                        %(scheduled_tech_id)s, %(actual_tech_id)s, %(started_at)s, %(ended_at)s,
                        %(status)s, %(visit_type)s, %(price_cents)s, %(billing_method)s,
                        %(office)s, %(notes)s, %(external_source)s)
-                    ON CONFLICT (service_location_id, scheduled_date, pool_id, service_type) DO UPDATE SET
+                    ON CONFLICT (service_location_id, scheduled_date, service_type) DO UPDATE SET
                       task_id             = COALESCE(EXCLUDED.task_id, maintenance.visits.task_id),
                       task_schedule_id    = COALESCE(EXCLUDED.task_schedule_id, maintenance.visits.task_schedule_id),
                       visit_date          = EXCLUDED.visit_date,
