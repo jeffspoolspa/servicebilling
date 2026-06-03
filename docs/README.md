@@ -5,6 +5,8 @@
 
 This is the canonical documentation root for the servicebilling repo. The docs are organized **by data flow**, not by code structure — you can answer "where does data come from, where does it go, what changes it" by browsing here.
 
+> **AI agents / new contributors:** start at [`/CLAUDE.md`](../CLAUDE.md) (repo root) for a 2-minute orientation, then [SYSTEM_MAP.md](SYSTEM_MAP.md).
+
 ## How the docs are organized
 
 | Folder | What's in it |
@@ -14,11 +16,11 @@ This is the canonical documentation root for the servicebilling repo. The docs a
 | [flows/](flows/) | One page per end-to-end business process. Each shows the sequence + click-through links to the scripts running each step. (E.g., [Work order to payment](flows/work-order-to-payment.md).) |
 | [scripts/](scripts/) | One page per Windmill script. Short — facts only: what it reads, writes, triggers, and which flows it's part of. Source links to the actual file. |
 | [shared/](shared/) | Stub. Will hold cross-entity reference info (currently empty; entity docs cover most of this). |
-| [integrations/](integrations/) | External-API contracts (QBO, RingCentral, Gmail, ION, Zoho, ...). Currently empty. |
+| [integrations/](integrations/) | External-API contracts (QBO, RingCentral, Gmail, ION, Zoho, ...). |
 | [modules/](modules/) | Thin area-index pages grouping entities/flows by business area (service, maintenance, etc.). Not the primary navigation; just for "show me everything in service-billing". |
 | [conventions/](conventions/) | Required templates and rules: entity template, flow template, script-page template, header conventions, label vocabulary. |
-| [runbooks/](runbooks/) | Step-by-step operational guides: deploying migrations, responding to incidents. (Empty for now.) |
-| [adrs/](adrs/) | Architecture Decision Records. (Empty for now.) |
+| [runbooks/](runbooks/) | Step-by-step operational guides: [adding a workflow](runbooks/adding-a-workflow.md) (the 4-layer process), [changing the system](runbooks/changing-the-system.md) (code + schema + docs together), [deploying migrations](runbooks/deploying-migrations.md). |
+| [adrs/](adrs/) | Architecture Decision Records (platform architecture, schema ownership, ...). |
 | [audits/](audits/) | Historical audit reports + auto-generated table-script cross-reference matrix. |
 
 ## House rules (every doc, every file)
@@ -40,6 +42,8 @@ The doc you read depends on what you're trying to do:
 | Understand "what does this specific script do" | [scripts/](scripts/) — drill into the area folder |
 | Add a new table or column | [conventions/SCHEMA_OWNERSHIP.md](conventions/SCHEMA_OWNERSHIP.md) |
 | Add a new Windmill script | [conventions/SCRIPT_HEADER.md](conventions/SCRIPT_HEADER.md) + [conventions/CONCURRENCY_KEYS.md](conventions/CONCURRENCY_KEYS.md) |
+| Build or change a flow | [runbooks/adding-a-workflow.md](runbooks/adding-a-workflow.md) (4-layer process) + [conventions/FLOW_TEMPLATE.md](conventions/FLOW_TEMPLATE.md) |
+| Make any change (code + schema + docs together) | [runbooks/changing-the-system.md](runbooks/changing-the-system.md) |
 | Make sense of the system at the highest level | [SYSTEM_MAP.md](SYSTEM_MAP.md) |
 
 ## Why this shape

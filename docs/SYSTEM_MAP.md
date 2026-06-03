@@ -16,13 +16,7 @@
 - **Adding a new project/repo?** Append a new top-level section under §8.
 - **Hit something unexpected?** Update this doc. Drift between this doc and reality is the bug.
 
-**Conventions used in this doc:**
-- `` = writes to this table/system
-- `` = reads from this table/system
-- `` = both reads and writes
-- `` = triggers something
-- `` = external integration (QBO, RingCentral, Gmail, etc.)
-- status = needs attention / cleanup / decision
+**Conventions used in this doc:** text labels in brackets, per [conventions/LABELS.md](conventions/LABELS.md) — `[write]`, `[read]`, `[r/w]`, `[trigger]`, `[external]` (QBO / RingCentral / Gmail / ...), `[attention]` (needs cleanup or a decision).
 
 ---
 
@@ -60,6 +54,43 @@
 │ • lead-form site │ ← Public website lead intake form
 │ • (others — to document)│
 └──────────────────────────┘
+```
+
+### Container diagram (C4 level 1 — the stable skeleton)
+
+This is the container-level map a flow doc's Layer 0 ([FLOW_TEMPLATE.md](conventions/FLOW_TEMPLATE.md)) places itself against. The ASCII box above is its text-equivalent fallback (house rule: every Mermaid diagram is paired with text).
+
+```mermaid
+flowchart LR
+  subgraph Clients
+    USERS["Staff + tech browsers"]
+  end
+  subgraph App["Next.js app (this repo, Vercel)"]
+    UI["UI routes app/(shell), app/(tech)"]
+    API["API routes app/api/*"]
+  end
+  subgraph Backend["Windmill (jps-internal)"]
+    WM["scripts + flows + schedules"]
+  end
+  DB[("Supabase Postgres — vvprodiuwraceabviyes")]
+  subgraph External
+    QBO["QuickBooks Online"]
+    ION["ION Pool Care"]
+    RC["RingCentral"]
+    GM["Gmail"]
+    MISC["Zoho / OpenAI / Resend / Pipedream"]
+  end
+  USERS -->|"HTTPS"| UI
+  UI --> API
+  API -->|"read/write"| DB
+  WM -->|"read/write"| DB
+  DB -->|"pg_net trigger -> webhook"| WM
+  WM -->|"charge / invoice sync"| QBO
+  WM -->|"fetch visits / logs"| ION
+  WM -->|"calls / SMS"| RC
+  WM -->|"email"| GM
+  WM --> MISC
+  QBO -->|"sync back via flows"| WM
 ```
 
 **The Supabase project is THE shared resource** — every project reads/writes to it. Code lives in many repos; data lives in one place. That's why schema ownership rules (§6) matter.
