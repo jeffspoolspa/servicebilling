@@ -2,88 +2,154 @@
 
 > Status: [active]
 > Kind: [orchestration]
-> Verification: [verified] for the charging steps (as-built autopay); [design] for the visit→invoice linking (new)
-> Domain: maintenance
-> Entities: [Visit](../entities/visit.md), [Task](../entities/task.md), [Task Billing Period](../entities/task-billing-period.md), [Invoice](../entities/invoice.md) (task-linked), [Autopay Transaction](../entities/autopay-transaction.md)
+> Verification: [verified] for log-based ingestion + per-task LABOR reconcile (May 2026, 473/475 tasks exact); [design] for the canonical service-type/consumable tables, the consumables-quantity reconcile, and the full historical re-ingest
+> Last verified: 2026-06-03
+> Trigger: monthly (after the month closes); ingestion can run daily
+> Code location: `f/ION/ingest_day_logs`, `f/ION/api/{list_day_logs,get_log_detail}`, `f/billing_audit/{build_task_billing_periods,reconcile_billing_periods}`, charging via `f/billing/monthly_autopay`
+> Entities: [Visit](../entities/visit.md), [Task](../entities/task.md), [Task Billing Period](../entities/task-billing-period.md), [Invoice](../entities/invoice.md), [Autopay Transaction](../entities/autopay-transaction.md)
 
-## The crux
+**One-line purpose:**
+> ION services pools all month and bills one invoice per task; we independently rebuild
+> each task's expected charge from the service logs and reconcile it against ION's actual
+> invoice before charging the customer — so we catch billing errors instead of trusting ION blindly.
 
-Visits accumulate over a month; ION builds one invoice per task; we reconcile it against the visits, then charge + send it. The workflow is two phases over the **[Task Billing Period](../entities/task-billing-period.md)** (the write-ahead invoice promise, one per active task-month):
+## The crux (and what changed 2026-06)
 
-- **Pre-processing** — get the invoice linked and reconciled (the new bridge). Done when `reconciled`.
-- **Processing** — credits, charge (if autopay), payment, send — mirrors per-WO [work-order-to-payment](work-order-to-payment.md), just per task-linked invoice.
+ION is the leader: it logs visits and, at month-end, emits **one invoice per task** (verified
+against ION's "All Transactions" report — 527 invoices over 526 tasks, strictly 1 task per
+invoice; the only exception is a task that gets a split/supplemental re-bill, so reconcile
+**aggregates invoices per task**). Our job is to *independently reproduce* each task's expected
+amount from the logs and reconcile.
 
-Routing: there is **one [Invoice](../entities/invoice.md) entity** routed by what it links to ([ADR 003](../adrs/003-unify-invoice-table.md)). Task-linked invoices run this flow; one invoice per task per month (a customer with N tasks gets N invoices; monthly total = the SUM).
+The big change this session: visit ingestion moved from the lossy bulk report (which inferred
+task and customer) to a **canonical log-based pipeline** keyed on each service log's unique
+`LogID`. Every field is now read directly instead of inferred — which is what got May's
+recurring labor to reconcile **473/475 tasks exactly**.
 
-## Lifecycle
+---
+
+## Layer 0 — System map placement
+
+| Container | Role |
+|---|---|
+| ION Pool Care | Source of truth. Per-day log list (`customerLogDetails.cfm`) + per-log detail (`addLog.cfm`). Emits the month-end invoices. |
+| Windmill | Runs ingestion (enumerate→detail→upsert), promise build, reconcile, and the charge cycle. |
+| Supabase | Caches visits/tasks/promises + the QBO invoice mirror; holds the canonical lookups. |
+| QBO | The invoices ION syncs to; where we apply credits + charge. |
+
+New to the system map? No — uses existing containers.
+
+---
+
+## Layer 1 — Schema contract
+
+**Reads:**
+- ION `home/customerLogDetails.cfm?dayindexsel=<date>` — every service log that day (LogID, calendarID, customer, service, status bullet).
+- ION `tasks/addLog.cfm?LogID=<id>` — per-log ground truth: `EventID` (= the task), `TaskInvoiceID` (= the billed QBO invoice → customer), time-in/out, `LocID`, service, consumables (`item{qbo-ish id}=qty`).
+- `ion.recurring_tasks` — the task census (one row per `ion_task_id`): `qbo_customer_id`, `service_location_id`, `task_price_cents` (**the authoritative per-visit rate**), `billing_type`, window.
+- `maintenance.task_schedules` + `maintenance.tasks` — resolves `ion_task_id` → `task_id` (uuid) + governing rate/billing_method.
+- `billing.invoices` — the QBO invoice mirror; `line_items[]` carry `item_id`, `item_name`, `qty`, `amount` per line.
+- (`[design]`) `maintenance.service_types` — service → default per-visit rate. (`[design]`) `maintenance.consumable_items` — canonical consumable + unit/conversion + ion↔qbo id.
+
+**Writes:**
+- `maintenance.visits` — one row per completed log, keyed by `ion_log_id`. Sets `task_id`, `ion_task_id` (=EventID), `service_location_id`, `scheduled_date`, `is_serviceable`, `service_type`, `price_cents`, `ion_calendar_id`, generated `ion_addlog_url`. Unique index `visits_uniq_log_natural` on `(service_location_id, scheduled_date, service_type, pool_id, started_at)` NULLS NOT DISTINCT.
+- `maintenance.consumables_usage` — `(visit_id, item_id, quantity, source='ion')`.
+- `billing_audit.task_billing_periods` — one promise per `(task_id, billing_month)`: `expected_labor_cents`, `billable_visit_count`, `qbo_customer_id`, `consumables`, status.
+
+**External calls:** ION (read logs); QBO (charge + send, in Phase B).
+
+**Critical invariants:**
+- A log is a real, billable visit iff it has a **time-in** (performed) — not whether it shows a "completed" bullet (a tech who never clocks out still gets billed).
+- `ion.recurring_tasks.task_price_cents` is the authoritative per-visit rate. The number in a service *name* ("POOL MAINTENANCE 80") is a tier code, **not** the price.
+- One invoice per task — but a task can be split across >1 invoice; reconcile aggregates invoices per task.
+- `SALT CELL CLEAN` is a **consumable**, not labor. `QUALITY CONTROL` and `HALF HOUR MAINTENANCE` are non-labor.
+
+---
+
+## Layer 2 — Decision map
+
+### Ingestion (per day, `ingest_day_logs`)
+1. **Enumerate** the day's logs (`list_day_logs`).
+2. **Detail** each via `get_log_detail` (addLog).
+3. **Keep** a log iff it has a `time_in` AND resolves to an `EventID` (a task). No time-in = not performed → skip. No EventID → skip (report as unresolved).
+4. **Serviceable** = has time-in AND NOT (time-out present AND time-out == time-in). So missing time-out and reversed times are still serviceable/billable; only an explicit zero-duration is a skip.
+5. **Price** = `task_price_cents` (override) → else service-type default (`[design]`) → else number parsed from the service name.
+6. **Customer** flows through the task: `EventID` → `task_schedules` → `recurring_tasks.qbo_customer_id` (and `TaskInvoiceID` on the log corroborates it).
+7. **Upsert** keyed by `LogID`; `ON CONFLICT (sl, date, service_type, pool_id, started_at) DO NOTHING` — multi-pool same-time logs collapse (billing collapses by (task, day) anyway).
+8. Any `EventID` not in the census → pull the customer's tasks and add it (so every visit resolves to a task).
+
+### Promise build (`build_task_billing_periods`, per (task, month))
+- `billable_visit_count` = distinct **serviceable, non-QC** service-days (multiple logs/pools on a day collapse to one day).
+- `expected_labor_cents` = flat task → the flat monthly amount; per_visit task → SUM over distinct days of that day's price.
+- One promise per active task-month even with zero visits (a flat task still bills).
+
+### Reconcile (`reconcile_billing_periods`, per task, against the QBO invoice)
+- **Labor (amount):** our `expected_labor` vs the invoice's maintenance-SKU line amounts (POOL MAINTENANCE / FLAT RATE / CHEMICAL TESTING / SPA CLEAN / FOUNTAIN CLEAN / GREEN POOL / ONE TIME CLEAN), **excluding** SALT CELL CLEAN / HALF HOUR / QUALITY CONTROL. Aggregate invoices per task first. $1 tolerance.
+- **Consumables (quantity)** (`[design]`): our `consumables_usage` per-item quantity vs the invoice's chemical-line `qty`. **Price not compared** (ION sets it at sync). Higher priority than labor. Needs the ion↔qbo item crosswalk (`maintenance.consumable_items`).
+- **Billed visit count check:** the invoice's primary-SKU line `qty` = ION's billed visits; compare to our serviceable days to catch genuine ION↔QBO discrepancies (e.g. a missing log).
+
+### Categories that are NOT a labor mismatch
+- **One-time jobs** (GREEN POOL / ONE TIME CLEAN / FOUNTAIN CLEAN / SPA CLEAN): job-priced, separate invoices — don't expect visits×rate.
+- **On-hold** invoices: not synced to QBO yet → genuinely absent, skip until synced.
+- **QC**: non-billable labor; its consumables still bill.
+
+### Failure handling
+- Unresolved log (no EventID) / missing task → report; pull the task; never silently drop.
+- Reconcile `mismatch` → hold the invoice + surface for review (do not charge).
+- Ingest conflict on the natural key → dedupe (DO NOTHING), don't error.
+
+### Post-conditions
+- Every completed, performed log → exactly one visit linked to a task.
+- Every active task-month → one promise; reconciled `labor_ok` (+ `consumables_ok` when the quantity check lands) before Phase B charges it.
+
+### Phase B — processing (unchanged; mirrors per-WO [work-order-to-payment](work-order-to-payment.md))
+Per reconciled invoice: apply credits → autopay decision → charge (card/ACH) or invoice-only → send → reflect balance. Engine: [monthly-autopay](monthly-autopay.md). Autopay roster is per-customer; processing is per-invoice (per task).
+
+---
+
+## Layer 3 — Flow map
 
 ```mermaid
-stateDiagram-v2
-  state "PRE-PROCESSING" as pre {
-    [*] --> promised : A1 open month (active task)
-    promised --> visits_accruing : A2 billable visits accrue
-    visits_accruing --> invoiced : A4 invoice linked 1:1
-    invoiced --> reconciled : A5 labor + consumable checks pass
-    invoiced --> mismatch : A5 fails -> hold + analyze
-    visits_accruing --> missed : month closed, no invoice (coverage gap)
-  }
-  state "PROCESSING" as proc {
-    reconciled --> credited : B1 apply credits
-    credited --> charged : B3 charge (if autopay)
-    charged --> sent : B4 send invoice
-    sent --> [*] : paid (autopay) or balance-due (not)
-  }
+sequenceDiagram
+  participant ION as ION Pool Care
+  participant W as Windmill
+  participant DB as Supabase
+  participant QBO as QuickBooks
+
+  loop each day in range
+    W->>ION: customerLogDetails (day) — list logs
+    ION-->>W: logs (LogID, calendarID, service, status)
+    W->>ION: addLog per log — detail
+    ION-->>W: EventID, TaskInvoiceID, times, consumables
+    W->>W: keep if time_in; serviceable rule; price=task_price_cents
+    W->>DB: upsert maintenance.visits (key LogID) + consumables_usage
+    Note over W,DB: ON CONFLICT(sl,date,service,pool,start) DO NOTHING
+  end
+  W->>DB: build_task_billing_periods (promises per task-month)
+  W->>DB: read billing.invoices (QBO mirror)
+  W->>W: reconcile per task — labor (aggregate invoices/task), consumables qty
+  alt labor_ok (+ consumables_ok)
+    W->>QBO: Phase B — credits, charge (if autopay), send
+  else mismatch / missed
+    W->>DB: hold + flag for review (no charge)
+  end
 ```
 
-## Phase A — Pre-processing (link + reconcile)
+---
 
-| Step | Input | Output | Period state |
-|---|---|---|---|
-| **A1 Open the month** — scheduled job on the 1st | active [Tasks](../entities/task.md) (`starts_on <= M-01 AND (ends_on IS NULL OR ends_on >= M-01)`) | one period per active task (the coverage checklist) | `promised` |
-| **A2 Accrue visits** — fed by [ion-visits sync](sync/ion-visits.md) | billable [Visits](../entities/visit.md), **auto-linked to their period by `task_id` + month** (97.5% of visits carry `task_id`) | period **labor** (`billable_visit_count`, `expected_labor` = count × rate or flat) + **consumables** (per-item used quantity) | `visits_accruing` |
-| **A3 Sync invoices** — universal QBO invoice sync | all QBO invoices | rows in `billing.invoices` (cached) | (unchanged) |
-| **A4 Link invoice → period** — [load_month](../scripts/billing_audit/load_month.md) / sync match | a synced task invoice + open periods | `period.qbo_invoice_id` set 1:1; invoice `link_kind=task` | `invoiced` |
-| **A5 Reconcile** | period (expected) + invoice (billed) | `labor_ok` (amount) + `consumables_ok` (per-item quantity) | `reconciled` (eligible) or `mismatch` (held) |
+## Status & open questions (the "as we decide" log)
 
-**A4 matching:** the promise is 1:1 with the QBO invoice. Match by `(qbo_customer_id, month)` — trivial for the ~95% single-task customers. Multi-task customers disambiguate by `service_type` + per-visit rate (encoded in the labor item name, e.g. "POOL MAINTENANCE 65") + visit count. **Billing-safe even when two pools have identical terms:** identical promises expect the same amount, so the reconciliation and charge are correct whichever one the invoice matches — only per-pool *attribution* is imperfect. Precise attribution (deferred) comes from capturing the invoice's **service location/address** or having the [ION API](../integrations/ion.md) **stamp the task id** onto the invoice ([ADR 002](../adrs/002-ion-api-layer.md)). An invoice that matches no promise = orphan, surfaced for review.
+**Verified (May 2026):** log-based ingestion + per-task LABOR reconcile = **473/475** recurring tasks exact. The 5 fixes that got it there: (1) ingest on time-in, not the completed bullet; (2) serviceable = not-zero-duration (reversed/missing times still count); (3) price from `task_price_cents`; (4) SALT CELL CLEAN → consumable; (5) aggregate invoices per task.
 
-**A5 reconcile = two checks:**
-- **Labor** — `expected_labor` vs invoice labor subtotal (by amount; flat-rate uses the flat amount).
-- **Consumables** — per-item **quantity** match (`consumables_usage` vs chemical line quantities). **Price is not compared** (ION sets it at sync). Higher priority than labor; needs an ION-item → QBO-item mapping (from `billing_audit.consumable_items`).
-
-**Coverage sweep:** at month close any period still `promised`/`visits_accruing` (no invoice) = **missed billing**.
-
-## Phase B — Processing (charge + send, per reconciled invoice)
-
-Mirrors [work-order-to-payment](work-order-to-payment.md). Detailed scripts live in [monthly-autopay](monthly-autopay.md).
-
-| Step | Input | Output |
-|---|---|---|
-| **B1 Apply credits** — [apply_maint_credits](../scripts/billing/apply_maint_credits.md) | invoice + customer's unapplied payments / credit memos | credits applied in QBO; balance reduced |
-| **B2 Autopay decision** | invoice's customer -> [Autopay Customer](../entities/autopay-customer.md) roster | branch: autopay (charge) vs not (invoice only) |
-| **B3 Charge (if autopay)** — charge step of [monthly-autopay](monthly-autopay.md) | invoice balance + customer payment method | **success**: QBO Payment created + applied to invoice + receipt emailed. **decline**: card-declined email + `consecutive_declines++` |
-| **B4 Send invoice** — [send_monthly_invoices](../scripts/billing/send_monthly_invoices.md) | the invoice (any customer) | invoice emailed — **paid** if autopay charged, **balance due** if not |
-| **B5 Finalize / reflect** | charge + send results | QBO balance reflects (via [sync_invoice_balances](../scripts/billing/sync_invoice_balances.md)); run stats in `billing_runs` |
-
-**Autopay grain:** the roster is **per-customer** (payment method is customer-level in QBO; enrollment is a customer decision). Processing is **per-invoice** (per task) and looks up the customer's autopay status — no task-grain on the roster unless a real per-task-enrollment need appears.
-
-## The payoff: deeper misbilling + chemical analysis
-
-Linking visits to the invoice sharpens the audit we already run ([compute_chemical_estimates](../scripts/billing_audit/compute_chemical_estimates.md) -> `audit_flag_level`): misbilling (expected vs billed labor + count) and chemical usage (used vs billed **quantity**). Flagged problems are eventually **corrected back in ION** via the [ION API](../integrations/ion.md) write-back ([ADR 002](../adrs/002-ion-api-layer.md)) — closing the loop.
-
-## Decided / open
-
-- **Consumable quantity check in v1** (higher priority than labor); price not compared.
-- **Invoice unification: one link-routed table** ([ADR 003](../adrs/003-unify-invoice-table.md)); refactor autopay onto it, proven by a behavioral-equivalence dry_run.
-- **Deferred — per-pool attribution** for identical-term multi-task customers (billing is already correct; capture service address or stamp task id via ION API for exact per-pool attribution).
-- **PREREQUISITE GAP — there is no recurring task sync.** The visit→task link is by `service_location_id` against `maintenance.tasks` (the ION visit report carries no task id). But all 469 tasks were created+last-updated on **2026-04-26** — a one-time ION import, never refreshed. Visits sync continuously, so **every customer onboarded after 2026-04-26 has visits but no task** (144 task-less visits across 27 locations as of 2026-06, e.g. SHIPWATCH). The task-driven model needs an **ongoing ION → `maintenance.tasks` / `task_schedules` sync** (currently missing — the maintenance analog of ion-work-orders / ion-visits). Until it exists, new customers silently fall out of maintenance billing. `task_id` on a visit is an **invariant**; the coverage check surfaces violations.
-- **Open — tolerance** for the checks: likely exact on consumable quantity, small tolerance on labor amount.
-- **Known gap — no CDC backstop** for `billing_audit` balances; reflection is the `sync_invoice_balances` poll only.
+**Open / design (tomorrow's build):**
+- `maintenance.service_types` (canonical service + default per-visit rate; task's custom amount overrides). Closes the one no-rate mismatch (COOK chem $30 → 475/475). Pattern: the existing `ion.task_definitions`/`task_aliases` + `normalize.py` alias-with-fallback approach, in the `maintenance` schema, fed into the **log-based** ingestion (not just the old `normalize.py`).
+- `maintenance.consumable_items` (canonical consumable + unit + conversion + ion↔qbo id), so the **consumables-quantity reconcile** can run across all tasks (QC + one-time included). Today our `consumables_usage.item_id` is ION's addLog id with no name; the invoice carries QBO ids + names — different id spaces, no join yet.
+- Full historical re-ingest 2025→2026 (same runner, wider range).
+- Fold the per-task reconcile (invoice-aggregation, SALT CELL CLEAN exclusion) permanently into `reconcile_billing_periods.py`; sync the new ION scripts into the repo per [changing-the-system](../runbooks/changing-the-system.md).
+- Resolved this session: the old "no recurring task sync" prerequisite gap — `ion.recurring_tasks` is now the census, and ingestion pulls any missing task on the fly.
 
 ## Cross-references
-
-- Input: [ion-visits sync](sync/ion-visits.md) · Invoice load: [qbo-maintenance-invoices](sync/qbo-maintenance-invoices.md) ([load_month](../scripts/billing_audit/load_month.md))
-- Charging engine: [monthly-autopay](monthly-autopay.md)
-- Sibling (per-WO): [work-order-to-payment](work-order-to-payment.md)
-- Entities: [Visit](../entities/visit.md), [Task](../entities/task.md), [Task Billing Period](../entities/task-billing-period.md), [Invoice](../entities/invoice.md)
-- Decisions: [ADR 002 (ION API)](../adrs/002-ion-api-layer.md), [ADR 003 (unify invoice)](../adrs/003-unify-invoice-table.md), [ADR 001 (platform)](../adrs/001-platform-architecture.md)
+- Input logs: ION via `list_day_logs` + `get_log_detail`. Invoice mirror: [qbo-maintenance-invoices](sync/qbo-maintenance-invoices.md) / [load_month](../scripts/billing_audit/load_month.md).
+- Charging engine: [monthly-autopay](monthly-autopay.md). Sibling (per-WO): [work-order-to-payment](work-order-to-payment.md).
+- Entities: [Visit](../entities/visit.md), [Task](../entities/task.md), [Task Billing Period](../entities/task-billing-period.md), [Invoice](../entities/invoice.md).
+- Decisions: [ADR 002 (ION API)](../adrs/002-ion-api-layer.md), [ADR 003 (unify invoice)](../adrs/003-unify-invoice-table.md), [ADR 001 (platform)](../adrs/001-platform-architecture.md).
