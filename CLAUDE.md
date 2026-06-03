@@ -57,3 +57,8 @@ is worse than no doc. If you find drift, fix the doc (or mark it `[drift]`).
   token rotates and will burn if you refresh it wrong.
 - **Deploying a Windmill script update** = delete-by-hash + re-create at the same path
   (the MCP `createScript` doesn't version in place).
+- **In-repo Windmill scripts must stay excluded from the app's `tsconfig`.** `f/` and `u/`
+  are mirrored into this repo, but their files use Windmill-runtime imports
+  (`import "playwright@1.40.0"`, `from "/f/ION/_lib/session"`) that `tsc` cannot resolve.
+  `next build` type-checks the whole repo, so if `f/`/`u/` aren't in `tsconfig.json`'s
+  `exclude`, every Vercel deploy fails the type-check. They are excluded — keep it that way.
