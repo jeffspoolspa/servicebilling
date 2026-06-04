@@ -151,7 +151,12 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
               <Field cls="col-span-1" label="State"><input name="state" value={stateCode} onChange={(e) => setStateCode(e.target.value)} className={inputCls} disabled={pending} /></Field>
               <Field cls="col-span-2" label="ZIP *"><input name="zip" value={zip} onChange={(e) => onZipChange(e.target.value)} className={inputCls} disabled={pending} required /></Field>
               <Field cls="col-span-3" label="Office (auto from ZIP)">
-                <OfficePill office={office} onChange={setOffice} disabled={pending} />
+                <OptionPills
+                  value={office}
+                  onChange={(v) => setOffice(v as Office)}
+                  disabled={pending}
+                  options={OFFICES.map((o) => ({ value: o.id, label: o.label }))}
+                />
               </Field>
             </div>
           </Accordion>
@@ -299,33 +304,6 @@ function Accordion({
   )
 }
 
-/* ── office as a pill that opens a dropdown ── */
-function OfficePill({ office, onChange, disabled }: { office: Office; onChange: (o: Office) => void; disabled?: boolean }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="relative inline-block">
-      <button type="button" disabled={disabled} onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium border text-cyan bg-cyan/10 border-cyan/20 hover:brightness-110 disabled:opacity-50">
-        {prettyOffice(office)}
-        <ChevronDown className="w-3 h-3" strokeWidth={2} />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute z-20 mt-1 w-40 rounded-md border border-line bg-bg-elev shadow-card py-1">
-            {OFFICES.map((o) => (
-              <button key={o.id} type="button"
-                onClick={() => { onChange(o.id); setOpen(false) }}
-                className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-white/5 ${o.id === office ? "text-cyan" : "text-ink-dim"}`}>
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
 
 function Field({ label, cls = "", children }: { label: string; cls?: string; children: React.ReactNode }) {
   return <div className={cls}><label className={labelCls}>{label}</label>{children}</div>
