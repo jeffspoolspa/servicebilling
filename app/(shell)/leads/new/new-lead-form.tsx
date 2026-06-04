@@ -35,6 +35,7 @@ const OFFICES: { id: Office; label: string }[] = [
 const VISIT_LABEL: Record<string, string> = { "0.5": "Bi-weekly", "1": "Weekly", "2": "2x per week" }
 const VISITS_PER_MONTH: Record<string, number> = { "0.5": 2, "1": 4, "2": 8 }
 const COND_LABEL: Record<string, string> = { good: "Good", needs_repair: "Needs repair", green_pool: "Green pool" }
+const CONTACT_LABEL: Record<string, string> = { first_name: "first name", last_name: "last name", email: "email", phone: "phone" }
 
 export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
   const router = useRouter()
@@ -59,6 +60,8 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
   const [dedupChecking, setDedupChecking] = useState(false)
   const [customerAction, setCustomerAction] = useState<"auto" | "use_existing" | "create_new">("auto")
   const [existingId, setExistingId] = useState<number | null>(null)
+  // snapshot of the attached customer's saved values, so we can flag edits as overrides
+  const [existingSnapshot, setExistingSnapshot] = useState<{ name: string; fields: Record<string, string> } | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // lead details
@@ -124,6 +127,39 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
   useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current) }, [])
   useEffect(() => { if (state.ok && state.leadId) router.push(`/leads/${state.leadId}` as never) }, [state, router])
 
+  // Attach an existing customer: pull their full record and pre-fill the form so
+  // staff can confirm. Snapshot the loaded values to flag any later edits as overrides.
+  async function selectExisting(customerId: number) {
+    setCustomerAction("use_existing"); setExistingId(customerId)
+    // Keep Contact open (don't auto-advance) so staff can read the confirm note.
+    advanced.current.contact = true
+    setOpenSection("contact")
+    try {
+      const r = await fetch(`/api/leads/customer/${customerId}`)
+      const j = await r.json()
+      const c = j.customer
+      if (!c) return
+      setFirstName(c.first_name || ""); setLastName(c.last_name || "")
+      setEmail(c.email || ""); setPhone(c.phone || "")
+      if (c.street) setStreet(c.street)
+      if (c.city) setCity(c.city)
+      if (c.state) setStateCode(c.state || "GA")
+      if (c.zip) { setZip(c.zip); const o = checkServiceArea(c.zip).office; if (o) setOffice(o) }
+      setExistingSnapshot({
+        name: c.display_name || `${c.first_name} ${c.last_name}`.trim(),
+        fields: { first_name: c.first_name || "", last_name: c.last_name || "", email: c.email || "", phone: c.phone || "" },
+      })
+    } catch { /* leave fields as-is on fetch failure */ }
+  }
+  function chooseCreateNew() { setCustomerAction("create_new"); setExistingId(null); setExistingSnapshot(null) }
+
+  // Which contact fields the staffer changed vs. the saved record (override warning).
+  const overriddenFields = existingSnapshot
+    ? (Object.entries({ first_name: firstName, last_name: lastName, email, phone }) as [string, string][])
+        .filter(([k, v]) => (v || "").trim() !== (existingSnapshot.fields[k] || "").trim())
+        .map(([k]) => CONTACT_LABEL[k])
+    : []
+
   const toggle = (s: SectionKey) => setOpenSection((cur) => (cur === s ? null : s))
 
   const customerSummary = customerAction === "use_existing" ? "Existing (attached)"
@@ -173,8 +209,8 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
             <div className="grid grid-cols-2 gap-3">
               <Field label="First name *"><input name="first_name" value={firstName} onChange={(e) => setFirstName(e.target.value)} className={inputCls} disabled={pending} required /></Field>
               <Field label="Last name *"><input name="last_name" value={lastName} onChange={(e) => setLastName(e.target.value)} className={inputCls} disabled={pending} required /></Field>
-              <Field label="Email"><input name="email" type="email" value={email} onChange={(e) => { setEmail(e.target.value); runDedup(e.target.value || phone) }} className={inputCls} disabled={pending} placeholder="email or phone required" /></Field>
-              <Field label="Phone"><input name="phone" type="tel" value={phone} onChange={(e) => { setPhone(e.target.value); runDedup(email || e.target.value) }} className={inputCls} disabled={pending} /></Field>
+              <Field label="Email"><input name="email" type="email" value={email} onChange={(e) => { setEmail(e.target.value); if (customerAction !== "use_existing") runDedup(e.target.value || phone) }} className={inputCls} disabled={pending} placeholder="email or phone required" /></Field>
+              <Field label="Phone"><input name="phone" type="tel" value={phone} onChange={(e) => { setPhone(e.target.value); if (customerAction !== "use_existing") runDedup(email || e.target.value) }} className={inputCls} disabled={pending} /></Field>
             </div>
             {matches.length > 0 && (
               <div className="border border-sun/30 bg-sun/10 rounded-md p-3 flex flex-col gap-2 mt-3">
@@ -182,16 +218,25 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
                 {matches.map((m) => (
                   <label key={m.customer_id} className="flex items-center gap-2 text-[13px] cursor-pointer">
                     <input type="radio" name="dedup_choice" className="accent-cyan" checked={customerAction === "use_existing" && existingId === m.customer_id}
-                      onChange={() => { setCustomerAction("use_existing"); setExistingId(m.customer_id) }} />
+                      onChange={() => selectExisting(m.customer_id)} />
                     <span className="text-ink">{m.display_name}</span>
                     <span className="text-ink-mute text-xs">{[m.redacted_phone, m.redacted_email].filter(Boolean).join(" · ")}</span>
                     {m.has_qbo && <Pill tone="grass">QBO</Pill>}
                   </label>
                 ))}
                 <label className="flex items-center gap-2 text-[13px] cursor-pointer">
-                  <input type="radio" name="dedup_choice" className="accent-cyan" checked={customerAction === "create_new"} onChange={() => { setCustomerAction("create_new"); setExistingId(null) }} />
+                  <input type="radio" name="dedup_choice" className="accent-cyan" checked={customerAction === "create_new"} onChange={chooseCreateNew} />
                   <span className="text-ink-dim">None of these — create a new customer</span>
                 </label>
+              </div>
+            )}
+            {customerAction === "use_existing" && existingSnapshot && (
+              <div className="border border-cyan/30 bg-cyan/10 rounded-md p-3 mt-3 text-[12px] leading-relaxed">
+                <span className="text-cyan font-medium">Loaded {existingSnapshot.name}&apos;s saved info.</span>{" "}
+                <span className="text-ink-dim">Confirm their contact above — anything you change here will overwrite their record on file.</span>
+                {overriddenFields.length > 0 && (
+                  <div className="text-sun mt-1.5">Will overwrite: {overriddenFields.join(", ")}.</div>
+                )}
               </div>
             )}
           </Accordion>
