@@ -226,16 +226,29 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
           <div className="sticky top-6 flex flex-col gap-4">
             <Card>
               <div className="px-5 pt-4 pb-2 text-[11px] uppercase tracking-[0.12em] text-ink-mute">Estimated monthly</div>
-              <div className="px-5 pb-4 text-[13px] flex flex-col gap-2">
-                <Row label="Labor" value={`$${laborMonthly}/mo`} sub={`$${quote.perVisit}/visit · ${VISITS_PER_MONTH[visits]} visits`} />
-                <Row label="Est. chemicals" value={tier ? `$${tier.med}/mo` : "—"} sub={tier ? `range $${tier.low}–$${tier.high}` : "estimate unavailable"} />
-                <div className="border-t border-line-soft my-1" />
-                <div className="flex justify-between items-baseline">
-                  <span className="text-ink">Estimated monthly total</span>
-                  <span className="text-cyan text-lg font-display">{tier ? `$${laborMonthly + tier.med}` : `$${laborMonthly}+`}</span>
-                </div>
-                {tier && <div className="text-right text-ink-mute text-[11px]">range ${laborMonthly + tier.low}–${laborMonthly + tier.high}</div>}
-                <p className="text-ink-mute text-[11px] mt-1">Chemicals billed separately on usage; estimate from this month&apos;s data. Labor is the canonical rate that gets stored.</p>
+              <div className="px-5 pb-4 text-[13px] flex flex-col">
+                <QuoteLine
+                  label="Labor"
+                  value={`$${laborMonthly}/mo`}
+                  sub={`$${quote.perVisit}/visit · ${VISITS_PER_MONTH[visits]} visits`}
+                  note={`Each visit we skim, brush, vacuum as needed, empty the baskets, test + balance the water, and check the equipment. Say: "${VISIT_LABEL[visits].toLowerCase()} service is $${quote.perVisit} a visit, about ${VISITS_PER_MONTH[visits]} visits a month." Labor is the only part billed up front (the first-month deposit).`}
+                />
+                <QuoteLine
+                  label="Est. chemicals"
+                  value={tier ? `$${tier.med}/mo` : "—"}
+                  sub={tier ? `range $${tier.low}–$${tier.high}` : "estimate unavailable"}
+                  note={tier
+                    ? `Chemicals are billed separately, based on what the pool actually uses — so it swings with the season and the pool's condition. Say: "most pools like yours run about $${tier.med} a month in chemicals, a bit more in summer." This is an estimate from our own customer data, not a set charge.`
+                    : "Chemical estimate isn't available right now — tell them chemicals are billed separately based on usage."}
+                />
+                <div className="border-t border-line-soft my-1.5" />
+                <QuoteLine
+                  emphasize
+                  label="Estimated monthly total"
+                  value={tier ? `$${laborMonthly + tier.med}` : `$${laborMonthly}+`}
+                  sub={tier ? `range $${laborMonthly + tier.low}–$${laborMonthly + tier.high}` : undefined}
+                  note={`Labor plus the estimated chemicals. Say: "you're looking at roughly $${tier ? laborMonthly + tier.med : laborMonthly} a month — billed monthly, cancel anytime, no penalties. The chemical part is an estimate, so some months run a little higher or lower."`}
+                />
               </div>
             </Card>
 
@@ -325,6 +338,37 @@ function Row({ label, value, sub }: { label: string; value: string; sub?: string
         <span className="text-ink">{value}</span>
         {sub && <span className="block text-ink-mute text-[11px]">{sub}</span>}
       </span>
+    </div>
+  )
+}
+/**
+ * One line in the quote panel — collapsed it shows label + value; expanded it
+ * reveals a talking-point note so the office person knows what to say on the
+ * phone about this line. `emphasize` styles the total row (cyan, larger).
+ */
+function QuoteLine({
+  label, value, sub, note, emphasize = false,
+}: { label: string; value: string; sub?: string; note: string; emphasize?: boolean }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="py-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-start justify-between gap-3 text-left group"
+      >
+        <span className="flex items-center gap-1.5 min-w-0">
+          <ChevronDown className={`w-3 h-3 text-ink-mute shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2} />
+          <span className={emphasize ? "text-ink" : "text-ink-mute group-hover:text-ink-dim transition-colors"}>{label}</span>
+        </span>
+        <span className="text-right shrink-0">
+          <span className={emphasize ? "text-cyan text-lg font-display" : "text-ink"}>{value}</span>
+          {sub && <span className="block text-ink-mute text-[11px]">{sub}</span>}
+        </span>
+      </button>
+      {open && (
+        <p className="text-ink-mute text-[11px] leading-relaxed pl-[18px] pr-1 pt-1.5">{note}</p>
+      )}
     </div>
   )
 }
