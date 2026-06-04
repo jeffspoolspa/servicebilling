@@ -196,9 +196,15 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
             summary={<span className="text-ink-dim truncate">{cap(primaryBody)}{additionalBodies ? " + fountain" : ""} · {VISIT_LABEL[visits]} · {COND_LABEL[poolCondition]}</span>}>
             <div className="flex flex-col gap-3">
               <Field label="Primary body">
-                <OptionPills name="primary_body_type" value={primaryBody} disabled={pending}
-                  onChange={(v) => setPrimaryBody(v as typeof primaryBody)}
-                  options={[{ value: "pool", label: "Pool" }, { value: "spa", label: "Spa" }, { value: "fountain", label: "Fountain" }]} />
+                <div className="flex items-center gap-4 flex-wrap">
+                  <OptionPills name="primary_body_type" value={primaryBody} disabled={pending}
+                    onChange={(v) => setPrimaryBody(v as typeof primaryBody)}
+                    options={[{ value: "pool", label: "Pool" }, { value: "spa", label: "Spa" }, { value: "fountain", label: "Fountain" }]} />
+                  <label className="flex items-center gap-2 text-[12px] text-ink-dim">
+                    <input type="checkbox" name="additional_fountain" checked={fountain} onChange={(e) => setFountain(e.target.checked)} className="accent-cyan" disabled={pending || primaryBody === "fountain"} />
+                    Add a fountain (+$10/visit)
+                  </label>
+                </div>
               </Field>
               <Field label="Visits / week">
                 <OptionPills name="visits_per_week" value={visits} disabled={pending}
@@ -211,10 +217,6 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
                   options={[{ value: "good", label: "Good" }, { value: "needs_repair", label: "Needs repair" }, { value: "green_pool", label: "Green pool" }]} />
               </Field>
             </div>
-            <label className="flex items-center gap-2 text-[12px] text-ink-dim mt-3">
-              <input type="checkbox" name="additional_fountain" checked={fountain} onChange={(e) => setFountain(e.target.checked)} className="accent-cyan" disabled={pending || primaryBody === "fountain"} />
-              Add a fountain (+$10/visit)
-            </label>
             <Field cls="mt-3" label="Issue / notes"><textarea name="issue_description" value={issue} onChange={(e) => setIssue(e.target.value)} rows={3} className={inputCls} disabled={pending} /></Field>
           </Accordion>
         </div>
