@@ -21,6 +21,20 @@ Live example: [docs/entities/invoice.md](../entities/invoice.md).
 <1-2 sentences. Business definition. When is a row created? When deleted? What
 single thing does it represent?>
 
+## Field dictionary
+
+Define **every** field: what it holds, its type, and the allowed values. The live schema
+is the source of truth for a column's *existence*; this table is the source of truth for
+its *meaning and allowed values*. Deep-link FK targets to their entity doc and, for shared
+enums, link to where the option set is defined.
+
+| Field | Type | Describes | Values / constraints |
+|---|---|---|---|
+| `<col>` | `<pg type>` | <what this field means, in plain words> | <enum options, or FK -> [Entity](x.md), or CHECK / default / nullable> |
+
+> One table per row-shape. If the entity spans a parent + child table, give each its own
+> sub-table under a `### <schema.table>` heading.
+
 ## Lifecycle
 
 \`\`\`mermaid
@@ -65,6 +79,7 @@ SELECT ... FROM <table> WHERE ...;
 
 ## Anti-patterns
 
-- Documenting every column — the live schema is the source of truth for columns. This doc captures lifecycle and meaning.
+- Letting the field dictionary drift from the live schema — when you add/change a column or a CHECK constraint, update the table in the *same* change. The dictionary owns meaning + allowed values; the live schema owns existence. A field table that lies is worse than none.
+- A field dictionary that only restates the column name (`status — the status`). Every row must add the *meaning* and the *allowed values*, or it earns nothing.
 - Skipping the table version of the lifecycle — breaks readability in non-mermaid viewers (notably Claude Desktop).
 - Long prose — facts in tables, decisions in 1-2 sentences.

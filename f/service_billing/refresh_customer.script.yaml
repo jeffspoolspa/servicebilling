@@ -1,0 +1,8 @@
+summary: Optional qbo_body + OCC guard + did_write return
+description: >-
+  Adds qbo_body=None so cdc_reconciler can call in-process. OCC guard on
+  qbo_last_updated. display_name propagation to billing.invoices.customer_name
+  now gated on did_write.
+lock: '!inline f/service_billing/refresh_customer.script.lock'
+kind: script
+schema: null

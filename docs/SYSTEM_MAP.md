@@ -258,7 +258,8 @@ The shared "customer record" and "work order" entities used by every other domai
 **Windmill scripts**:
 - `f/qbo/qbo_customer_sync` — daily QBO customer sync (5am)
 - `f/qbo/sync_customer_to_qbo` — push Supabase customer to QBO (called by edge function or trigger)
-- `f/leads/create_qbo_customer` — create QBO customer when a lead converts
+- `f/service_billing/qbo_customer_write` — Pattern D QBO customer create/update (used at lead intake, leader-correct)
+- `f/leads/create_qbo_customer` — legacy conversion-time QBO create (superseded by intake-time Pattern D; manual repair only)
 - `f/webhooks/get_employees` — daily Gusto employee sync ( failing)
 
 **Database tables**:
@@ -324,43 +325,55 @@ Monthly autopay processing for pool maintenance customers. Distinct from the ser
 
 ### 3.5 Domain: Leads + Lead Intake (lifecycle)
 
-New-customer lead intake from the website. The submission entry-points live in the lead-form repo; this repo owns the RPCs they call + the lifecycle UI.
+New-customer maintenance lead intake from **two** entry points: the public website (external
+lead-form repo) and a **new in-app internal form** for office staff. Both hit the same Supabase
+RPC pipeline. This repo owns the RPCs + the new `/leads` management UI. The canonical data model
+and the dead-code cleanup are specified in [ADR 004](adrs/004-leads-canonical-model.md); the
+end-to-end process is [flows/lead-intake-to-conversion/index.md](flows/lead-intake-to-conversion/index.md).
 
-**UI routes**: lead-management UIs aren't fully built out yet — leads land in DB, get followed up via comms.
+> **Data model = "Gen-2" (normalized).** A type-agnostic envelope `public.leads`
+> (`account_id`→`Customers`, `type`, `lifecycle_state`) + a type-specific child
+> `maintenance.residential_lead_details` carrying the real `status`
+> (`new`→`quoted`→`accepted`→`converted`). The child status is the source of truth; a trigger
+> projects it to `leads.lifecycle_state`. There is **no `status` column on `public.leads`**.
+> A defunct "Gen-1" flat `maintenance.leads` table was dropped but is still referenced by dead
+> code (see [ADR 004](adrs/004-leads-canonical-model.md) for the removal list).
 
-**API endpoints**: none in this repo's `app/api/`. The lead-form site calls Supabase RPCs directly.
+**UI routes** (`app/(shell)/leads/` — new, `/leads` module):
+- `/leads` — lead management list (search/sort/paginate, status pills)
+- `/leads/[id]` — lead detail: envelope + child + onboarding + activity timeline + actions
+- `/leads/new` — internal create form (staff-entered lead → same pipeline as website)
+
+**API endpoints**: server actions in `app/(shell)/leads/actions.ts` (no `app/api/leads`); the
+external lead-form site calls the Supabase RPCs directly.
 
 **Windmill scripts**:
-- `f/comms/quote_followup_cadence` — daily 9am quote follow-up ( currently failing)
+- `f/service_billing/qbo_customer_write` — Pattern D QBO customer create, fired at **intake** for new customers (QBO is the leader); reflected by `f/service_billing/refresh_customer`
+- `f/comms/quote_followup_cadence` — daily 9am quote follow-up (emails the accept link)
 - `f/comms/send_email`, `f/comms/send_sms` — generic senders
-- `f/leads/create_qbo_customer` — promote lead to QBO customer
-- `u/carter/estimate_email_processing` (flow) — process inbound estimate emails
 
-**RPCs called by the lead-form site**:
-- `public.submit_website_lead` (wrapper) — atomic check-or-create + create lead
-- `public.check_or_create_customer` — dedup + create/link customer
-- `public.create_lead` — create lead under existing customer
-- `public.accept_lead`, `public.mark_lead_quoted`, `public.mark_payment_on_file` — lifecycle transitions
-- `public.create_card_collection_request`, `public.get_lead_by_accept_token` — accept-link flow
+**Canonical RPCs** (per [ADR 004](adrs/004-leads-canonical-model.md); `public.*` wrappers delegate to `maintenance.*` impls):
+- Intake (live recipe, via `lib/leads/intake.ts` → `POST /api/leads` for both website + internal form): `search_accounts_by_contact`, `create_account`/`update_account_contact`, `create_service_body`, `create_maintenance_lead`; QBO create via `createInQbo`→`f/service_billing/qbo_customer_write`. [attention] legacy/unused-by-intake: `submit_website_lead`, `start_website_lead`+`submit_lead_qualifying`, `check_or_create_customer`, `create_lead`
+- Lifecycle: `mark_lead_quoted`, `accept_lead`, `create_card_collection_request`, `get_lead_by_accept_token`, `mark_payment_on_file`, `submit_maintenance_onboarding`
+- Read/manage: `get_maintenance_leads`, `get_maintenance_lead_detail`, `get_maintenance_lead_by_id`, `update_maintenance_lead`, `bulk_update_lead_status`, `log_lead_activity`, `add_lead_note`
+- [attention] A large set of dead Gen-1 RPCs (`get_leads`, `update_lead_*`, `submit_onboarding`, `add_maintenance_lead_note`, …) are slated for drop — see [ADR 004](adrs/004-leads-canonical-model.md).
 
 **Database tables**:
-- `public.leads` — central lead record (FK → Customers)
-- `maintenance.residential_lead_details`, `commercial_lead_details` — type-specific details
-- `maintenance.onboarding` — onboarding state
-- `public.card_collection_requests` — accept-link tokens
-- `public.communications` — outbound emails/sms
-- `public.email_messages`, `public.text_messages` — inbound message details
-- `public.estimates` — estimate records (FK → work_orders)
-- `public.est_emails` — estimate email body cache
+- `public.leads` — lead envelope (FK → Customers via `account_id`)
+- `maintenance.residential_lead_details` — child (status + qualifying); `commercial_lead_details` recreated empty (intake deferred)
+- `maintenance.onboarding` — post-conversion onboarding state
+- `maintenance.lead_activities` — **recreated** (Gen-2): system events + notes; the UI timeline
+- `public.card_collection_requests` — tokenized card-on-file links (shared with service-billing)
+- `public.communications`, `email_messages`, `text_messages` — comms (cadence + inbound)
+- `public.estimates`, `est_emails` — estimate records + email cache
 
 **Triggers**:
-- `trg_sync_lifecycle_from_residential` / `from_commercial` — child status → lead status
-- `trg_pause_campaigns_on_inbound` (on communications) — pauses comms when customer responds
+- `trg_sync_lifecycle_from_residential` → `sync_lead_lifecycle_from_child` — child status → `leads.lifecycle_state`
+- `trg_pause_campaigns_on_inbound` (on communications) — pauses comms when a customer responds
 
 **External integrations**:
-- Gmail (service account `jpsbilling@jeffspoolspa.com`) for sending
-- RingCentral (SMS)
-- Resend (alternative email path)
+- QBO — customer creation on conversion
+- Gmail (`jpsbilling@jeffspoolspa.com`) + RingCentral (SMS) + Resend — quote/accept comms
 
 ---
 
@@ -541,20 +554,26 @@ Shared comms infrastructure used by all domains.
 
 ### 4.2 Lead intake → onboarding → conversion
 
+Full detail: [flows/lead-intake-to-conversion/index.md](flows/lead-intake-to-conversion/index.md). Note the
+**two status fields**: the child `residential_lead_details.status` is authoritative; the trigger
+projects it onto `leads.lifecycle_state` (open/closed). `public.leads` has no `status` column.
+
 ```
-1. Public website (lead-form repo) → calls public.submit_website_lead RPC
- - dedup customer by phone/email
- - INSERT public.leads
- - INSERT maintenance.{residential,commercial}_lead_details
- - INSERT maintenance.service_bodies per pool
-2. Quote follow-up emails sent via f/comms/quote_followup_cadence (daily)
-3. Customer clicks "Get Started Now" → accept_lead RPC
- - flips lead.status to 'accepted'
-4. Customer enters card on card-collection page → mark_payment_on_file RPC
- - INSERTs maintenance.onboarding row
- - flips lead status to 'converted'
-5. f/leads/create_qbo_customer promotes lead to QBO customer
-6. Customer enters service-billing pipeline from here on
+1. Intake (two entry points, ONE orchestrator = lib/leads/intake.ts):
+   a. Public website (perfectpools-redesign) → POST /api/leads   (target; pre-cutover: website-lead-intake edge fn)
+   b. In-app internal form (/leads/new)      → submitLeadIntake (same module)
+   The recipe:
+     - search_accounts_by_contact: dedup → create_account (new) or update_account_contact (reuse)
+     - NEW customer → create in QBO now (Pattern D): createInQbo → f/service_billing/qbo_customer_write,
+       stamp Customers.qbo_customer_id, webhook_expectations WAL; refresh_customer webhook confirms (QBO is leader)
+     - create_service_body per pool/spa/fountain
+     - create_maintenance_lead (computed quote) → public.leads + maintenance.residential_lead_details (status='new')
+2. mark_lead_quoted → child status='quoted'; f/comms/quote_followup_cadence emails the accept link (daily)
+3. Customer clicks "Get Started Now" → accept_lead (resume-token gated) → child status='accepted'
+4. create_card_collection_request → token; customer enters card → mark_payment_on_file
+     - INSERT maintenance.onboarding (payment_on_file=true)
+     - child status='converted' → trigger sets leads.lifecycle_state='closed' (reason=converted)
+5. Customer enters service-billing pipeline from here on (already a QBO customer)
 ```
 
 ### 4.3 Monthly autopay run

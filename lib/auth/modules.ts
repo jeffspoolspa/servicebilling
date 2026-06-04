@@ -15,7 +15,7 @@
  * A user can have multiple rows (one per module they have access to).
  */
 
-export type ModuleKey = "service" | "maintenance" | "admin"
+export type ModuleKey = "service" | "maintenance" | "leads" | "admin"
 export type RoleKey = "viewer" | "admin"
 
 export interface RoleSpec {
@@ -45,12 +45,11 @@ export const MODULES: Record<ModuleKey, ModuleSpec> = {
   service: {
     key: "service",
     label: "Service",
-    description: "Service billing, work orders, customers, invoices, employees.",
+    description: "Service billing, work orders, invoices, employees.",
     routes: [
       "/service",
       "/service-billing",
       "/work-orders",
-      "/customers",
       "/invoices",
       "/employees",
     ],
@@ -66,6 +65,16 @@ export const MODULES: Record<ModuleKey, ModuleSpec> = {
     routes: ["/maintenance"],
     roles: {
       admin: { label: "Admin", canWrite: true },
+    },
+  },
+  leads: {
+    key: "leads",
+    label: "Leads",
+    description: "Maintenance lead intake, follow-up, and conversion.",
+    routes: ["/leads"],
+    roles: {
+      admin:  { label: "Admin",  canWrite: true  },
+      viewer: { label: "Viewer", canWrite: false },
     },
   },
   admin: {
@@ -86,6 +95,7 @@ export const PUBLIC_ROUTES = [
   "/auth",
   "/logout",
   "/api/webhooks",
+  "/api/leads", // external website lead intake — gated by x-api-key in the route, not session
   "/unauthorized",
 ]
 

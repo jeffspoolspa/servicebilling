@@ -3,14 +3,17 @@
 > Status: [active]
 > Last updated: 2026-06-03
 
-Copy this when creating a new flow doc under `/docs/flows/<name>.md`. A flow (a.k.a.
-workflow) is an end-to-end business process that crosses multiple entities and scripts.
-The doc sits **above the code and below hand-waving** — readable by you, by a new person,
-and by an AI that needs to reason about the system without re-reading every Windmill
-script.
+Copy this when documenting a flow. A flow (a.k.a. workflow) is an end-to-end business
+process that crosses multiple entities and scripts. The doc sits **above the code and below
+hand-waving** — readable by you, by a new person, and by an AI that needs to reason about
+the system without re-reading every Windmill script.
 
-Live example: [docs/flows/monthly-autopay.md](../flows/monthly-autopay.md). Process for
-building one: [runbooks/adding-a-workflow.md](../runbooks/adding-a-workflow.md).
+A flow is documented as a **folder**, not a single file: `docs/flows/<name>/` with a small
+`index.md` hub plus one sub-doc per layer (see "A flow is a folder" below). The hub stays
+scannable; each layer is its own focused, clickable doc.
+
+Live example: [docs/flows/lead-intake-to-conversion/](../flows/lead-intake-to-conversion/index.md).
+Process for building one: [runbooks/adding-a-workflow.md](../runbooks/adding-a-workflow.md).
 
 ## Fill the four layers in this order
 
@@ -28,9 +31,65 @@ Do **not** redraw the system map for every flow. The system map
 ([SYSTEM_MAP.md](../SYSTEM_MAP.md)) is the stable skeleton — you usually just confirm
 where the new thing plugs in.
 
+### A flow is a folder: a hub + the four layers as sub-docs
+
+Each layer is its own file so it stays focused and individually clickable. The `index.md`
+hub just *refers* to them at a high level — it holds no rules or sequences itself.
+
+```
+docs/flows/<name>/
+  index.md            # hub: purpose, Layer-0 system-map link, links to the 4 sub-docs
+  schema-contract.md  # Layer 1 — reads / writes / external calls / invariants (tables deep-linked to entity field dicts)
+  decision-map.md     # Layer 2 — business rules (Pre-conditions → Decision sequence → Failure handling → Post-conditions)
+  flow-map.md         # Layer 3 — Mermaid sequence + numbered steps + failure-modes table + concurrency
+  open-questions.md   # gaps / known issues, pulled out of every layer into one place
+```
+
+Rules for the split:
+- **No duplication.** Each fact lives in exactly one sub-doc; the others link to it. The hub
+  never restates rules or sequences.
+- **Open questions are their own doc.** Gaps from any layer collect in `open-questions.md` so
+  the supporting docs stay clean.
+- **A decision map is not an ADR.** The ADR records *how we decided the architecture* (and
+  why); `decision-map.md` records *the rules the workflow runs by*.
+- **Schema contract deep-links every table** to its [entity](../entities) field dictionary, so
+  a reader can click from "writes `public.leads`" to the field-by-field definition.
+
+Live example: [lead-intake-to-conversion/](../flows/lead-intake-to-conversion/index.md).
+
 ---
 
-## The shape (copy from here)
+## The `index.md` hub (copy from here)
+
+```markdown
+# Flow: <Name>
+
+> Status: [active] | [deprecated]
+> Kind: [sync] | [orchestration]            (see "Sync vs orchestration" below)
+> Trigger: <schedule / webhook / manual / event>
+
+**One-line purpose:** <one sentence a non-technical person could follow.>
+
+## Layer 0 — System map placement
+
+<Which containers it touches; link to [SYSTEM_MAP.md](../../SYSTEM_MAP.md). New node/edge → update the map.>
+
+## The layers (click in)
+
+- **[Schema contract](schema-contract.md)** — what it reads, writes, and calls.
+- **[Decision map](decision-map.md)** — the business rules.
+- **[Flow map](flow-map.md)** — the exact sequence.
+- **[Open questions](open-questions.md)** — gaps + known issues.
+```
+
+> Relative depth: a flow folder sits one level deeper than the old single file, so links to
+> entities / system map use `../../` (e.g. `../../entities/lead.md`), not `../`.
+
+## The layer-doc content (copy each block into its named sub-doc)
+
+The skeleton below is the *content* for the layer sub-docs — Layer 1 → `schema-contract.md`,
+Layer 2 → `decision-map.md`, Layer 3 → `flow-map.md`, and the gaps → `open-questions.md`. The
+hub above does not repeat any of it.
 
 ```markdown
 # Flow: <Name>

@@ -13,7 +13,7 @@ This is the canonical documentation root for the servicebilling repo. The docs a
 |---|---|
 | [SYSTEM_MAP.md](SYSTEM_MAP.md) | Top-down system overview. Start here if you're brand new. |
 | [entities/](entities/) | One page per row-shape in the DB. Each shows the entity's lifecycle, who writes which columns, what flows touch it. (E.g., [Invoice](entities/invoice.md).) |
-| [flows/](flows/) | One page per end-to-end business process. Each shows the sequence + click-through links to the scripts running each step. (E.g., [Work order to payment](flows/work-order-to-payment.md).) |
+| [flows/](flows/) | One end-to-end business process each. Newer flows are a **folder** — `flows/<name>/` with an `index.md` hub + per-layer sub-docs (schema-contract, decision-map, flow-map, open-questions); see [conventions/FLOW_TEMPLATE.md](conventions/FLOW_TEMPLATE.md). (E.g., [lead-intake-to-conversion](flows/lead-intake-to-conversion/index.md).) |
 | [scripts/](scripts/) | One page per Windmill script. Short — facts only: what it reads, writes, triggers, and which flows it's part of. Source links to the actual file. |
 | [shared/](shared/) | Stub. Will hold cross-entity reference info (currently empty; entity docs cover most of this). |
 | [integrations/](integrations/) | External-API contracts (QBO, RingCentral, Gmail, ION, Zoho, ...). |

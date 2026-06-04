@@ -41,6 +41,12 @@ export async function updateSession(request: NextRequest) {
     return response
   }
 
+  // External website lead intake. The website (no session cookie) POSTs leads
+  // here; the route authenticates via the x-api-key header (LEADS_INTAKE_API_KEY).
+  if (path === "/api/leads" || path.startsWith("/api/leads/")) {
+    return response
+  }
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

@@ -78,7 +78,7 @@ const ENTITY_CONFIG: Record<
   },
   customer: {
     script: "f/service_billing/qbo_customer_write",
-    cacheTable: "customers",
+    cacheTable: "Customers", // public."Customers" — case-sensitive, quoted
     cacheSchema: "public",
     cacheIdColumn: "qbo_customer_id",
   },
@@ -237,4 +237,117 @@ async function markSyncFailed(
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+/**
+ * Create a NEW entity in QBO (leader-correct) and link it into our cache.
+ *
+ * writeToQbo (above) is UPDATE-only — it keys the cache row by an existing QBO id.
+ * A brand-new entity has no QBO id yet, so the create path keys the cache row by our
+ * LOCAL id (e.g. Customers.id) and only learns the QBO id from the create script's
+ * 200 response. Sequence (Pattern D, create variant):
+ *   1. Mark the local cache row 'pending' (by localId).
+ *   2. Call the Windmill create script -> { success, qbo_id, entity }.
+ *   3. On 200: stamp the qbo id + 'awaiting_propagation' on the local row, and write a
+ *      billing.webhook_expectations row (now that we know the QBO id).
+ *   4. The inbound QBO webhook (refresh_<entity> + confirm_webhook_expectation) reflects
+ *      the canonical record and resolves the expectation; CDC reconciler is the backstop.
+ *
+ * Script contract:
+ *   args:    { operation: 'create', body, idempotency_key }
+ *   returns: { success: true, qbo_id, entity } | { success: false, error }
+ */
+export async function createInQbo<T = unknown>(
+  entityType: QboEntityType,
+  body: Record<string, unknown>,
+  opts: WriteOptions & { localId: string | number; localIdColumn?: string },
+): Promise<WriteResult<T> & { qboId?: string }> {
+  const config = ENTITY_CONFIG[entityType]
+  if (!config) {
+    return { success: false, error: `unknown entity type: ${entityType}`, idempotencyKey: "" }
+  }
+  const localIdColumn = opts.localIdColumn ?? "id"
+  const idempotencyKey = crypto.randomUUID()
+  const sb = createSupabaseAdmin()
+  const graceMs = opts.webhookGraceMs ?? DEFAULT_WEBHOOK_GRACE_MS
+
+  // 1. Mark the local cache row pending (keyed by OUR id — no QBO id exists yet).
+  await sb
+    .schema(config.cacheSchema as "billing" | "public")
+    .from(config.cacheTable)
+    .update({
+      sync_state: "pending",
+      sync_state_changed_at: new Date().toISOString(),
+      sync_error: null,
+    })
+    .eq(localIdColumn, opts.localId)
+
+  // 2. Call the Windmill create script.
+  let scriptResult: { success: boolean; qbo_id?: string; entity?: T; error?: string }
+  try {
+    scriptResult = await triggerScriptSync(
+      opts.scriptOverride ?? config.script,
+      { operation: "create", body, idempotency_key: idempotencyKey },
+      { timeoutMs: opts.timeoutMs ?? 60_000 },
+    )
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "windmill error"
+    await markSyncFailedByLocal(sb, config, localIdColumn, opts.localId, msg)
+    return { success: false, error: msg, idempotencyKey }
+  }
+
+  if (!scriptResult.success || !scriptResult.qbo_id) {
+    const errMsg = scriptResult.error ?? "qbo create failed"
+    await markSyncFailedByLocal(sb, config, localIdColumn, opts.localId, errMsg)
+    return { success: false, error: errMsg, idempotencyKey }
+  }
+
+  // 3. Link the QBO id + flip to awaiting_propagation; write the expectation WAL.
+  await sb
+    .schema(config.cacheSchema as "billing" | "public")
+    .from(config.cacheTable)
+    .update({
+      [config.cacheIdColumn]: scriptResult.qbo_id,
+      sync_state: "awaiting_propagation",
+      sync_state_changed_at: new Date().toISOString(),
+      sync_error: null,
+    })
+    .eq(localIdColumn, opts.localId)
+
+  // Write-ahead row: the webhook handler resolves it via confirm_webhook_expectation.
+  void sb
+    .schema("billing")
+    .from("webhook_expectations")
+    .insert({
+      entity_type: capitalize(entityType),
+      entity_id: scriptResult.qbo_id,
+      expected_by: new Date(Date.now() + graceMs).toISOString(),
+      source: "self_initiated",
+      idempotency_key: idempotencyKey,
+    })
+
+  return {
+    success: true,
+    entity: scriptResult.entity,
+    qboId: scriptResult.qbo_id,
+    idempotencyKey,
+  }
+}
+
+async function markSyncFailedByLocal(
+  sb: ReturnType<typeof createSupabaseAdmin>,
+  config: (typeof ENTITY_CONFIG)[QboEntityType],
+  localIdColumn: string,
+  localId: string | number,
+  errorMessage: string,
+): Promise<void> {
+  await sb
+    .schema(config.cacheSchema as "billing" | "public")
+    .from(config.cacheTable)
+    .update({
+      sync_state: "sync_failed",
+      sync_state_changed_at: new Date().toISOString(),
+      sync_error: errorMessage.slice(0, 500),
+    })
+    .eq(localIdColumn, localId)
 }

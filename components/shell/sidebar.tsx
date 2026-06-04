@@ -8,6 +8,8 @@ import {
   Waves,
   Wrench,
   Settings,
+  Users,
+  UserPlus,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react"
@@ -53,6 +55,17 @@ interface Item {
 const ITEMS: Item[] = [
   { href: "/home", icon: HomeIcon, label: "Home", matches: ["/home"], module: null },
   {
+    // Customers is a shared entity (used by Service for billing and by
+    // Maintenance for dispatch), so it lives at the top level instead of
+    // under either module. The page itself doesn't enforce a module gate;
+    // anyone authenticated can look up a customer record.
+    href: "/customers",
+    icon: Users,
+    label: "Customers",
+    matches: ["/customers"],
+    module: null,
+  },
+  {
     href: "/service",
     icon: Waves,
     label: "Service",
@@ -61,7 +74,6 @@ const ITEMS: Item[] = [
       "/service-billing",
       "/work-orders",
       "/invoices",
-      "/customers",
     ],
     module: "service",
   },
@@ -71,6 +83,13 @@ const ITEMS: Item[] = [
     label: "Maintenance",
     matches: ["/maintenance"],
     module: "maintenance",
+  },
+  {
+    href: "/leads",
+    icon: UserPlus,
+    label: "Leads",
+    matches: ["/leads"],
+    module: "leads",
   },
 ]
 
