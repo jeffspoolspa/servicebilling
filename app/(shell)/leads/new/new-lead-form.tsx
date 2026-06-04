@@ -32,7 +32,7 @@ const OFFICES: { id: Office; label: string }[] = [
   { id: "brunswick", label: "Brunswick" },
   { id: "st_marys", label: "St. Marys" },
 ]
-const VISIT_LABEL: Record<string, string> = { "0.5": "Every other week", "1": "Weekly", "2": "Twice weekly" }
+const VISIT_LABEL: Record<string, string> = { "0.5": "Bi-weekly", "1": "Weekly", "2": "2x per week" }
 const VISITS_PER_MONTH: Record<string, number> = { "0.5": 2, "1": 4, "2": 8 }
 const COND_LABEL: Record<string, string> = { good: "Good", needs_repair: "Needs repair", green_pool: "Green pool" }
 
@@ -209,7 +209,7 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
               <Field label="Visits / week">
                 <OptionPills name="visits_per_week" value={visits} disabled={pending}
                   onChange={(v) => setVisits(v as typeof visits)}
-                  options={[{ value: "0.5", label: "Every other week" }, { value: "1", label: "Weekly" }, { value: "2", label: "Twice weekly" }]} />
+                  options={[{ value: "0.5", label: "Bi-weekly" }, { value: "1", label: "Weekly" }, { value: "2", label: "2x per week" }]} />
               </Field>
               <Field label="Pool condition">
                 <OptionPills name="pool_condition" value={poolCondition} disabled={pending}
