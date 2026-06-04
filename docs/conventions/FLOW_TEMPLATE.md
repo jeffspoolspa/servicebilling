@@ -176,7 +176,7 @@ Per [ADR 001](../adrs/001-platform-architecture.md), there are two kinds of flow
   `flows/sync/qbo-invoices.md`.
 - **`[orchestration]`** — drives a business process across entities. Lives in `flows/`.
   References the sync flows at its boundaries rather than re-explaining them. Example:
-  `flows/work-order-to-payment.md`.
+  `flows/work-order-to-payment/index.md`.
 
 ### Edge types in an orchestration flow
 Every arrow is one of three kinds — label them so leader round-trips and drift windows

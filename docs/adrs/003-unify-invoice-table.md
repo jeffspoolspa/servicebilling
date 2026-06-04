@@ -21,7 +21,7 @@ Current state, measured:
 
 Per [Invoice](../entities/invoice.md), the processing path is determined by **what an invoice links to**, not a classified type:
 
-- **Work-order-linked** -> [work-order-to-payment](../flows/work-order-to-payment.md) (a WO may be department=maintenance; still the WO workflow).
+- **Work-order-linked** -> [work-order-to-payment](../flows/work-order-to-payment/index.md) (a WO may be department=maintenance; still the WO workflow).
 - **Task-linked** (via its [Task Billing Period](../entities/task-billing-period.md), 1:1) -> [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md).
 - **Neither** -> orphan exception (coverage gap).
 
@@ -82,7 +82,7 @@ The 558 maintenance invoices in the service table (486 `processed` there) + 27 o
 ## Cross-references
 
 - Entity: [Invoice](../entities/invoice.md)
-- Flow: [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md), [work-order-to-payment](../flows/work-order-to-payment.md)
+- Flow: [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md), [work-order-to-payment](../flows/work-order-to-payment/index.md)
 - Autopay engine (the contract to protect): [monthly-autopay](../flows/monthly-autopay.md)
 - Loop postmortem (trigger risk): [audits/2026-05-27-database.md](../audits/2026-05-27-database.md)
 - Architecture: [ADR 001](001-platform-architecture.md)

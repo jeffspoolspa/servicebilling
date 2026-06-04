@@ -28,4 +28,4 @@ IF NOT FOUND THEN RETURN NEW; END IF;  -- already claimed recently, skip
 - Entity: [Payment Method](../../entities/payment-method.md)
 - Indicator trigger: [set_payment_method_ok](../../scripts/_triggers/set_payment_method_ok.md)
 - Postmortem: [2026-05-27-database](../../audits/2026-05-27-database.md)
-- Downstream: [work-order-to-payment](../work-order-to-payment.md)
+- Downstream: [work-order-to-payment](../work-order-to-payment/index.md)

@@ -8,7 +8,7 @@
 
 ## What this keeps current
 
-Mirrors ION work orders into `public.work_orders`. This is a foundational sync flow — many downstream flows depend on it, including [work-order-to-payment](../work-order-to-payment.md). It runs in the background on a schedule; downstream flows assume `public.work_orders` is current because this flow keeps it so.
+Mirrors ION work orders into `public.work_orders`. This is a foundational sync flow — many downstream flows depend on it, including [work-order-to-payment](../work-order-to-payment/index.md). It runs in the background on a schedule; downstream flows assume `public.work_orders` is current because this flow keeps it so.
 
 ## Trigger
 
@@ -76,6 +76,6 @@ How our columns are preserved: the sync's pandas DataFrame only contains ION col
 ## Cross-references
 
 - Entity kept current: [Work Order](../../entities/work-order.md)
-- Downstream flows that depend on this: [work-order-to-payment](../work-order-to-payment.md)
+- Downstream flows that depend on this: [work-order-to-payment](../work-order-to-payment/index.md)
 - Architecture: [ADR 001](../../adrs/001-platform-architecture.md)
 - Source: [f/ION/work_orders.flow](../../../f/ION/work_orders.flow/flow.yaml)

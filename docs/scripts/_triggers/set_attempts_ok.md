@@ -14,4 +14,4 @@ When [process_work_order](../service_billing/process_work_order.md) logs an atte
 - `billing.invoices.attempts_ok` (the indicator); projection then recomputes `billing_status`
 
 ## In which flows
-- [work-order-to-payment](../../flows/work-order-to-payment.md) — charge-attempt gate
+- [work-order-to-payment](../../flows/work-order-to-payment/index.md) — charge-attempt gate

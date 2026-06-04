@@ -16,4 +16,4 @@ Outbox-pattern backstop for `pre_process_invoice`. Every 60s, finds invoices stu
 - `billing.invoices` (indirectly via in-process call to `pre_process_invoice`)
 
 ## In which flows
-- [Work order to payment](../../flows/work-order-to-payment.md) — recovery path for step 6
+- [Work order to payment](../../flows/work-order-to-payment/index.md) — recovery path for step 6

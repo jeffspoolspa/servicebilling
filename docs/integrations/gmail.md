@@ -12,5 +12,5 @@ Gmail is the outbound email channel. [process_work_order](../scripts/service_bil
 
 ## Flows that depend on Gmail
 
-- [work-order-to-payment](../flows/work-order-to-payment.md) — receipt email
+- [work-order-to-payment](../flows/work-order-to-payment/index.md) — receipt email
 - [monthly-autopay](../flows/monthly-autopay.md) — invoice + decline emails

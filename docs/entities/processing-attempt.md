@@ -17,7 +17,7 @@ QBO has no concept of "we tried and don't know if it worked," so this state live
 
 ## Flows this entity participates in
 
-- [work-order-to-payment](../flows/work-order-to-payment.md) — written on every charge; drives `attempts_ok`
+- [work-order-to-payment](../flows/work-order-to-payment/index.md) — written on every charge; drives `attempts_ok`
 
 ## Common queries
 

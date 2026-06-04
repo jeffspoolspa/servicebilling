@@ -23,4 +23,4 @@ For each uncertain attempt in the lookback window (`LOOKBACK_DAYS=7`), it querie
 - `billing.processing_attempts` (status transitions only — never writes to QBO or Intuit)
 
 ## In which flows
-- [work-order-to-payment](../../flows/work-order-to-payment.md) — backstop for the `charge_uncertain` state
+- [work-order-to-payment](../../flows/work-order-to-payment/index.md) — backstop for the `charge_uncertain` state

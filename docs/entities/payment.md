@@ -46,7 +46,7 @@ stateDiagram-v2
 
 ## Flows this entity participates in
 
-- [work-order-to-payment](../flows/work-order-to-payment.md) — the charge + record steps
+- [work-order-to-payment](../flows/work-order-to-payment/index.md) — the charge + record steps
 - [cdc-reconciliation](../flows/cdc-reconciliation.md) — QBO Payment changes reflect back via the CDC reconciler
 - [monthly-autopay](../flows/monthly-autopay.md) — autopay charges land here too
 

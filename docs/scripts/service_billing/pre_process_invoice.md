@@ -22,4 +22,4 @@ Critically, pre_process owns ONLY its own source-of-truth fields and `enrichment
 - `billing.customer_payments` (indirect): each applied credit decrements `unapplied_amt`, firing `fn_set_credits_ok_from_payment`
 
 ## In which flows
-- [work-order-to-payment](../../flows/work-order-to-payment.md) — the enrichment step (`awaiting_pre_processing` -> `ready_to_process`)
+- [work-order-to-payment](../../flows/work-order-to-payment/index.md) — the enrichment step (`awaiting_pre_processing` -> `ready_to_process`)

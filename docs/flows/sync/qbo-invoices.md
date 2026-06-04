@@ -8,9 +8,9 @@
 
 ## What this keeps current
 
-Mirrors QBO invoices into `billing.invoices` and reflects QBO's financial-state changes (balance, email status, payments applied) back into our cache. This is the inbound boundary of [work-order-to-payment](../work-order-to-payment.md): a freshly-cached invoice seeds `awaiting_pre_processing` and the pipeline takes over.
+Mirrors QBO invoices into `billing.invoices` and reflects QBO's financial-state changes (balance, email status, payments applied) back into our cache. This is the inbound boundary of [work-order-to-payment](../work-order-to-payment/index.md): a freshly-cached invoice seeds `awaiting_pre_processing` and the pipeline takes over.
 
-Note the invoice's split leadership (see [Invoice](../../entities/invoice.md)): ION creates the invoice + number, then QBO becomes the leader for financial state. This sync only deals with the QBO half. The ION-to-QBO hand-off is the manual queue push described in [work-order-to-payment](../work-order-to-payment.md).
+Note the invoice's split leadership (see [Invoice](../../entities/invoice.md)): ION creates the invoice + number, then QBO becomes the leader for financial state. This sync only deals with the QBO half. The ION-to-QBO hand-off is the manual queue push described in [work-order-to-payment](../work-order-to-payment/index.md).
 
 ## Trigger
 
@@ -48,12 +48,12 @@ Yes — unlike the ION sync, the QBO caches have the [CDC reconciler](qbo-drift-
 |---|---|---|
 | QBO token refresh fails | Pull aborts | Raises; Windmill marks job failed |
 | Webhook dropped | Invoice stays stale (balance/email not reflected) | cdc_reconciler catches within 15min |
-| Line items lost in ION-to-QBO push | QBO subtotal < WO subtotal | `subtotal_ok` indicator flips false -> `needs_review` (see [work-order-to-payment](../work-order-to-payment.md)) |
+| Line items lost in ION-to-QBO push | QBO subtotal < WO subtotal | `subtotal_ok` indicator flips false -> `needs_review` (see [work-order-to-payment](../work-order-to-payment/index.md)) |
 
 ## Cross-references
 
 - Entity kept current: [Invoice](../../entities/invoice.md)
 - Scripts: [pull_qbo_invoices](../../scripts/service_billing/pull_qbo_invoices.md), [cdc_reconciler](../../scripts/service_billing/cdc_reconciler.md)
 - Drift backstop: [qbo-drift-reconciliation](qbo-drift-reconciliation.md)
-- Downstream: [work-order-to-payment](../work-order-to-payment.md)
+- Downstream: [work-order-to-payment](../work-order-to-payment/index.md)
 - Architecture: [ADR 001](../../adrs/001-platform-architecture.md)

@@ -7,7 +7,7 @@
 
 ## Purpose
 
-The charge step. Takes a `ready_to_process` work order and: applies matched credits, charges the card/ACH on file (or sends the invoice), records the payment in QBO, emails the receipt, and logs the attempt. This is the `[write-out]` half of [work-order-to-payment](../../flows/work-order-to-payment.md) — it pushes to the external leaders (Intuit Payments + QBO).
+The charge step. Takes a `ready_to_process` work order and: applies matched credits, charges the card/ACH on file (or sends the invoice), records the payment in QBO, emails the receipt, and logs the attempt. This is the `[write-out]` half of [work-order-to-payment](../../flows/work-order-to-payment/index.md) — it pushes to the external leaders (Intuit Payments + QBO).
 
 Concurrency is self-managed via a `billing_status` lock: it sets `processing` on entry so a second invocation for the same WO sees the lock and bails. The 60s auto-processor schedule is a backstop — Windmill's concurrency limit ensures a burst of 100 triggers runs serially, not 100-at-once (see [CONCURRENCY_KEYS.md](../../conventions/CONCURRENCY_KEYS.md)).
 
@@ -32,4 +32,4 @@ Concurrency is self-managed via a `billing_status` lock: it sets `processing` on
 - Intuit Payments (`[write-out]` — the charge), QBO (`[write-out]` — invoice update + Payment record)
 
 ## In which flows
-- [work-order-to-payment](../../flows/work-order-to-payment.md) — the charge + record steps
+- [work-order-to-payment](../../flows/work-order-to-payment/index.md) — the charge + record steps

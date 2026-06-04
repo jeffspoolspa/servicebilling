@@ -14,4 +14,4 @@ When [pre_process_invoice](../service_billing/pre_process_invoice.md) auto-appli
 - `billing.invoices.credits_ok` (the indicator); projection then recomputes `billing_status`
 
 ## In which flows
-- [work-order-to-payment](../../flows/work-order-to-payment.md) — credit-application gate
+- [work-order-to-payment](../../flows/work-order-to-payment/index.md) — credit-application gate

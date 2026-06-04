@@ -19,7 +19,7 @@ The per-WO transaction pipeline: invoice creation, enrichment, payment processin
 
 | Flow | Status |
 |---|---|
-| [Work order to payment](../../flows/work-order-to-payment.md) | [active] |
+| [Work order to payment](../../flows/work-order-to-payment/index.md) | [active] |
 | [CDC reconciliation](../../flows/cdc-reconciliation.md) | [stub] |
 | [Credit auto-matching](../../flows/credit-auto-matching.md) | [stub] |
 

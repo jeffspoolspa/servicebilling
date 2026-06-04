@@ -7,7 +7,7 @@
 
 ## Purpose
 
-Caches QBO invoices into `billing.invoices` and links each to its work order. This is the inbound half of the [qbo-invoices sync](../../flows/sync/qbo-invoices.md). A new row seeds `billing_status='awaiting_pre_processing'`, which kicks off the rest of the [work-order-to-payment](../../flows/work-order-to-payment.md) pipeline.
+Caches QBO invoices into `billing.invoices` and links each to its work order. This is the inbound half of the [qbo-invoices sync](../../flows/sync/qbo-invoices.md). A new row seeds `billing_status='awaiting_pre_processing'`, which kicks off the rest of the [work-order-to-payment](../../flows/work-order-to-payment/index.md) pipeline.
 
 Two modes:
 - **Bulk** (default, scheduled): finds every billable WO whose `invoice_number` is missing from the cache or stale (`max_age_minutes=60`), batch-fetches via a QBO `IN`-clause query (batch size 200), upserts, links, seeds `awaiting_pre_processing`.
@@ -24,4 +24,4 @@ Two modes:
 
 ## In which flows
 - [qbo-invoices sync](../../flows/sync/qbo-invoices.md) — the inbound cache step
-- [work-order-to-payment](../../flows/work-order-to-payment.md) — seeds the invoice queue (step: reflection from QBO)
+- [work-order-to-payment](../../flows/work-order-to-payment/index.md) — seeds the invoice queue (step: reflection from QBO)

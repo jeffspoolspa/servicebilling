@@ -10,7 +10,7 @@
 
 The truth backstop for every QBO cache. Webhooks are the primary low-latency reflection channel; when one drops, the cache silently drifts from QBO. This flow polls QBO's CDC (Change Data Capture) endpoint every 15 minutes — an incremental "what changed since this cursor" query — and replays the changes into our cache, so drift self-heals within one tick.
 
-It is the `[reflection]` mechanism that backstops the `[write-out]` edges in [work-order-to-payment](../work-order-to-payment.md): if we charge a card and record a QBO Payment but the resulting invoice webhook drops, this catches it.
+It is the `[reflection]` mechanism that backstops the `[write-out]` edges in [work-order-to-payment](../work-order-to-payment/index.md): if we charge a card and record a QBO Payment but the resulting invoice webhook drops, this catches it.
 
 ## Mechanism
 

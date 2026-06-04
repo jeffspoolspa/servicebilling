@@ -46,5 +46,5 @@ Still read-only today. [ADR 002](../adrs/002-ion-api-layer.md) adds `f/ION/api` 
 
 - [ion-work-orders sync](../flows/sync/ion-work-orders.md)
 - [ion-visits sync](../flows/sync/ion-visits.md)
-- [work-order-to-payment](../flows/work-order-to-payment.md) (invoice origin)
+- [work-order-to-payment](../flows/work-order-to-payment/index.md) (invoice origin)
 - [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md) (invoice origin, built from visits)

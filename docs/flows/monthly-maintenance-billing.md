@@ -102,7 +102,7 @@ New to the system map? No — uses existing containers.
 - Every completed, performed log → exactly one visit linked to a task.
 - Every active task-month → one promise; reconciled `labor_ok` (+ `consumables_ok` when the quantity check lands) before Phase B charges it.
 
-### Phase B — processing (unchanged; mirrors per-WO [work-order-to-payment](work-order-to-payment.md))
+### Phase B — processing (unchanged; mirrors per-WO [work-order-to-payment](work-order-to-payment/index.md))
 Per reconciled invoice: apply credits → autopay decision → charge (card/ACH) or invoice-only → send → reflect balance. Engine: [monthly-autopay](monthly-autopay.md). Autopay roster is per-customer; processing is per-invoice (per task).
 
 ---
@@ -150,6 +150,6 @@ sequenceDiagram
 
 ## Cross-references
 - Input logs: ION via `list_day_logs` + `get_log_detail`. Invoice mirror: [qbo-maintenance-invoices](sync/qbo-maintenance-invoices.md) / [load_month](../scripts/billing_audit/load_month.md).
-- Charging engine: [monthly-autopay](monthly-autopay.md). Sibling (per-WO): [work-order-to-payment](work-order-to-payment.md).
+- Charging engine: [monthly-autopay](monthly-autopay.md). Sibling (per-WO): [work-order-to-payment](work-order-to-payment/index.md).
 - Entities: [Visit](../entities/visit.md), [Task](../entities/task.md), [Task Billing Period](../entities/task-billing-period.md), [Invoice](../entities/invoice.md).
 - Decisions: [ADR 002 (ION API)](../adrs/002-ion-api-layer.md), [ADR 003 (unify invoice)](../adrs/003-unify-invoice-table.md), [ADR 001 (platform)](../adrs/001-platform-architecture.md).

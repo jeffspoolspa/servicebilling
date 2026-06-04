@@ -15,4 +15,4 @@ Pulls QBO credit memos into the cache and auto-matches available credit to the w
 
 - Indicator trigger: [set_credits_ok](../scripts/_triggers/set_credits_ok.md)
 - Entities: [Payment](../entities/payment.md), [Invoice](../entities/invoice.md)
-- Applied during: [work-order-to-payment](work-order-to-payment.md) (step 5 of process_work_order)
+- Applied during: [work-order-to-payment](work-order-to-payment/index.md) (step 5 of process_work_order)

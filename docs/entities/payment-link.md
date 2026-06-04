@@ -17,4 +17,4 @@ This is **our** domain data — it records the allocation decision our pipeline 
 
 ## Flows this entity participates in
 
-- [work-order-to-payment](../flows/work-order-to-payment.md) — written when a charge or credit is applied
+- [work-order-to-payment](../flows/work-order-to-payment/index.md) — written when a charge or credit is applied

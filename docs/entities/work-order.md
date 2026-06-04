@@ -56,7 +56,7 @@ stateDiagram-v2
 ## Flows this entity participates in
 
 - [ion-work-orders sync](../flows/sync/ion-work-orders.md) — how it gets into our cache (inbound)
-- [work-order-to-payment](../flows/work-order-to-payment.md) — the billing process it drives
+- [work-order-to-payment](../flows/work-order-to-payment/index.md) — the billing process it drives
 
 ## Common queries
 

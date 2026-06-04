@@ -9,7 +9,7 @@
 
 One QuickBooks Online invoice, mirrored into our cache. **One universal QBO→invoice sync** brings in *every* QBO invoice as a separate process — it does not classify or pull per-pipeline. The processing workflow is then decided by **what the invoice links to**, not by a type set up front:
 
-- **Work-order-linked** (`work_orders.qbo_invoice_id`) -> [work-order-to-payment](../flows/work-order-to-payment.md). A WO can itself be **department=maintenance** (there are maintenance work orders), so a WO-linked invoice can still be "maintenance" for reporting — but it still runs the WO workflow.
+- **Work-order-linked** (`work_orders.qbo_invoice_id`) -> [work-order-to-payment](../flows/work-order-to-payment/index.md). A WO can itself be **department=maintenance** (there are maintenance work orders), so a WO-linked invoice can still be "maintenance" for reporting — but it still runs the WO workflow.
 - **Task-linked** (via its [Task Billing Period](task-billing-period.md), 1:1) -> [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md). ION issues one per task per month; a customer with N tasks gets N invoices (monthly total = the SUM). Maintenance-specific analytics: [maintenance-invoice detail](maintenance-invoice.md).
 
 **Linkage routes the workflow** — a derived `type`/`link_kind` (`work_order` | `task`) is materialized from the link for indexing and trigger-guarding, but the link is the source of truth. **Coverage guarantee: every QBO invoice should resolve to a work order or a task.** One linked to neither is an **orphan** to investigate (this generalizes "did every maintenance customer get invoiced?" to all invoices). Everything downstream — charging, payments, QBO reflection — is shared; only the path to "ready to charge" differs by link.
@@ -68,7 +68,7 @@ stateDiagram-v2
 
 ## Flows this entity participates in
 
-- [Work-order to payment](../flows/work-order-to-payment.md) — work-order-linked path
+- [Work-order to payment](../flows/work-order-to-payment/index.md) — work-order-linked path
 - [Monthly maintenance billing](../flows/monthly-maintenance-billing.md) — task-linked path (visit link + reconciliation)
 - [CDC reconciliation](../flows/cdc-reconciliation.md) — backstop for missing QBO webhooks (work-order-linked cache only)
 

@@ -31,4 +31,4 @@ Severity tiers: `soft` (cache stale — auto-heal silently), `hard` (webhook mis
 
 ## In which flows
 - [qbo-drift-reconciliation sync](../../flows/sync/qbo-drift-reconciliation.md) — the mechanism
-- [work-order-to-payment](../../flows/work-order-to-payment.md) — backstop for missing QBO webhooks
+- [work-order-to-payment](../../flows/work-order-to-payment/index.md) — backstop for missing QBO webhooks

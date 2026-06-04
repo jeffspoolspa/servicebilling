@@ -14,4 +14,4 @@ The work-order lifecycle: how a unit of field work enters our cache from ION and
 
 - Entity: [Work Order](../../entities/work-order.md)
 - Sync flow (inbound): [ion-work-orders](../../flows/sync/ion-work-orders.md)
-- Drives: [work-order-to-payment](../../flows/work-order-to-payment.md)
+- Drives: [work-order-to-payment](../../flows/work-order-to-payment/index.md)

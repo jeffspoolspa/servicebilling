@@ -12,4 +12,4 @@ OpenAI generates invoice memos during enrichment. [pre_process_invoice](../scrip
 
 ## Flows that depend on OpenAI
 
-- [work-order-to-payment](../flows/work-order-to-payment.md) — memo generation in pre_process_invoice
+- [work-order-to-payment](../flows/work-order-to-payment/index.md) — memo generation in pre_process_invoice

@@ -14,5 +14,5 @@ Note: this trigger was at the center of the [pull_customer_payment_methods loop 
 - `billing.invoices.payment_method_ok` (the indicator); projection then recomputes `billing_status`
 
 ## In which flows
-- [work-order-to-payment](../../flows/work-order-to-payment.md) — payment-method gate
+- [work-order-to-payment](../../flows/work-order-to-payment/index.md) — payment-method gate
 - [qbo-payment-methods sync](../../flows/sync/qbo-payment-methods.md) — what keeps PMs current
