@@ -13,7 +13,7 @@ import { submitLeadIntake } from "@/lib/leads/intake"
  * docs/flows/lead-intake-to-conversion/index.md.
  */
 
-export type ActionState = { ok?: string; error?: string; leadId?: string }
+export type ActionState = { ok?: string; error?: string; leadId?: string; intent?: "create" | "onboard" }
 
 const createSchema = z.object({
   first_name: z.string().trim().min(1, "First name is required"),
@@ -32,6 +32,9 @@ const createSchema = z.object({
   issue_description: z.string().trim().optional(),
   customer_action: z.enum(["auto", "use_existing", "create_new"]).default("auto"),
   existing_customer_id: z.string().trim().optional(),
+  // "create" sends the quote then opens the lead; "onboard" skips the quote and
+  // jumps to the in-app onboarding form (card + pool details) for a walk-in close.
+  intent: z.enum(["create", "onboard"]).default("create"),
 }).refine((d) => (d.email && d.email.length > 0) || (d.phone && d.phone.length > 0), {
   message: "Email or phone is required",
   path: ["email"],
@@ -80,18 +83,24 @@ export async function createInternalLead(
     allow_out_of_area: true,
     customer_action: d.customer_action,
     existing_customer_id: d.existing_customer_id ? Number(d.existing_customer_id) : undefined,
+    // Onboard path skips the quote send — we collect the card + details immediately.
+    notify: d.intent !== "onboard",
   })
 
   if (!result.ok) return { error: result.error ?? "Could not create lead." }
 
   revalidatePath("/leads")
+  // Onboard path: caller redirects straight to the onboarding form; skip the quote note.
+  if (d.intent === "onboard") {
+    return { ok: "Lead created — continue to onboarding.", leadId: result.lead_id, intent: "onboard" }
+  }
   const qboNote = result.qbo === "deferred" ? " QBO customer create deferred — will retry." : ""
   const lead = result.returning ? "Lead created under existing customer." : "Lead created."
   const notifyNote =
     result.notify?.status === "sent" ? ` Quote ${result.notify.channel === "email" ? "emailed" : "texted"}.`
     : result.notify?.status === "failed" ? ` Quote ${result.notify.channel} send deferred.`
     : ""
-  return { ok: lead + qboNote + notifyNote, leadId: result.lead_id }
+  return { ok: lead + qboNote + notifyNote, leadId: result.lead_id, intent: "create" }
 }
 
 const idSchema = z.object({ lead_id: z.string().uuid() })

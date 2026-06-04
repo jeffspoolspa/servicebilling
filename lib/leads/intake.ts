@@ -73,6 +73,12 @@ export interface LeadIntakeInput {
   customer_action?: "auto" | "use_existing" | "create_new"
   /** Required when customer_action='use_existing' — the matched Customers.id. */
   existing_customer_id?: number
+  /**
+   * Auto-send the quote to the customer on create (default true). Set false for
+   * the staff-driven "Continue to onboarding" path, where we collect the card +
+   * pool details immediately instead of emailing a quote.
+   */
+  notify?: boolean
 }
 
 export interface LeadIntakeResult {
@@ -251,7 +257,7 @@ export async function submitLeadIntake(input: LeadIntakeInput): Promise<LeadInta
   // 7. Auto-send the quote to the customer (non-fatal). Prefer email when present
   //    and the Resend template is configured; otherwise fall back to SMS. Any
   //    failure is swallowed — the lead is already created.
-  const notify: LeadIntakeResult["notify"] = office
+  const notify: LeadIntakeResult["notify"] = (input.notify !== false && office)
     ? await notifyQuote({
         office, leadId, accountId,
         firstName: a.first_name, email: a.email ?? null, phone: a.phone ?? null,

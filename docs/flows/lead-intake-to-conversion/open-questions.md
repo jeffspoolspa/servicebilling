@@ -53,3 +53,13 @@ match the live `website-lead-intake` recipe (`create_account` + `create_service_
 - **Resend lead-quote template must exist.** Auto-email needs `RESEND_TEMPLATE_LEAD_QUOTE` (a Resend
   template UUID) set; until then intake falls back to SMS. Template variable contract lives in
   `lib/comms/templates.ts`.
+
+- **In-app onboarding reuses the website card-vault.** `/leads/[id]/onboarding` embeds the existing
+  `secure.jeffspoolspa.com/collect` iframe (`NEXT_PUBLIC_CARD_VAULT_URL`); raw card data stays in the
+  vault app. The card step needs the customer's `qbo_customer_id` to exist (Pattern-D create); if still
+  propagating, the page shows a "syncing to QBO" notice. The card-vault requires a pre-auth amount, so we
+  pass the first-month deposit as a hold (not a capture).
+
+- **Emailed-quote follow-up cadence is still unscheduled.** `f/comms/quote_followup_cadence.py` polls
+  `status='quoted'` (2/3/5-day gaps, stops on accept/reject) but has no Windmill schedule and still emails
+  via Gmail. Next phase: repoint its email to the app's Resend templates, then add a daily schedule.

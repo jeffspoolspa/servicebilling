@@ -1,6 +1,8 @@
 "use client"
 
 import { useActionState, useState } from "react"
+import Link from "next/link"
+import { CreditCard } from "lucide-react"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select } from "@/components/ui/select"
@@ -27,6 +29,14 @@ export function LeadActions({ leadId, status }: { leadId: string; status: string
     <Card>
       <CardHeader><CardTitle>Actions</CardTitle></CardHeader>
       <div className="p-5 pt-3 flex flex-col gap-5">
+        <div className="flex flex-col gap-2">
+          <span className="text-[11px] uppercase tracking-[0.1em] text-ink-mute">Onboard now</span>
+          <Link href={`/leads/${leadId}/onboarding` as never}>
+            <Button type="button" variant="primary" size="sm" className="w-full">
+              <CreditCard className="w-3.5 h-3.5" /> Collect card + pool details
+            </Button>
+          </Link>
+        </div>
         <MarkQuoted leadId={leadId} />
         <SendCardLink leadId={leadId} />
         <SetStatus leadId={leadId} status={status} />

@@ -131,7 +131,12 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
   }, [])
 
   useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current) }, [])
-  useEffect(() => { if (state.ok && state.leadId) router.push(`/leads/${state.leadId}` as never) }, [state, router])
+  useEffect(() => {
+    if (state.ok && state.leadId) {
+      const dest = state.intent === "onboard" ? `/leads/${state.leadId}/onboarding` : `/leads/${state.leadId}`
+      router.push(dest as never)
+    }
+  }, [state, router])
 
   // Attach an existing customer: pull their full record and pre-fill the form so
   // staff can confirm. Snapshot the loaded values to flag any later edits as overrides.
@@ -322,7 +327,11 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
             <input type="hidden" name="existing_customer_id" value={existingId ?? ""} />
 
             {state.error && <div className="text-coral text-[13px] bg-coral/10 border border-coral/20 rounded-md p-3">{state.error}</div>}
-            <Button type="submit" variant="primary" disabled={pending}>{pending ? "Creating…" : "Create lead"}</Button>
+            <Button type="submit" name="intent" value="create" variant="primary" disabled={pending}>{pending ? "Creating…" : "Create lead"}</Button>
+            <Button type="submit" name="intent" value="onboard" variant="default" disabled={pending} className="w-full">
+              {pending ? "…" : "Continue to onboarding →"}
+            </Button>
+            <p className="text-ink-mute text-[11px] text-center -mt-1">Skips the quote — collect card + pool details now.</p>
           </div>
         </div>
       </div>
