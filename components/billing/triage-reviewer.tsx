@@ -1035,6 +1035,7 @@ function Card({
               <option value="on_file">On file (charge)</option>
               <option value="invoice">Invoice (email only)</option>
             </select>
+            <PmOnFileHint card={row.card_on_file} selected={effective("payment_method")} />
           </Field>
         </div>
         {/* Inline action button — same flow as the bottom toolbar's Approve,
@@ -1062,6 +1063,40 @@ function Card({
       {busy === "approve" && (
         <div className="text-[11px] text-cyan">Approving + marking ready…</div>
       )}
+    </div>
+  )
+}
+
+// One-line readout under the Payment method select: WHICH instrument
+// "On file (charge)" would actually charge. Shows the default usable card/ACH
+// QBO has on file (independent of the current email/charge selection), so the
+// reviewer knows what they're switching to before flipping email -> charge.
+function PmOnFileHint({
+  card,
+  selected,
+}: {
+  card: TriageRow["card_on_file"]
+  selected: string | null
+}) {
+  if (!card) {
+    return (
+      <div className="flex items-center gap-1.5 text-[10px] text-sun mt-1.5">
+        <AlertCircle className="w-3 h-3" strokeWidth={1.8} />
+        No card / ACH on file — &ldquo;On file (charge)&rdquo; would fail.
+      </div>
+    )
+  }
+  const label =
+    card.type === "ach"
+      ? `ACH ····${card.last_four ?? "—"}`
+      : `${card.brand ?? "Card"} ····${card.last_four ?? "—"}`
+  return (
+    <div className="flex items-center gap-1.5 text-[10px] text-ink-mute mt-1.5">
+      <CreditCard className="w-3 h-3 text-ink-dim" strokeWidth={1.8} />
+      <span>
+        On file: <span className="text-ink-dim">{label}</span>
+      </span>
+      {selected === "on_file" && <span className="text-grass">· charges this</span>}
     </div>
   )
 }

@@ -3,7 +3,7 @@ import { type ReactNode } from "react"
 interface ObjectHeaderProps {
   eyebrow?: string
   title: string
-  sub?: string
+  sub?: ReactNode
   icon?: ReactNode
   actions?: ReactNode
 }

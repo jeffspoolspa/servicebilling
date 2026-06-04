@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { ObjectHeader } from "@/components/shell/object-header"
 import { ClipboardList } from "lucide-react"
 import { Pill } from "@/components/ui/pill"
@@ -14,6 +15,7 @@ import { ProcessButton } from "@/components/work-orders/process-button"
 import { RevertButton } from "@/components/work-orders/revert-button"
 import { SyncButton } from "@/components/work-orders/sync-button"
 import { SkipButton } from "@/components/work-orders/skip-button"
+import { MarkProcessedButton } from "@/components/work-orders/mark-processed-button"
 import { RecoveryBanner } from "@/components/work-orders/recovery-banner"
 import { AttemptTimeline } from "@/components/work-orders/attempt-timeline"
 import { LiveWorkOrderDetail } from "@/components/work-orders/live-work-order-detail"
@@ -106,10 +108,15 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
       customerId
         ? sb
             .from("Customers")
-            .select("preferred_payment_type")
+            .select("id, preferred_payment_type")
             .eq("qbo_customer_id", customerId)
             .maybeSingle()
-            .then((r) => r.data as { preferred_payment_type: string | null } | null)
+            .then(
+              (r) =>
+                r.data as
+                  | { id: number | string; preferred_payment_type: string | null }
+                  | null,
+            )
         : Promise.resolve(null),
       // Two counts: needs_review invoices for this customer (a) without an
       // override (cascade target), (b) with an override (would be skipped).
@@ -139,6 +146,10 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
     invoice?.billing_status === "needs_review" ||
     Boolean(invoice?.needs_review_reason)
 
+  // Local Customers.id (for the /customers/[id] link). Resolved from the
+  // invoice's qbo_customer_id; null when there's no invoice yet (no link).
+  const customerLocalId = custPrefRow?.id ?? null
+
   return (
     <>
       {/* Subscribes to billing.invoices, billing.processing_attempts,
@@ -149,7 +160,21 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
       <ObjectHeader
         eyebrow={`${wo.type} · ${wo.office_name ?? "—"}`}
         title={`WO ${wo.wo_number}`}
-        sub={`${wo.customer ?? "—"} · ${techDisplay} · completed ${formatDate(wo.completed)}`}
+        sub={
+          <>
+            {customerLocalId != null && wo.customer ? (
+              <Link
+                href={`/customers/${customerLocalId}` as never}
+                className="text-cyan hover:underline"
+              >
+                {wo.customer}
+              </Link>
+            ) : (
+              wo.customer ?? "—"
+            )}
+            {` · ${techDisplay} · completed ${formatDate(wo.completed)}`}
+          </>
+        }
         icon={<ClipboardList className="w-6 h-6" strokeWidth={1.8} />}
         actions={
           <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -175,15 +200,28 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
                     />
                   </>
                 )}
+                {/* Force-processed: close an already-settled invoice without
+                    charging or sending. Allowed from needs_review /
+                    ready_to_process (mirrors the force_mark_processed RPC). */}
+                {(invoice.billing_status === "needs_review" ||
+                  invoice.billing_status === "ready_to_process") && (
+                  <MarkProcessedButton
+                    qboInvoiceId={invoice.qbo_invoice_id}
+                    balance={Number(invoice.balance ?? 0)}
+                  />
+                )}
               </>
             )}
-            {/* Skip is only a pre-processing option — once the invoice is
-                ready_to_process or later, skipping would abandon work we've
-                already done. Always show Unskip so a prior skip can be
+            {/* Skip is a pre-charge option — available with no invoice, or
+                while the invoice is awaiting_pre_processing / needs_review
+                (nothing has been charged yet). Once ready_to_process or later,
+                skipping would abandon work we've already done — use "Mark
+                processed" instead. Always show Unskip so a prior skip can be
                 reversed even if the invoice has since moved forward. */}
             {(() => {
               const canSkip = !invoice ||
-                invoice.billing_status === "awaiting_pre_processing"
+                invoice.billing_status === "awaiting_pre_processing" ||
+                invoice.billing_status === "needs_review"
               if (skipped || canSkip) {
                 return (
                   <SkipButton

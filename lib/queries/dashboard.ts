@@ -801,6 +801,18 @@ export interface TriageRow {
   completed: string | null
   // Open credits on the customer (applicable only — excludes maint + stale)
   open_credits: OpenCredit[]
+  // The default usable payment method QBO has on file for this customer —
+  // i.e. what "On file (charge)" would actually charge. null = nothing on
+  // file (switching to charge would fail). Independent of the invoice's
+  // current email/charge selection; surfaced so the reviewer can see the
+  // instrument before flipping email -> charge.
+  card_on_file: CardOnFile | null
+}
+
+export interface CardOnFile {
+  type: string | null
+  brand: string | null
+  last_four: string | null
 }
 
 export async function getNeedsReviewTriageQueue(
@@ -873,6 +885,30 @@ export async function getNeedsReviewTriageQueue(
     }
   }
 
+  // Batch-fetch the default usable payment method per customer — what
+  // "On file (charge)" would actually charge. Mirrors the default-or-newest
+  // pick the WO-detail PaymentMethodsCard uses (is_default desc, then newest),
+  // so the triage hint names the same instrument the charge path would hit.
+  const pmByCustomer = new Map<string, CardOnFile>()
+  if (customerIds.length > 0) {
+    const { data: pms } = await sb
+      .from("billing_customer_payment_methods")
+      .select("qbo_customer_id, type, card_brand, last_four, is_default, is_active, qbo_created_at")
+      .in("qbo_customer_id", customerIds)
+      .eq("is_active", true)
+      .order("is_default", { ascending: false, nullsFirst: false })
+      .order("qbo_created_at", { ascending: false })
+    for (const p of (pms ?? []) as Array<Record<string, unknown>>) {
+      const cid = String(p.qbo_customer_id)
+      if (pmByCustomer.has(cid)) continue // first row per customer = top of the order
+      pmByCustomer.set(cid, {
+        type: (p.type ?? null) as string | null,
+        brand: (p.card_brand ?? null) as string | null,
+        last_four: (p.last_four ?? null) as string | null,
+      })
+    }
+  }
+
   const rows: TriageRow[] = invoices
     .map((inv) => {
       const wo = woByInv.get(String(inv.qbo_invoice_id))
@@ -909,6 +945,9 @@ export async function getNeedsReviewTriageQueue(
         open_credits: inv.qbo_customer_id
           ? (creditsByCustomer.get(String(inv.qbo_customer_id)) ?? [])
           : [],
+        card_on_file: inv.qbo_customer_id
+          ? (pmByCustomer.get(String(inv.qbo_customer_id)) ?? null)
+          : null,
       }
     })
     .filter((r): r is TriageRow => r !== null)
