@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server"
-import { createAnon } from "@/lib/supabase/anon"
+import { createSupabaseServer } from "@/lib/supabase/server"
 import { guardApi } from "@/lib/auth/api"
 
 interface RouteContext {
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       { status: 400 },
     )
   }
-  const sb = createAnon("public")
+  const sb = await createSupabaseServer()
   const { data, error } = await sb.rpc("set_wo_billable_override", {
     p_wo_number: wo_number,
     p_override: override,
@@ -39,7 +39,7 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
   const guard = await guardApi("service", { write: true })
   if (guard instanceof NextResponse) return guard
   const { wo_number } = await context.params
-  const sb = createAnon("public")
+  const sb = await createSupabaseServer()
   const { data, error } = await sb.rpc("clear_wo_billable_override", { p_wo_number: wo_number })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!data) return NextResponse.json({ error: "WO not found" }, { status: 404 })

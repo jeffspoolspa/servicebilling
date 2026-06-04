@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server"
-import { createAnon } from "@/lib/supabase/anon"
+import { createSupabaseServer } from "@/lib/supabase/server"
 import { guardApi } from "@/lib/auth/api"
 
 /**
@@ -36,7 +36,7 @@ export async function POST(
   const included =
     body.included === true || body.included === false ? body.included : null
 
-  const sb = createAnon("public")
+  const sb = await createSupabaseServer()
   const { data, error } = await sb.rpc("set_wo_bonus_inclusion", {
     p_wo_number: wo,
     p_included: included,

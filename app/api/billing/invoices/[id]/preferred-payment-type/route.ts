@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server"
-import { createAnon } from "@/lib/supabase/anon"
+import { createSupabaseServer } from "@/lib/supabase/server"
 import { guardApi } from "@/lib/auth/api"
 
 /**
@@ -38,7 +38,8 @@ export async function POST(
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 })
   }
 
-  const sb = createAnon("public")
+  // Session-aware client so the RPC's _assert_app_role sees the signed-in user.
+  const sb = await createSupabaseServer()
   const { data, error } = await sb.rpc("set_preferred_payment_type", {
     p_qbo_invoice_id: id,
     p_type: type,

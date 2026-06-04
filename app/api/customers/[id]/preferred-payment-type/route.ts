@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server"
-import { createAnon } from "@/lib/supabase/anon"
+import { createSupabaseServer } from "@/lib/supabase/server"
 import { guardApi } from "@/lib/auth/api"
 
 /**
@@ -47,7 +47,10 @@ export async function POST(
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 })
   }
 
-  const sb = createAnon("public")
+  // Session-aware client: forwards the signed-in user's JWT so the RPC's
+  // _assert_app_role('service','admin') sees auth.uid() (the anon client has
+  // no user identity → "permission denied: not authenticated").
+  const sb = await createSupabaseServer()
   const { data, error } = await sb.rpc("set_customer_preferred_payment_type", {
     p_qbo_customer_id: qboCustomerId,
     p_type: type,
