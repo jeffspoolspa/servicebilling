@@ -272,17 +272,40 @@ const FREQUENCY_LABEL: Record<MaintQuote["frequencyKey"], string> = {
   biweekly: "bi-weekly", weekly: "weekly", twice_weekly: "twice-weekly",
 }
 
+// The customer-facing get-started page (hosts the onboarding wizard + the
+// already-accepted status screen). Same base the Windmill cadence uses.
+const GET_STARTED_URL = process.env.GET_STARTED_URL || "https://jeffspoolspa.github.io/perfectpools-redesign/get-started/"
+
+/** Mint the card-collection token + build the onboarding link for a lead. Best-effort. */
+async function buildOnboardLink(leadId: string, laborMonthly: number): Promise<string | undefined> {
+  try {
+    const sb = createSupabaseAdmin()
+    const preAuthCents = laborMonthly > 0 ? Math.round(laborMonthly * 100) : null
+    const { data, error } = await sb.rpc("create_card_collection_request", { p_lead_id: leadId, p_pre_auth_amount: preAuthCents })
+    if (error) return undefined
+    const res = data as Record<string, unknown> | null
+    const token = res?.token as string | undefined
+    if (!token) return undefined
+    const sep = GET_STARTED_URL.includes("?") ? "&" : "?"
+    return `${GET_STARTED_URL}${sep}token=${token}`
+  } catch {
+    return undefined
+  }
+}
+
 /** Auto-send the quote to the customer. Returns the channel + status; never throws. */
 async function notifyQuote(args: {
   office: Office; leadId: string; accountId: number
   firstName: string; email: string | null; phone: string | null
   quote: MaintQuote
 }): Promise<LeadIntakeResult["notify"]> {
+  const onboardLink = await buildOnboardLink(args.leadId, args.quote.laborMonthly)
   const ctx: LeadQuoteContext = {
     firstName: args.firstName,
     office: args.office,
     quote: args.quote,
     visitFrequencyLabel: FREQUENCY_LABEL[args.quote.frequencyKey],
+    onboardLink,
   }
   const templateId = leadQuoteTemplate.resendTemplateId()
   try {

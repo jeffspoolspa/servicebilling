@@ -20,6 +20,8 @@ export interface LeadQuoteContext {
   quote: MaintQuote
   /** Human label for the cadence, e.g. "weekly", "bi-weekly", "twice-weekly". */
   visitFrequencyLabel: string
+  /** Token-gated onboarding URL (get-started page) the customer clicks to accept + pay. */
+  onboardLink?: string
 }
 
 function officeName(office: Office): string {
@@ -43,7 +45,8 @@ function officePhone(office: Office): string {
  * in the template copy):
  *   FIRST_NAME, OFFICE_NAME, OFFICE_PHONE, VISIT_FREQUENCY,
  *   PER_VISIT, LABOR_MONTHLY, CHEM_ESTIMATE,
- *   MONTHLY_TOTAL, MONTHLY_LOW, MONTHLY_HIGH
+ *   MONTHLY_TOTAL, MONTHLY_LOW, MONTHLY_HIGH,
+ *   ONBOARD_LINK (the get-started URL — put it on the CTA button in the template)
  */
 export const leadQuoteTemplate = {
   name: "lead_quote" as const,
@@ -65,16 +68,20 @@ export const leadQuoteTemplate = {
       MONTHLY_TOTAL: total,
       MONTHLY_LOW: ctx.quote.monthlyTotal?.low ?? ctx.quote.laborMonthly,
       MONTHLY_HIGH: ctx.quote.monthlyTotal?.high ?? ctx.quote.laborMonthly,
+      ONBOARD_LINK: ctx.onboardLink ?? "",
     }
   },
 
   sms(ctx: LeadQuoteContext): string {
     const total = ctx.quote.monthlyTotal?.median ?? ctx.quote.laborMonthly
+    const cta = ctx.onboardLink
+      ? ` Get started here: ${ctx.onboardLink}`
+      : ` We'll follow up shortly.`
     return (
       `Hi ${ctx.firstName}, thanks for reaching out to ${officeName(ctx.office)}! ` +
       `Your estimated ${ctx.visitFrequencyLabel} pool service is about $${total}/mo ` +
-      `(labor $${ctx.quote.laborMonthly} + est. chemicals). We'll follow up shortly — ` +
-      `questions? Call ${officePhone(ctx.office)}.`
+      `(labor $${ctx.quote.laborMonthly} + est. chemicals).${cta} ` +
+      `Questions? Call ${officePhone(ctx.office)}.`
     )
   },
 }

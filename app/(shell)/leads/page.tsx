@@ -84,12 +84,13 @@ export default async function LeadsPage({ searchParams }: PageProps) {
                   <th className="px-5 py-2.5 font-medium">Per visit</th>
                   <th className="px-5 py-2.5 font-medium">Source</th>
                   <th className="px-5 py-2.5 font-medium">Created</th>
+                  <th className="px-5 py-2.5 font-medium text-right">Onboard</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-5 py-8 text-center text-ink-mute">
+                    <td colSpan={7} className="px-5 py-8 text-center text-ink-mute">
                       No leads{q || status ? " match this filter" : " yet"}.
                     </td>
                   </tr>
@@ -111,6 +112,13 @@ export default async function LeadsPage({ searchParams }: PageProps) {
                     </td>
                     <td className="px-5 py-2.5 text-ink-mute text-xs">{l.source ?? "—"}</td>
                     <td className="px-5 py-2.5 text-ink-mute text-xs">{formatDate(l.created_at)}</td>
+                    <td className="px-5 py-2.5 text-right">
+                      <Link href={`/leads/${l.id}/onboarding` as never}>
+                        <Button variant={l.status === "converted" ? "default" : "primary"} size="sm">
+                          {l.status === "converted" ? "Status" : "Onboard"}
+                        </Button>
+                      </Link>
+                    </td>
                   </tr>
                 ))}
               </tbody>

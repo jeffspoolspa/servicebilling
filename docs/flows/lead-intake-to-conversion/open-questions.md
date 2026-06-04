@@ -63,3 +63,15 @@ match the live `website-lead-intake` recipe (`create_account` + `create_service_
 - **Emailed-quote follow-up cadence is still unscheduled.** `f/comms/quote_followup_cadence.py` polls
   `status='quoted'` (2/3/5-day gaps, stops on accept/reject) but has no Windmill schedule and still emails
   via Gmail. Next phase: repoint its email to the app's Resend templates, then add a daily schedule.
+
+- **Quote carries the onboarding link.** The `Create lead` auto-send now mints a card-collection token
+  and includes the get-started URL (`GET_STARTED_URL?token=…`, var `ONBOARD_LINK`) in the email/SMS, so
+  customers can self-onboard. The in-office onboarding page is a 2-step wizard (card → pool details) and
+  shows a status screen for already-converted leads.
+
+- **Website hand-off — "already accepted" status screen (perfectpools-redesign repo, separate session).**
+  The website get-started page should, when `get_lead_by_accept_token` returns `payment_on_file === true`
+  (or `lead.status === "converted"`), show a status screen instead of the wizard, using
+  `lead.onboarding.{status, first_service_date, assigned_route, assigned_tech}`. **No backend change
+  needed** — the RPC already returns all of this. Route/tech/first-visit stay null until a routing step
+  assigns them (graceful "we'll reach out to schedule").
