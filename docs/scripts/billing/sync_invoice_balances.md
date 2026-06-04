@@ -16,4 +16,4 @@ Pulls live QBO balances into `billing_audit.maintenance_invoices.balance_due` so
 - `billing_audit.maintenance_invoices` (`balance_due`, `balance_synced_at`)
 
 ## In which flows
-- [monthly-maintenance-billing](../../flows/monthly-maintenance-billing.md) — step 3 (sync_balances)
+- [monthly-maintenance-billing](../../flows/monthly-maintenance-billing/index.md) — step 3 (sync_balances)

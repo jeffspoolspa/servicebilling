@@ -16,7 +16,7 @@ The core hypothesis is confirmed and the first endpoint is live:
 
 ## Context
 
-ION Pool Care is the leader for field operations (work orders, visits, recurring tasks) and it **builds the maintenance invoices** (see [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md)). But ION has **no public API** — no documented set of URLs that return clean data. The only way in is to act like a browser: log in to get a session, then request pages and read the data back out of the HTML.
+ION Pool Care is the leader for field operations (work orders, visits, recurring tasks) and it **builds the maintenance invoices** (see [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md)). But ION has **no public API** — no documented set of URLs that return clean data. The only way in is to act like a browser: log in to get a session, then request pages and read the data back out of the HTML.
 
 A few terms, from the ground up:
 
@@ -99,5 +99,5 @@ Each step is shippable on its own; flows keep working throughout.
 ## Cross-references
 
 - Integration page: [integrations/ion.md](../integrations/ion.md)
-- Flows that will consume it: [ion-visits](../flows/sync/ion-visits.md), [ion-work-orders](../flows/sync/ion-work-orders.md), [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md)
+- Flows that will consume it: [ion-visits](../flows/sync/ion-visits.md), [ion-work-orders](../flows/sync/ion-work-orders.md), [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md)
 - Architecture: [ADR 001](001-platform-architecture.md)

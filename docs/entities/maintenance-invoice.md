@@ -47,4 +47,4 @@ stateDiagram-v2
 ## Flows this entity participates in
 
 - [qbo-maintenance-invoices sync](../flows/sync/qbo-maintenance-invoices.md) — how it's loaded + classified
-- [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md) — audit, send, charge
+- [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md) — audit, send, charge

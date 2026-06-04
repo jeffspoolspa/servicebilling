@@ -10,19 +10,19 @@
 One QuickBooks Online invoice, mirrored into our cache. **One universal QBO→invoice sync** brings in *every* QBO invoice as a separate process — it does not classify or pull per-pipeline. The processing workflow is then decided by **what the invoice links to**, not by a type set up front:
 
 - **Work-order-linked** (`work_orders.qbo_invoice_id`) -> [work-order-to-payment](../flows/work-order-to-payment/index.md). A WO can itself be **department=maintenance** (there are maintenance work orders), so a WO-linked invoice can still be "maintenance" for reporting — but it still runs the WO workflow.
-- **Task-linked** (via its [Task Billing Period](task-billing-period.md), 1:1) -> [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md). ION issues one per task per month; a customer with N tasks gets N invoices (monthly total = the SUM). Maintenance-specific analytics: [maintenance-invoice detail](maintenance-invoice.md).
+- **Task-linked** (via its [Task Billing Period](task-billing-period.md), 1:1) -> [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md). ION issues one per task per month; a customer with N tasks gets N invoices (monthly total = the SUM). Maintenance-specific analytics: [maintenance-invoice detail](maintenance-invoice.md).
 
 **Linkage routes the workflow** — a derived `type`/`link_kind` (`work_order` | `task`) is materialized from the link for indexing and trigger-guarding, but the link is the source of truth. **Coverage guarantee: every QBO invoice should resolve to a work order or a task.** One linked to neither is an **orphan** to investigate (this generalizes "did every maintenance customer get invoiced?" to all invoices). Everything downstream — charging, payments, QBO reflection — is shared; only the path to "ready to charge" differs by link.
 
 **Origin (two leaders at different stages):** The invoice is NOT born in QBO. It is created in **ION** (a closed work order, or the month's visits for a task), which **assigns the `invoice_number`** and owns the line items. It then goes through an **ION-to-QBO syncing queue** (manual push); it appears in **QBO with the same number**, and from that point QBO is the leader for its financial state (balance, email_status, payments).
 
-The `subtotal_ok` indicator (below) catches line items lost during that ION-to-QBO sync — for task-linked invoices the equivalent is SUM(billable visits) vs labor subtotal + the per-item consumable-quantity check (see [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md)).
+The `subtotal_ok` indicator (below) catches line items lost during that ION-to-QBO sync — for task-linked invoices the equivalent is SUM(billable visits) vs labor subtotal + the per-item consumable-quantity check (see [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md)).
 
 > **Unification (decided — [ADR 003](../adrs/003-unify-invoice-table.md)):** today the same invoice can sit in two physical tables (`billing.invoices`, `billing_audit.maintenance_invoices`) — that's the 558 duplicates. The decision is **one `billing.invoices` table, routed by a derived `link_kind`** (`work_order` | `task`). Phased: guard the 8 service triggers to `link_kind='work_order'` and add the maintenance columns (incl. `billing_month`, `balance_due`) first; dedupe the 558; then fold maintenance in and **refactor the autopay flow onto the unified table** (proven by a behavioral-equivalence `dry_run` — same customers, same amounts), ending in a clean documented workflow. See [ADR 003](../adrs/003-unify-invoice-table.md).
 
 ## Lifecycle (work-order-linked)
 
-The `billing_status` state machine below is the **work-order-linked** path. The **task-linked** lifecycle (load -> link visits -> reconcile -> autopay) is in [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md).
+The `billing_status` state machine below is the **work-order-linked** path. The **task-linked** lifecycle (load -> link visits -> reconcile -> autopay) is in [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md).
 
 ```mermaid
 stateDiagram-v2
@@ -69,7 +69,7 @@ stateDiagram-v2
 ## Flows this entity participates in
 
 - [Work-order to payment](../flows/work-order-to-payment/index.md) — work-order-linked path
-- [Monthly maintenance billing](../flows/monthly-maintenance-billing.md) — task-linked path (visit link + reconciliation)
+- [Monthly maintenance billing](../flows/monthly-maintenance-billing/index.md) — task-linked path (visit link + reconciliation)
 - [CDC reconciliation](../flows/cdc-reconciliation.md) — backstop for missing QBO webhooks (work-order-linked cache only)
 
 ## Common queries

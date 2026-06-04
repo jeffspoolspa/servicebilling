@@ -7,7 +7,7 @@
 
 ## What this is
 
-The charging sub-phase of [monthly-maintenance-billing](monthly-maintenance-billing.md): given a month's reconciled maintenance invoices, charge each enrolled customer's card/ACH, record the QBO payment, and email the receipt. Windmill flow `f/billing/monthly_autopay.flow`, run per `billing_month` (YYYY-MM), with `dry_run` and `test_mode` (single customer).
+The charging sub-phase of [monthly-maintenance-billing](monthly-maintenance-billing/index.md): given a month's reconciled maintenance invoices, charge each enrolled customer's card/ACH, record the QBO payment, and email the receipt. Windmill flow `f/billing/monthly_autopay.flow`, run per `billing_month` (YYYY-MM), with `dry_run` and `test_mode` (single customer).
 
 ## The run (8 steps)
 
@@ -37,6 +37,6 @@ Charges run sequentially (`parallel: false`) to stay within the shared QBO/Intui
 
 ## Cross-references
 
-- Parent flow: [monthly-maintenance-billing](monthly-maintenance-billing.md)
+- Parent flow: [monthly-maintenance-billing](monthly-maintenance-billing/index.md)
 - Scripts: [stamp_invoice_memos](../scripts/billing/stamp_invoice_memos.md), [sync_invoice_balances](../scripts/billing/sync_invoice_balances.md), [apply_maint_credits](../scripts/billing/apply_maint_credits.md), [send_monthly_invoices](../scripts/billing/send_monthly_invoices.md)
 - Entities: [Maintenance Invoice](../entities/maintenance-invoice.md), [Autopay Transaction](../entities/autopay-transaction.md), [Autopay Customer](../entities/autopay-customer.md)

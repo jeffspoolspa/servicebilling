@@ -40,4 +40,4 @@ stateDiagram-v2
 
 ## Flows this entity participates in
 
-- [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md) — the charge record + idempotency guard
+- [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md) — the charge record + idempotency guard

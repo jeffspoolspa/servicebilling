@@ -17,4 +17,4 @@ Stamps "[Month] Pool Maintenance" onto the memo fields of the month's maintenanc
 - QBO Invoice memo fields (`[write-out -> QBO]`)
 
 ## In which flows
-- [monthly-maintenance-billing](../../flows/monthly-maintenance-billing.md) — step 1 (memo_stamp)
+- [monthly-maintenance-billing](../../flows/monthly-maintenance-billing/index.md) — step 1 (memo_stamp)

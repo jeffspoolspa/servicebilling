@@ -22,7 +22,7 @@ Current state, measured:
 Per [Invoice](../entities/invoice.md), the processing path is determined by **what an invoice links to**, not a classified type:
 
 - **Work-order-linked** -> [work-order-to-payment](../flows/work-order-to-payment/index.md) (a WO may be department=maintenance; still the WO workflow).
-- **Task-linked** (via its [Task Billing Period](../entities/task-billing-period.md), 1:1) -> [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md).
+- **Task-linked** (via its [Task Billing Period](../entities/task-billing-period.md), 1:1) -> [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md).
 - **Neither** -> orphan exception (coverage gap).
 
 `load_month`'s labor-SKU classification was a **stopgap** for "is this maintenance?" that real task-linkage replaces.
@@ -56,14 +56,14 @@ Two pieces are **maintenance-specific and not in `billing.invoices` today**, so 
 
 **The one safety gate that stays — behavioral equivalence, not data-shape preservation:** before cutover, a `monthly_autopay` `dry_run` on the refactored flow must charge **the same customers the same amounts** as the current flow for the same `billing_month`. That proves the refactor didn't change billing behavior. A transitional back-compat view is optional scaffolding only — not the destination.
 
-**Definition of done:** the standalone `maintenance_invoices` table is retired, autopay reads the unified table, and [monthly-autopay](../flows/monthly-autopay.md) + [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md) document the refactored flow with no transitional cruft described as permanent.
+**Definition of done:** the standalone `maintenance_invoices` table is retired, autopay reads the unified table, and [monthly-autopay](../flows/monthly-autopay.md) + [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md) document the refactored flow with no transitional cruft described as permanent.
 
 ## Phases
 
 1. **Guard + extend (no behavior change).** Add `link_kind` (default `work_order`) + the maintenance columns (`billing_month`, `balance_due`, `send_status`, …) to `billing.invoices`; add `WHEN (NEW.link_kind='work_order')` to all 8 triggers. Every existing row is `work_order`, so the service pipeline is untouched. Verify.
 2. **Dedupe the 558.** Reconcile each to one task-linked row (keep any service-side processing history, fold in maintenance classification). Confirm none are genuinely WO-linked (data says none are).
 3. **Backfill + refactor autopay + equivalence test.** Backfill remaining maintenance rows into `billing.invoices` as task-linked; refactor the autopay scripts to read/write the unified table directly (clean column names, no back-compat shim required); run the **behavioral-equivalence `dry_run`** on `monthly_autopay` (same customers, same amounts, same month). Cut over only on a pass.
-4. **Retire + document.** Drop the standalone `maintenance_invoices` table once equivalence holds across a full live run, and update [monthly-autopay](../flows/monthly-autopay.md) + [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md) to the refactored workflow. A transitional view may exist briefly during phase 3 but is removed here.
+4. **Retire + document.** Drop the standalone `maintenance_invoices` table once equivalence holds across a full live run, and update [monthly-autopay](../flows/monthly-autopay.md) + [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md) to the refactored workflow. A transitional view may exist briefly during phase 3 but is removed here.
 
 ## Consequences
 
@@ -82,7 +82,7 @@ The 558 maintenance invoices in the service table (486 `processed` there) + 27 o
 ## Cross-references
 
 - Entity: [Invoice](../entities/invoice.md)
-- Flow: [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md), [work-order-to-payment](../flows/work-order-to-payment/index.md)
+- Flow: [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md), [work-order-to-payment](../flows/work-order-to-payment/index.md)
 - Autopay engine (the contract to protect): [monthly-autopay](../flows/monthly-autopay.md)
 - Loop postmortem (trigger risk): [audits/2026-05-27-database.md](../audits/2026-05-27-database.md)
 - Architecture: [ADR 001](001-platform-architecture.md)

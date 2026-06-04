@@ -8,7 +8,7 @@
 
 ## What this keeps current
 
-Mirrors ION's daily service-log visits into `maintenance.visits` and its per-visit detail tables. These visits are the operational record of what a tech actually did — and, per [monthly-maintenance-billing](../monthly-maintenance-billing.md), they are what ION bills from at month-end. Keeping this cache current is what makes the (proposed) visits-vs-invoice reconciliation possible.
+Mirrors ION's daily service-log visits into `maintenance.visits` and its per-visit detail tables. These visits are the operational record of what a tech actually did — and, per [monthly-maintenance-billing](../monthly-maintenance-billing/index.md), they are what ION bills from at month-end. Keeping this cache current is what makes the (proposed) visits-vs-invoice reconciliation possible.
 
 ## Trigger
 
@@ -42,7 +42,7 @@ Same shape as [ion-work-orders](ion-work-orders.md): column rename, currency/dat
 
 The ION visit report carries **no task id**. `_lib/upsert.py` (`build_resolvers` / `resolve_task_and_schedule`) links a visit to a task by matching its **`service_location_id`** against existing `maintenance.tasks` rows, then picks a schedule slot by `day_of_week` + `actual_tech`. Two consequences:
 
-- **No task row for the location -> `task_id` stays NULL.** The task table is a one-time 2026-04-26 import with no recurring sync, so customers onboarded since then have visits but no task (see [monthly-maintenance-billing](../monthly-maintenance-billing.md) prerequisite gap). A recurring ION -> `maintenance.tasks` / `task_schedules` sync is the missing piece.
+- **No task row for the location -> `task_id` stays NULL.** The task table is a one-time 2026-04-26 import with no recurring sync, so customers onboarded since then have visits but no task (see [monthly-maintenance-billing](../monthly-maintenance-billing/index.md) prerequisite gap). A recurring ION -> `maintenance.tasks` / `task_schedules` sync is the missing piece.
 - **Multi-task locations are mis-resolved.** `task_by_sl[service_location_id] = task_id` keeps only ONE task per location. Some locations legitimately have multiple active tasks (differentiated by price / start date / service type). The fix: disambiguate with a **combined best-match** (active date window + `day_of_week` + `actual_tech` + `price_cents` vs schedule rate + service type), since no single signal suffices — price matches only 59% (40% of visits are flat-rate with no per-visit rate). Ambiguous cases flag for review. (~17% of resolved visits already get a `task_id` but no `task_schedule_id` from the day/tech slot miss.)
 
 ## Leadership
@@ -68,4 +68,4 @@ Note `maintenance.tasks` / `task_schedules` are ALSO partly app-owned — the Ne
 - Entity: [Visit](../../entities/visit.md)
 - Sibling sync: [ion-work-orders](ion-work-orders.md)
 - Consumes (future): [ION API](../../integrations/ion.md), [ADR 002](../../adrs/002-ion-api-layer.md)
-- Downstream: [monthly-maintenance-billing](../monthly-maintenance-billing.md)
+- Downstream: [monthly-maintenance-billing](../monthly-maintenance-billing/index.md)

@@ -18,7 +18,7 @@
   Confirm the `processing_attempts` idempotency guarantees a retry can never double-charge in that window.
 
 - **Invoice-table unification ([ADR 003](../../adrs/003-unify-invoice-table.md)).** This flow and
-  [monthly-maintenance-billing](../monthly-maintenance-billing.md) should converge on one link-routed
+  [monthly-maintenance-billing](../monthly-maintenance-billing/index.md) should converge on one link-routed
   invoice table (work-order-linked vs task-linked routed by what the invoice links to). Track the
   refactor + the behavioral-equivalence dry-run there.
 

@@ -2,7 +2,7 @@
 
 > Lives in: `billing_audit.task_billing_periods` (proposed)
 > Source: [native]   (our write-ahead coordination row — exists in neither ION nor QBO)
-> Status: [design]   (the bridge in [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md))
+> Status: [design]   (the bridge in [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md))
 
 ## What it is
 
@@ -28,7 +28,7 @@ Coverage ("did every active task get billed?") is a **completeness guarantee**, 
 | `consumables_ok` | indicator: per-item used quantity (`consumables_usage`) == billed quantity (chemical lines). **Quantity only — price not compared** (ION sets it at sync). Higher priority than labor. |
 | `opened_at`, `reconciled_at`, `notes` | audit |
 
-Reconciliation is **two checks**: labor by amount, consumables by per-item quantity. Both must pass to reach `reconciled`. The consumable check needs an ION-item -> QBO-item mapping (see [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md) item-identity caveat).
+Reconciliation is **two checks**: labor by amount, consumables by per-item quantity. Both must pass to reach `reconciled`. The consumable check needs an ION-item -> QBO-item mapping (see [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md) item-identity caveat).
 
 ## Lifecycle
 
@@ -52,4 +52,4 @@ stateDiagram-v2
 
 ## Flows this entity participates in
 
-- [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md) — this entity IS the bridge
+- [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md) — this entity IS the bridge

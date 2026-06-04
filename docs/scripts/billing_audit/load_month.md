@@ -28,4 +28,4 @@ Idempotent: returns `already_loaded` if the month is already present.
 
 ## In which flows
 - [qbo-maintenance-invoices sync](../../flows/sync/qbo-maintenance-invoices.md) — the load step
-- [monthly-maintenance-billing](../../flows/monthly-maintenance-billing.md) — seeds the invoices the autopay run charges
+- [monthly-maintenance-billing](../../flows/monthly-maintenance-billing/index.md) — seeds the invoices the autopay run charges

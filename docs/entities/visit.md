@@ -6,7 +6,7 @@
 
 ## What it is
 
-One service visit to a pool — a tech showing up on a day and doing the work. It is the operational record of what was actually performed, and (per [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md)) the basis ION uses to build the month-end invoice: `per_visit_rate × completed visits` (or a flat monthly rate), plus consumables used.
+One service visit to a pool — a tech showing up on a day and doing the work. It is the operational record of what was actually performed, and (per [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md)) the basis ION uses to build the month-end invoice: `per_visit_rate × completed visits` (or a flat monthly rate), plus consumables used.
 
 Synced from ION by [ion-visits sync](../flows/sync/ion-visits.md). Per-visit detail hangs off it: [chem_readings], [consumables_usage], [visit_tasks].
 
@@ -44,7 +44,7 @@ Each visit carries (proposed) two billing fields:
 ## Flows this entity participates in
 
 - [ion-visits sync](../flows/sync/ion-visits.md) — how visits enter the cache
-- [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md) — the basis for the month-end invoice + the (proposed) visits-vs-invoice reconciliation
+- [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md) — the basis for the month-end invoice + the (proposed) visits-vs-invoice reconciliation
 
 ## Common queries
 

@@ -16,4 +16,4 @@ Before charging, applies a customer's existing maintenance credit toward the mon
 - QBO (applies payments / credit memos to invoices — `[write-out -> QBO]`)
 
 ## In which flows
-- [monthly-maintenance-billing](../../flows/monthly-maintenance-billing.md) — step 4 (apply credits)
+- [monthly-maintenance-billing](../../flows/monthly-maintenance-billing/index.md) — step 4 (apply credits)

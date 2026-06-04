@@ -17,4 +17,4 @@ The billing run joins this roster to unpaid [Maintenance Invoices](maintenance-i
 
 ## Flows this entity participates in
 
-- [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md) — the roster the run iterates over
+- [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md) — the roster the run iterates over

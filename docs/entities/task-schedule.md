@@ -14,7 +14,7 @@ How often a [Task](task.md) is serviced and what it costs — the billing terms.
 - `tech_employee_id`, `office`, `active`, `starts_on` / `ends_on`
 - `ion_task_id` (ION linkage), `skimmer_id` (legacy — ION is the current leader per [ADR 002](../adrs/002-ion-api-layer.md))
 
-This is the **source of the expected bill**: the proposed visits-vs-invoice reconciliation ([monthly-maintenance-billing](../flows/monthly-maintenance-billing.md)) multiplies `price_per_visit_cents × completed visits` (or uses `flat_rate_monthly_cents`) and compares to what QBO billed.
+This is the **source of the expected bill**: the proposed visits-vs-invoice reconciliation ([monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md)) multiplies `price_per_visit_cents × completed visits` (or uses `flat_rate_monthly_cents`) and compares to what QBO billed.
 
 Mixed leadership like [Task](task.md): ION-seeded, app-edited (`lib/entities/task/mutations.ts`). Changes audited in `maintenance.task_schedules_audit`.
 
@@ -26,4 +26,4 @@ Mixed leadership like [Task](task.md): ION-seeded, app-edited (`lib/entities/tas
 
 ## Flows this entity participates in
 
-- [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md) — defines expected billing for the reconciliation
+- [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md) — defines expected billing for the reconciliation

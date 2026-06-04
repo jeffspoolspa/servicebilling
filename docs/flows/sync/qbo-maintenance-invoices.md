@@ -8,7 +8,7 @@
 
 ## What this keeps current
 
-At month-end, pulls the month's QBO invoices, identifies which are maintenance (vs one-off service), and caches them into `billing_audit.maintenance_invoices` + `maintenance_invoice_line_items`. This is the billing-side mirror that feeds the autopay run in [monthly-maintenance-billing](../monthly-maintenance-billing.md).
+At month-end, pulls the month's QBO invoices, identifies which are maintenance (vs one-off service), and caches them into `billing_audit.maintenance_invoices` + `maintenance_invoice_line_items`. This is the billing-side mirror that feeds the autopay run in [monthly-maintenance-billing](../monthly-maintenance-billing/index.md).
 
 Distinct from the per-WO [qbo-invoices sync](qbo-invoices.md): that one pulls a single WO's invoice on demand; this one bulk-pulls a whole month and classifies + derives billing analytics.
 
@@ -59,5 +59,5 @@ During the autopay run, `sync_invoice_balances` re-pulls live QBO balances into 
 
 - Entity: [Maintenance Invoice](../../entities/maintenance-invoice.md)
 - Script: [load_month](../../scripts/billing_audit/load_month.md), [compute_chemical_estimates](../../scripts/billing_audit/compute_chemical_estimates.md)
-- Downstream: [monthly-maintenance-billing](../monthly-maintenance-billing.md)
+- Downstream: [monthly-maintenance-billing](../monthly-maintenance-billing/index.md)
 - Sibling: [qbo-invoices](qbo-invoices.md)

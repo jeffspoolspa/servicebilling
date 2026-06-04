@@ -18,4 +18,4 @@ Downstream, an invoice whose `chemical_total` falls far outside the percentile b
 - `billing_audit.chemical_cost_estimates` (full delete + insert; percentile rows per frequency × month × season)
 
 ## In which flows
-- [monthly-maintenance-billing](../../flows/monthly-maintenance-billing.md) — the chemical-cost audit gate
+- [monthly-maintenance-billing](../../flows/monthly-maintenance-billing/index.md) — the chemical-cost audit gate

@@ -14,7 +14,7 @@ Mixed leadership: seeded from ION (`external_source`, `external_data`) via `f/IO
 
 ## Billing coverage role
 
-**Every month a task is active, it must be billed once.** At month-start the bridge writes a [Task Billing Period](task-billing-period.md) (invoice promise) for each active task; a promise still uninvoiced at month close = **missed billing**. This write-ahead checklist is how "did every maintenance customer get invoiced this month?" is answered, distinct from the per-invoice subtotal-correctness check. See [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md).
+**Every month a task is active, it must be billed once.** At month-start the bridge writes a [Task Billing Period](task-billing-period.md) (invoice promise) for each active task; a promise still uninvoiced at month close = **missed billing**. This write-ahead checklist is how "did every maintenance customer get invoiced this month?" is answered, distinct from the per-invoice subtotal-correctness check. See [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md).
 
 ## Connected entities
 
@@ -26,4 +26,4 @@ Mixed leadership: seeded from ION (`external_source`, `external_data`) via `f/IO
 ## Flows this entity participates in
 
 - [ion-visits sync](../flows/sync/ion-visits.md) — seeded alongside visits
-- [monthly-maintenance-billing](../flows/monthly-maintenance-billing.md) — coverage check + `chem_budget_cents` informs the chemical-cost audit
+- [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md) — coverage check + `chem_budget_cents` informs the chemical-cost audit

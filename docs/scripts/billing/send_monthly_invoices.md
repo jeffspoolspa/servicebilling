@@ -20,4 +20,4 @@ Emails the month's maintenance invoices to customers via QBO's invoice-send endp
 - `billing.invoice_send_log` (per-invoice send outcome), `billing.billing_runs` (`invoices_emailed`)
 
 ## In which flows
-- [monthly-maintenance-billing](../../flows/monthly-maintenance-billing.md) — invoice email step
+- [monthly-maintenance-billing](../../flows/monthly-maintenance-billing/index.md) — invoice email step
