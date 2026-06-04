@@ -25,9 +25,13 @@ const createSchema = z.object({
   state: z.string().trim().default("GA"),
   zip: z.string().trim().min(1, "ZIP is required"),
   office: z.enum(["richmond_hill", "brunswick", "st_marys"]),
+  primary_body_type: z.enum(["pool", "spa", "fountain"]).default("pool"),
+  additional_fountain: z.enum(["on"]).optional(),
   visits_per_week: z.enum(["0.5", "1", "2"]).optional(),
   pool_condition: z.enum(["good", "needs_repair", "green_pool"]).optional(),
   issue_description: z.string().trim().optional(),
+  customer_action: z.enum(["auto", "use_existing", "create_new"]).default("auto"),
+  existing_customer_id: z.string().trim().optional(),
 }).refine((d) => (d.email && d.email.length > 0) || (d.phone && d.phone.length > 0), {
   message: "Email or phone is required",
   path: ["email"],
@@ -44,8 +48,15 @@ export async function createInternalLead(
   const d = parsed.data
 
   // Same orchestrator the public website uses (lib/leads/intake.ts). The recipe
-  // computes the quote and reuses a matched customer automatically; office is an
+  // computes the quote; the form decides use-existing vs create-new; office is an
   // explicit override and staff can enter out-of-area leads.
+  const bodies = [
+    { body_type: d.primary_body_type, is_primary: true, is_inground: d.primary_body_type === "pool" ? true : null },
+  ]
+  if (d.additional_fountain === "on" && d.primary_body_type !== "fountain") {
+    bodies.push({ body_type: "fountain", is_primary: false, is_inground: null })
+  }
+
   const result = await submitLeadIntake({
     account: {
       first_name: d.first_name,
@@ -58,7 +69,7 @@ export async function createInternalLead(
       billing_state: d.state || "GA",
       billing_zip: d.zip,
     },
-    bodies: [{ body_type: "pool", is_primary: true, is_inground: true }],
+    bodies,
     lead: {
       source: "internal",
       visits_per_week: d.visits_per_week ? Number(d.visits_per_week) : 1,
@@ -67,6 +78,8 @@ export async function createInternalLead(
     },
     office: d.office,
     allow_out_of_area: true,
+    customer_action: d.customer_action,
+    existing_customer_id: d.existing_customer_id ? Number(d.existing_customer_id) : undefined,
   })
 
   if (!result.ok) return { error: result.error ?? "Could not create lead." }

@@ -1,6 +1,5 @@
 import { UserPlus } from "lucide-react"
 import { ObjectHeader } from "@/components/shell/object-header"
-import { Card } from "@/components/ui/card"
 import { BackButton } from "@/components/shell/back-button"
 import { requireModuleWrite } from "@/lib/auth/access"
 import { NewLeadForm } from "./new-lead-form"
@@ -18,12 +17,8 @@ export default async function NewLeadPage() {
         icon={<UserPlus />}
         actions={<BackButton fallbackHref="/leads" />}
       />
-      <div className="px-7 py-6 max-w-2xl">
-        <Card>
-          <div className="p-5">
-            <NewLeadForm />
-          </div>
-        </Card>
+      <div className="px-7 py-6">
+        <NewLeadForm />
       </div>
     </>
   )
