@@ -37,6 +37,15 @@ const VISITS_PER_MONTH: Record<string, number> = { "0.5": 2, "1": 4, "2": 8 }
 const COND_LABEL: Record<string, string> = { good: "Good", needs_repair: "Needs repair", green_pool: "Green pool" }
 const CONTACT_LABEL: Record<string, string> = { first_name: "first name", last_name: "last name", email: "email", phone: "phone" }
 
+/** Progressively format a US phone as the user types → (xxx) xxx-xxxx. */
+function formatPhone(v: string): string {
+  const d = v.replace(/\D/g, "").slice(0, 10)
+  if (d.length === 0) return ""
+  if (d.length < 4) return `(${d}`
+  if (d.length < 7) return `(${d.slice(0, 3)}) ${d.slice(3)}`
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`
+}
+
 export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
   const router = useRouter()
   const [state, action, pending] = useActionState(createInternalLead, empty)
@@ -210,7 +219,7 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
               <Field label="First name *"><input name="first_name" value={firstName} onChange={(e) => setFirstName(e.target.value)} className={inputCls} disabled={pending} required /></Field>
               <Field label="Last name *"><input name="last_name" value={lastName} onChange={(e) => setLastName(e.target.value)} className={inputCls} disabled={pending} required /></Field>
               <Field label="Email"><input name="email" type="email" value={email} onChange={(e) => { setEmail(e.target.value); if (customerAction !== "use_existing") runDedup(e.target.value || phone) }} className={inputCls} disabled={pending} placeholder="email or phone required" /></Field>
-              <Field label="Phone"><input name="phone" type="tel" value={phone} onChange={(e) => { setPhone(e.target.value); if (customerAction !== "use_existing") runDedup(email || e.target.value) }} className={inputCls} disabled={pending} /></Field>
+              <Field label="Phone"><input name="phone" type="tel" inputMode="tel" value={phone} onChange={(e) => { const f = formatPhone(e.target.value); setPhone(f); if (customerAction !== "use_existing") runDedup(email || f) }} className={inputCls} disabled={pending} placeholder="(555) 123-4567" /></Field>
             </div>
             {matches.length > 0 && (
               <div className="border border-sun/30 bg-sun/10 rounded-md p-3 flex flex-col gap-2 mt-3">
