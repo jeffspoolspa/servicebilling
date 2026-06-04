@@ -17,6 +17,9 @@ match the live `website-lead-intake` recipe (`create_account` + `create_service_
 3. Retire the `website-lead-intake` and `sync-customer-qbo` edge functions once traffic is on
    `/api/leads`. `f/qbo/sync_customer_to_qbo` (update-only) stays for its other callers but is no
    longer in the intake path.
+4. Repoint the website's **live quote** at `POST /api/leads/quote` (same `x-api-key`) so it shares the
+   canonical `calculateMaintQuote` instead of duplicating the formula. Body:
+   `{ primaryBodyType, additionalBodyCount, visitsPerWeek }`.
 
 ## Other gaps
 
@@ -38,3 +41,15 @@ match the live `website-lead-intake` recipe (`create_account` + `create_service_
 - **Custom quote / referral source on internal leads** — the unified recipe computes the quote and
   `create_maintenance_lead` takes no referral field, so the internal form dropped those inputs. If
   staff need a manual override, add it to `create_maintenance_lead` + the form later.
+
+- **2×/week chemicals are approximated.** `billing_audit.chemical_cost_estimates` has no twice-weekly
+  sample, so `estimate_maint_chemicals` mirrors the weekly tier with `approximated: true`. Replace with
+  real logic in that one function once 2×/week chemical data exists.
+
+- **Quote snapshot not persisted.** Only `quoted_per_visit` is stored on the lead. To audit exactly
+  what each customer was auto-quoted (chem median + monthly total), add a `quote_snapshot` jsonb column
+  and have intake write `calculateMaintQuote`'s result — trivial now that it's the single source.
+
+- **Resend lead-quote template must exist.** Auto-email needs `RESEND_TEMPLATE_LEAD_QUOTE` (a Resend
+  template UUID) set; until then intake falls back to SMS. Template variable contract lives in
+  `lib/comms/templates.ts`.

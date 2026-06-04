@@ -1,11 +1,15 @@
 import "server-only"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { createInQbo } from "@/lib/qbo/write"
-import { checkServiceArea, calculateQuote, type Office } from "./quote"
+import { checkServiceArea, calculateMaintQuote, type Office, type MaintQuote } from "./quote"
+import { estimateMaintChemicals } from "./chem-estimate"
+import { sendEmail } from "@/lib/comms/server/resend"
+import { sendSms } from "@/lib/comms/server/ringcentral"
+import { leadQuoteTemplate, type LeadQuoteContext } from "@/lib/comms/templates"
 
 // Pure pricing + service-area helpers live in ./quote (client-importable).
 // Re-export so existing server-side imports from intake keep working.
-export { checkServiceArea, calculateQuote } from "./quote"
+export { checkServiceArea, calculateQuote, calculateMaintQuote } from "./quote"
 export type { Office } from "./quote"
 
 /**
@@ -78,6 +82,8 @@ export interface LeadIntakeResult {
   quoted_per_visit?: number
   returning?: boolean
   qbo?: "created" | "deferred" | "skipped"
+  /** Outcome of the auto-quote notification (never blocks lead creation). */
+  notify?: { channel: "email" | "sms" | "none"; status: "sent" | "failed" | "skipped" }
   error?: string
 }
 
@@ -208,9 +214,15 @@ export async function submitLeadIntake(input: LeadIntakeInput): Promise<LeadInta
     if (bodyErr) return { ok: false, error: `Body creation failed: ${bodyErr.message}` }
   }
 
-  // 5. Lead (with the computed quote).
+  // 5. Lead (with the computed quote — same calculateMaintQuote the form/website use,
+  //    so the stored per-visit matches what the customer was shown).
   const primary = input.bodies.find((b) => b.is_primary) ?? input.bodies[0]
-  const { perVisit } = calculateQuote(primary.body_type, input.bodies.length - 1, input.lead.visits_per_week)
+  const chemEstimates = await estimateMaintChemicals()
+  const quote = calculateMaintQuote(
+    { primaryBodyType: primary.body_type, additionalBodyCount: input.bodies.length - 1, visitsPerWeek: input.lead.visits_per_week },
+    chemEstimates,
+  )
+  const perVisit = quote.perVisit
   const { data: leadData, error: leadErr } = await sb.rpc("create_maintenance_lead", {
     p_account_id: accountId,
     p_source: input.lead.source,
@@ -236,7 +248,62 @@ export async function submitLeadIntake(input: LeadIntakeInput): Promise<LeadInta
     },
   }).catch(() => {})
 
-  return { ok: true, account_id: accountId, lead_id: leadId, quoted_per_visit: perVisit, returning, qbo }
+  // 7. Auto-send the quote to the customer (non-fatal). Prefer email when present
+  //    and the Resend template is configured; otherwise fall back to SMS. Any
+  //    failure is swallowed — the lead is already created.
+  const notify: LeadIntakeResult["notify"] = office
+    ? await notifyQuote({
+        office, leadId, accountId,
+        firstName: a.first_name, email: a.email ?? null, phone: a.phone ?? null,
+        quote,
+      })
+    : { channel: "none", status: "skipped" }
+
+  return { ok: true, account_id: accountId, lead_id: leadId, quoted_per_visit: perVisit, returning, qbo, notify }
+}
+
+const FREQUENCY_LABEL: Record<MaintQuote["frequencyKey"], string> = {
+  biweekly: "bi-weekly", weekly: "weekly", twice_weekly: "twice-weekly",
+}
+
+/** Auto-send the quote to the customer. Returns the channel + status; never throws. */
+async function notifyQuote(args: {
+  office: Office; leadId: string; accountId: number
+  firstName: string; email: string | null; phone: string | null
+  quote: MaintQuote
+}): Promise<LeadIntakeResult["notify"]> {
+  const ctx: LeadQuoteContext = {
+    firstName: args.firstName,
+    office: args.office,
+    quote: args.quote,
+    visitFrequencyLabel: FREQUENCY_LABEL[args.quote.frequencyKey],
+  }
+  const templateId = leadQuoteTemplate.resendTemplateId()
+  try {
+    if (args.email && templateId) {
+      const r = await sendEmail({
+        office: args.office, to: args.email,
+        lead_id: args.leadId, customer_id: args.accountId,
+        template: { id: templateId, variables: leadQuoteTemplate.variables(ctx) },
+        template_name: leadQuoteTemplate.name,
+        created_by: "system:lead-intake",
+      })
+      return { channel: "email", status: r.ok ? "sent" : "failed" }
+    }
+    if (args.phone) {
+      const r = await sendSms({
+        office: args.office, to: args.phone,
+        lead_id: args.leadId, customer_id: args.accountId,
+        body: leadQuoteTemplate.sms(ctx),
+        template_name: leadQuoteTemplate.name,
+        created_by: "system:lead-intake",
+      })
+      return { channel: "sms", status: r.ok ? "sent" : "failed" }
+    }
+    return { channel: "none", status: "skipped" }
+  } catch {
+    return { channel: args.email && templateId ? "email" : "sms", status: "failed" }
+  }
 }
 
 /** Build the QBO Customer body from the intake account fields. */

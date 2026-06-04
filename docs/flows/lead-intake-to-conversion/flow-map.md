@@ -26,22 +26,31 @@ sequenceDiagram
     WH->>DB: refresh_customer (sync_state=synced) + confirm_webhook_expectation
   end
   API->>DB: create_service_body (per body)
+  API->>DB: estimate_maint_chemicals + calculateMaintQuote (one quote engine)
   API->>DB: create_maintenance_lead (computed quote) -> leads + residential_lead_details(status=new)
-  API-->>U: { account_id, lead_id, quoted_per_visit, qbo }
+  API->>DB: auto-send quote (Resend template email, else SMS) -> communications (non-fatal)
+  API-->>U: { account_id, lead_id, quoted_per_visit, qbo, notify }
   U->>DB: mark_lead_quoted   %% quoted
   U->>DB: accept_lead        %% accepted
   U->>DB: create_card_collection_request -> mark_payment_on_file   %% converted + onboarding
   DB->>DB: sync_lead_lifecycle_from_child -> lifecycle_state=closed
 ```
 
+**Quote engine:** labor + chemicals + monthly total are computed in ONE place,
+`lib/leads/quote.ts calculateMaintQuote`, which consumes the chemical tiers from
+`estimate_maint_chemicals` (the refinable DB gate). The internal form computes it client-side for the
+live panel; intake computes the stored quote; `POST /api/leads/quote` (api-key gated) serves the same
+result to the website — so no caller can drift from in-app pricing.
+
 **Steps (click for detail):**
 1. **Intake** — `submitLeadIntake` (`/api/leads` for the website; server action for the internal form): dedup → `create_account`/`update_account_contact` → `create_service_body` → `create_maintenance_lead`. Creates the [Customer](../../entities/customer.md) + [Lead](../../entities/lead.md). `[write-out -> Supabase]`
 2. **Create in QBO (new customer)** — `createInQbo('customer')` → `f/service_billing/qbo_customer_write`. `[write-out -> QBO]`
 3. **Reflect** — QBO Customer webhook → `f/service_billing/refresh_customer` (`sync_state=synced`) + `confirm_webhook_expectation`. `[reflection <- QBO]`
-4. **Quote** — `mark_lead_quoted`. `[internal]`
-5. **Accept** — `accept_lead` (resume-token gated). `[internal]`
-6. **Card on file** — `create_card_collection_request` → `mark_payment_on_file`. `[internal]`
-7. **Close projection** — `sync_lead_lifecycle_from_child` trigger. `[internal]`
+4. **Auto-notify** — auto-send the quote to the customer: Resend hosted-template email (`RESEND_TEMPLATE_LEAD_QUOTE`) when email + template present, else RingCentral SMS. Non-fatal; `result.notify` records `{channel, status}`. `[write-out -> Resend/RingCentral]`
+5. **Quote** — `mark_lead_quoted`. `[internal]`
+6. **Accept** — `accept_lead` (resume-token gated). `[internal]`
+7. **Card on file** — `create_card_collection_request` → `mark_payment_on_file`. `[internal]`
+8. **Close projection** — `sync_lead_lifecycle_from_child` trigger. `[internal]`
 
 **Failure modes:**
 | Failure | Where | Detected by | Recovery |
@@ -50,6 +59,7 @@ sequenceDiagram
 | QBO customer create fails | intake (new customer) | `sync_state='sync_failed'` | lead unaffected; retry or CDC / daily sync reconciles |
 | QBO Customer webhook never arrives | post-create | expectation open past `expected_by` | CDC (Customer, 15 min) + daily `qbo_customer_sync` |
 | account / body / lead RPC fails | intake | RPC error | returned to caller; the form re-shows it |
+| Auto-quote send fails / template unset | intake (notify) | `result.notify.status` | non-fatal; lead still created; email falls back to SMS, or skips |
 | Expired/mismatched resume token | accept | token check | RAISE; re-quote to re-issue a token |
 
 **Concurrency:** `f/service_billing/qbo_customer_write` touches QBO — key `qbo_api` (rotating refresh

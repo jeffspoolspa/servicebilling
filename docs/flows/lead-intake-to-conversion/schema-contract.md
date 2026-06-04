@@ -19,13 +19,17 @@ leader-correct QBO create.
 - [`public.leads`](../../entities/lead.md) / [`residential_lead_details`](../../entities/lead.md) — lifecycle.
 - [`public.card_collection_requests`](../../entities/card-collection-request.md) — payment-on-file check.
 - [`maintenance.onboarding`](../../entities/onboarding.md) — onboarding state.
+- `public.estimate_maint_chemicals(month)` — current-month chemical cost tiers (median + p25/p75 per
+  frequency) for the quote. The refinable gate over `billing_audit.chemical_cost_estimates`; the
+  in-app wrapper is `lib/leads/chem-estimate.ts estimateMaintChemicals`.
 
 ## Writes (via RPCs, the live recipe)
 
 - [`public."Customers"`](../../entities/customer.md) — `create_account` (new) or `update_account_contact` (reuse); the **Pattern D create** then stamps `qbo_customer_id` + drives `sync_state` (`pending`→`awaiting_propagation`→`synced`).
 - `public.service_locations` — primary location (from `create_account`, or inserted).
 - `maintenance.service_bodies` — `create_service_body` per pool/spa/fountain.
-- [`public.leads`](../../entities/lead.md) + [`residential_lead_details`](../../entities/lead.md) — `create_maintenance_lead` (`office`, computed `quoted_per_visit`, `visits_per_week`, `pool_condition`).
+- [`public.leads`](../../entities/lead.md) + [`residential_lead_details`](../../entities/lead.md) — `create_maintenance_lead` (`office`, computed `quoted_per_visit`, `visits_per_week`, `pool_condition`). The quote is computed by **`lib/leads/quote.ts calculateMaintQuote`** — the single quote engine the form, intake, and `POST /api/leads/quote` all call.
+- `public.communications` + `public.email_messages` / `public.text_messages` — the auto-sent quote (write-ahead row → provider send → sent/failed), via `lib/comms`.
 - [`public.card_collection_requests`](../../entities/card-collection-request.md) — tokenized card link (`create_card_collection_request`).
 - [`maintenance.onboarding`](../../entities/onboarding.md) — `mark_payment_on_file` / `submit_maintenance_onboarding`.
 - `maintenance.lead_activities` — audit trail.
@@ -41,6 +45,10 @@ leader-correct QBO create.
   resets `sync_state='synced'`, and `confirm_webhook_expectation` resolves the WAL. CDC reconciler +
   daily `qbo_customer_sync` backstop.
 - **`submit-ticket` edge function** — best-effort Airtable mirror for office triage.
+- **Auto-quote send (non-fatal)** — on create, the customer is notified with the quote: email via a
+  **Resend hosted template** (`RESEND_TEMPLATE_LEAD_QUOTE`) when an email + the template id are present,
+  else SMS via RingCentral. Built on `lib/comms` (`sendEmail`/`sendSms`) — additive, contract-preserving.
+  A send failure never blocks lead creation (`result.notify` records the outcome).
 
 ## Critical invariants
 

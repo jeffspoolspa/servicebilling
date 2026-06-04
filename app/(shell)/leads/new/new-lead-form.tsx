@@ -8,12 +8,9 @@ import { Card } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { OptionPills } from "@/components/ui/option-pills"
 import { AddressAutocomplete, type PickedAddress } from "@/components/form/address-autocomplete"
-import { checkServiceArea, calculateQuote } from "@/lib/leads/quote"
+import { checkServiceArea, calculateMaintQuote, type ChemEstimates } from "@/lib/leads/quote"
 import { prettyOffice } from "../ui"
 import { createInternalLead, type ActionState } from "../actions"
-
-export type ChemTier = { med: number; low: number; high: number }
-export type ChemEstimates = { weekly: ChemTier; biweekly: ChemTier }
 
 const empty: ActionState = {}
 const inputCls =
@@ -33,7 +30,6 @@ const OFFICES: { id: Office; label: string }[] = [
   { id: "st_marys", label: "St. Marys" },
 ]
 const VISIT_LABEL: Record<string, string> = { "0.5": "Bi-weekly", "1": "Weekly", "2": "2x per week" }
-const VISITS_PER_MONTH: Record<string, number> = { "0.5": 2, "1": 4, "2": 8 }
 const COND_LABEL: Record<string, string> = { good: "Good", needs_repair: "Needs repair", green_pool: "Green pool" }
 const CONTACT_LABEL: Record<string, string> = { first_name: "first name", last_name: "last name", email: "email", phone: "phone" }
 
@@ -101,9 +97,10 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
   }, [openSection, contactComplete])
 
   const additionalBodies = fountain && primaryBody !== "fountain" ? 1 : 0
-  const quote = calculateQuote(primaryBody, additionalBodies, Number(visits))
-  const laborMonthly = quote.firstMonthsDeposit
-  const tier = chem ? (visits === "0.5" ? chem.biweekly : chem.weekly) : null
+  const quote = calculateMaintQuote(
+    { primaryBodyType: primaryBody, additionalBodyCount: additionalBodies, visitsPerWeek: Number(visits) },
+    chem,
+  )
 
   function onAddressPicked(a: PickedAddress) {
     setStreet(a.street); setCity(a.city); setStateCode(a.state || "GA"); setZip(a.zip)
@@ -288,25 +285,25 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
               <div className="px-5 pb-4 text-[13px] flex flex-col">
                 <QuoteLine
                   label="Labor"
-                  value={`$${laborMonthly}/mo`}
-                  sub={`$${quote.perVisit}/visit · ${VISITS_PER_MONTH[visits]} visits`}
-                  note={`Each visit we skim, brush, vacuum as needed, empty the baskets, test + balance the water, and check the equipment. Say: "${VISIT_LABEL[visits].toLowerCase()} service is $${quote.perVisit} a visit, about ${VISITS_PER_MONTH[visits]} visits a month." Labor is the only part billed up front (the first-month deposit).`}
+                  value={`$${quote.laborMonthly}/mo`}
+                  sub={`$${quote.perVisit}/visit · ${quote.visitsPerMonth} visits`}
+                  note={`Each visit we skim, brush, vacuum as needed, empty the baskets, test + balance the water, and check the equipment. Say: "${VISIT_LABEL[visits].toLowerCase()} service is $${quote.perVisit} a visit, about ${quote.visitsPerMonth} visits a month." Labor is the only part billed up front (the first-month deposit).`}
                 />
                 <QuoteLine
                   label="Est. chemicals"
-                  value={tier ? `$${tier.med}/mo` : "—"}
-                  sub={tier ? `range $${tier.low}–$${tier.high}` : "estimate unavailable"}
-                  note={tier
-                    ? `Chemicals are billed separately, based on what the pool actually uses — so it swings with the season and the pool's condition. Say: "most pools like yours run about $${tier.med} a month in chemicals, a bit more in summer." This is an estimate from our own customer data, not a set charge.`
+                  value={quote.chem ? `$${quote.chem.median}/mo` : "—"}
+                  sub={quote.chem ? `range $${quote.chem.low}–$${quote.chem.high}${quote.chem.approximated ? " · approx" : ""}` : "estimate unavailable"}
+                  note={quote.chem
+                    ? `Chemicals are billed separately, based on what the pool actually uses — so it swings with the season and the pool's condition. Say: "most pools like yours run about $${quote.chem.median} a month in chemicals, a bit more in summer." This is an estimate from our own customer data, not a set charge.`
                     : "Chemical estimate isn't available right now — tell them chemicals are billed separately based on usage."}
                 />
                 <div className="border-t border-line-soft my-1.5" />
                 <QuoteLine
                   emphasize
                   label="Estimated monthly total"
-                  value={tier ? `$${laborMonthly + tier.med}` : `$${laborMonthly}+`}
-                  sub={tier ? `range $${laborMonthly + tier.low}–$${laborMonthly + tier.high}` : undefined}
-                  note={`Labor plus the estimated chemicals. Say: "you're looking at roughly $${tier ? laborMonthly + tier.med : laborMonthly} a month — billed monthly, cancel anytime, no penalties. The chemical part is an estimate, so some months run a little higher or lower."`}
+                  value={quote.monthlyTotal ? `$${quote.monthlyTotal.median}` : `$${quote.laborMonthly}+`}
+                  sub={quote.monthlyTotal ? `range $${quote.monthlyTotal.low}–$${quote.monthlyTotal.high}` : undefined}
+                  note={`Labor plus the estimated chemicals. Say: "you're looking at roughly $${quote.monthlyTotal ? quote.monthlyTotal.median : quote.laborMonthly} a month — billed monthly, cancel anytime, no penalties. The chemical part is an estimate, so some months run a little higher or lower."`}
                 />
               </div>
             </Card>

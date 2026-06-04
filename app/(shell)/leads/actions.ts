@@ -87,7 +87,11 @@ export async function createInternalLead(
   revalidatePath("/leads")
   const qboNote = result.qbo === "deferred" ? " QBO customer create deferred — will retry." : ""
   const lead = result.returning ? "Lead created under existing customer." : "Lead created."
-  return { ok: lead + qboNote, leadId: result.lead_id }
+  const notifyNote =
+    result.notify?.status === "sent" ? ` Quote ${result.notify.channel === "email" ? "emailed" : "texted"}.`
+    : result.notify?.status === "failed" ? ` Quote ${result.notify.channel} send deferred.`
+    : ""
+  return { ok: lead + qboNote + notifyNote, leadId: result.lead_id }
 }
 
 const idSchema = z.object({ lead_id: z.string().uuid() })

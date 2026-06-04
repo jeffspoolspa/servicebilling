@@ -52,9 +52,14 @@ export async function sendEmail(req: SendEmailRequest): Promise<SendEmailResult>
     return { ok: false, error: "identity_required" }
   }
   if (!req.to) return { ok: false, error: "to_required" }
-  if (!req.subject) return { ok: false, error: "subject_required" }
-  if (!req.body_html && !req.body_text) {
-    return { ok: false, error: "body_required" }
+  // Template path: subject/body may come from the Resend template's defaults.
+  // Raw path: subject + at least one of html/text are required (unchanged contract).
+  const usingTemplate = !!req.template?.id
+  if (!usingTemplate) {
+    if (!req.subject) return { ok: false, error: "subject_required" }
+    if (!req.body_html && !req.body_text) {
+      return { ok: false, error: "body_required" }
+    }
   }
   const branding = EMAIL_OFFICE_BRANDING[req.office]
   if (!branding) return { ok: false, error: `unknown_office:${req.office}` }
@@ -80,12 +85,17 @@ export async function sendEmail(req: SendEmailRequest): Promise<SendEmailResult>
       to_address: req.to,
       provider: "resend",
       template_name: req.template_name,
-      metadata: { office: req.office, ...(req.metadata ?? {}) },
+      metadata: {
+        office: req.office,
+        ...(usingTemplate ? { template_id: req.template!.id, template_variables: req.template!.variables ?? {} } : {}),
+        ...(req.metadata ?? {}),
+      },
       created_by: req.created_by ?? "system:send-email",
     })
     await insertEmailMessage({
       communication_id: communicationId,
-      subject: req.subject,
+      // The real subject/body live in the Resend template; log a marker for the row.
+      subject: req.subject ?? `[template:${req.template_name ?? req.template!.id}]`,
       body_html: req.body_html,
       body_text: req.body_text,
       cc: cc.length ? cc : undefined,
@@ -110,13 +120,20 @@ export async function sendEmail(req: SendEmailRequest): Promise<SendEmailResult>
       from: fromHeader,
       to: req.to,
       replyTo: branding.reply_to,
-      subject: req.subject,
     }
+    // subject in the payload overrides the template's default; omit it on the
+    // template path to let the template supply it.
+    if (req.subject) payload.subject = req.subject
     if (cc.length) payload.cc = cc
     if (mergedBcc.length) payload.bcc = mergedBcc
-    if (req.body_html) payload.html = req.body_html
-    if (req.body_text) payload.text = req.body_text
     if (Object.keys(headers).length) payload.headers = headers
+    if (usingTemplate) {
+      // Resend rejects html/text alongside a template — send the template only.
+      payload.template = { id: req.template!.id, variables: req.template!.variables ?? {} }
+    } else {
+      if (req.body_html) payload.html = req.body_html
+      if (req.body_text) payload.text = req.body_text
+    }
 
     const { data, error } = await client.emails.send(
       payload as unknown as Parameters<typeof client.emails.send>[0],
