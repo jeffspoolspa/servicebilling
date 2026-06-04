@@ -14,15 +14,17 @@ types per [ADR 001](../../adrs/001-platform-architecture.md): `[internal]` = our
 
 - A closed, billable WO with `invoice_number` set — [ion-work-orders sync](../sync/ion-work-orders.md).
 - The invoice cached from QBO — [qbo-invoices sync](../sync/qbo-invoices.md).
-- The customer's payment methods cached — [qbo-payment-methods sync](../sync/qbo-payment-methods.md).
+- (Payment methods need no pre-caching — pre-processing refreshes them per invoice; see step 2 + [qbo-payment-methods](../sync/qbo-payment-methods.md).)
 
 ## Decision sequence
 
 1. **Invoice lands** ([pull_qbo_invoices](../../scripts/service_billing/pull_qbo_invoices.md)) →
    `invoices.billing_status = awaiting_pre_processing`. `[reflection <- QBO]`
-2. **Pre-process / enrich** ([pre_process_invoice](../../scripts/service_billing/pre_process_invoice.md)) →
-   PATCH QBO memo / `PaymentMethodRef` / `ClassRef` / `TxnDate = wo.completed`; set `enrichment_ok`.
-   `[write-out -> QBO]` + `[internal]`
+2. **Pre-process / enrich** ([pre_process_invoice](../../scripts/service_billing/pre_process_invoice.md)) —
+   **first refresh the customer's payment methods** (single-customer, once per invoice — the home for
+   the PM refresh; see [qbo-payment-methods](../sync/qbo-payment-methods.md)), then PATCH QBO memo /
+   `PaymentMethodRef` / `ClassRef` / `TxnDate = wo.completed` and set `enrichment_ok` +
+   `payment_method_ok` on the fresh data. `[write-out -> QBO]` + `[internal]`
 3. **Indicator gates** — when all of `enrichment_ok`, `subtotal_ok`, `payment_method_ok`, `credits_ok`,
    `attempts_ok` are true → `invoices: awaiting_pre_processing → ready_to_process`, and a trigger
    promotes the linked `WO → ready_to_process`. Any gate false (especially `subtotal_ok`) →

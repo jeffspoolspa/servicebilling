@@ -2,7 +2,7 @@
 
 > Status: [active]
 > Kind: [sync]
-> Verification: [verified] for the new-invoice refresh (INSERT trigger + atomic claim, post-2026-05-27 revert); [design] for the between-invoice freshness guarantee (the pre-charge check)
+> Verification: [design] — finalized 2026-06-03 to refresh inside pre-processing (once per invoice); the prior invoice-INSERT trigger is to be dropped
 > Leader: QuickBooks Online (cards / ACH on file)
 > Cache: [Payment Method](../../entities/payment-method.md)
 
@@ -10,61 +10,59 @@
 
 Caches each customer's QBO payment methods (card / ACH on file) into
 [`billing.customer_payment_methods`](../../entities/payment-method.md) so the charge path doesn't
-need a live QBO lookup. **QBO Payments has no payment-method webhook**, so there is no push signal
-when a customer adds or changes a card — the refresh is event-driven off new invoices, plus an
-on-demand check right before charging.
+need a live QBO lookup. **QBO Payments has no payment-method webhook** — there's no push signal when
+a customer adds or changes a card — so we refresh at the one moment it's needed and cheap: invoice
+**pre-processing**.
 
-## The refresh signal: new invoices only (not invoice updates)
+## The refresh runs inside pre-processing — once per invoice
 
-A new invoice landing in `billing.invoices` is the proxy for "this customer is active; make sure
-their card data is current." The trigger is deliberately **INSERT-only**:
+The PM refresh is a **step in [pre_process_invoice](../../scripts/service_billing/pre_process_invoice.md)**,
+not a database trigger. Pre-processing already runs **exactly once per invoice** (gated by the
+invoice's `billing_status`: `awaiting_pre_processing → ready_to_process`) and already needs the
+payment method to set `PaymentMethodRef` and compute `payment_method_ok`. So the refresh sits there:
 
-- **`trg_request_pm_refresh_on_invoice_insert` — `AFTER INSERT ON billing.invoices`.** Reads the
-  shared `windmill_token` Vault secret and `pg_net`-posts the `f/service_billing/pull_customer_payment_methods`
-  webhook with `{ only_customer_id: NEW.qbo_customer_id }`. Fire-and-forget; a failed call is a
-  no-op (the daily backstop catches it) — a PM-refresh failure must never roll back an invoice insert.
-- **"Truly new" holds because the invoice sync upserts.** Existing invoices arrive as `UPDATE`s
-  (balance / email_status / `fetched_at` churn); only a genuinely new `doc_number` is an `INSERT`.
-  `AFTER INSERT` fires for exactly those.
+1. Pre-process refreshes that **one customer's** PMs from QBO (single-customer, synchronous).
+2. Then it sets the invoice's PM fields + computes `payment_method_ok` on the now-fresh data.
 
-### Why NOT on updates (the loop postmortem)
+Because it's keyed to the invoice's pre-processing lifecycle (not the row's existence or its
+`fetched_at`), it fires **once per genuinely-new invoice** and is naturally immune to the constant
+balance / email-status / `fetched_at` churn the invoice sync produces.
 
-A prior v2 added an `AFTER UPDATE OF fetched_at` trigger as a "self-healing" freshness loop. But
-`fetched_at` is bumped **every time any QBO sync touches a row**, and `pull_qbo_invoices` +
-`refresh_open_invoices` touch every invoice every 4h — so it fired the refresh per-row:
-**~3,600 full-table PM sweeps over the 2026-05-23→25 weekend, ~$2,500 compute.** The
-[`20260527201313` migration](../../audits/2026-05-27-database.md) dropped that update trigger and
-kept only the INSERT one. Updates to the constantly-refreshing invoice table must never fire a PM refresh.
+### Why not a DB trigger on the invoices table (the loop postmortem)
 
-## Bulk-insert dedup: the atomic claim
+The earlier design fired the refresh from triggers on `billing.invoices`:
+- An `AFTER UPDATE OF fetched_at` trigger (v2) fired on **every** sync touch — `pull_qbo_invoices` +
+  `refresh_open_invoices` bump `fetched_at` on every row every 4h — producing **~3,600 full-table PM
+  sweeps over the 2026-05-23→25 weekend, ~$2,500 compute** (the
+  [2026-05-27 postmortem](../../audits/2026-05-27-database.md)). That update trigger was dropped.
+- An `AFTER INSERT` trigger then fired once per new invoice (with a 60s atomic-claim dedup for
+  bulk inserts). It worked, but it's an **async, fire-and-forget** signal decoupled from the step
+  that actually consumes the PM data.
 
-A QBO sync writing N new invoices for one customer must fire the webhook **once**, not N times.
-The dedup is an **atomic claim** (a `SELECT`-then-fire can't dedup within a single transaction):
+Moving the refresh into pre-processing supersedes both: it's synchronous, once per invoice, and the
+freshness is guaranteed exactly where `payment_method_ok` is computed. **The `AFTER INSERT` trigger
+(`trg_request_pm_refresh_on_invoice_insert`) and its atomic-claim dedup are dropped** as part of this.
 
-```sql
-UPDATE public."Customers" SET pm_last_checked_at = now()
- WHERE qbo_customer_id = NEW.qbo_customer_id
-   AND (pm_last_checked_at IS NULL OR pm_last_checked_at < now() - interval '60 seconds');
-IF NOT FOUND THEN RETURN NEW; END IF;  -- another row in this burst already claimed it
-```
+## The narrow residual: a card changed between pre-process and charge
 
-The first invoice of a burst wins the row lock + claims the 60s window; the rest skip.
+Pre-processing establishes freshness; a card added in QBO *after* pre-process but *before* the charge
+is a small window. If that needs covering, the helper
+`billing.invoice_pm_freshness_status(qbo_invoice_id)` (already in place) lets the charge path do a
+single-customer re-refresh inline when not `fresh` — kept as an optional belt-and-suspenders, not the
+primary mechanism.
 
-## The gap: a card changed *between* invoices
+## Implementation to wire (this is [design])
 
-The INSERT trigger covers "new invoice → refresh." It does **not** detect a customer
-adding/changing a card between invoices (and there's no webhook to). Two homes for that, the first
-being the correctness guarantee:
-
-1. **On-demand, right before charging (recommended final):** the charge path calls
-   `billing.invoice_pm_freshness_status(qbo_invoice_id)` and does a single-customer refresh inline
-   if not `fresh`. Correctness exactly when it matters — at the charge — with no fan-out.
-2. **Off the CDC reconciler:** when the 15-min CDC sweep detects a *Customer* entity change in QBO,
-   fan out a per-customer PM refresh. Deterministic, per-customer; a nice-to-have for UI freshness.
+- Add the single-customer PM refresh as the first step of
+  [pre_process_invoice](../../scripts/service_billing/pre_process_invoice.md), before it computes
+  `payment_method_ok`.
+- Migration to **drop** `trg_request_pm_refresh_on_invoice_insert` (+ its function) on `billing.invoices`.
+- Keep the daily backstop sweep as the safety net for any pre-process that didn't run.
 
 ## Cross-references
 
 - Entity: [Payment Method](../../entities/payment-method.md)
+- Driven by: [pre_process_invoice](../../scripts/service_billing/pre_process_invoice.md)
 - Indicator trigger: [set_payment_method_ok](../../scripts/_triggers/set_payment_method_ok.md)
 - Loop postmortem: [2026-05-27-database](../../audits/2026-05-27-database.md)
 - Downstream: [work-order-to-payment](../work-order-to-payment/index.md)

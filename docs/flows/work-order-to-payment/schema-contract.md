@@ -26,8 +26,8 @@ verify the ION-to-QBO push didn't drop line items (see [decision-map](decision-m
   `billable` (generated), `billing_status`. Kept current by [ion-work-orders sync](../sync/ion-work-orders.md).
 - [`billing.invoices`](../../entities/invoice.md) — `doc_number`, `subtotal` / `balance` / `email_status`
   (QBO's view), `billing_status`, the indicator columns. Kept current by [qbo-invoices sync](../sync/qbo-invoices.md).
-- [`public.payment_methods`](../../entities/payment-method.md) — the card on file. Kept current by
-  [qbo-payment-methods sync](../sync/qbo-payment-methods.md) (kicked off when a new invoice lands).
+- [`public.payment_methods`](../../entities/payment-method.md) — the card on file. Refreshed
+  **once per invoice during pre-processing** (single-customer); see [qbo-payment-methods](../sync/qbo-payment-methods.md).
 
 ## Writes
 
