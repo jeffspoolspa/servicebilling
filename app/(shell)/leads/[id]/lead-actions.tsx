@@ -1,8 +1,9 @@
 "use client"
 
-import { useActionState } from "react"
+import { useActionState, useState } from "react"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Select } from "@/components/ui/select"
 import {
   markQuoted,
   addNote,
@@ -37,16 +38,14 @@ export function LeadActions({ leadId, status }: { leadId: string; status: string
 
 function MarkQuoted({ leadId }: { leadId: string }) {
   const [state, action, pending] = useActionState(markQuoted, empty)
+  const [channel, setChannel] = useState("email")
   return (
     <form action={action} className="flex flex-col gap-2">
       <span className="text-[11px] uppercase tracking-[0.1em] text-ink-mute">Mark quoted</span>
       <input type="hidden" name="lead_id" value={leadId} />
       <div className="flex gap-2">
-        <select name="channel" className={inputCls} defaultValue="email" disabled={pending}>
-          <option value="email">Email</option>
-          <option value="sms">SMS</option>
-          <option value="phone">Phone</option>
-        </select>
+        <Select name="channel" value={channel} onChange={setChannel} disabled={pending} className="flex-1"
+          options={[{ value: "email", label: "Email" }, { value: "sms", label: "SMS" }, { value: "phone", label: "Phone" }]} />
         <Button type="submit" size="sm" disabled={pending}>{pending ? "…" : "Quote"}</Button>
       </div>
       <Result state={state} />
@@ -68,18 +67,18 @@ function SendCardLink({ leadId }: { leadId: string }) {
   )
 }
 
+const STATUS_OPTIONS = ["new", "quoted", "accepted", "converted", "expired", "declined", "disqualified"]
+  .map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }))
+
 function SetStatus({ leadId, status }: { leadId: string; status: string }) {
   const [state, action, pending] = useActionState(setStatus, empty)
+  const [value, setValue] = useState(status)
   return (
     <form action={action} className="flex flex-col gap-2">
       <span className="text-[11px] uppercase tracking-[0.1em] text-ink-mute">Set status</span>
       <input type="hidden" name="lead_id" value={leadId} />
       <div className="flex gap-2">
-        <select name="status" className={inputCls} defaultValue={status} disabled={pending}>
-          {["new", "quoted", "accepted", "converted", "expired", "declined", "disqualified"].map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+        <Select name="status" value={value} onChange={setValue} disabled={pending} className="flex-1" options={STATUS_OPTIONS} />
         <Button type="submit" size="sm" disabled={pending}>{pending ? "…" : "Apply"}</Button>
       </div>
       <Result state={state} />

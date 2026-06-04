@@ -6,6 +6,7 @@ import { ChevronDown, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
+import { OptionPills } from "@/components/ui/option-pills"
 import { AddressAutocomplete, type PickedAddress } from "@/components/form/address-autocomplete"
 import { checkServiceArea, calculateQuote } from "@/lib/leads/quote"
 import { prettyOffice } from "../ui"
@@ -193,13 +194,22 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
           {/* 3. Lead details */}
           <Accordion sectionKey="details" title="Lead details" open={openSection === "details"} complete onToggle={toggle}
             summary={<span className="text-ink-dim truncate">{cap(primaryBody)}{additionalBodies ? " + fountain" : ""} · {VISIT_LABEL[visits]} · {COND_LABEL[poolCondition]}</span>}>
-            <div className="grid grid-cols-3 gap-3">
-              <Field label="Primary body"><select name="primary_body_type" value={primaryBody} onChange={(e) => setPrimaryBody(e.target.value as typeof primaryBody)} className={inputCls} disabled={pending}>
-                <option value="pool">Pool</option><option value="spa">Spa</option><option value="fountain">Fountain</option></select></Field>
-              <Field label="Visits / week"><select name="visits_per_week" value={visits} onChange={(e) => setVisits(e.target.value as typeof visits)} className={inputCls} disabled={pending}>
-                <option value="0.5">Every other week</option><option value="1">Weekly</option><option value="2">Twice weekly</option></select></Field>
-              <Field label="Pool condition"><select name="pool_condition" value={poolCondition} onChange={(e) => setPoolCondition(e.target.value as typeof poolCondition)} className={inputCls} disabled={pending}>
-                <option value="good">Good</option><option value="needs_repair">Needs repair</option><option value="green_pool">Green pool</option></select></Field>
+            <div className="flex flex-col gap-3">
+              <Field label="Primary body">
+                <OptionPills name="primary_body_type" value={primaryBody} disabled={pending}
+                  onChange={(v) => setPrimaryBody(v as typeof primaryBody)}
+                  options={[{ value: "pool", label: "Pool" }, { value: "spa", label: "Spa" }, { value: "fountain", label: "Fountain" }]} />
+              </Field>
+              <Field label="Visits / week">
+                <OptionPills name="visits_per_week" value={visits} disabled={pending}
+                  onChange={(v) => setVisits(v as typeof visits)}
+                  options={[{ value: "0.5", label: "Every other week" }, { value: "1", label: "Weekly" }, { value: "2", label: "Twice weekly" }]} />
+              </Field>
+              <Field label="Pool condition">
+                <OptionPills name="pool_condition" value={poolCondition} disabled={pending}
+                  onChange={(v) => setPoolCondition(v as typeof poolCondition)}
+                  options={[{ value: "good", label: "Good" }, { value: "needs_repair", label: "Needs repair" }, { value: "green_pool", label: "Green pool" }]} />
+              </Field>
             </div>
             <label className="flex items-center gap-2 text-[12px] text-ink-dim mt-3">
               <input type="checkbox" name="additional_fountain" checked={fountain} onChange={(e) => setFountain(e.target.checked)} className="accent-cyan" disabled={pending || primaryBody === "fountain"} />
