@@ -107,10 +107,13 @@ export async function listRouteStopsGeo(
 
   const enriched: RouteStopGeo[] = stops.map((s) => {
     const g = s.customer_id != null ? geo.get(s.customer_id) : undefined
-    // Prefer the service-location geocode; fall back to the account-level
+    // Trust the service-location coordinate ONLY when it's rooftop-confirmed
+    // (geocode_status='ok'); a needs_review/out_of_area/failed row may carry a stale,
+    // wrong coordinate (ADR 005/007 invariant). Otherwise fall back to the account-level
     // Customers coordinate until the service_locations backfill is complete.
-    const lat = s.service_location_latitude ?? g?.latitude ?? null
-    const lng = s.service_location_longitude ?? g?.longitude ?? null
+    const slOk = s.service_location_geocode_status === "ok"
+    const lat = (slOk ? s.service_location_latitude : null) ?? g?.latitude ?? null
+    const lng = (slOk ? s.service_location_longitude : null) ?? g?.longitude ?? null
     let flag: GeoFlag = "ok"
     if (lat == null || lng == null) flag = "missing"
     else if (!inServiceRegion(lat, lng)) flag = "out_of_region"
@@ -168,6 +171,7 @@ type RawScheduleGeoRow = {
   service_location_zip: string | null
   service_location_latitude: number | null
   service_location_longitude: number | null
+  service_location_geocode_status: string | null
 }
 
 const SEVERITY: Record<Exclude<GeoFlag, "ok">, number> = {
@@ -187,7 +191,7 @@ export async function listGeocodeIssues(): Promise<GeocodeIssue[]> {
     .schema("maintenance")
     .from("v_task_schedules_with_context")
     .select(
-      "service_location_id, customer_id, customer_name, tech_employee_id, tech_name, day_of_week, service_location_street, service_location_city, service_location_zip, service_location_latitude, service_location_longitude",
+      "service_location_id, customer_id, customer_name, tech_employee_id, tech_name, day_of_week, service_location_street, service_location_city, service_location_zip, service_location_latitude, service_location_longitude, service_location_geocode_status",
     )
     .eq("active", true)
     .eq("task_status", "active")
@@ -199,9 +203,11 @@ export async function listGeocodeIssues(): Promise<GeocodeIssue[]> {
   // back to the account-level Customers coordinate until the backfill is done.
   const coordOf = (r: RawScheduleGeoRow): { lat: number | null; lng: number | null } => {
     const g = r.customer_id != null ? geo.get(r.customer_id) : undefined
+    // Trust the service-location coordinate only when rooftop-confirmed (ADR 005/007).
+    const slOk = r.service_location_geocode_status === "ok"
     return {
-      lat: r.service_location_latitude ?? g?.latitude ?? null,
-      lng: r.service_location_longitude ?? g?.longitude ?? null,
+      lat: (slOk ? r.service_location_latitude : null) ?? g?.latitude ?? null,
+      lng: (slOk ? r.service_location_longitude : null) ?? g?.longitude ?? null,
     }
   }
 
