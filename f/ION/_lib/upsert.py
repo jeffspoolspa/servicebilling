@@ -176,7 +176,7 @@ def build_resolvers(conn):
             SELECT t.id, t.service_location_id, COALESCE(t.ion_task_id, ts.ion_task_id),
                    t.status, t.starts_on, t.ends_on,
                    ts.id, ts.active, ts.day_of_week, ts.tech_employee_id,
-                   ts.billing_method, ts.price_per_visit_cents, ts.flat_rate_monthly_cents
+                   t.billing_method, t.price_per_visit_cents, t.flat_rate_monthly_cents
             FROM maintenance.tasks t
             LEFT JOIN maintenance.task_schedules ts ON ts.task_id = t.id
             WHERE t.status IN ('active','paused','closed')
