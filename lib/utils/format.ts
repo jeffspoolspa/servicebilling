@@ -8,6 +8,15 @@ export function formatCurrency(amount: number | null | undefined): string {
   }).format(amount)
 }
 
+/** Normalize a US phone to (xxx) xxx-xxxx. Returns "—" for empty, or the raw
+ *  input unchanged if it isn't a 10-digit (or 1+10) number. */
+export function formatPhone(input: string | null | undefined): string {
+  if (!input) return "—"
+  const digits = String(input).replace(/\D/g, "")
+  const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits
+  return ten.length === 10 ? `(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}` : String(input)
+}
+
 export function formatDate(date: string | Date | null | undefined): string {
   if (!date) return "—"
   // YYYY-MM-DD strings from Postgres DATE columns have no time/tz.

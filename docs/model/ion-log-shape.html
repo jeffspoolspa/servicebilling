@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ION service-log — the raw shape | JPS model</title>
+<style>
+  :root{
+    --bg:#fbfbfa; --fg:#1c1c1a; --muted:#6b6b66; --line:#e4e3df;
+    --accent:#0b6e6e; --accent-soft:#e6f1f1;
+    --code-bg:#f3f2ef; --code-fg:#3a3a36;
+    --why-bg:#eef4ff; --why-bar:#3b6fd4;
+    --break-bg:#fff4ec; --break-bar:#d4761f;
+    --incode-bg:#f3f2ef; --incode-bar:#7a7a72;
+    --maxw:900px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0; background:var(--bg); color:var(--fg);
+    font:16px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif; -webkit-font-smoothing:antialiased;}
+  .wrap{display:grid; grid-template-columns:250px minmax(0,1fr); gap:0; max-width:1260px; margin:0 auto;}
+  nav.toc{position:sticky; top:0; align-self:start; height:100vh; overflow:auto; border-right:1px solid var(--line); padding:26px 18px 40px;}
+  nav.toc .brand{font-weight:700; font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:14px;}
+  nav.toc a{display:block; color:var(--fg); text-decoration:none; padding:5px 8px; border-radius:6px; font-size:14px; line-height:1.35;}
+  nav.toc a:hover{background:var(--accent-soft); color:var(--accent);}
+  nav.toc .sub{padding-left:14px; font-size:13px; color:var(--muted);}
+  nav.toc .tools{margin-top:18px; padding-top:14px; border-top:1px solid var(--line); display:flex; gap:8px; flex-wrap:wrap;}
+  nav.toc button{font:inherit; font-size:12px; cursor:pointer; border:1px solid var(--line); background:#fff; color:var(--fg); border-radius:6px; padding:5px 9px;}
+  nav.toc button:hover{border-color:var(--accent); color:var(--accent);}
+  main{padding:42px 52px 120px; max-width:var(--maxw);}
+  h1{font-size:31px; line-height:1.15; margin:0 0 4px;}
+  .kicker{color:var(--accent); font-weight:600; font-size:13px; letter-spacing:.07em; text-transform:uppercase; margin-bottom:10px;}
+  h2{font-size:21px; margin:46px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line);}
+  h3{font-size:16px; margin:24px 0 8px;}
+  p{margin:11px 0;} .lead{font-size:18px; color:#333;}
+  a.x{color:var(--accent); text-decoration:none; border-bottom:1px solid var(--accent-soft);}
+  code,.mono{font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em;}
+  code{background:var(--code-bg); color:var(--code-fg); padding:1px 5px; border-radius:4px;}
+  abbr[title]{text-decoration:underline dotted var(--muted); text-underline-offset:3px; cursor:help;}
+  ul,ol{margin:11px 0; padding-left:22px;} li{margin:5px 0;}
+  table{border-collapse:collapse; width:100%; margin:14px 0; font-size:14px;}
+  th,td{border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top;}
+  th{background:#f4f4f1; font-weight:650;} td code{font-size:.84em;}
+  .call{border-left:4px solid var(--line); border-radius:0 8px 8px 0; padding:11px 15px; margin:16px 0; font-size:14.7px;}
+  .call .tag{font-weight:700; font-size:11px; letter-spacing:.06em; text-transform:uppercase; display:block; margin-bottom:3px;}
+  .why{background:var(--why-bg); border-color:var(--why-bar);} .why .tag{color:var(--why-bar);}
+  .brk{background:var(--break-bg); border-color:var(--break-bar);} .brk .tag{color:var(--break-bar);}
+  .incode{background:var(--incode-bg); border-color:var(--incode-bar); font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace; font-size:13px;}
+  .incode .tag{color:var(--incode-bar); font-family:-apple-system,sans-serif;} .incode .path{color:var(--accent); font-weight:600;}
+  .pill{display:inline-block; font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:20px; white-space:nowrap;}
+  .pill.ok{background:#e7f6ec; color:#1c7a3f;} .pill.new{background:#fde8e8; color:#b3261e;} .pill.warn{background:#fdeede; color:#a35a12;}
+  .meta{color:var(--muted); font-size:13.5px; margin:2px 0 0;}
+  .flow{display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin:16px 0 6px;}
+  .flow .node{flex:1 1 0; min-width:130px; border:1px solid var(--line); background:#fff; border-radius:9px; padding:10px 11px; text-align:center;}
+  .flow .node b{display:block; font-size:13.5px;} .flow .node span{font-size:11.5px; color:var(--muted);}
+  .flow .arrow{display:flex; align-items:center; padding:0 6px; color:var(--muted); font-size:20px;}
+  hr{border:0; border-top:1px solid var(--line); margin:34px 0;}
+  @media (max-width:880px){ .wrap{grid-template-columns:1fr} nav.toc{display:none} main{padding:28px 18px 80px} }
+  @media print{ nav.toc{display:none} .wrap{display:block} main{max-width:100%; padding:0} a.x{border:0} .call,table,.flow .node{break-inside:avoid} body{font-size:10.5pt} }
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="toc">
+  <div class="brand">JPS · Data Model</div>
+  <a href="#top">ION service-log — raw shape</a>
+  <a class="sub" href="#rules">Decided: tag map &amp; rules</a>
+  <a class="sub" href="#pull">How the raw shape is pulled</a>
+  <a class="sub" href="#core">Core → visit row</a>
+  <a class="sub" href="#readings">Readings → chem_readings</a>
+  <a class="sub" href="#checklist">Checklist → visit_tasks</a>
+  <a class="sub" href="#consumables">Consumables → consumables_usage</a>
+  <a class="sub" href="#classify">Backfilling the canonical link</a>
+  <a class="sub" href="#aliases">Alias coverage &amp; what's NEW</a>
+  <a class="sub" href="#decisions">Open decisions</a>
+  <div class="tools">
+    <button onclick="window.print()">Print</button>
+  </div>
+</nav>
+
+<main id="top">
+  <div class="kicker">JPS · ION boundary · field dictionary</div>
+  <h1>ION service-log — the raw shape</h1>
+  <p class="lead">Every field the per-day log pull returns from ION, and which of our tables it feeds. This is
+  the input to the <strong>normalize-after</strong> step: the API pulls these faithfully; a separate function
+  classifies each into <a class="x" href="visit.html">visit</a> / <code>chem_readings</code> /
+  <code>visit_tasks</code> / <code>consumables_usage</code> using the alias tables.</p>
+
+  <div class="call why">
+    <span class="tag">Method &amp; coverage</span>
+    Compiled by probing <strong>30 logs across 10 distinct ION service profiles</strong> (CHEMICAL TESTING,
+    FLAT RATE, FOUNTAIN, GREEN POOL, ONE TIME, POOL MAINTENANCE tiers; pools, spas, fountains, kiddie, etc.).
+    Frequencies below are "appeared in N of 30 logs." Rare profiles may add fields not seen here — which is
+    exactly why normalization auto-appends unseen labels rather than hard-coding a list.
+  </div>
+
+  <h2 id="pull">How the raw shape is pulled</h2>
+  <div class="flow">
+    <div class="node"><b>list_day_logs(day)</b><span>customerLogDetails.cfm</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>per log: LogID + calendarID</b><span>+ customer, service, tech</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>get_log_detail(LogID)</b><span>addLog.cfm form</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>the fields below</b><span>core + field&lt;n&gt; + item&lt;n&gt;</span></div>
+  </div>
+  <div class="call brk"><span class="tag">The field ids are NOT stable — key on the LABEL</span>
+    The same reading/task gets a different <code>field&lt;digits&gt;</code> id under different service profiles
+    (e.g. "Cleaned Filter" = <code>field14</code> in one profile, a different id in another). Always read the
+    field's <strong>row label</strong>, never the numeric id. Verified across all 10 profiles in the sample.</p>
+  </div>
+
+  <h2 id="rules">Decided — ingest tag map &amp; rules</h2>
+  <p>Finalized 2026-06-09. Ingest classifies each field by its <strong>HTML control</strong> (no canonical
+  lookup needed at ingest); every detail row stores the <strong>raw name + value + a nullable canonical FK</strong>
+  that is backfilled afterward.</p>
+  <table>
+    <tr><th>What ION sends</th><th>Tag → table</th></tr>
+    <tr><td>Yes/blank <strong>radio</strong> group (<code>field&lt;n&gt;</code>)</td><td><strong>checklist</strong> → <code>visit_tasks</code> (<code>name</code> + <code>checklist_id</code> NULL)</td></tr>
+    <tr><td><strong>select or text</strong> field (<code>field&lt;n&gt;</code>) — anything not yes/no</td><td><strong>readings</strong> → <code>visit_readings</code> (tall: <code>name</code>, <code>value</code>, <code>reading_id</code> NULL)</td></tr>
+    <tr><td><code>item&lt;n&gt;</code> with qty &gt; 0</td><td><strong>consumables</strong> → <code>consumables_usage</code> (raw id/name + <code>item_id</code> NULL)</td></tr>
+    <tr><td>known core inputs (LogID, EventID, times, submittedBy, comment, failureid…)</td><td><strong>general</strong> → the visit row</td></tr>
+    <tr><td>config / plumbing / billing-state inputs</td><td><strong>ignore</strong></td></tr>
+  </table>
+
+  <div class="call why"><span class="tag">Two rules that make this work</span>
+    <strong>1. Readings are tall.</strong> One row per reading per visit —
+    <code>visit_readings(visit_id, name, value, reading_id→reading_definitions NULL)</code> — same shape as
+    checklist and consumables; never a widening column set. <strong>2. Name now, FK later.</strong> Ingest writes
+    the raw ION label and leaves the canonical FK NULL; after the full load a matching pass fills the FK where the
+    name maps to a definition. Unmatched rows stay with a NULL FK — captured, just outside the normalized analysis set.</p>
+  </div>
+
+  <h3>Every visit must link to a task</h3>
+  <p>The log's <code>EventID</code> (= the ION task) is stored as <code>ion_task_id</code> on <strong>every</strong>
+  visit, unconditionally. <code>task_id</code> (our FK) is resolved where the task exists and left NULL otherwise —
+  <em>for now</em>. After a load, EventIDs not yet in <code>maintenance.tasks</code> are <strong>looked up in ION
+  and inserted</strong> (task + schedule), then <code>task_id</code> is backfilled — so every visit ends up linked.
+  Once the daily puller is in place, "<code>task_id</code> present" becomes a <strong>required</strong> check.</p>
+
+  <h3>The tag buckets</h3>
+  <p><strong>General</strong> (→ visit row): <code>LogID</code>, <code>calendarID</code>, <code>EventID</code>,
+  <code>TaskInvoiceID</code>, <code>ConsumableInvoiceID</code>, <code>CustomerID</code>, <code>LocID</code>,
+  <code>ScheduledDate</code>, <code>LogDate</code>, <code>timeinvalue</code>, <code>timeoutvalue</code>,
+  <code>InvoiceType</code>, <code>ServiceProfile</code>, <code>OriginalFailureID</code>, <code>submittedBy</code> (tech),
+  <code>comment</code> (notes), <code>failureid</code> (non-service reason).</p>
+  <p><strong>Ignore</strong>: <code>WOadd</code>, <code>SendLogEmail</code>, <code>CanSendEmail</code>,
+  <code>CanReceiveEmail</code>, <code>NonServiceEmailByTask</code>, <code>TaskLocked</code>,
+  <code>ConsumablesLocked</code>, <code>InvoiceConsumables</code>, <code>InvoiceAllVisits</code>, <code>Source</code>,
+  <code>OfficeID</code> (office comes from the customer, not the log), <code>OriginalLogDate</code>,
+  <code>wotempid</code>, <code>LogSubmit</code>. Read only as <em>profile metadata</em> when building canon:
+  <code>fieldlist</code>, <code>ReqFieldList</code>, <code>ReqLabelList</code>, <code>itemlist</code>;
+  <code>recurringNote</code> is task-level, not visit.</p>
+  <p class="meta"><strong>Readings</strong> and <strong>checklist</strong> are the <code>field&lt;n&gt;</code> labels
+  in the per-category tables below. By the not-yes/no→readings rule, "Customer Tabs", the <em>Adjustment</em> fields,
+  tank levels, Resident's Chemicals, % Salt Output, ORP, and "Emergency Phone Working?" are all <strong>readings</strong>
+  — even though some were historically filed as tasks.</p>
+
+  <h2 id="core">Core fields → the visit row</h2>
+  <p>Present on every log (all 30/30 unless noted). These populate <code>maintenance.visits</code> directly.</p>
+  <table>
+    <tr><th>ION field</th><th>Source</th><th>Our column / use</th></tr>
+    <tr><td><code>LogID</code></td><td>list_day_logs</td><td><code>ion_log_id</code> — the visit's unique id (dedup key)</td></tr>
+    <tr><td><code>calendarID</code></td><td>list_day_logs</td><td><code>ion_calendar_id</code></td></tr>
+    <tr><td><code>EventID</code></td><td>addLog</td><td><code>ion_task_id</code> → resolve to <code>task_id</code> (the task)</td></tr>
+    <tr><td><code>TaskInvoiceID</code></td><td>addLog</td><td>the QBO invoice DocNumber it billed under (reconciliation key)</td></tr>
+    <tr><td><code>ConsumableInvoiceID</code></td><td>addLog</td><td>invoice the consumables billed under</td></tr>
+    <tr><td><code>CustomerID</code>, <code>LocID</code></td><td>addLog</td><td>ION customer / location (resolution aids)</td></tr>
+    <tr><td><code>ScheduledDate</code>, <code>LogDate</code></td><td>addLog</td><td><code>scheduled_date</code> / <code>visit_date</code></td></tr>
+    <tr><td><code>timeinvalue</code>, <code>timeoutvalue</code></td><td>addLog</td><td><code>started_at</code> / <code>ended_at</code>; drive <code>is_serviceable</code></td></tr>
+    <tr><td><code>InvoiceType</code></td><td>addLog</td><td><code>billing_method</code> input</td></tr>
+    <tr><td><code>ServiceProfile</code></td><td>addLog</td><td>which field set this log uses (10 distinct in sample)</td></tr>
+    <tr><td><code>OriginalFailureID</code></td><td>addLog (2/30)</td><td>set when the visit is a make-up for a prior failure</td></tr>
+  </table>
+
+  <h2 id="readings">Readings → <code>chem_readings</code></h2>
+  <p>Measurements. They arrive as <strong>either</strong> a <code>&lt;select&gt;</code> (dropdown) or an
+  <code>&lt;input type=text&gt;</code> — the HTML control is not meaningful; both are readings. Canonical names
+  come from <code>ion.reading_definitions</code> (41 catalogued).</p>
+  <table>
+    <tr><th>Raw label (addLog)</th><th>Seen</th><th>Control</th><th>Canonical</th><th>Resolves by</th></tr>
+    <tr><td>pH</td><td>30</td><td>select</td><td><code>ph</code></td><td>alias <span class="pill ok">ok</span></td></tr>
+    <tr><td>Free Chlorine</td><td>30</td><td>select</td><td><code>free_chlorine</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>Total Chlorine</td><td>28</td><td>select</td><td><code>total_chlorine</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>Total Alkalinity</td><td>30</td><td>select</td><td><code>total_alkalinity</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>Cyanuric Acid</td><td>30</td><td>select</td><td><code>cyanuric_acid</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>Calcium Hardness</td><td>28</td><td>select</td><td><code>calcium_hardness</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>Temperature</td><td>26</td><td>select</td><td><code>temperature</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>Phosphates</td><td>22</td><td>select</td><td><code>phosphates</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>Salinity</td><td>14</td><td>text</td><td><code>salinity</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>Total Dissolved Solids</td><td>13</td><td>text</td><td><code>total_dissolved_solids</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>FILTER PSI BEFORE / AFTER</td><td>18</td><td>text</td><td><code>filter_psi_before</code> / <code>_after</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>FLOW METER GPM</td><td>8</td><td>text</td><td><code>flow_meter_gpm</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>pH / Alkalinity / Chlorine / Calcium / Stabilizer Adjustment</td><td>3</td><td>text</td><td><code>*_adjustment</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>Acid / Chlorine tank level</td><td>2</td><td>text</td><td><code>acid_tank_level</code> / <code>chlorine_tank_level</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>Resident's Chemicals</td><td>2</td><td>text</td><td><code>residents_chemicals</code></td><td>slug <span class="pill ok">ok</span></td></tr>
+    <tr><td>% SALT OUTPUT</td><td>12</td><td>select</td><td><code>salt_output_pct</code></td><td>needs alias <span class="pill new">NEW</span></td></tr>
+    <tr><td>Current Filter PSI</td><td>29</td><td>select</td><td><code>filter_psi</code></td><td>needs alias <span class="pill new">NEW</span></td></tr>
+    <tr><td>OXIDATION-REDUCTION POTENTIAL</td><td>3</td><td>text</td><td><code>orp</code></td><td>needs alias <span class="pill new">NEW</span></td></tr>
+    <tr><td>Emergency Phone Working?</td><td>8</td><td>select</td><td>— (not catalogued)</td><td>NEW reading/inspection <span class="pill new">NEW</span></td></tr>
+    <tr><td>Tablets</td><td>9</td><td>text</td><td><code>tablets</code></td><td>slug — but is it a reading or dosing? <span class="pill warn">classify</span></td></tr>
+  </table>
+  <div class="call brk"><span class="tag">Structural gap — readings exceed chem_readings</span>
+    16+ distinct readings appear here, but <code>maintenance.chem_readings</code> has only <strong>7 columns</strong>
+    (<code>ph, free_chlorine, total_chlorine, alkalinity, cya, salt, calcium_hardness</code>). The
+    <code>ion.reading_definitions</code> catalog has <strong>41</strong>. <strong>Decided: readings go tall</strong> —
+    a new <code>visit_readings(visit_id, name, value, reading_id→reading_definitions NULL)</code>, one row per reading,
+    name now / FK later. <code>chem_readings</code>' 7 columns are superseded for the log path. See
+    <a class="x" href="#rules">tag map &amp; rules</a>.</p>
+  </div>
+
+  <h2 id="checklist">Checklist → <code>visit_tasks</code></h2>
+  <p><code>&lt;input type=radio&gt;</code> Yes/blank groups; checked "Yes" = done. Canonical from
+  <code>ion.task_definitions</code> (23). All observed labels slug straight to canonical.</p>
+  <table>
+    <tr><th>Raw label</th><th>Seen</th><th>Canonical</th></tr>
+    <tr><td>Cleaned Filter</td><td>26</td><td><code>cleaned_filter</code> <span class="pill ok">ok</span></td></tr>
+    <tr><td>Vacuum Pool</td><td>21</td><td><code>vacuum_pool</code> <span class="pill ok">ok</span></td></tr>
+    <tr><td>Brushed Pool</td><td>21</td><td><code>brushed_pool</code> <span class="pill ok">ok</span></td></tr>
+    <tr><td>Service Pump</td><td>15</td><td><code>service_pump</code> <span class="pill ok">ok</span></td></tr>
+    <tr><td>Emptied Pump / Skimmer Baskets</td><td>13</td><td><code>emptied_pump_baskets</code> / <code>emptied_skimmer_baskets</code> <span class="pill ok">ok</span></td></tr>
+    <tr><td>Emptied Cleaner Bag</td><td>11</td><td><code>emptied_cleaner_bag</code> <span class="pill ok">ok</span></td></tr>
+    <tr><td>Cleaned Salt Cell</td><td>10</td><td><code>cleaned_salt_cell</code> <span class="pill ok">ok</span></td></tr>
+    <tr><td>Safety Inspection</td><td>6</td><td><code>safety_inspection</code> <span class="pill ok">ok</span></td></tr>
+  </table>
+
+  <h2 id="consumables">Consumables → <code>consumables_usage</code></h2>
+  <p>Hidden <code>item&lt;digits&gt;</code> inputs whose value (quantity) &gt; 0. The number in the name is ION's
+  item id. In the sample, 7/30 logs had consumables (12 item lines total).</p>
+  <div class="call why"><span class="tag">Resolved — the name comes off the log row</span>
+    Each used item renders as <code>&lt;td&gt;&lt;strong&gt;SALT 40LB&lt;/strong&gt;&lt;br&gt;desc&lt;/td&gt;</code>
+    next to its hidden <code>item&lt;id&gt;</code> qty input, so <code>get_log_detail</code> reads the <strong>name</strong>
+    straight off the log — authoritative and complete, no catalog dependency, and it covers ids the mobile
+    <code>qbitems.cfm</code> catalog snapshot misses. Ingest stores <code>ion_item_id</code> + <code>item_name</code>
+    + quantity. The only post-load step is matching <code>item_name</code> → <code>public.items</code> to set the
+    canonical <code>item_id</code> FK (no <code>ion_item_id</code> column on <code>public.items</code>; match by name).</p>
+  </div>
+
+  <h2 id="classify">Backfilling the canonical link (the after-step)</h2>
+  <p>Ingest tags by control (see <a class="x" href="#rules">rules</a>) and stores the <strong>raw name</strong> with a
+  NULL canonical FK. After the full load, a matching pass fills the FK:</p>
+  <table>
+    <tr><th>Row type</th><th>Match raw name against</th><th>Sets FK</th></tr>
+    <tr><td>reading</td><td><code>ion.reading_aliases</code> → <code>reading_definitions</code> (or slug)</td><td><code>visit_readings.reading_id</code></td></tr>
+    <tr><td>checklist</td><td><code>ion.task_aliases</code> → <code>task_definitions</code></td><td><code>visit_tasks.checklist_id</code></td></tr>
+    <tr><td>consumable</td><td>ION item id / name → <code>public.items</code></td><td><code>consumables_usage.item_id</code></td></tr>
+    <tr><td>no match</td><td>—</td><td>FK stays NULL; append the raw name to the alias table as pending → assign a canonical later</td></tr>
+  </table>
+  <p class="meta">A label ION renders inconsistently (full label vs short code, select vs text) never blocks ingest —
+  it just may not get a canonical FK until an alias is added. Analysis runs off the FK; everything is captured regardless.</p>
+
+  <h2 id="aliases">Alias coverage &amp; what's NEW</h2>
+  <p>The alias tables today hold <strong>bulk-report short codes</strong> (<code>Alk→total_alkalinity</code>,
+  <code>FC→free_chlorine</code>); <code>addLog</code> emits <strong>full labels</strong>. Most full labels slug
+  straight to the canonical name, but these need explicit alias rows added before/with the backfill:</p>
+  <table>
+    <tr><th>addLog label</th><th>Canonical</th><th>Why slug fails</th></tr>
+    <tr><td><code>% SALT OUTPUT</code></td><td><code>salt_output_pct</code></td><td>slug = <code>salt_output</code></td></tr>
+    <tr><td><code>Current Filter PSI</code></td><td><code>filter_psi</code></td><td>slug = <code>current_filter_psi</code></td></tr>
+    <tr><td><code>OXIDATION-REDUCTION POTENTIAL</code></td><td><code>orp</code></td><td>slug = <code>oxidation_reduction_potential</code></td></tr>
+    <tr><td><code>Emergency Phone Working?</code></td><td>— (decide: new reading or inspection task)</td><td>not in any catalog</td></tr>
+  </table>
+  <p class="meta">Checklist labels and the ~15 other readings above all resolve by slug or existing alias — so the
+  "build the canonical tables from observed data" step is small: add the handful of full-label aliases the
+  normalizer reports as unmatched, then re-run.</p>
+
+  <h2 id="decisions">Decisions (resolved 2026-06-09) &amp; remaining</h2>
+  <ol>
+    <li><strong>Readings store: TALL.</strong> <code>visit_readings(visit_id, name, value, reading_id→reading_definitions NULL)</code> — one row per reading, name now / FK later. Supersedes the 7-column <code>chem_readings</code> for the log path.</li>
+    <li><strong>Classification: by control.</strong> Yes/no radios → checklist; everything else (select/text) → readings; <code>item&lt;n&gt;</code> → consumables. "Customer Tabs", adjustments, tank levels, % Salt Output, ORP, "Emergency Phone Working?" are all <strong>readings</strong>.</li>
+    <li><strong>Office:</strong> not captured from the log — derived from the customer. <code>OfficeID</code> ignored.</li>
+    <li><strong>Every visit links to a task.</strong> <code>ion_task_id</code> (EventID) on every visit; unknown EventIDs looked up in ION and inserted into <code>maintenance.tasks</code>/<code>task_schedules</code> after the load, then <code>task_id</code> backfilled; required once the daily puller is live.</li>
+    <li><strong>Remaining:</strong> consumables item resolution (no <code>ion_item_id</code> on <code>public.items</code>; 590 unresolved) needs an item lookup/alias decision; add the 3 new reading aliases (<code>% SALT OUTPUT</code>, <code>Current Filter PSI</code>, <code>OXIDATION-REDUCTION POTENTIAL</code>).</li>
+  </ol>
+
+  <hr>
+  <p class="meta">Sources: live probe of 30 ion_log visits' <code>addLog.cfm</code> forms (2026-06-09);
+  <code>ion.reading_definitions</code> (41) / <code>reading_aliases</code> (38) / <code>task_definitions</code> (23)
+  / <code>task_aliases</code> (23); <code>maintenance.chem_readings</code> / <code>visit_tasks</code> /
+  <code>consumables_usage</code> schemas. Related: <a class="x" href="visit.html">visit.html</a> ·
+  <a class="x" href="ion-api.html">ion-api.html</a>.</p>
+</main>
+</div>
+</body>
+</html>

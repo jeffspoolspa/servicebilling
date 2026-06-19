@@ -48,3 +48,17 @@ supabase/.temp/
 
 # one-shot script outputs (regenerated each run)
 ingest_*.json
+
+# structurizr local viewer artifacts (derived from workspace.dsl)
+docs/architecture/.structurizr/
+docs/architecture/workspace.json
+
+# obsidian editor state
+.obsidian/
+
+# python bytecode (Windmill script caches)
+__pycache__/
+*.pyc
+
+# one-shot script run artifacts (regenerated each run)
+scripts/*.log

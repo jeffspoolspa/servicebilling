@@ -56,9 +56,14 @@
 └──────────────────────────┘
 ```
 
-### Container diagram (C4 level 1 — the stable skeleton)
+### Container diagram (C4 container level — the stable skeleton)
 
 This is the container-level map a flow doc's Layer 0 ([FLOW_TEMPLATE.md](conventions/FLOW_TEMPLATE.md)) places itself against. The ASCII box above is its text-equivalent fallback (house rule: every Mermaid diagram is paired with text).
+
+The same model at every C4 zoom level (context, containers, components, key flows) is
+maintained as a Structurizr workspace: [architecture/workspace.dsl](architecture/workspace.dsl)
+— see [architecture/README.md](architecture/README.md) to render it. Same drift rule as this
+doc: change reality, change the DSL in the same PR.
 
 ```mermaid
 flowchart LR
@@ -203,7 +208,8 @@ Pool maintenance: scheduled visits, technician routes, chemistry readings, consu
 - ION flows: `f/ION/visits`, `f/ION/work_orders`, `f/ION/consumables_usage`, `f/ION/refresh_stale_work_orders`
 - `f/ION/_lib/*` — shared session, parser, normalize, upsert
 - `f/ION/_discover/*` — diagnostic probes (consider archiving)
-- `f/google_maps/normalize_customer_addresses`, `f/google_maps/geocode_customers`
+- `f/google_maps/geocode_service_locations` — geocodes the pool address onto `public.service_locations`, validating each result against the SE-GA/NE-FL service bbox (rejects/flags out-of-area geocodes). Source of truth for route geocoding.
+- `f/google_maps/geocode_customers` [deprecated], `f/google_maps/normalize_customer_addresses` — legacy billing-address geocode onto `public."Customers"`; superseded by `geocode_service_locations` (kept only as a fallback account-level pin, with a bbox guard).
 
 **Database tables**:
 - `maintenance.visits` — central. FK → work_orders, employees, service_locations, tasks, task_schedules
@@ -266,7 +272,7 @@ The shared "customer record" and "work order" entities used by every other domai
 - `public."Customers"` — **THE central customer record**. ~8,876 rows. FK target for tons of tables. `pm_last_checked_at` column used by PM-refresh trigger.
 - `public.work_orders` — ~3,179 rows. FK → employees, billing.invoices (via qbo_invoice_id)
 - `public.work_orders_history` — change history (28k rows)
-- `public.service_locations` — addresses per customer
+- `public.service_locations` — service (pool) addresses per customer; holds the route geocode (`latitude`, `longitude`, `geocoded_at`, `geocode_source`, `geocode_status`). See [service-location.md](entities/service-location.md).
 - `public.employees` — staff (FK → branches, departments)
 - `public.branches`, `public.departments`, `public.locations` — config/lookup tables
 - `public.pools` — pool records per service location

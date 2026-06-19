@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ION API — the boundary we pull from | JPS model</title>
+<style>
+  :root{
+    --bg:#fbfbfa; --fg:#1c1c1a; --muted:#6b6b66; --line:#e4e3df;
+    --accent:#0b6e6e; --accent-soft:#e6f1f1;
+    --code-bg:#f3f2ef; --code-fg:#3a3a36;
+    --why-bg:#eef4ff; --why-bar:#3b6fd4;
+    --break-bg:#fff4ec; --break-bar:#d4761f;
+    --incode-bg:#f3f2ef; --incode-bar:#7a7a72;
+    --maxw:880px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0; background:var(--bg); color:var(--fg);
+    font:16px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif; -webkit-font-smoothing:antialiased;}
+  .wrap{display:grid; grid-template-columns:248px minmax(0,1fr); gap:0; max-width:1240px; margin:0 auto;}
+  nav.toc{position:sticky; top:0; align-self:start; height:100vh; overflow:auto; border-right:1px solid var(--line); padding:26px 18px 40px;}
+  nav.toc .brand{font-weight:700; font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:14px;}
+  nav.toc a{display:block; color:var(--fg); text-decoration:none; padding:5px 8px; border-radius:6px; font-size:14px; line-height:1.35;}
+  nav.toc a:hover{background:var(--accent-soft); color:var(--accent);}
+  nav.toc .sub{padding-left:14px; font-size:13px; color:var(--muted);}
+  nav.toc .tools{margin-top:18px; padding-top:14px; border-top:1px solid var(--line); display:flex; gap:8px; flex-wrap:wrap;}
+  nav.toc button{font:inherit; font-size:12px; cursor:pointer; border:1px solid var(--line); background:#fff; color:var(--fg); border-radius:6px; padding:5px 9px;}
+  nav.toc button:hover{border-color:var(--accent); color:var(--accent);}
+  main{padding:42px 52px 120px; max-width:var(--maxw);}
+  h1{font-size:31px; line-height:1.15; margin:0 0 4px;}
+  .kicker{color:var(--accent); font-weight:600; font-size:13px; letter-spacing:.07em; text-transform:uppercase; margin-bottom:10px;}
+  h2{font-size:21px; margin:46px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line);}
+  h3{font-size:16px; margin:26px 0 8px;}
+  p{margin:11px 0;} .lead{font-size:18px; color:#333;}
+  a.x{color:var(--accent); text-decoration:none; border-bottom:1px solid var(--accent-soft);}
+  code,.mono{font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em;}
+  code{background:var(--code-bg); color:var(--code-fg); padding:1px 5px; border-radius:4px;}
+  abbr[title]{text-decoration:underline dotted var(--muted); text-underline-offset:3px; cursor:help;}
+  ul,ol{margin:11px 0; padding-left:22px;} li{margin:5px 0;}
+  table{border-collapse:collapse; width:100%; margin:14px 0; font-size:14.5px;}
+  th,td{border:1px solid var(--line); padding:8px 11px; text-align:left; vertical-align:top;}
+  th{background:#f4f4f1; font-weight:650;} td code{font-size:.84em;}
+  .call{border-left:4px solid var(--line); border-radius:0 8px 8px 0; padding:11px 15px; margin:16px 0; font-size:14.7px;}
+  .call .tag{font-weight:700; font-size:11px; letter-spacing:.06em; text-transform:uppercase; display:block; margin-bottom:3px;}
+  .why{background:var(--why-bg); border-color:var(--why-bar);} .why .tag{color:var(--why-bar);}
+  .brk{background:var(--break-bg); border-color:var(--break-bar);} .brk .tag{color:var(--break-bar);}
+  .incode{background:var(--incode-bg); border-color:var(--incode-bar); font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace; font-size:13px;}
+  .incode .tag{color:var(--incode-bar); font-family:-apple-system,sans-serif;} .incode .path{color:var(--accent); font-weight:600;}
+  details{border:1px solid var(--line); border-radius:8px; padding:0 15px; margin:14px 0; background:#fff;}
+  details[open]{padding-bottom:8px;}
+  summary{cursor:pointer; font-weight:600; padding:11px 0; list-style:none;}
+  summary::-webkit-details-marker{display:none;}
+  summary::before{content:"\25B8"; color:var(--accent); display:inline-block; width:1.1em; transition:transform .15s;}
+  details[open] summary::before{transform:rotate(90deg);}
+  /* contract block */
+  .contract{border:1px solid var(--line); border-radius:10px; background:#fff; padding:4px 16px 12px; margin:16px 0;}
+  .contract .sig{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace; font-size:14px; background:var(--code-bg); border-radius:7px; padding:10px 12px; margin:12px 0; color:#222; overflow:auto;}
+  .contract dl{display:grid; grid-template-columns:128px 1fr; gap:4px 14px; margin:6px 0; font-size:14.5px;}
+  .contract dt{font-weight:650; color:var(--muted);} .contract dd{margin:0;}
+  /* pipeline diagram */
+  .pipe{display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin:18px 0 6px;}
+  .pipe .node{flex:1 1 0; min-width:118px; border:1px solid var(--line); background:#fff; border-radius:9px; padding:10px 11px; text-align:center;}
+  .pipe .node b{display:block; font-size:13.5px;} .pipe .node span{font-size:11.5px; color:var(--muted);}
+  .pipe .node.box{border-color:var(--accent); background:var(--accent-soft);} .pipe .node.box b{color:var(--accent);}
+  .pipe .node.ext{border-style:dashed; color:var(--muted);}
+  .pipe .arrow{display:flex; align-items:center; padding:0 6px; color:var(--muted); font-size:20px;}
+  .pill{display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:20px;}
+  .pill.live{background:#e7f6ec; color:#1c7a3f;} .pill.warn{background:#fdeede; color:#a35a12;}
+  .meta{color:var(--muted); font-size:13.5px; margin:2px 0 0;}
+  hr{border:0; border-top:1px solid var(--line); margin:34px 0;}
+  @media (max-width:880px){ .wrap{grid-template-columns:1fr} nav.toc{display:none} main{padding:28px 20px 80px} .contract dl{grid-template-columns:1fr} }
+  @media print{
+    nav.toc{display:none} .wrap{display:block} main{max-width:100%; padding:0}
+    details{border:0; padding:0} details summary{display:none} details > *:not(summary){display:block!important}
+    a.x{border:0} .call,.contract,table,.pipe .node{break-inside:avoid} body{font-size:11.5pt}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="toc">
+  <div class="brand">JPS · Data Model</div>
+  <a href="#top">ION API — the boundary</a>
+  <a class="sub" href="#what">What this is</a>
+  <a class="sub" href="#shape">The boundary, in one picture</a>
+  <a class="sub" href="#endpoints">Endpoints (what we call)</a>
+  <a class="sub" href="#output">Output contract: RecurringTask</a>
+  <a class="sub" href="#visits">Visits: per-day log pull</a>
+  <a class="sub" href="#internals">Inside the box (for debugging)</a>
+  <a class="sub" href="#config">Config &amp; secrets</a>
+  <a class="sub" href="#debug">Failure → where to look</a>
+  <a class="sub" href="#add">Adding a new ION pull</a>
+  <div class="tools">
+    <button onclick="document.querySelectorAll('details').forEach(d=>d.open=true)">Expand all</button>
+    <button onclick="document.querySelectorAll('details').forEach(d=>d.open=false)">Collapse</button>
+    <button onclick="window.print()">Print</button>
+  </div>
+</nav>
+
+<main id="top">
+  <div class="kicker">JPS · External Boundary</div>
+  <h1>ION API — the boundary we pull from</h1>
+  <p class="lead">ION Pool Care is an external ColdFusion app with <strong>no real API</strong>. We wrap it in
+  a thin, typed boundary so the rest of the system calls a <em>function</em> — passes arguments, gets typed
+  rows back — and never touches ION's internals.</p>
+
+  <div class="call why">
+    <span class="tag">What this doc is for (and what it deliberately isn't)</span>
+    This documents the <strong>contract</strong>: which function we call, what we pass, what we get back, and
+    where each piece lives — so when a pull breaks we know where to look. It does <strong>not</strong> explain
+    how ION works internally (its sessions, ColdFusion, scraping quirks) — that's ION's concern and the
+    <code>ion-automation</code> skill's. Treat everything past the boundary as a black box.
+  </div>
+
+  <h2 id="what">What this is</h2>
+  <p>Three thin layers of our own code stand between a caller and ION. A caller only ever touches the top one.</p>
+  <ul>
+    <li><strong>Endpoints</strong> (<code>f/ION/api/*</code>) — one function per thing you can pull. This is the contract.</li>
+    <li><strong>Reports client</strong> (<code>f/ION/_lib/reports.ts</code>) — priming, fetching, and HTML→typed normalization.</li>
+    <li><strong>Session</strong> (<code>f/ION/_lib/session.ts</code>, <code>session_cache.ts</code>) — login + cookies, cached and reused.</li>
+  </ul>
+
+  <h2 id="shape">The boundary, in one picture</h2>
+  <div class="pipe">
+    <div class="node"><b>Your code</b><span>flow / script</span></div>
+    <div class="arrow">→</div>
+    <div class="node box"><b>list_recurring_tasks</b><span>the puller (black box)</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>RecurringTask[]</b><span>typed rows</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>upsert_tasks</b><span>our mapper</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>maintenance.tasks</b><span>+ task_schedules</span></div>
+  </div>
+  <p class="meta">The puller talks to ION (dashed = external) behind the box; callers see only
+  <code>filters → RecurringTask[]</code>. The mapper is <em>our</em> side, documented in
+  <a class="x" href="task.html#extract">task.html</a>.</p>
+
+  <h2 id="endpoints">Endpoints — what we call</h2>
+  <p>Recurring-task pulls (the ones <a class="x" href="task.html">task.html</a> depends on):</p>
+  <div class="contract">
+    <h3>Full pull <span class="pill live">in use</span></h3>
+    <div class="sig">main(filters?: Record&lt;string, string|number&gt; = {}) → Promise&lt;RecurringTask[]&gt;</div>
+    <dl>
+      <dt>Where</dt><dd><code>f/ION/api/list_recurring_tasks.ts</code></dd>
+      <dt>Pass</dt><dd><code>filters</code> — optional <code>{ techid, OfficeID, serviceType }</code>; each defaults to <code>0</code> = all. Usually omit.</dd>
+      <dt>Returns</dt><dd>the complete normalized array (~487 rows, ~350&nbsp;KB) — see <a class="x" href="#output">output contract</a></dd>
+      <dt>Used by</dt><dd>the <code>recurring_tasks</code> flow, step <strong>a</strong> → feeds <code>upsert_tasks</code></dd>
+      <dt>Cost</dt><dd>pure HTTP if the session cache is warm; launches chromium only to re-login when stale</dd>
+    </dl>
+  </div>
+  <div class="contract">
+    <h3>Light health check</h3>
+    <div class="sig">main() → Promise&lt;{ count: number, sample: RecurringTask }&gt;</div>
+    <dl>
+      <dt>Where</dt><dd><code>f/ION/api/get_recurring_tasks.ts</code></dd>
+      <dt>Use</dt><dd>ad-hoc "is the pull alive and how many rows" without moving 350&nbsp;KB</dd>
+    </dl>
+  </div>
+  <p class="meta">Sibling endpoints exist for visits and work orders (same composition); they get their own
+  rows in this doc as we document those flows.</p>
+
+  <h2 id="output">Output contract — <code>RecurringTask</code></h2>
+  <p>23 plain string fields per row (defined in <code>f/ION/_lib/reports.ts:RecurringTask</code>). Everything
+  is a string as pulled; typing/cleaning happens in the mapper. The fields the mapper actually reads are
+  bolded.</p>
+  <table>
+    <tr><th>Field</th><th>Field</th><th>Field</th></tr>
+    <tr><td><b>ionTaskId</b> (identity)</td><td><b>ionCustId</b></td><td>customerName</td></tr>
+    <tr><td>serviceAddress, city, state, zip</td><td><b>billingType</b></td><td><b>serviceRepeat</b></td></tr>
+    <tr><td><b>taskPrice</b></td><td><b>taskStart</b> / <b>taskEnd</b></td><td>serviceType, serviceProfile</td></tr>
+    <tr><td>customerType, zone</td><td>routeName, seq</td><td>facilityDescription, lockCombo</td></tr>
+    <tr><td>techPay</td><td>lastVisit</td><td>recurringNotes</td></tr>
+  </table>
+  <p class="meta">The non-bold fields are carried into <code>maintenance.tasks.external_data</code> (jsonb) for
+  provenance rather than mapped to columns. The field→column rules are in
+  <a class="x" href="task.html#ion">task.html → How it maps to ION</a>.</p>
+
+  <h2 id="visits">Visits — the per-day log pull</h2>
+  <p>A different ION surface from reports: the <strong>Manage Logs</strong> grid plus the per-log
+  <code>addLog.cfm</code> form. Two endpoints compose into the canonical visit ingestion (used by
+  <a class="x" href="visit.html">visit.html</a>). These live in Windmill and are not mirrored to the repo.</p>
+
+  <div class="contract">
+    <h3>1 &middot; Enumerate a day <span class="pill live">in use</span></h3>
+    <div class="sig">main(date_us: string /* MM/DD/YYYY */, officeid = 0) → Promise&lt;{ date, total, completed, logs[] }&gt;</div>
+    <dl>
+      <dt>Where</dt><dd><code>f/ION/api/list_day_logs.ts</code></dd>
+      <dt>Hits</dt><dd><code>GET /home/customerLogDetails.cfm?…&amp;dayindexsel=MM/DD/YYYY&amp;logset=1</code> — one call, all customers</dd>
+      <dt>Each log</dt><dd><code>log_id</code> (LogID), <code>calendar_id</code>, <code>customer_name</code>, <code>service_type</code>, <code>tech</code>, <code>completed</code> (green bullet), <code>addlog_url</code></dd>
+    </dl>
+  </div>
+  <div class="contract">
+    <h3>2 &middot; Per-log detail <span class="pill live">in use</span></h3>
+    <div class="sig">main(logs: {log_id, calendar_id?}[]) → Promise&lt;{ count, with_event, performed, details[] }&gt;</div>
+    <dl>
+      <dt>Where</dt><dd><code>f/ION/api/get_log_detail.ts</code></dd>
+      <dt>Hits</dt><dd><code>GET /tasks/addLog.cfm?calendarID=…&amp;LogID=…</code> — per log</dd>
+      <dt>Each detail</dt><dd><code>event_id</code> (EventID = task), <code>task_invoice_id</code> (TaskInvoiceID = QBO invoice DocNumber), <code>ion_customer_id</code>, <code>loc_id</code>, <code>scheduled_date</code>, <code>time_in</code>/<code>time_out</code>, <code>serviceable</code>, <code>invoice_type</code>, <code>service_profile</code>, <code>consumables {item_id: qty}</code></dd>
+      <dt>Serviceable</dt><dd><code>time_in present AND NOT (time_out == time_in)</code> — validated against the ION transactions report</dd>
+    </dl>
+  </div>
+  <div class="incode"><span class="tag">Orchestrator (not an endpoint)</span>
+  <span class="path">f/ION/ingest_day_logs</span> composes the two over a date window, resolves EventID → task,
+  prices at the contracted rate, and does a scoped transactional replace into
+  <span class="path">maintenance.visits + consumables_usage</span>. <code>dry_run</code> default.</div>
+  <div class="call why"><span class="tag">Why two calls, not one</span>
+  The day grid (<code>customerLogDetails</code>) is cheap and lists every log, but only the per-log
+  <code>addLog</code> form carries the authoritative <strong>EventID</strong> (task) + <strong>TaskInvoiceID</strong>
+  (invoice) + times. That second hop is what makes attribution exact (100% match) instead of inferred.</div>
+
+  <h2 id="internals">Inside the box — only when debugging</h2>
+  <p>A caller never needs this. A debugger does: the puller is three sub-steps, and a failure lives in exactly one.</p>
+
+  <details>
+    <summary>1. Session — <code>session_cache.getOrRefreshSession(ion)</code></summary>
+    <p>Returns a valid <code>IonSession</code> <code>{ cookies, cfClientId, ionOrigin, capturedAt, expiresAt }</code>.
+    Reuses the cached session (Windmill variable <code>f/ION/session_cache</code>) if fresh — <strong>no browser</strong> —
+    and only logs in via chromium (<code>session.loginToIon</code>, two-stage Fluidra→ION redirect) when stale.
+    Inactivity TTL ~15 min; every successful fetch slides it forward.</p>
+    <div class="incode"><span class="tag">In code</span>
+    <span class="path">f/ION/_lib/session_cache.ts:getOrRefreshSession</span> ·
+    <span class="path">f/ION/_lib/session.ts:loginToIon</span> (throws if Stage-2 redirect misses ionpoolcare.com)</div>
+  </details>
+
+  <details>
+    <summary>2. Prime + fetch — <code>reports.ensureReportsPrimed</code> → <code>fetchRecurringTasksHtml</code></summary>
+    <p>ION report <code>.cfm</code> files read server-side session state the Reports UI sets up; a cold call 500s.
+    <code>ensureReportsPrimed</code> replays the UI's request chain <strong>once per session</strong>, after which
+    any report fetch is plain HTTP. The recurring-tasks report is
+    <code>GET /reports/_xls/RecurringtasksActive.cfm?techid=0&amp;OfficeID=0&amp;serviceType=0</code>.</p>
+    <div class="incode"><span class="tag">In code</span>
+    <span class="path">f/ION/_lib/reports.ts</span> (ensureReportsPrimed, fetchReportHtml, fetchRecurringTasksHtml) ·
+    transport via <span class="path">session.ts:ionFetchText</span></div>
+  </details>
+
+  <details>
+    <summary>3. Normalize — <code>reports.normalizeRecurringTasks(html)</code></summary>
+    <p>Finds the data table by the header marker <code>"Cust ID"</code> (<code>parseReportTable</code>), then maps
+    each row's cells <strong>by position</strong> into a <code>RecurringTask</code> using the fixed
+    <code>RT_COLS</code> order.</p>
+    <div class="call brk"><span class="tag">The one real leak <span class="pill warn">brittle</span></span>
+    Mapping is <strong>positional</strong> and only checks that a <code>"Cust ID"</code> row exists — there's no
+    per-column header assertion. If ION reorders or inserts a column, rows mismap <em>silently</em> (e.g. price
+    lands in the wrong field) with no error thrown. This is the most likely "data looks wrong but nothing
+    crashed" cause. Candidate hardening: assert header names against <code>RT_COLS</code>.</div>
+  </details>
+
+  <h2 id="config">Config &amp; secrets</h2>
+  <table>
+    <tr><th>Name</th><th>What</th></tr>
+    <tr><td><code>f/ION/LOGIN_URL</code>, <code>f/ION/USERNAME</code>, <code>f/ION/PASSWORD</code></td><td>Windmill variables — ION/Fluidra login (read by the endpoints)</td></tr>
+    <tr><td><code>f/ION/session_cache</code></td><td>Windmill variable holding the cached <code>IonSession</code> JSON; delete it to force a fresh login</td></tr>
+    <tr><td><code>u/carter/supabase</code></td><td>Windmill resource — DB connection the mapper writes through</td></tr>
+  </table>
+
+  <h2 id="debug">Failure → where to look</h2>
+  <table>
+    <tr><th>Symptom</th><th>Likely step</th><th>Where to look</th></tr>
+    <tr><td>chromium error / "Stage 2 redirect did not land on ionpoolcare.com"</td><td>login</td><td><code>session.ts:loginToIon</code> (creds in <code>f/ION/*</code>, ION UI changed?)</td></tr>
+    <tr><td><code>IonSessionExpiredError</code> mid-run (redirect to fluidra/login)</td><td>stale session</td><td><code>session.ts:ionFetch</code>; clear <code>f/ION/session_cache</code> to force re-login</td></tr>
+    <tr><td>report returns 500 / login page on a cold call</td><td>priming skipped</td><td><code>reports.ts:ensureReportsPrimed</code></td></tr>
+    <tr><td><code>getRecurringTasks</code> returns <code>[]</code></td><td>normalize</td><td><code>"Cust ID"</code> marker not found — ION changed the report HTML</td></tr>
+    <tr><td>fields shifted / price in the wrong column</td><td>normalize (positional)</td><td><code>reports.ts:RT_COLS</code> — see the leak above</td></tr>
+    <tr><td>rows pulled fine but not in the DB</td><td>mapping</td><td><code>upsert_tasks</code> — see <a class="x" href="task.html#debug">task.html debugging</a></td></tr>
+  </table>
+
+  <h2 id="add">Adding a new ION pull (the pattern)</h2>
+  <ol>
+    <li><strong>Reports client</strong> (<code>f/ION/_lib/reports.ts</code>): add <code>fetch&lt;Thing&gt;Html(session, filters)</code> (the <code>.cfm</code> path + default params), <code>normalize&lt;Thing&gt;(html)</code> (a typed interface + positional column list), and <code>get&lt;Thing&gt;(session, filters)</code> to compose them.</li>
+    <li><strong>Endpoint</strong>: add <code>f/ION/api/list_&lt;thing&gt;.ts</code> whose <code>main(filters)</code> does <code>getOrRefreshSession</code> → <code>get&lt;Thing&gt;</code>. That's the new black-box function.</li>
+    <li><strong>Mapper</strong>: add <code>f/ION/_lib/upsert_&lt;thing&gt;.py</code> turning the typed rows into our tables; default <code>dry_run=true</code>.</li>
+    <li><strong>Flow</strong>: wire step <strong>a</strong> (endpoint) → step <strong>b</strong> (mapper), passing <code>results.a</code> as the rows.</li>
+  </ol>
+  <p class="meta">Priming for a different report <em>family</em> would register its own prime chain in
+  <code>ensureReportsPrimed</code>; the scheduled-tasks/service-events family is already covered.</p>
+
+  <hr>
+  <p class="meta">Sources: <code>f/ION/api/list_recurring_tasks.ts</code>, <code>f/ION/_lib/reports.ts</code>,
+  <code>f/ION/_lib/session.ts</code>, <code>f/ION/_lib/session_cache.ts</code>,
+  <code>f/ION/recurring_tasks.flow</code>. Read the <code>ion-automation</code> skill before changing any ION
+  script. Verified against code 2026-06-09.</p>
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chemical Reconciliation — Brunswick — May 2026</title>
+<style>
+:root{--ink:#1a1f24;--muted:#6b7682;--line:#e3e8ee;--bg:#f6f8fa;--card:#fff;--red:#d23f31;--blue:#2a6fdb;}
+*{box-sizing:border-box}
+body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);margin:0;padding:24px}
+.wrap{max-width:760px;margin:0 auto}
+h1{font-size:21px;margin:0 0 2px}.sub{color:var(--muted);margin:0 0 14px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;border-bottom:2px solid var(--line);padding-bottom:10px}
+.tab{padding:5px 11px;border:1px solid var(--line);background:var(--card);border-radius:16px;cursor:pointer;font-size:12.5px;color:#44505b}
+.tab:hover{border-color:#b9c4cf}.tab.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+h2{font-size:13.5px;margin:18px 0 4px;color:#33404b;text-transform:uppercase;letter-spacing:.03em}
+h2 .mut{text-transform:none;letter-spacing:0;font-weight:400;color:var(--muted)}
+table{border-collapse:collapse;width:100%;background:var(--card);margin:4px 0;font-variant-numeric:tabular-nums}
+th,td{padding:6px 10px;text-align:right;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);background:#fbfcfe}
+td.g.pos{color:var(--red);font-weight:700}td.g.neg{color:var(--blue);font-weight:600}td.g.ok{color:#9aa4ad}
+.none{color:var(--muted);font-style:italic;margin:2px 0 6px}
+@media print{.tab{display:none}}
+</style></head><body><div class="wrap">
+<h1>Chemical Reconciliation — Brunswick, GA</h1>
+<p class="sub">Signed out vs. used · <b>May 2026</b> · per tech. Bulk in base units; specialty &amp; parts in package units.</p>
+<div class="tabs" id="tabs"></div><div id="panels"></div>
+</div>
+<script>
+const D={"month": "May 2026", "techs": ["Aaron Bass", "Aaron Newbauer", "Carlos Vaquerano", "Emmanuel Thornton", "Ernie Stegall II", "Jamie Teston", "Jayden Hinson", "Joshua Carroll", "Korey Felts", "MaryMarie Kidd", "Travis Nelson", "Wesley Grubbs"], "chems": [[1, "CAL HYPO", "lb", "chemical"], [2, "CALCIUM CHLORIDE", "lb", "chemical"], [3, "CHLORINE TABLET", "tab", "chemical"], [4, "CYANURIC ACID", "lb", "chemical"], [5, "LIQUID CLARIFIER (MCB)", "oz", "chemical"], [6, "PHOSPHATE REMOVER (LPE)", "oz", "chemical"], [7, "SODA ASH", "lb", "chemical"], [8, "SODIUM BICARB", "lb", "chemical"], [9, "NO MOR PROBLEMS", "oz", "chemical"], [10, "ENZYME", "oz", "chemical"], [11, "LIQUID CHLORINE", "gal", "chemical"], [12, "MURIATIC ACID", "gal", "chemical"], [13, "OXIDIZER", "lb", "chemical"], [14, "SALT", "lb", "chemical"], [15, "SALT TEST STRIPS", "each", "chemical"], [16, "TILE SOAP", "oz", "chemical"], [17, "CHLORINATOR CHECK VALVE", "each", "part"], [18, "CHLORINATOR CONTROL VALVE", "each", "part"], [19, "CHLORINATOR LID O-RING", "each", "part"], [20, "CHLORINATOR TUBING", "each", "part"], [21, "POLARIS ALL PURPOSE BAG", "each", "part"], [22, "POLARIS SWEEP HOSE CLAMP", "each", "part"], [23, "POLARIS TAIL SCRUBBER", "each", "part"], [24, "PSI GAUGE (BACK MOUNT)", "each", "part"], [25, "PSI GAUGE (BOTTOM MOUNT)", "each", "part"]], "used": [[11, 3, 16], [5, 3, 48], [1, 11, 53], [4, 12, 11], [3, 21, 1], [8, 6, 175], [11, 5, 8], [7, 12, 12], [7, 6, 6], [5, 11, 25], [1, 3, 30], [3, 3, 15], [5, 10, 12], [7, 10, 9], [5, 8, 31], [6, 8, 75], [6, 6, 382], [8, 14, 12], [6, 9, 2], [5, 9, 10], [6, 1, 33], [1, 1, 187], [8, 17, 3], [7, 11, 25], [11, 14, 1], [6, 13, 1], [8, 19, 1], [11, 9, 1], [2, 9, 9], [8, 23, 1], [5, 24, 1], [10, 12, 1], [3, 14, 6], [0, 1, 12], [4, 15, 2], [3, 8, 229], [7, 4, 3], [8, 12, 18], [6, 5, 74], [7, 14, 4], [2, 1, 90], [3, 15, 7], [6, 15, 2], [8, 3, 112], [4, 9, 1], [5, 4, 12], [2, 4, 26], [11, 1, 2], [8, 2, 86], [1, 7, 11], [1, 8, 233], [3, 11, 93], [2, 15, 7], [11, 20, 1], [11, 15, 1], [1, 6, 431], [6, 14, 4], [6, 18, 1], [3, 9, 9], [2, 2, 7], [2, 24, 2], [5, 13, 9], [6, 11, 21], [7, 15, 5], [1, 10, 13], [2, 8, 99], [6, 3, 76], [1, 12, 43], [8, 9, 6], [2, 10, 11], [11, 4, 6], [7, 5, 14], [6, 12, 20], [8, 15, 1], [7, 3, 65], [4, 11, 9], [8, 18, 1], [5, 12, 25], [3, 17, 2], [2, 5, 128], [1, 2, 24], [5, 6, 45], [3, 4, 7], [5, 14, 10], [5, 1, 53], [6, 4, 17], [4, 5, 1], [5, 7, 13], [8, 4, 20], [11, 11, 4], [3, 1, 54], [3, 13, 24], [9, 7, 6], [8, 11, 26], [2, 6, 213], [4, 17, 1], [8, 10, 13], [3, 2, 1], [3, 10, 6], [2, 14, 10], [2, 17, 7], [8, 8, 229], [8, 1, 28], [7, 9, 7], [1, 14, 14], [8, 7, 2], [4, 13, 2], [2, 13, 1], [4, 14, 11], [1, 13, 30], [5, 15, 2], [3, 12, 73], [5, 5, 41], [3, 6, 264], [1, 9, 4], [11, 8, 16], [6, 10, 2], [2, 3, 65], [2, 18, 1], [8, 13, 2], [4, 7, 2], [7, 1, 39], [3, 5, 138], [1, 4, 6], [4, 8, 69], [9, 8, 4], [2, 11, 25], [1, 5, 264], [2, 12, 17], [4, 3, 29], [8, 5, 336], [10, 1, 12]], "signed": [[1, 1, 150], [1, 5, 128], [1, 6, 256], [1, 8, 100], [1, 9, 2], [1, 10, 3], [1, 11, 1], [1, 12, 17], [1, 13, 12], [1, 14, 6], [2, 1, 100], [2, 3, 100], [2, 4, 25], [2, 5, 256], [2, 6, 256], [2, 8, 100], [2, 9, 7], [2, 10, 8], [2, 11, 3], [2, 12, 19], [2, 13, 1], [2, 14, 14], [2, 15, 8], [2, 17, 8], [2, 18, 2], [2, 24, 1], [3, 1, 50], [3, 4, 25], [3, 5, 128], [3, 8, 100], [3, 9, 4], [3, 10, 4], [3, 12, 33], [3, 13, 13], [3, 14, 8], [3, 15, 4], [3, 17, 1], [5, 1, 50], [5, 3, 100], [5, 8, 50], [5, 9, 15], [5, 10, 15], [5, 11, 18], [5, 12, 33], [5, 13, 15], [5, 14, 6], [5, 15, 7], [5, 25, 1], [6, 1, 50], [6, 3, 100], [6, 5, 128], [6, 6, 384], [6, 8, 50], [6, 12, 16], [6, 14, 4], [6, 15, 1], [6, 17, 2], [6, 18, 2], [7, 1, 50], [7, 3, 100], [7, 4, 25], [7, 15, 3], [8, 1, 50], [8, 2, 50], [8, 3, 100], [8, 5, 256], [8, 6, 128], [8, 8, 200], [8, 9, 8], [8, 10, 17], [8, 11, 6], [8, 12, 22], [8, 13, 3], [8, 14, 11], [8, 17, 3], [8, 18, 1], [8, 19, 1]]};
+const ALIAS={9:'qt',10:'qt',11:'jug',12:'gal',13:'bottle',14:'bag',15:'pack',16:'qt',17:'ea',18:'ea',19:'ea',20:'ea',21:'ea',22:'ea',23:'ea',24:'ea',25:'ea'};
+const chemByCo={}; D.chems.forEach(c=>chemByCo[c[0]]=c);
+function grp(rows){const m={};rows.forEach(([ti,co,q])=>{(m[ti]=m[ti]||{})[co]=q;});return m;}
+const U=grp(D.used), S=grp(D.signed);
+function section(ti,lo,hi){
+  let rows='';
+  for(let co=lo;co<=hi;co++){
+    const sg=(S[ti]||{})[co]||0, us=(U[ti]||{})[co]||0;
+    const c=chemByCo[co], unit=co<=8?c[2]:(ALIAS[co]||c[2]);
+    const gap=us-sg, cls=gap>0?'pos':(gap<0?'neg':'ok');
+    rows+='<tr><td>'+c[1]+'</td><td style="text-align:left;color:#6b7682">'+unit+'</td><td>'+sg+'</td><td>'+us+'</td><td class="g '+cls+'">'+(gap>0?'+':'')+gap+'</td></tr>';
+  }
+  if(!rows) return '<p class="none">none</p>';
+  return '<table><thead><tr><th>Item</th><th>Unit</th><th>Signed</th><th>Used</th><th>Gap</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+function renderTech(ti){
+  return '<h2>Bulk chemicals <span class="mut">— base units</span></h2>'+section(ti,1,8)+
+         '<h2>Specialty chemicals <span class="mut">— package units</span></h2>'+section(ti,9,16)+
+         '<h2>Parts</h2>'+section(ti,17,25);
+}
+const tabsEl=document.getElementById('tabs'), panelsEl=document.getElementById('panels');
+D.techs.forEach((nm,ti)=>{const b=document.createElement('div');b.className='tab';b.textContent=nm;
+  b.onclick=()=>{document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));b.classList.add('on');panelsEl.innerHTML=renderTech(ti);};
+  tabsEl.appendChild(b);});
+if(D.techs.length){tabsEl.firstChild.classList.add('on');panelsEl.innerHTML=renderTech(0);}
+</script></body></html>

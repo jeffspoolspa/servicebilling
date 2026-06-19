@@ -1,0 +1,9 @@
+summary: get_adjustments
+description: ''
+lock: '!inline u/carter/get_adjustments.script.lock'
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties: {}
+  required: []
