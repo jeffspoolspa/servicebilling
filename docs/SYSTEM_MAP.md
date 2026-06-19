@@ -195,7 +195,7 @@ Pool maintenance: scheduled visits, technician routes, chemistry readings, consu
 
 **UI routes** (`app/(shell)/maintenance/`):
 - `/dashboard` — overview
-- `/customers`, `/customers/[id]` — maintenance customer list
+- `/customers`, `/customers/[id]` — maintenance customer list + detail. The detail page shows each service location's geocode status and lets staff **correct a wrong service address in place** via the Google autocomplete (`edit_service_location_address` RPC) — the fix follows through to the task, visits, and route map, since they all reference that `service_location` row.
 - `/routes`, `/routes/[tech]/[day]` — route view (per-(tech,day) cards → per-route map + stop table)
 - `/routes/map` — all-routes territory overview: every active stop on one map colored by office, cross-office outliers flagged (a stop sitting in another office's cluster), + per-route geographic-dispersion table. Reads `public.v_route_stops` / `public.v_route_load`.
 - `/techs` — technician list
