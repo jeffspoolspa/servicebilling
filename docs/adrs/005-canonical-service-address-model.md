@@ -307,3 +307,4 @@ post-validation rollout (see Phases → Rollout), not this implementation pass.
 - Migrations (foundation): `20260615180000_add_geocode_to_service_locations`, `20260615182000_add_place_id_to_service_locations`, `20260615183000_service_location_upsert_rpc`
 - System map: [docs/SYSTEM_MAP.md](../SYSTEM_MAP.md)
 - Architecture: [ADR 001](001-platform-architecture.md), [ADR 004](004-leads-canonical-model.md)
+- Follow-on: [ADR 007](007-address-resolution-and-customer-address-ledger.md) — the concrete Phase 4 shape: the resolution pipeline + `customer_service_addresses` as the address ledger
