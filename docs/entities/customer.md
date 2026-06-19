@@ -6,7 +6,9 @@
 
 ## What it is
 
-A customer record, shared across every module (service billing, maintenance, leads, comms). QBO is the leader for the canonical identity and billing fields; we layer on derived and domain columns (e.g. `display_name` propagation, `pm_last_checked_at` for the payment-method freshness gate, geocoding from Google Maps).
+A customer record, shared across every module (service billing, maintenance, leads, comms). QBO is the leader for the canonical identity and billing fields; we layer on derived and domain columns (e.g. `display_name` propagation, `pm_last_checked_at` for the payment-method freshness gate).
+
+> Geocoding note: `Customers.latitude/longitude` are **legacy** account-level coordinates derived from the *billing* address (`f/google_maps/geocode_customers.py`). For snowbird/owner accounts the billing address is out of state, so that coordinate is unreliable for routing. Route geocoding now lives per pool on [`public.service_locations`](service-location.md) (`f/google_maps/geocode_service_locations.py`), and `app/(shell)/maintenance/_lib/geo.ts` reads the service-location coordinate first, falling back to `Customers.lat/lng` only until the backfill completes.
 
 Because it lives in `public.*` and is read by many modules, no single module "owns" it for writes the way a schema-scoped table is owned. See [SCHEMA_OWNERSHIP.md](../conventions/SCHEMA_OWNERSHIP.md) for the shared-table rules.
 
@@ -23,6 +25,8 @@ exception to lowercase naming.)
 | `id` | bigint | Our local customer identity (the `account_id` leads tie to) | PK |
 | `qbo_customer_id` | text | The QBO Customer id — the link to the leader record | null until created in QBO; stamped by the Pattern D create / `refresh_customer` |
 | `qbo_last_updated` | timestamptz | QBO's `MetaData.LastUpdatedTime` — the OCC guard for reflection | set by `refresh_customer` |
+| `ion_cust_id` | text | ION's internal customer id (= ION `Customer ID` / `IPCCustomerID`) — the stable key for ION task ownership | **unique**; fuzzy-match-once ([ADR 006](../adrs/006-ion-customer-id-fuzzy-match-once.md)); null = not in ION / unmatched |
+| `ion_match_method` / `ion_match_confidence` / `ion_matched_at` | text / text / timestamptz | Provenance of the ion_cust_id match | `recurring_task_sync` \| `report_*` \| `api_fuzzy` \| `manual`; `high`\|`medium`\|`low` |
 | `sync_state` | text | Pattern D cache state for our own QBO writes | `synced` (default) \| `pending` \| `awaiting_propagation` \| `sync_failed` |
 | `sync_state_changed_at` | timestamptz | When `sync_state` last changed | default `now()` |
 | `sync_error` | text | Last sync failure message | nullable |
