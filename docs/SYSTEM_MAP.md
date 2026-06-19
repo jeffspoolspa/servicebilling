@@ -196,7 +196,8 @@ Pool maintenance: scheduled visits, technician routes, chemistry readings, consu
 **UI routes** (`app/(shell)/maintenance/`):
 - `/dashboard` — overview
 - `/customers`, `/customers/[id]` — maintenance customer list
-- `/routes`, `/routes/[tech]/[day]` — route view
+- `/routes`, `/routes/[tech]/[day]` — route view (per-(tech,day) cards → per-route map + stop table)
+- `/routes/map` — all-routes territory overview: every active stop on one map colored by office, cross-office outliers flagged (a stop sitting in another office's cluster), + per-route geographic-dispersion table. Reads `public.v_route_stops` / `public.v_route_load`.
 - `/techs` — technician list
 - `/visits`, `/visits/[id]` — visit history + detail
 - `/inventory` — maintenance inventory snapshot
@@ -217,8 +218,12 @@ Pool maintenance: scheduled visits, technician routes, chemistry readings, consu
 - `maintenance.consumables_usage` — chemicals used per visit
 - `maintenance.visit_tasks` — per-visit checklist completion (brushing, vacuuming, salt cell clean, etc.). One row per canonical task per visit. Canonical names + alias mapping live in `f/ION/_lib/normalize.py` (TASK_ALIASES + TASK_DEFINITIONS). Added 2026-05-28 to close the gap where this data was being parsed but discarded.
 - `maintenance.tasks` — scheduled task definitions per service location
-- `maintenance.task_schedules` — schedule details (tech assignment, day)
+- `maintenance.task_schedules` — routing-only schedule slots (tech, day_of_week, sequence, frequency, office); financial terms live on `maintenance.tasks`, not here
 - `maintenance.tasks_audit`, `task_schedules_audit` — change history
+
+**Views (route analysis)** — app-facing, in `public` (PostgREST-exposed, like `v_customer_data_quality`):
+- `public.v_route_stops` — routing spine: one row per active slot → pinned `service_location` geocode + tech + customer; `office_outlier_mi` = miles from the slot office's centroid (cross-office-leakage signal). Read by `/maintenance/routes/map`.
+- `public.v_route_load` — per-(tech, day) rollup over `v_route_stops`: stop count + geographic dispersion (avg/max miles from route centroid).
 - `maintenance.service_bodies` — pool body specs per service location
 - `maintenance.onboarding` — new-customer onboarding state (populated by `mark_payment_on_file` RPC)
 - `maintenance.residential_lead_details` — lead qualifying details
