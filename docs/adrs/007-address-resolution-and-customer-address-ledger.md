@@ -1,7 +1,9 @@
 # ADR 007: Address resolution pipeline + the customer↔address ledger
 
-> Status: [accepted] — design agreed 2026-06-19; implementation pending (this is the concrete
-> shape of ADR 005 Phase 4 "route all writers through `upsert_service_location`").
+> Status: [accepted] — design agreed 2026-06-19. Substrate + the lead-intake resolution path
+> are implemented (see Implementation status below); ION/QBO rewire + reject-null enforcement
+> are the remaining steps. The concrete shape of ADR 005 Phase 4 "route all writers through
+> `upsert_service_location`".
 > Date: 2026-06-19
 > Depends on: [ADR 005](005-canonical-service-address-model.md), [ADR 006](006-ion-customer-id-fuzzy-match-once.md)
 
@@ -155,14 +157,23 @@ address and stamps `source`:
 
 ## Implementation (forward)
 
-1. Migration: `customer_service_addresses` gains `raw_*`, `source`, `resolution_status`, `created_at`,
-   `resolved_at`; `service_location_id` made nullable; the three uniques above.
-2. `upsert_service_location`: reject null `p_place_id` + the `place_id ⟺ geocode_status='ok'` CHECK.
-3. `resolveServiceAddress` (shared) — reuse `f/google_maps/geocode_service_locations.fuzzy_resolve`
-   (TS surface: a `/api/places/resolve` route returning the same `ResolvedAddress` as `/api/places/details`).
-4. `resolveServiceAddress`-backed composer as the single create/edit front door (`resolve: now|defer`);
-   wire **lead intake first** end-to-end (dry-run + verify), then ION ingestion, then the QBO sync.
-5. Drain job over `pending`; `v_addresses_needing_resolution` (status-split) feeding `/customers/data-quality`.
+1. [done] Migration: `customer_service_addresses` gains `raw_*`, `source`, `resolution_status`,
+   `created_at`, `resolved_at`; `service_location_id` made nullable; `v_addresses_needing_resolution`.
+   (Substrate PR. The three uniques are not all added yet — they land with reject-null in step 2.)
+2. [pending] `upsert_service_location`: reject null `p_place_id` + the `place_id ⟺ geocode_status='ok'`
+   CHECK + the three uniques. **Must come last** — every null-passing writer (ION, QBO ShipAddr sync)
+   has to route through the resolver first, or it breaks. For now `create_account` forwards
+   `geocode_status='ok'` to `upsert_service_location` whenever a `place_id` is supplied, so the
+   invariant holds on the resolved path without yet rejecting nulls.
+3. [done] `resolveServiceAddress` (shared) — `lib/places/resolve.ts`, a TS port of
+   `f/google_maps/geocode_service_locations.fuzzy_resolve` (strict geocode → precision gate →
+   guarded fuzzy → `ok | out_of_area | needs_review`). TS surface: `POST /api/places/resolve`.
+4. [partial] `resolveServiceAddress`-backed composer. **Lead intake is wired** (`lib/leads/intake.ts`
+   resolves the service address synchronously before `create_account`, passing `place_id` + canonical
+   coords; a miss leaves the location `place_id`-NULL for the existing backfill/Address-QA flow and
+   never blocks the lead). ION ingestion and the QBO ShipAddr sync still to route through it.
+5. [pending] Drain job over `pending`; `v_addresses_needing_resolution` (status-split) feeding
+   `/customers/data-quality`.
 
 ## Cross-references
 
