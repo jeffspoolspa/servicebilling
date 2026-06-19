@@ -6,6 +6,7 @@ import { estimateMaintChemicals } from "./chem-estimate"
 import { sendEmail } from "@/lib/comms/server/resend"
 import { sendSms } from "@/lib/comms/server/ringcentral"
 import { leadQuoteTemplate, type LeadQuoteContext } from "@/lib/comms/templates"
+import { resolveServiceAddress } from "@/lib/places/resolve"
 
 // Pure pricing + service-area helpers live in ./quote (client-importable).
 // Re-export so existing server-side imports from intake keep working.
@@ -113,6 +114,16 @@ export async function submitLeadIntake(input: LeadIntakeInput): Promise<LeadInta
     if (!input.allow_out_of_area) return { ok: false, error: "Out of service area" }
   }
 
+  // Resolve the service address to a canonical place_id + rooftop coordinate up
+  // front (ADR 007). Billing doubles as the service address (billing-fallback); a
+  // confident match pins the new location immediately, a miss leaves it place_id-
+  // NULL for the existing geocode backfill / Address-QA flow. Runs BEFORE the write
+  // RPCs (an external HTTP call must not sit inside a txn) and never blocks the lead.
+  const resolved = await resolveServiceAddress({
+    street: a.billing_street, city: a.billing_city, state: billingState, zip: billingZip,
+  })
+  const svc = resolved.resolved ? resolved.address : null
+
   // 1. Resolve the customer: explicit use_existing / create_new, else auto-dedup.
   const action = input.customer_action ?? "auto"
   let accountId: number | null = null
@@ -159,10 +170,14 @@ export async function submitLeadIntake(input: LeadIntakeInput): Promise<LeadInta
       p_billing_state: billingState,
       p_billing_zip: billingZip,
       p_account_name: null,
-      p_service_street: a.billing_street,
-      p_service_city: a.billing_city,
-      p_service_state: billingState,
-      p_service_zip: billingZip,
+      // Service address = billing; canonical text + place_id when the resolve pinned it.
+      p_service_street: svc?.street ?? a.billing_street,
+      p_service_city: svc?.city ?? a.billing_city,
+      p_service_state: svc?.state ?? billingState,
+      p_service_zip: svc?.zip ?? billingZip,
+      p_place_id: svc?.place_id ?? null,
+      p_service_lat: svc?.lat ?? null,
+      p_service_lng: svc?.lng ?? null,
     })
     if (acctErr) return { ok: false, error: `Account creation failed: ${acctErr.message}` }
     accountId = (acct.account_id ?? acct.id) as number
@@ -178,14 +193,20 @@ export async function submitLeadIntake(input: LeadIntakeInput): Promise<LeadInta
     if (existingLoc?.id) {
       primaryLocationId = existingLoc.id as number
     } else {
-      // ADR 005: route through the canonical address door, not a direct insert.
+      // ADR 005/007: route through the canonical address door, not a direct insert,
+      // and pass the resolved place_id + rooftop coordinate when we pinned it.
       const { data: locId, error: locErr } = await sb.rpc("upsert_service_location", {
         p_account_id: accountId,
-        p_street: a.billing_street,
-        p_city: a.billing_city,
-        p_state: billingState,
-        p_zip: billingZip,
+        p_place_id: svc?.place_id ?? null,
+        p_street: svc?.street ?? a.billing_street,
+        p_city: svc?.city ?? a.billing_city,
+        p_state: svc?.state ?? billingState,
+        p_zip: svc?.zip ?? billingZip,
+        p_lat: svc?.lat ?? null,
+        p_lng: svc?.lng ?? null,
         p_is_primary: false,
+        p_geocode_source: svc ? "google" : null,
+        p_geocode_status: svc ? "ok" : null,
       })
       if (locErr) return { ok: false, error: `Location creation failed: ${locErr.message}` }
       primaryLocationId = locId as number
