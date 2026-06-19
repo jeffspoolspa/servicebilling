@@ -1,0 +1,5 @@
+summary: get_employees
+description: ''
+lock: '!inline f/webhooks/get_employees.script.lock'
+kind: script
+schema: null

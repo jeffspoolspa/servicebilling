@@ -1,0 +1,5 @@
+summary: create_check_payment
+description: Create a check payment in QBO with optional memo and receipt sending.
+lock: '!inline f/check_buddy/create_qbo_payment.script.lock'
+kind: script
+schema: null

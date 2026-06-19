@@ -1,0 +1,5 @@
+summary: Remove late fee charges from QBO invoices via credit memo + $0 application
+description: ''
+lock: '!inline f/check_buddy/remove_late_fees.script.lock'
+kind: script
+schema: null

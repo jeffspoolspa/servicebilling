@@ -26,7 +26,7 @@ export default async function CustomerPaymentMethodsPage({ params }: PageProps) 
 
   return (
     <>
-      <ObjectHeader
+      <ObjectHeader back
         eyebrow="Customer"
         title={customer.display_name}
         sub={`ID ${customer.id} · QBO ${customer.qbo_customer_id ?? "—"} · ${customer.email ?? "no email"}`}

@@ -157,7 +157,7 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
           router.refresh() (debounced 350ms) when any change. Without this
           the detail page is stale until manual reload. */}
       <LiveWorkOrderDetail />
-      <ObjectHeader
+      <ObjectHeader back
         eyebrow={`${wo.type} · ${wo.office_name ?? "—"}`}
         title={`WO ${wo.wo_number}`}
         sub={

@@ -21,6 +21,11 @@ The CDC response includes the FULL entity body, so rather than firing async `ref
 
 Severity tiers: `soft` (cache stale — auto-heal silently), `hard` (webhook missing AND value disagrees — auto-heal + flag), `critical` (cache appears NEWER than QBO — halt + alert).
 
+## Failure handling
+
+- **Dropped DB connection (added 2026-06-12).** The Supabase pooler (port 6543) can drop the run's long-lived connection mid-batch ("SSL connection has been closed unexpectedly"). Before the fix, every later event failed with "connection already closed", the drift-error logger failed the same way, and `save_cursor` raised — failing the run (example job `019ebd19-2f41-1ceb-b17f-9bc44fcf1c67`). All DB work now goes through a `Db` wrapper that reconnects on `OperationalError`/`InterfaceError` and retries the failed operation exactly once; `save_cursor`, the drift-error logger, and the end-of-run sweeps all use the live connection. One retry only — a second consecutive drop means the DB is actually down and should fail the run loudly. Replays are safe: upserts are OCC-guarded and a duplicated `drift_log` row is pruned by the 30-day sweep.
+- **Per-entity errors** are logged to `drift_log` as `processing_error` and skipped; they never fail the run. The cursor does not advance past an entity whose inline refresh failed, so the next run retries it.
+
 ## Reads
 - `billing.cdc_cursors`, cache rows (`billing.invoices`, `billing.customer_payments`, `public."Customers"`)
 - QBO CDC endpoint (Invoice, Payment, Customer)

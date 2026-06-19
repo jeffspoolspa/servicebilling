@@ -57,18 +57,20 @@ export const leadQuoteTemplate = {
 
   variables(ctx: LeadQuoteContext): Record<string, string | number> {
     const total = ctx.quote.monthlyTotal?.median ?? ctx.quote.laborMonthly
+    // camelCase keys — Resend variable names can't contain underscores, and
+    // FIRST_NAME/EMAIL etc. are reserved. So customerName, not FIRST_NAME.
     return {
-      FIRST_NAME: ctx.firstName,
-      OFFICE_NAME: officeName(ctx.office),
-      OFFICE_PHONE: officePhone(ctx.office),
-      VISIT_FREQUENCY: ctx.visitFrequencyLabel,
-      PER_VISIT: ctx.quote.perVisit,
-      LABOR_MONTHLY: ctx.quote.laborMonthly,
-      CHEM_ESTIMATE: ctx.quote.chem?.median ?? 0,
-      MONTHLY_TOTAL: total,
-      MONTHLY_LOW: ctx.quote.monthlyTotal?.low ?? ctx.quote.laborMonthly,
-      MONTHLY_HIGH: ctx.quote.monthlyTotal?.high ?? ctx.quote.laborMonthly,
-      ONBOARD_LINK: ctx.onboardLink ?? "",
+      customerName: ctx.firstName,
+      officeName: officeName(ctx.office),
+      officePhone: officePhone(ctx.office),
+      visitFrequency: ctx.visitFrequencyLabel,
+      perVisit: ctx.quote.perVisit,
+      laborMonthly: ctx.quote.laborMonthly,
+      chemEstimate: ctx.quote.chem?.median ?? 0,
+      monthlyTotal: total,
+      monthlyLow: ctx.quote.monthlyTotal?.low ?? ctx.quote.laborMonthly,
+      monthlyHigh: ctx.quote.monthlyTotal?.high ?? ctx.quote.laborMonthly,
+      onboardLink: ctx.onboardLink ?? "",
     }
   },
 

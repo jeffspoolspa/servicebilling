@@ -220,31 +220,58 @@ export function PreProcessActivity() {
             if (!seenInFlightRef.current.has(id)) return
             seenInFlightRef.current.delete(id)
 
-            // Compute outcome from billing_status + needs_review_reason.
-            let outcome: Recent["outcome"] = "ready"
-            if (billingStatus === "needs_review") outcome = "review"
-            else if (billingStatus === "ready_to_process") outcome = "ready"
-            else if (billingStatus === "processed") outcome = "ready"
-            else outcome = "error"
-
+            // Stop the spinner immediately.
             setInFlight((prev) => {
               if (!prev.has(id)) return prev
               const next = new Map(prev)
               next.delete(id)
               return next
             })
-            setRecent((prev) => {
-              const completion: Recent = {
-                qbo_invoice_id: id,
-                doc_number: docNumber,
-                customer_name: customerName,
-                outcome,
-                needs_review_reason: needsReason,
-                finished_at: Date.now(),
-              }
-              const filtered = prev.filter((r) => r.qbo_invoice_id !== id)
-              return [completion, ...filtered].slice(0, RECENT_LIMIT)
-            })
+
+            // Fresh-fetch billing_status before classifying. The Realtime
+            // payload's `new` row for this stage='done' UPDATE carries a
+            // STALE billing_status: the projection trigger
+            // (trg_project_billing_status_on_indicator_change) is AFTER
+            // UPDATE and issues its own self-UPDATE on the same row to
+            // write the new billing_status. That trigger UPDATE produces
+            // a separate Realtime event which the seenInFlightRef guard
+            // above filters out by ID. Net result if we trusted the
+            // payload here: every completion got classified as 'error'
+            // because the stale billing_status (often
+            // 'needs_classification' or 'not_billable' from before
+            // pre-processing) didn't match any 'ready' bucket. Both
+            // UPDATEs commit in one transaction, so a fresh SELECT here
+            // sees the final state.
+            void (async () => {
+              const { data } = await sb
+                .from("billing_invoices")
+                .select("billing_status, needs_review_reason, doc_number, customer_name")
+                .eq("qbo_invoice_id", id)
+                .single()
+              const finalStatus = (data?.billing_status as string | null) ?? billingStatus
+              const finalReason = (data?.needs_review_reason as string | null) ?? needsReason
+              const finalDoc = (data?.doc_number as string | null) ?? docNumber
+              const finalCustomer = (data?.customer_name as string | null) ?? customerName
+
+              let outcome: Recent["outcome"] = "ready"
+              if (finalStatus === "needs_review") outcome = "review"
+              else if (finalStatus === "ready_to_process") outcome = "ready"
+              else if (finalStatus === "processed") outcome = "ready"
+              else outcome = "error"
+
+              setRecent((prev) => {
+                const completion: Recent = {
+                  qbo_invoice_id: id,
+                  doc_number: finalDoc,
+                  customer_name: finalCustomer,
+                  outcome,
+                  needs_review_reason: finalReason,
+                  finished_at: Date.now(),
+                }
+                const filtered = prev.filter((r) => r.qbo_invoice_id !== id)
+                return [completion, ...filtered].slice(0, RECENT_LIMIT)
+              })
+            })()
           }
         },
       )
