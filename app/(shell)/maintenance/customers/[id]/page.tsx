@@ -4,6 +4,14 @@ import { Card } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { formatCurrency } from "@/lib/utils/format"
 import { DAY_NAMES, getMaintenanceCustomerDetail, type VisitContextRow } from "../../_lib/views"
+import { ServiceLocationEditor } from "@/components/maintenance/service-location-editor"
+
+const GEO_TONE: Record<string, "grass" | "sun" | "coral" | "neutral"> = {
+  ok: "grass",
+  needs_review: "sun",
+  out_of_area: "coral",
+  failed: "coral",
+}
 
 export const metadata = { title: "Maintenance · Customer" }
 export const dynamic = "force-dynamic"
@@ -96,20 +104,36 @@ export default async function MaintenanceCustomerDetailPage({
                 <th className="px-4 py-2 font-medium">City</th>
                 <th className="px-4 py-2 font-medium">State</th>
                 <th className="px-4 py-2 font-medium">ZIP</th>
+                <th className="px-4 py-2 font-medium">Geocode</th>
                 <th className="px-4 py-2 font-medium">Primary</th>
+                <th className="px-4 py-2 font-medium text-right">Correct</th>
               </tr>
             </thead>
             <tbody>
               {service_locations.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-6 text-center text-ink-mute">No service locations.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-6 text-center text-ink-mute">No service locations.</td></tr>
               )}
               {service_locations.map((l) => (
-                <tr key={l.id} className="border-b border-line-soft/40 last:border-0">
+                <tr key={l.id} className="border-b border-line-soft/40 last:border-0 align-top">
                   <td className="px-4 py-2 text-ink">{l.street ?? "—"}</td>
                   <td className="px-4 py-2 text-ink-dim">{l.city ?? "—"}</td>
                   <td className="px-4 py-2 text-ink-dim">{l.state ?? "—"}</td>
                   <td className="px-4 py-2 text-ink-dim">{l.zip ?? "—"}</td>
+                  <td className="px-4 py-2">
+                    {l.geocode_status ? (
+                      <Pill tone={GEO_TONE[l.geocode_status] ?? "neutral"} dot>{l.geocode_status}</Pill>
+                    ) : (
+                      <span className="text-ink-mute/60 text-[11px]">none</span>
+                    )}
+                  </td>
                   <td className="px-4 py-2">{l.is_primary ? <Pill tone="cyan">primary</Pill> : null}</td>
+                  <td className="px-4 py-2 text-right">
+                    <ServiceLocationEditor
+                      locationId={l.id}
+                      customerId={customer.id}
+                      current={[l.street, l.city].filter(Boolean).join(", ")}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>

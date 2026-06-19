@@ -344,6 +344,10 @@ export interface MaintenanceCustomerDetail {
     state: string | null
     zip: string | null
     is_primary: boolean
+    geocode_status: string | null
+    latitude: number | null
+    longitude: number | null
+    place_id: string | null
   }>
   tasks: TaskContextRow[]
   schedules: TaskScheduleContextRow[]
@@ -371,7 +375,7 @@ export async function getMaintenanceCustomerDetail(
 
   const { data: locs } = await supabase
     .from("service_locations")
-    .select("id, street, city, state, zip, is_primary")
+    .select("id, street, city, state, zip, is_primary, geocode_status, latitude, longitude, place_id")
     .eq("account_id", customerId)
     .order("is_primary", { ascending: false })
     .order("id", { ascending: true })
