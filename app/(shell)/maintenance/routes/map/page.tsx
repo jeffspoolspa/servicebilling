@@ -136,7 +136,15 @@ export default async function TerritoryMapPage() {
             )}
             {outlierRows.map((s) => (
               <tr key={s.schedule_id} className="border-b border-line-soft/40 last:border-0 hover:bg-white/[0.02]">
-                <td className="px-4 py-2.5 text-ink">{s.customer_name ?? <span className="text-ink-mute">(unknown)</span>}</td>
+                <td className="px-4 py-2.5 text-ink">
+                  {s.customer_id != null ? (
+                    <Link href={`/maintenance/customers/${s.customer_id}` as never} className="text-cyan hover:underline">
+                      {s.customer_name ?? `#${s.customer_id}`}
+                    </Link>
+                  ) : (
+                    <span className="text-ink-mute">{s.customer_name ?? "(unknown)"}</span>
+                  )}
+                </td>
                 <td className="px-4 py-2.5 text-ink-dim">{s.city ?? "—"}</td>
                 <td className="px-4 py-2.5">
                   <Pill tone="neutral">{s.office ?? "—"}</Pill>
