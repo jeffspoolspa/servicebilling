@@ -20,9 +20,12 @@ Mixed leadership like [Task](task.md): ION-seeded, app-edited (`lib/entities/tas
 
 ## Connected entities
 
-- [Task](task.md) via `task_id`
+- [Task](task.md) via `task_id` — a schedule belongs to one task (the task is the parent; the ION
+  id lives on the task as `tasks.ion_task_id`). Schedules are **routing/cadence only**.
 - [Employee](employee.md) via `tech_employee_id`
-- [Visit](visit.md) — visits reference `task_schedule_id` and snapshot `billing_method` / `flat_rate_monthly_cents`
+- [Visit](visit.md) — visits do **not** link to a schedule (`visits.task_schedule_id` is unused / all
+  NULL). A visit links to the **task** (`visits.task_id`); it snapshots the schedule's
+  `billing_method` / `flat_rate_monthly_cents` at generation rather than carrying a live FK.
 
 ## Flows this entity participates in
 

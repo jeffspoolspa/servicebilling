@@ -1,7 +1,7 @@
 # Entity: Visit
 
 > Lives in: `maintenance.visits`
-> Source: [cache: ION + native]   (ION owns the occurrence; we own the schedule link + billing fields)
+> Source: [cache: ION + native]   (ION owns the occurrence; we own the task link + billing fields)
 > Status: [active]
 
 ## What it is
@@ -35,7 +35,15 @@ Each visit carries (proposed) two billing fields:
 
 ## Connected entities
 
-- [Task Schedule](task-schedule.md) via `task_schedule_id` — the cadence + price this visit instantiates
+- [Task](task.md) via **`task_id`** — the recurring task this visit belongs to. **This is the visit's
+  canonical parent link.** It is set by matching the visit's `ion_task_id` to the task's `ion_task_id`
+  (the ION task id is 1:1 with a task). Visits do **not** link to a schedule: `task_schedule_id` is
+  unused (all NULL) — schedules are routing/cadence only, and the per-visit price is snapshotted onto
+  the visit (`billing_method` / `flat_rate_monthly_cents` / `price_cents`) at generation. See
+  [task-record-linkage](../operations/task-record-linkage.md).
+- **Ground-truth ION ids carried on the visit:** `ion_task_id` (EventID) + `ion_cust_id` (CustomerID),
+  both read from the service log. `customer_id` is the resolved link (derived; the owning task also
+  carries the customer — double-linked for convenience).
 - [Task Billing Period](task-billing-period.md) via `billing_period_id` — the invoice promise this visit accrues to
 - [Work Order](work-order.md) via `work_order_wo_number` / `ion_work_order_id`
 - [Employee](employee.md) via `scheduled_tech_id` / `actual_tech_id`
