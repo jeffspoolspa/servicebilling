@@ -10,7 +10,6 @@ import {
   markQuoted,
   addNote,
   sendCardLink,
-  setStatus,
   type ActionState,
 } from "../actions"
 
@@ -24,7 +23,7 @@ function Result({ state }: { state: ActionState }) {
   return null
 }
 
-export function LeadActions({ leadId, status }: { leadId: string; status: string }) {
+export function LeadActions({ leadId }: { leadId: string }) {
   return (
     <Card>
       <CardHeader><CardTitle>Actions</CardTitle></CardHeader>
@@ -39,7 +38,6 @@ export function LeadActions({ leadId, status }: { leadId: string; status: string
         </div>
         <MarkQuoted leadId={leadId} />
         <SendCardLink leadId={leadId} />
-        <SetStatus leadId={leadId} status={status} />
         <AddNote leadId={leadId} />
       </div>
     </Card>
@@ -72,25 +70,6 @@ function SendCardLink({ leadId }: { leadId: string }) {
       <Button type="submit" size="sm" disabled={pending}>
         {pending ? "Creating…" : "Create card-collection link"}
       </Button>
-      <Result state={state} />
-    </form>
-  )
-}
-
-const STATUS_OPTIONS = ["new", "quoted", "accepted", "converted", "expired", "declined", "disqualified"]
-  .map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }))
-
-function SetStatus({ leadId, status }: { leadId: string; status: string }) {
-  const [state, action, pending] = useActionState(setStatus, empty)
-  const [value, setValue] = useState(status)
-  return (
-    <form action={action} className="flex flex-col gap-2">
-      <span className="text-[11px] uppercase tracking-[0.1em] text-ink-mute">Set status</span>
-      <input type="hidden" name="lead_id" value={leadId} />
-      <div className="flex gap-2">
-        <Select name="status" value={value} onChange={setValue} disabled={pending} className="flex-1" options={STATUS_OPTIONS} />
-        <Button type="submit" size="sm" disabled={pending}>{pending ? "…" : "Apply"}</Button>
-      </div>
       <Result state={state} />
     </form>
   )

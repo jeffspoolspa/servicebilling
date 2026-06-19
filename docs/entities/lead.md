@@ -104,14 +104,14 @@ A `service_request`-type lead is the exception: `create_lead` opens it already `
 
 ## Transitions — who writes what
 
-| From | To | Caused by | What changes |
-|---|---|---|---|
-| (none) | `new` | `submit_website_lead` / `start_website_lead`+`submit_lead_qualifying` / internal form | inserts `leads` + child `*_lead_details (status='new')`; dedups/creates `Customers` |
-| `new` | `quoted` | [`mark_lead_quoted`](../flows/lead-intake-to-conversion/index.md) | child `status='quoted'`; `leads.quote_channel`, `last_contacted_at` |
-| `quoted` | `accepted` | `accept_lead` (resume-token gated) | child `status='accepted'` |
-| `quoted`/`accepted` | `converted` | `mark_payment_on_file` | child `status='converted'`; upserts [`onboarding`](onboarding.md) `payment_on_file=true` |
-| any non-terminal | `closed` | trigger `sync_lead_lifecycle_from_child` | `leads.lifecycle_state='closed'`, `closed_at`, `closed_reason` |
-| (at intake, new customer) | — | Pattern D `createInQbo('customer')` | creates the customer in QBO, stamps [`Customers`](customer.md)`.qbo_customer_id` (QBO is the leader) |
+| From                      | To          | Caused by                                                                             | What changes                                                                                         |
+| ------------------------- | ----------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| (none)                    | `new`       | `submit_website_lead` / `start_website_lead`+`submit_lead_qualifying` / internal form | inserts `leads` + child `*_lead_details (status='new')`; dedups/creates `Customers`                  |
+| `new`                     | `quoted`    | [`mark_lead_quoted`](../flows/lead-intake-to-conversion/index.md)                     | child `status='quoted'`; `leads.quote_channel`, `last_contacted_at`                                  |
+| `quoted`                  | `accepted`  | `accept_lead` (resume-token gated)                                                    | child `status='accepted'`                                                                            |
+| `quoted`/`accepted`       | `converted` | `mark_payment_on_file`                                                                | child `status='converted'`; upserts [`onboarding`](onboarding.md) `payment_on_file=true`             |
+| any non-terminal          | `closed`    | trigger `sync_lead_lifecycle_from_child`                                              | `leads.lifecycle_state='closed'`, `closed_at`, `closed_reason`                                       |
+| (at intake, new customer) | —           | Pattern D `createInQbo('customer')`                                                   | creates the customer in QBO, stamps [`Customers`](customer.md)`.qbo_customer_id` (QBO is the leader) |
 
 ## Related row-shapes
 

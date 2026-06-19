@@ -24,7 +24,10 @@ Plugs into [SYSTEM_MAP.md §3.5](../../SYSTEM_MAP.md). Architecture rationale: [
 
 ## The layers (click in)
 
+- **[Operation: resolve-or-create customer](../../operations/resolve-or-create-customer.md)** —
+  the shared customer phase (step 2 of intake), split out 2026-06-10 as its own flow `[design]`.
 - **[Schema contract](schema-contract.md)** — what it reads, writes, and calls (tables deep-linked to their field dictionaries).
 - **[Decision map](decision-map.md)** — the business rules: pre-conditions → decision sequence → failure handling → post-conditions.
 - **[Flow map](flow-map.md)** — the exact sequence diagram + numbered steps + failure-modes table.
 - **[Open questions](open-questions.md)** — gaps, known issues, and deferred work.
+- **[Website cutover](website-cutover.md)** — checklist to point the public site at the app's shared endpoints (intake, quote, address).

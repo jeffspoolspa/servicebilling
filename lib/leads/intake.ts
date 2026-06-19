@@ -120,7 +120,8 @@ export async function submitLeadIntake(input: LeadIntakeInput): Promise<LeadInta
   let returning = false
 
   async function refreshContact(id: number) {
-    await sb.rpc("update_account_contact", {
+    // Standard customer-edit RPC (row-locked). Address omitted → unchanged.
+    await sb.rpc("update_customer", {
       p_account_id: id,
       p_first_name: a.first_name,
       p_last_name: a.last_name,
@@ -177,12 +178,17 @@ export async function submitLeadIntake(input: LeadIntakeInput): Promise<LeadInta
     if (existingLoc?.id) {
       primaryLocationId = existingLoc.id as number
     } else {
-      const { data: newLoc, error: locErr } = await sb
-        .schema("public").from("service_locations")
-        .insert({ account_id: accountId, street: a.billing_street, city: a.billing_city, state: billingState, zip: billingZip, is_primary: false })
-        .select("id").single()
+      // ADR 005: route through the canonical address door, not a direct insert.
+      const { data: locId, error: locErr } = await sb.rpc("upsert_service_location", {
+        p_account_id: accountId,
+        p_street: a.billing_street,
+        p_city: a.billing_city,
+        p_state: billingState,
+        p_zip: billingZip,
+        p_is_primary: false,
+      })
       if (locErr) return { ok: false, error: `Location creation failed: ${locErr.message}` }
-      primaryLocationId = newLoc.id as number
+      primaryLocationId = locId as number
     }
   }
 

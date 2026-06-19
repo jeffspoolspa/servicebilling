@@ -50,7 +50,7 @@ export default async function LeadOnboardingPage({ params }: { params: Promise<{
 
   return (
     <>
-      <ObjectHeader
+      <ObjectHeader back
         eyebrow="Onboarding"
         title={name}
         sub="Collect the card, then confirm pool details — converts the lead on the spot."
