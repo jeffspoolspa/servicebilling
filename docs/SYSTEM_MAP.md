@@ -222,7 +222,7 @@ Pool maintenance: scheduled visits, technician routes, chemistry readings, consu
 - `maintenance.tasks_audit`, `task_schedules_audit` — change history
 
 **Views (route analysis)** — app-facing, in `public` (PostgREST-exposed, like `v_customer_data_quality`):
-- `public.v_route_stops` — routing spine: one row per active slot → pinned `service_location` geocode + tech + customer; `office_outlier_mi` = miles from the slot office's centroid (cross-office-leakage signal). Read by `/maintenance/routes/map`.
+- `public.v_route_stops` — routing spine: one row per active slot → pinned `service_location` geocode + tech + customer. `geo_trusted` = coordinate is rooftop-confirmed (`geocode_status='ok'` AND `place_id`); untrusted coords (stale points on never-resolved addresses) are never used for geography. `nearest_office` = closest office by a robust median center over trusted coords; `is_cross_office` = a trusted, office-assigned stop whose nearest office is >8mi closer than its assigned one (cross-office misassignment). Read by `/maintenance/routes/map`.
 - `public.v_route_load` — per-(tech, day) rollup over `v_route_stops`: stop count + geographic dispersion (avg/max miles from route centroid).
 - `maintenance.service_bodies` — pool body specs per service location
 - `maintenance.onboarding` — new-customer onboarding state (populated by `mark_payment_on_file` RPC)
