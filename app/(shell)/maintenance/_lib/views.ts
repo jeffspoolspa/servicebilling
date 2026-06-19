@@ -77,6 +77,10 @@ export interface TaskScheduleContextRow {
   active: boolean
   service_location_street: string | null
   service_location_city: string | null
+  service_location_zip: string | null
+  service_location_latitude: number | null
+  service_location_longitude: number | null
+  service_location_geocode_status: "ok" | "out_of_area" | "needs_review" | "failed" | null
   customer_id: number | null
   customer_name: string | null
   tech_name: string | null

@@ -1,0 +1,13 @@
+summary: Resolve service_locations to Google place_id + coordinate (canonical address list, ADR 005)
+description: >-
+  Resolves active service_locations to a Google place_id + coordinate + canonical
+  address and caches it on public.service_locations (ADR 005). Server-side, resumable
+  (only touches place_id IS NULL). Every result is validated against the SE-GA/NE-FL
+  SERVICE_BBOX: out-of-area results are flagged 'out_of_area' with no coordinate; a
+  place_id that already exists as a canonical row (owner change / shared address) is
+  caught on unique(place_id), rolled back, and flagged 'needs_review' with no place_id
+  so the collision is visible for a later collapse review. Builds the canonical
+  unique-address list. Requires the Windmill variable f/google_maps/api_key.
+lock: '!inline f/google_maps/geocode_service_locations.script.lock'
+kind: script
+schema: null
