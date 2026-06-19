@@ -5,6 +5,8 @@
 > code still lives inline in `lib/leads/intake.ts` until the refactor lands.
 > Kind: shared operation (verb). First doc in `docs/operations/` — one doc per reusable verb,
 > per the nouns/verbs/sentences model in [FLOW_DIAGRAM_NOTATION.md](../conventions/FLOW_DIAGRAM_NOTATION.md).
+> Address resolution + the customer↔address ledger this composer writes to:
+> [ADR 007](../adrs/007-address-resolution-and-customer-address-ledger.md).
 
 **One-line purpose:** turn contact + address into an `account_id` without creating duplicate
 customers — reusable by any flow that needs "a customer must exist before X".
