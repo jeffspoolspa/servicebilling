@@ -1,0 +1,15 @@
+summary: receive_sms
+description: ''
+lock: '!inline u/carter/receive_sms.script.lock'
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties:
+    body:
+      type: object
+      description: ''
+      default: null
+      properties: {}
+  required:
+    - body

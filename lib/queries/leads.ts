@@ -109,3 +109,39 @@ export async function getLeadActivities(leadId: string): Promise<LeadActivityRow
   if (error) throw new Error(`getLeadActivities: ${error.message}`)
   return (data ?? []) as LeadActivityRow[]
 }
+
+export interface LeadTimelineItem {
+  id: string
+  at: string
+  type: "email" | "text" | "other"
+  title: string
+}
+
+/**
+ * Communications-backed lead timeline, read from public.v_lead_timeline (which
+ * unions communications + email/text bodies, keyed by lead_id). Feeds the reusable
+ * ActivityTimeline component. Newest first.
+ */
+export async function getLeadTimeline(leadId: string): Promise<LeadTimelineItem[]> {
+  const sb = createSupabaseAdmin()
+  const { data, error } = await sb
+    .from("v_lead_timeline")
+    .select("at, event, title, source_id")
+    .eq("lead_id", leadId)
+    .order("at", { ascending: false })
+  if (error) throw new Error(`getLeadTimeline: ${error.message}`)
+  return (data ?? []).map((r: Record<string, unknown>) => {
+    const event = String(r.event ?? "")
+    const type: LeadTimelineItem["type"] = event.startsWith("email")
+      ? "email"
+      : event.startsWith("sms") || event.startsWith("text")
+        ? "text"
+        : "other"
+    return {
+      id: String(r.source_id),
+      at: String(r.at),
+      type,
+      title: (r.title as string) || (type === "email" ? "Email" : type === "text" ? "Text message" : "Activity"),
+    }
+  })
+}

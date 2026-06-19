@@ -1,0 +1,5 @@
+summary: Add subtotal_ok=TRUE gate
+description: Dispatch worker only fires pre_process for invoices with subtotal_ok=TRUE.
+lock: '!inline f/service_billing/dispatch_pre_processing.script.lock'
+kind: script
+schema: null

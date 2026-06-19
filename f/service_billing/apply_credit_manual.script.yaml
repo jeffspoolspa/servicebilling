@@ -1,0 +1,16 @@
+summary: >-
+  Drop Invoice webhook expectation on credit apply (cache is updated
+  authoritatively inline)
+description: >-
+  QBO doesn't reliably fire Invoice.update webhooks for credit applies (the
+  Payment.update is the canonical event). We were inserting an Invoice
+  expectation that'd time out and surface as a 'missing' alert in the sync
+  issues badge — pure noise, since apply_credit_manual already updates
+  billing.invoices.balance directly from a post-apply QBO fetch. Now we only
+  track the Payment/CreditMemo expectation, which IS the real verification (did
+  QBO accept the LinkedTxn change).
+lock: '!inline f/service_billing/apply_credit_manual.script.lock'
+concurrency_time_window_s: 0
+concurrent_limit: 5
+kind: script
+schema: null

@@ -1,0 +1,5 @@
+summary: Drop manual recheck loop (Phase 2B)
+description: fn_set_credits_ok_from_payment trigger handles fan-out automatically.
+lock: '!inline f/service_billing/refresh_payment.script.lock'
+kind: script
+schema: null

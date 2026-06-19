@@ -73,6 +73,12 @@ export interface LeadIntakeInput {
   customer_action?: "auto" | "use_existing" | "create_new"
   /** Required when customer_action='use_existing' — the matched Customers.id. */
   existing_customer_id?: number
+  /**
+   * Auto-send the quote to the customer on create (default true). Set false for
+   * the staff-driven "Continue to onboarding" path, where we collect the card +
+   * pool details immediately instead of emailing a quote.
+   */
+  notify?: boolean
 }
 
 export interface LeadIntakeResult {
@@ -114,7 +120,8 @@ export async function submitLeadIntake(input: LeadIntakeInput): Promise<LeadInta
   let returning = false
 
   async function refreshContact(id: number) {
-    await sb.rpc("update_account_contact", {
+    // Standard customer-edit RPC (row-locked). Address omitted → unchanged.
+    await sb.rpc("update_customer", {
       p_account_id: id,
       p_first_name: a.first_name,
       p_last_name: a.last_name,
@@ -171,12 +178,17 @@ export async function submitLeadIntake(input: LeadIntakeInput): Promise<LeadInta
     if (existingLoc?.id) {
       primaryLocationId = existingLoc.id as number
     } else {
-      const { data: newLoc, error: locErr } = await sb
-        .schema("public").from("service_locations")
-        .insert({ account_id: accountId, street: a.billing_street, city: a.billing_city, state: billingState, zip: billingZip, is_primary: false })
-        .select("id").single()
+      // ADR 005: route through the canonical address door, not a direct insert.
+      const { data: locId, error: locErr } = await sb.rpc("upsert_service_location", {
+        p_account_id: accountId,
+        p_street: a.billing_street,
+        p_city: a.billing_city,
+        p_state: billingState,
+        p_zip: billingZip,
+        p_is_primary: false,
+      })
       if (locErr) return { ok: false, error: `Location creation failed: ${locErr.message}` }
-      primaryLocationId = newLoc.id as number
+      primaryLocationId = locId as number
     }
   }
 
@@ -251,7 +263,7 @@ export async function submitLeadIntake(input: LeadIntakeInput): Promise<LeadInta
   // 7. Auto-send the quote to the customer (non-fatal). Prefer email when present
   //    and the Resend template is configured; otherwise fall back to SMS. Any
   //    failure is swallowed — the lead is already created.
-  const notify: LeadIntakeResult["notify"] = office
+  const notify: LeadIntakeResult["notify"] = (input.notify !== false && office)
     ? await notifyQuote({
         office, leadId, accountId,
         firstName: a.first_name, email: a.email ?? null, phone: a.phone ?? null,
@@ -266,17 +278,40 @@ const FREQUENCY_LABEL: Record<MaintQuote["frequencyKey"], string> = {
   biweekly: "bi-weekly", weekly: "weekly", twice_weekly: "twice-weekly",
 }
 
+// The customer-facing get-started page (hosts the onboarding wizard + the
+// already-accepted status screen). Same base the Windmill cadence uses.
+const GET_STARTED_URL = process.env.GET_STARTED_URL || "https://jeffspoolspa.github.io/perfectpools-redesign/get-started/"
+
+/** Mint the card-collection token + build the onboarding link for a lead. Best-effort. */
+async function buildOnboardLink(leadId: string, laborMonthly: number): Promise<string | undefined> {
+  try {
+    const sb = createSupabaseAdmin()
+    const preAuthCents = laborMonthly > 0 ? Math.round(laborMonthly * 100) : null
+    const { data, error } = await sb.rpc("create_card_collection_request", { p_lead_id: leadId, p_pre_auth_amount: preAuthCents })
+    if (error) return undefined
+    const res = data as Record<string, unknown> | null
+    const token = res?.token as string | undefined
+    if (!token) return undefined
+    const sep = GET_STARTED_URL.includes("?") ? "&" : "?"
+    return `${GET_STARTED_URL}${sep}token=${token}`
+  } catch {
+    return undefined
+  }
+}
+
 /** Auto-send the quote to the customer. Returns the channel + status; never throws. */
 async function notifyQuote(args: {
   office: Office; leadId: string; accountId: number
   firstName: string; email: string | null; phone: string | null
   quote: MaintQuote
 }): Promise<LeadIntakeResult["notify"]> {
+  const onboardLink = await buildOnboardLink(args.leadId, args.quote.laborMonthly)
   const ctx: LeadQuoteContext = {
     firstName: args.firstName,
     office: args.office,
     quote: args.quote,
     visitFrequencyLabel: FREQUENCY_LABEL[args.quote.frequencyKey],
+    onboardLink,
   }
   const templateId = leadQuoteTemplate.resendTemplateId()
   try {

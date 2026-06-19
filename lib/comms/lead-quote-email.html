@@ -1,0 +1,120 @@
+<!--
+  Lead-quote estimate email. Pushed into the Resend template via the API (see the
+  one-shot create/update scripts in chat history). Variable syntax is Resend's
+  triple-brace; names are camelCase (Resend can't parse underscores, and FIRST_NAME
+  is reserved). The ONLY variables our code sends (lib/comms/templates.ts):
+      customerName, officeName, officePhone, visitFrequency,
+      perVisit, laborMonthly, chemEstimate,
+      monthlyTotal, monthlyLow, monthlyHigh, onboardLink
+  Static "Learn more" links point at the marketing site — update the domain/paths.
+  The doc comment is stripped before pushing to Resend (it contains literal tokens).
+-->
+<div style="margin:0;padding:0;background:#eef2f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f2d3a;">
+  <div style="display:none;max-height:0;overflow:hidden;color:#eef2f5;">Your custom pool care estimate — about ${{{monthlyTotal}}}/mo.</div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f5;padding:20px 0;">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e2e8ee;">
+
+        <!-- Header band -->
+        <tr><td style="background:#0c2238;padding:22px 32px;">
+          <table role="presentation" width="100%"><tr>
+            <td style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.01em;">{{{officeName}}}</td>
+            <td align="right" style="color:#7fb6dd;font-size:12px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;">Your Estimate</td>
+          </tr></table>
+        </td></tr>
+
+        <!-- Hero -->
+        <tr><td style="background:#0c2238;padding:8px 32px 36px;">
+          <p style="margin:0 0 6px;color:#a9c9e2;font-size:15px;">Hi {{{customerName}}},</p>
+          <h1 style="margin:0 0 18px;color:#ffffff;font-size:26px;line-height:1.25;font-weight:800;letter-spacing:-0.02em;">Here's your custom<br>pool care estimate</h1>
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td style="vertical-align:bottom;">
+              <span style="color:#ffffff;font-size:40px;font-weight:800;letter-spacing:-0.02em;">${{{monthlyTotal}}}</span>
+              <span style="color:#a9c9e2;font-size:16px;font-weight:600;">/mo</span>
+            </td>
+          </tr></table>
+          <p style="margin:8px 0 24px;color:#7fb6dd;font-size:14px;">Typically <strong style="color:#cfe4f5;">${{{monthlyLow}}}&ndash;${{{monthlyHigh}}}/mo</strong> &middot; {{{visitFrequency}}} service</p>
+          <a href="{{{onboardLink}}}" style="display:inline-block;background:#19a7e0;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 30px;border-radius:9px;">Get started &rarr;</a>
+        </td></tr>
+
+        <!-- Section 1: Your estimate -->
+        <tr><td style="padding:34px 32px 8px;">
+          <p style="margin:0 0 4px;color:#19a7e0;font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">1 &middot; Your estimate</p>
+          <h2 style="margin:0 0 12px;font-size:20px;font-weight:700;letter-spacing:-0.01em;">What your monthly cost is based on</h2>
+          <p style="margin:0 0 18px;color:#5b7a90;font-size:14px;line-height:1.6;">It's a range because every pool is different. Your estimate moves with your pool's <strong style="color:#1f2d3a;">size</strong>, current <strong style="color:#1f2d3a;">water condition</strong>, how much <strong style="color:#1f2d3a;">chlorine your pool demands</strong> week to week, and your <strong style="color:#1f2d3a;">visit frequency</strong>.</p>
+
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8ee;border-radius:10px;">
+            <tr><td style="padding:12px 16px;border-bottom:1px solid #eef2f5;color:#5b7a90;font-size:14px;">Per visit</td><td align="right" style="padding:12px 16px;border-bottom:1px solid #eef2f5;font-weight:700;font-size:14px;">${{{perVisit}}}</td></tr>
+            <tr><td style="padding:12px 16px;border-bottom:1px solid #eef2f5;color:#5b7a90;font-size:14px;">Frequency</td><td align="right" style="padding:12px 16px;border-bottom:1px solid #eef2f5;font-size:14px;">{{{visitFrequency}}}</td></tr>
+            <tr><td style="padding:12px 16px;border-bottom:1px solid #eef2f5;color:#5b7a90;font-size:14px;">Labor (monthly)</td><td align="right" style="padding:12px 16px;border-bottom:1px solid #eef2f5;font-size:14px;">${{{laborMonthly}}}</td></tr>
+            <tr><td style="padding:12px 16px;border-bottom:1px solid #eef2f5;color:#5b7a90;font-size:14px;">Chemicals (est.)</td><td align="right" style="padding:12px 16px;border-bottom:1px solid #eef2f5;font-size:14px;">${{{chemEstimate}}}</td></tr>
+            <tr><td style="padding:14px 16px;font-weight:700;font-size:15px;">Estimated monthly</td><td align="right" style="padding:14px 16px;font-weight:800;font-size:18px;color:#0c2238;">${{{monthlyTotal}}}</td></tr>
+          </table>
+          <p style="margin:14px 0 0;font-size:13px;"><a href="https://www.jeffspoolspa.com/pricing" style="color:#19a7e0;text-decoration:none;font-weight:600;">Learn how we build your estimate &rarr;</a></p>
+        </td></tr>
+
+        <tr><td style="padding:8px 32px;"><div style="border-top:1px solid #eef2f5;"></div></td></tr>
+
+        <!-- Section 2: How pricing works -->
+        <tr><td style="padding:24px 32px 8px;">
+          <p style="margin:0 0 4px;color:#19a7e0;font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">2 &middot; How pricing works</p>
+          <h2 style="margin:0 0 12px;font-size:20px;font-weight:700;letter-spacing:-0.01em;">Exactly what you're paying for</h2>
+
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;">Chemicals &mdash; dosed to your water, not a flat fee</p>
+          <p style="margin:0 0 16px;color:#5b7a90;font-size:14px;line-height:1.6;">Every visit we test your water and add exactly what your pool needs, sized to your pool's volume and readings. Pools with <strong style="color:#1f2d3a;">high chlorine demand</strong> (heavy use, sun, or algae-prone) may need an added treatment plan &mdash; we'll only recommend it if your readings call for it, so you never pay for chemicals you don't need.</p>
+
+          <p style="margin:0 0 8px;font-size:15px;font-weight:700;">Labor &mdash; a full checklist, every visit</p>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 8px;">
+            <tr>
+              <td width="50%" style="padding:5px 0;color:#33424f;font-size:14px;"><span style="color:#15b8a6;font-weight:800;">&#10003;</span>&nbsp; Skim &amp; net debris</td>
+              <td width="50%" style="padding:5px 0;color:#33424f;font-size:14px;"><span style="color:#15b8a6;font-weight:800;">&#10003;</span>&nbsp; Brush walls &amp; steps</td>
+            </tr>
+            <tr>
+              <td style="padding:5px 0;color:#33424f;font-size:14px;"><span style="color:#15b8a6;font-weight:800;">&#10003;</span>&nbsp; Vacuum as needed</td>
+              <td style="padding:5px 0;color:#33424f;font-size:14px;"><span style="color:#15b8a6;font-weight:800;">&#10003;</span>&nbsp; Empty skimmer &amp; pump baskets</td>
+            </tr>
+            <tr>
+              <td style="padding:5px 0;color:#33424f;font-size:14px;"><span style="color:#15b8a6;font-weight:800;">&#10003;</span>&nbsp; Test &amp; balance water</td>
+              <td style="padding:5px 0;color:#33424f;font-size:14px;"><span style="color:#15b8a6;font-weight:800;">&#10003;</span>&nbsp; Inspect equipment</td>
+            </tr>
+          </table>
+          <p style="margin:10px 0 0;font-size:13px;"><a href="https://www.jeffspoolspa.com/services" style="color:#19a7e0;text-decoration:none;font-weight:600;">See everything included in a visit &rarr;</a></p>
+        </td></tr>
+
+        <tr><td style="padding:8px 32px;"><div style="border-top:1px solid #eef2f5;"></div></td></tr>
+
+        <!-- Section 3: Signup & billing + trust -->
+        <tr><td style="padding:24px 32px 8px;">
+          <p style="margin:0 0 4px;color:#19a7e0;font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">3 &middot; Getting started</p>
+          <h2 style="margin:0 0 12px;font-size:20px;font-weight:700;letter-spacing:-0.01em;">Simple signup &amp; billing</h2>
+          <p style="margin:0 0 18px;color:#5b7a90;font-size:14px;line-height:1.6;">Save a card on file and we'll get you on the schedule. You're billed <strong style="color:#1f2d3a;">monthly for the service we've already completed</strong> &mdash; no upfront contracts, and you can pause or cancel anytime.</p>
+
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f9fc;border:1px solid #dbe9f3;border-radius:10px;margin:0 0 18px;">
+            <tr><td style="padding:16px 18px;">
+              <p style="margin:0 0 6px;color:#15b8a6;font-size:13px;font-weight:700;">&#9733;&#9733;&#9733;&#9733;&#9733;</p>
+              <p style="margin:0 0 6px;font-size:14px;line-height:1.6;font-style:italic;color:#33424f;">"Our pool has never looked better and the billing is completely hassle-free. They tell us exactly what they're doing every visit."</p>
+              <p style="margin:0;color:#5b7a90;font-size:13px;">&mdash; A happy {{{officeName}}} customer</p>
+            </td></tr>
+          </table>
+
+          <p style="margin:0 0 4px;font-size:14px;font-weight:700;">When am I billed?</p>
+          <p style="margin:0 0 12px;color:#5b7a90;font-size:14px;line-height:1.6;">At the start of each month, for the prior month's completed visits.</p>
+          <p style="margin:0 0 4px;font-size:14px;font-weight:700;">Can I change my frequency later?</p>
+          <p style="margin:0 0 18px;color:#5b7a90;font-size:14px;line-height:1.6;">Anytime &mdash; just let us know and we'll adjust your plan and pricing.</p>
+
+          <a href="{{{onboardLink}}}" style="display:inline-block;background:#19a7e0;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 30px;border-radius:9px;">Get started &rarr;</a>
+          <p style="margin:14px 0 0;font-size:13px;"><a href="https://www.jeffspoolspa.com/faq" style="color:#19a7e0;text-decoration:none;font-weight:600;">Read more FAQs &rarr;</a></p>
+        </td></tr>
+
+        <!-- Footer band -->
+        <tr><td style="background:#0c2238;padding:22px 32px;">
+          <p style="margin:0 0 4px;color:#ffffff;font-size:14px;font-weight:700;">{{{officeName}}}</p>
+          <p style="margin:0 0 10px;color:#7fb6dd;font-size:13px;">Questions? Call us at {{{officePhone}}}</p>
+          <p style="margin:0;color:#5e83a0;font-size:11px;">You're receiving this because you requested a pool service quote. &middot; <a href="https://www.jeffspoolspa.com" style="color:#7fb6dd;text-decoration:none;">jeffspoolspa.com</a></p>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</div>

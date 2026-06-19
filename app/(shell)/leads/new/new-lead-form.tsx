@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { OptionPills } from "@/components/ui/option-pills"
-import { AddressAutocomplete, type PickedAddress } from "@/components/form/address-autocomplete"
+import { MapboxAddressAutocomplete, type PickedAddress } from "@/components/form/mapbox-address-autocomplete"
+import { AddressFields } from "@/components/form/address-fields"
 import { checkServiceArea, calculateMaintQuote, type ChemEstimates } from "@/lib/leads/quote"
 import { prettyOffice } from "../ui"
 import { createInternalLead, type ActionState } from "../actions"
@@ -107,11 +108,6 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
     const o = checkServiceArea(a.zip).office
     if (o) setOffice(o)
   }
-  function onZipChange(v: string) {
-    setZip(v)
-    const o = checkServiceArea(v).office
-    if (o) setOffice(o)
-  }
 
   const runDedup = useCallback((q: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -131,7 +127,12 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
   }, [])
 
   useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current) }, [])
-  useEffect(() => { if (state.ok && state.leadId) router.push(`/leads/${state.leadId}` as never) }, [state, router])
+  useEffect(() => {
+    if (state.ok && state.leadId) {
+      const dest = state.intent === "onboard" ? `/leads/${state.leadId}/onboarding` : `/leads/${state.leadId}`
+      router.push(dest as never)
+    }
+  }, [state, router])
 
   // Attach an existing customer: pull their full record and pre-fill the form so
   // staff can confirm. Snapshot the loaded values to flag any later edits as overrides.
@@ -186,13 +187,10 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
                   <Pill tone={area.inArea ? "grass" : "coral"}>{area.inArea ? prettyOffice(office) : "Out of area"}</Pill>
                 </span>
               : null}>
-            <AddressAutocomplete onPicked={onAddressPicked} className={inputCls} />
-            <div className="grid grid-cols-6 gap-3 mt-3">
-              <Field cls="col-span-6" label="Street *"><input name="street" value={street} onChange={(e) => setStreet(e.target.value)} className={inputCls} disabled={pending} required /></Field>
-              <Field cls="col-span-3" label="City *"><input name="city" value={city} onChange={(e) => setCity(e.target.value)} className={inputCls} disabled={pending} required /></Field>
-              <Field cls="col-span-1" label="State"><input name="state" value={stateCode} onChange={(e) => setStateCode(e.target.value)} className={inputCls} disabled={pending} /></Field>
-              <Field cls="col-span-2" label="ZIP *"><input name="zip" value={zip} onChange={(e) => onZipChange(e.target.value)} className={inputCls} disabled={pending} required /></Field>
-              <Field cls="col-span-3" label="Office (auto from ZIP)">
+            <MapboxAddressAutocomplete onPicked={onAddressPicked} className={inputCls} placeholder="Search the service address…" />
+            <AddressFields street={street} city={city} state={stateCode} zip={zip} className="mt-3" />
+            <div className="mt-3 max-w-xs">
+              <Field cls="" label="Office (auto from ZIP)">
                 <OptionPills
                   value={office}
                   onChange={(v) => setOffice(v as Office)}
@@ -322,7 +320,11 @@ export function NewLeadForm({ chem }: { chem: ChemEstimates | null }) {
             <input type="hidden" name="existing_customer_id" value={existingId ?? ""} />
 
             {state.error && <div className="text-coral text-[13px] bg-coral/10 border border-coral/20 rounded-md p-3">{state.error}</div>}
-            <Button type="submit" variant="primary" disabled={pending}>{pending ? "Creating…" : "Create lead"}</Button>
+            <Button type="submit" name="intent" value="create" variant="primary" disabled={pending}>{pending ? "Creating…" : "Create lead"}</Button>
+            <Button type="submit" name="intent" value="onboard" variant="default" disabled={pending} className="w-full">
+              {pending ? "…" : "Continue to onboarding →"}
+            </Button>
+            <p className="text-ink-mute text-[11px] text-center -mt-1">Skips the quote — collect card + pool details now.</p>
           </div>
         </div>
       </div>

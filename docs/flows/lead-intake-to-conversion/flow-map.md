@@ -36,6 +36,15 @@ sequenceDiagram
   DB->>DB: sync_lead_lifecycle_from_child -> lifecycle_state=closed
 ```
 
+**Two close paths from the internal new-lead form:**
+- **Create lead** — auto-sends the quote (Resend/SMS); the customer self-onboards via the website
+  get-started page, chased by the follow-up cadence. (Steps below.)
+- **Continue to onboarding** — staff-driven walk-in/phone close. Creates the lead with `notify:false`
+  (no quote sent) and opens the in-app page **`/leads/[id]/onboarding`** (also reachable from the lead
+  detail page). That page embeds the card-vault iframe (`NEXT_PUBLIC_CARD_VAULT_URL`/collect, origin-checked
+  postMessage) → `mark_payment_on_file` (convert), then collects pool details → `submit_maintenance_onboarding`.
+  Reuses the same RPCs + card-vault as the website; our app never touches card data.
+
 **Quote engine:** labor + chemicals + monthly total are computed in ONE place,
 `lib/leads/quote.ts calculateMaintQuote`, which consumes the chemical tiers from
 `estimate_maint_chemicals` (the refinable DB gate). The internal form computes it client-side for the

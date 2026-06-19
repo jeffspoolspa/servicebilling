@@ -20,6 +20,8 @@ export interface LeadQuoteContext {
   quote: MaintQuote
   /** Human label for the cadence, e.g. "weekly", "bi-weekly", "twice-weekly". */
   visitFrequencyLabel: string
+  /** Token-gated onboarding URL (get-started page) the customer clicks to accept + pay. */
+  onboardLink?: string
 }
 
 function officeName(office: Office): string {
@@ -43,7 +45,8 @@ function officePhone(office: Office): string {
  * in the template copy):
  *   FIRST_NAME, OFFICE_NAME, OFFICE_PHONE, VISIT_FREQUENCY,
  *   PER_VISIT, LABOR_MONTHLY, CHEM_ESTIMATE,
- *   MONTHLY_TOTAL, MONTHLY_LOW, MONTHLY_HIGH
+ *   MONTHLY_TOTAL, MONTHLY_LOW, MONTHLY_HIGH,
+ *   ONBOARD_LINK (the get-started URL — put it on the CTA button in the template)
  */
 export const leadQuoteTemplate = {
   name: "lead_quote" as const,
@@ -54,27 +57,33 @@ export const leadQuoteTemplate = {
 
   variables(ctx: LeadQuoteContext): Record<string, string | number> {
     const total = ctx.quote.monthlyTotal?.median ?? ctx.quote.laborMonthly
+    // camelCase keys — Resend variable names can't contain underscores, and
+    // FIRST_NAME/EMAIL etc. are reserved. So customerName, not FIRST_NAME.
     return {
-      FIRST_NAME: ctx.firstName,
-      OFFICE_NAME: officeName(ctx.office),
-      OFFICE_PHONE: officePhone(ctx.office),
-      VISIT_FREQUENCY: ctx.visitFrequencyLabel,
-      PER_VISIT: ctx.quote.perVisit,
-      LABOR_MONTHLY: ctx.quote.laborMonthly,
-      CHEM_ESTIMATE: ctx.quote.chem?.median ?? 0,
-      MONTHLY_TOTAL: total,
-      MONTHLY_LOW: ctx.quote.monthlyTotal?.low ?? ctx.quote.laborMonthly,
-      MONTHLY_HIGH: ctx.quote.monthlyTotal?.high ?? ctx.quote.laborMonthly,
+      customerName: ctx.firstName,
+      officeName: officeName(ctx.office),
+      officePhone: officePhone(ctx.office),
+      visitFrequency: ctx.visitFrequencyLabel,
+      perVisit: ctx.quote.perVisit,
+      laborMonthly: ctx.quote.laborMonthly,
+      chemEstimate: ctx.quote.chem?.median ?? 0,
+      monthlyTotal: total,
+      monthlyLow: ctx.quote.monthlyTotal?.low ?? ctx.quote.laborMonthly,
+      monthlyHigh: ctx.quote.monthlyTotal?.high ?? ctx.quote.laborMonthly,
+      onboardLink: ctx.onboardLink ?? "",
     }
   },
 
   sms(ctx: LeadQuoteContext): string {
     const total = ctx.quote.monthlyTotal?.median ?? ctx.quote.laborMonthly
+    const cta = ctx.onboardLink
+      ? ` Get started here: ${ctx.onboardLink}`
+      : ` We'll follow up shortly.`
     return (
       `Hi ${ctx.firstName}, thanks for reaching out to ${officeName(ctx.office)}! ` +
       `Your estimated ${ctx.visitFrequencyLabel} pool service is about $${total}/mo ` +
-      `(labor $${ctx.quote.laborMonthly} + est. chemicals). We'll follow up shortly — ` +
-      `questions? Call ${officePhone(ctx.office)}.`
+      `(labor $${ctx.quote.laborMonthly} + est. chemicals).${cta} ` +
+      `Questions? Call ${officePhone(ctx.office)}.`
     )
   },
 }

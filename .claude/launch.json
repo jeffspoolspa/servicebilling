@@ -6,6 +6,18 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": ["/Users/cartergasia/servicebilling/servicebilling/.claude/dev.sh"],
       "port": 3000
+    },
+    {
+      "name": "docs-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4599", "--directory", "docs/model"],
+      "port": 4599
+    },
+    {
+      "name": "tail-review",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4610", "--directory", "/tmp/tailreview"],
+      "port": 4610
     }
   ]
 }

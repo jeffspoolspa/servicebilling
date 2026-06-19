@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visit Sync — Architecture & Data Flow</title>
+<style>
+:root{
+  --ink:#15212b;--muted:#667483;--line:#e2e8ef;--bg:#f5f7fa;--card:#fff;
+  --ion:#b8860b;--ionbg:#fbf3df;--canon:#0f9d58;--canonbg:#e8f6ee;
+  --core:#2a6fdb;--corebg:#e9f1fc;--watch:#d23f31;--watchbg:#fbe9e7;--tool:#7048b6;--toolbg:#efe9fb;
+}
+*{box-sizing:border-box}
+body{font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);margin:0;padding:28px 22px}
+.wrap{max-width:1080px;margin:0 auto}
+h1{font-size:25px;margin:0 0 2px}
+h2{font-size:18px;margin:32px 0 8px;padding-top:12px;border-top:2px solid var(--line)}
+h3{font-size:14px;margin:18px 0 4px;text-transform:uppercase;letter-spacing:.04em;color:#3a4757}
+.sub{color:var(--muted);margin:0 0 6px}
+p{margin:8px 0}
+code{background:#eef2f6;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:14px 16px;margin:10px 0}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--muted);margin:6px 0}
+.legend b{color:var(--ink)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:3px;vertical-align:0;margin-right:4px}
+table{border-collapse:collapse;width:100%;background:var(--card);margin:8px 0;font-size:13px}
+th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);background:#fbfcfe}
+.tag{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:9px;letter-spacing:.02em}
+.t-done{background:var(--canonbg);color:var(--canon)}
+.t-todo{background:var(--watchbg);color:var(--watch)}
+.t-part{background:var(--ionbg);color:var(--ion)}
+.q{background:#fff;border:1px solid var(--line);border-left:3px solid var(--core);border-radius:6px;padding:10px 14px;margin:8px 0}
+.q b{color:var(--core)}
+ul{margin:6px 0 6px 0;padding-left:20px}li{margin:3px 0}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.small{font-size:12px;color:var(--muted)}
+svg{max-width:100%;height:auto;background:var(--card);border:1px solid var(--line);border-radius:9px}
+</style></head>
+<body><div class="wrap">
+
+<h1>Visit Sync — Architecture &amp; Data Flow</h1>
+<p class="sub">How ION pool-service data becomes clean, route-attributed, normalized visits that tools can build on. Status: <b>draft for review · 2026-06-10</b>.</p>
+
+<div class="legend">
+  <span><span class="dot" style="background:var(--ion)"></span><b>ION</b> source (ColdFusion, scraped)</span>
+  <span><span class="dot" style="background:var(--canon)"></span><b>Canonical/alias</b> (ion.*)</span>
+  <span><span class="dot" style="background:var(--core)"></span><b>Core</b> maintenance.*</span>
+  <span><span class="dot" style="background:var(--watch)"></span><b>Watcher</b> (drift/quality)</span>
+  <span><span class="dot" style="background:var(--tool)"></span><b>Tools</b></span>
+</div>
+
+<h2>1 · Capture flow + reconcilers</h2>
+<p><b>Two clocks.</b> A <b>capture flow</b> (daily ~5 am ET) pulls ION and lands raw facts, then does the cheap DB-only resolution. Independent <b>reconcilers</b> own the table invariants ("every visit has a task", "nothing unmapped") and run on their own cadence — so heavy / fragile per-task ION lookups never gate the daily pull. Everything keyed &amp; idempotent; re-runs never duplicate.</p>
+
+<svg viewBox="0 0 1040 430" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial" font-size="12">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#9aa7b4"/></marker>
+  </defs>
+  <!-- ION source -->
+  <rect x="20" y="170" width="120" height="90" rx="8" fill="#fbf3df" stroke="#e3c878"/>
+  <text x="80" y="205" text-anchor="middle" font-weight="700" fill="#8a6608">ION Pool Care</text>
+  <text x="80" y="223" text-anchor="middle" fill="#8a6608" font-size="11">customerLogDetails</text>
+  <text x="80" y="238" text-anchor="middle" fill="#8a6608" font-size="11">addLog · taskList</text>
+  <text x="80" y="253" text-anchor="middle" fill="#8a6608" font-size="11">recurringTasks</text>
+
+  <!-- step 1 recurring_tasks -->
+  <rect x="185" y="40" width="150" height="74" rx="8" fill="#e9f1fc" stroke="#9cc0ee"/>
+  <text x="260" y="64" text-anchor="middle" font-weight="700" fill="#1d4e89">1 · recurring_tasks</text>
+  <text x="260" y="82" text-anchor="middle" fill="#33506e" font-size="11">active tasks →</text>
+  <text x="260" y="97" text-anchor="middle" fill="#33506e" font-size="11">tasks + task_schedules</text>
+
+  <!-- step 2 ingest -->
+  <rect x="185" y="170" width="150" height="90" rx="8" fill="#e9f1fc" stroke="#9cc0ee"/>
+  <text x="260" y="194" text-anchor="middle" font-weight="700" fill="#1d4e89">2 · ingest_day_logs</text>
+  <text x="260" y="211" text-anchor="middle" fill="#33506e" font-size="11">rolling 14 days</text>
+  <text x="260" y="226" text-anchor="middle" fill="#33506e" font-size="11">visits + children</text>
+  <text x="260" y="241" text-anchor="middle" fill="#33506e" font-size="11">dedup ion_log_id</text>
+
+  <!-- step 3 resolve tasks -->
+  <rect x="185" y="300" width="150" height="74" rx="8" fill="#fbe9e7" stroke="#e8a59d"/>
+  <text x="260" y="324" text-anchor="middle" font-weight="700" fill="#a8261a">task reconciler</text>
+  <text x="260" y="342" text-anchor="middle" fill="#8c2c22" font-size="11">task_id null → ION</text>
+  <text x="260" y="357" text-anchor="middle" fill="#8c2c22" font-size="11">create + link · own clock</text>
+
+  <!-- inline resolvers (within ingest) -->
+  <rect x="385" y="150" width="175" height="130" rx="8" fill="#e8f6ee" stroke="#92d3ab"/>
+  <text x="472" y="172" text-anchor="middle" font-weight="700" fill="#0c7c46">3 · normalize (set-based)</text>
+  <text x="472" y="192" text-anchor="middle" fill="#1c6b43" font-size="11">tech → actual_tech_id</text>
+  <text x="472" y="209" text-anchor="middle" fill="#1c6b43" font-size="11">consumable → concept</text>
+  <text x="472" y="226" text-anchor="middle" fill="#1c6b43" font-size="11">reading → reading_id*</text>
+  <text x="472" y="243" text-anchor="middle" fill="#1c6b43" font-size="11">checklist → checklist_id*</text>
+  <text x="472" y="263" text-anchor="middle" fill="#0c7c46" font-size="10">re-runnable · no ION</text>
+
+  <!-- core tables -->
+  <rect x="610" y="150" width="170" height="130" rx="8" fill="#fff" stroke="#cfd8e2"/>
+  <text x="695" y="172" text-anchor="middle" font-weight="700">maintenance.visits</text>
+  <text x="695" y="191" text-anchor="middle" font-size="11" fill="#556">+ visit_readings</text>
+  <text x="695" y="206" text-anchor="middle" font-size="11" fill="#556">+ visit_tasks</text>
+  <text x="695" y="221" text-anchor="middle" font-size="11" fill="#556">+ consumables_usage</text>
+  <text x="695" y="241" text-anchor="middle" font-size="11" fill="#556">task_id · task_schedule_id</text>
+  <text x="695" y="256" text-anchor="middle" font-size="11" fill="#556">actual_tech_id · office</text>
+
+  <!-- watcher -->
+  <rect x="610" y="40" width="170" height="74" rx="8" fill="#fbe9e7" stroke="#e8a59d"/>
+  <text x="695" y="64" text-anchor="middle" font-weight="700" fill="#a8261a">4 · drift watcher*</text>
+  <text x="695" y="82" text-anchor="middle" fill="#8c2c22" font-size="11">unmapped ids / names</text>
+  <text x="695" y="97" text-anchor="middle" fill="#8c2c22" font-size="11">out-of-range readings</text>
+
+  <!-- tools -->
+  <rect x="830" y="150" width="180" height="130" rx="8" fill="#efe9fb" stroke="#c3aee6"/>
+  <text x="920" y="172" text-anchor="middle" font-weight="700" fill="#54338f">Tools</text>
+  <text x="920" y="192" text-anchor="middle" fill="#4a3080" font-size="11">chem reconciliation</text>
+  <text x="920" y="208" text-anchor="middle" fill="#4a3080" font-size="11">route / tech reports</text>
+  <text x="920" y="224" text-anchor="middle" fill="#4a3080" font-size="11">billing audit</text>
+  <text x="920" y="240" text-anchor="middle" fill="#4a3080" font-size="11">inventory drift</text>
+
+  <!-- arrows -->
+  <path d="M140,200 L182,90" stroke="#9aa7b4" fill="none" marker-end="url(#ar)"/>
+  <path d="M140,215 L182,210" stroke="#9aa7b4" fill="none" marker-end="url(#ar)"/>
+  <path d="M140,235 L182,335" stroke="#9aa7b4" fill="none" marker-end="url(#ar)"/>
+  <path d="M260,114 L260,168" stroke="#9aa7b4" fill="none" marker-end="url(#ar)" stroke-dasharray="3,3"/>
+  <path d="M260,300 L260,262" stroke="#9aa7b4" fill="none" marker-end="url(#ar)" stroke-dasharray="3,3"/>
+  <path d="M335,215 L383,215" stroke="#9aa7b4" fill="none" marker-end="url(#ar)"/>
+  <path d="M560,215 L608,215" stroke="#9aa7b4" fill="none" marker-end="url(#ar)"/>
+  <path d="M695,150 L695,116" stroke="#9aa7b4" fill="none" marker-end="url(#ar)"/>
+  <path d="M780,215 L828,215" stroke="#9aa7b4" fill="none" marker-end="url(#ar)"/>
+</svg>
+<p class="small"><b>recurring_tasks</b> = standalone reusable flow (also fired after a reroute). <b>ingest</b> only CAPTURES raw (+ grid-tech, which only exists during the scrape). <b>normalize_visits</b> resolves every DB-only FK (tech, consumable, reading, checklist, task_id-from-schedules), is re-runnable after any alias change, and runs off the chromium worker. The <b>task reconciler</b> (ION create for unknown EventIDs) and <b>drift watcher</b> are separate jobs that read the owned tables on their own clock — not steps of the scrape.</p>
+
+<h2>2 · Cadence — what runs when</h2>
+<table>
+<tr><th>Job</th><th>Cadence</th><th>Why that cadence</th><th>Status</th></tr>
+<tr><td><b>Daily visit sync</b><br><span class="small">recurring_tasks → ingest(14d) → resolve_visit_tasks</span></td><td>Daily ~5 am ET</td><td>Yesterday's logs are in; 14-day re-pull catches late submissions/edits.</td><td><span class="tag t-part">assemble</span></td></tr>
+<tr><td><b>Route / schedule sync</b><br><span class="small">schedule_slots (day/tech/frequency) + recurring_tasks terms</span></td><td>Weekly (+ on-demand after a reroute)</td><td>Route assignments change in batches, not daily; cheap to refresh weekly.</td><td><span class="tag t-part">exists</span></td></tr>
+<tr><td><b>Non-active task capture</b><br><span class="small">capture_nonactive_tasks</span></td><td>Weekly</td><td>Closed/one-time tasks behind task-less visits; rare day-to-day.</td><td><span class="tag t-part">exists</span></td></tr>
+<tr><td><b>Drift watcher</b><br><span class="small">unmapped items/readings/checklist + reading out-of-range</span></td><td>Daily (after sync)</td><td>Catch new ION items/readings the moment they appear, before they silently fall out of analysis.</td><td><span class="tag t-todo">build</span></td></tr>
+<tr><td><b>Catalog/employee sync</b><br><span class="small">items (Zoho), employees (Gusto)</span></td><td>Existing external syncs</td><td>Feed the canonical anchors (public.items) + tech aliases.</td><td><span class="tag t-done">exists</span></td></tr>
+</table>
+
+<h2>3 · Data shapes (the spine)</h2>
+<p>Grain &amp; keys per table. Money = <code>integer</code> cents; dates = <code>date</code>; instants = <code>timestamptz</code>; quantities = <code>numeric</code>; canonical links = <code>uuid</code> FK alongside the preserved raw ION string.</p>
+<table>
+<tr><th>Table</th><th>Grain / key</th><th>Ties to</th><th>Notes</th></tr>
+<tr><td class="mono">maintenance.visits</td><td>1 per ION <b>LogID</b> (<code>ion_log_id</code> unique)</td><td>service_location_id, task_id, task_schedule_id, actual_tech_id, ion_task_id, office</td><td>Immutable grain; re-pull updates in place (<code>updated_at</code>). Holds <code>ion_submitted_by</code> (raw tech), <code>is_serviceable</code>, time in/out.</td></tr>
+<tr><td class="mono">maintenance.visit_readings</td><td>1 per (visit, reading)</td><td>visit_id, <b>reading_id</b>→reading_definitions</td><td>Tall. <code>name</code>+<code>value</code> raw; <code>reading_id</code> = canonical (★ not backfilled).</td></tr>
+<tr><td class="mono">maintenance.visit_tasks</td><td>1 per (visit, checklist item)</td><td>visit_id, <b>checklist_id</b>→task_definitions</td><td>Tall. <code>task_name</code>+<code>completed</code>; <code>checklist_id</code> canonical (★ not backfilled).</td></tr>
+<tr><td class="mono">maintenance.consumables_usage</td><td>1 per (visit, item line)</td><td>visit_id, <b>canonical_name</b>→chemical_definitions, item_id→public.items</td><td><span class="tag t-done">tied</span> <code>canonical_name</code>+<code>base_quantity</code> populated; <code>quantity</code>=raw package count.</td></tr>
+<tr><td class="mono">maintenance.tasks / task_schedules</td><td>task per service_location; schedule per (task, day, tech)</td><td>ion_task_id, tech_employee_id, day_of_week, office, frequency</td><td>The <b>route</b> lives here. Audited (tasks_audit, task_schedules_audit).</td></tr>
+<tr><td class="mono">ion.*_definitions / *_aliases</td><td>canonical concept + raw→canonical map</td><td>—</td><td>chemical (✅), reading (defs exist), task/checklist (defs exist). Append-only aliases.</td></tr>
+</table>
+<p class="small"><b>Legacy / cleanup:</b> <code>maintenance.chem_readings</code> (wide ph/fc/alk…) is superseded by tall <code>visit_readings</code> — plan to retire. A stray <code>ion.visit_tasks</code> duplicates <code>maintenance.visit_tasks</code> — confirm &amp; drop.</p>
+
+<h2>4 · The normalization pattern (3 parallel resolvers + a watcher)</h2>
+<p>Every visit child follows the same shape: ION emits a <b>raw name/id</b>, an <b>alias table</b> maps it to a <b>canonical definition</b>, and a <b>resolved FK</b> is stored next to the raw value. A <b>watcher</b> flags anything raw that has no alias yet, so the approved lists never silently drift.</p>
+<table>
+<tr><th>Child</th><th>raw</th><th>alias</th><th>canonical (approved list)</th><th>resolved FK</th><th>state</th></tr>
+<tr><td>Consumables</td><td>ion_item_id + name</td><td>consumable_aliases</td><td>chemical_definitions (25, from truck list, priced)</td><td>canonical_name + base_quantity</td><td><span class="tag t-done">done</span></td></tr>
+<tr><td>Readings</td><td>name + value</td><td>reading_aliases</td><td>reading_definitions (+ min/max, corrective_consumables)</td><td>reading_id</td><td><span class="tag t-todo">resolve+watch</span></td></tr>
+<tr><td>Checklist</td><td>task_name + completed</td><td>task_aliases</td><td>task_definitions</td><td>checklist_id</td><td><span class="tag t-todo">resolve+watch</span></td></tr>
+</table>
+<div class="card">
+<h3>Drift watcher — what it flags (daily)</h3>
+<ul>
+<li><b>New unmapped:</b> any <code>ion_item_id</code> / reading <code>name</code> / checklist <code>task_name</code> appearing in the last window with <b>no alias row</b> (or <code>kind='unknown'</code>) → surface for a one-line mapping decision (append-only).</li>
+<li><b>Reading quality:</b> readings outside <code>reading_definitions.min/max_acceptable</code> → flag (water-chemistry exceptions, and a hook for "should have used <code>corrective_consumables</code>").</li>
+<li><b>Sign-out vs usage drift:</b> the chem reconciliation gap (already built) is the inventory-side watcher — extend to a daily/weekly alert per branch.</li>
+</ul>
+<p class="small">Output: a small <code>ion.alias_drift</code> queue (or a daily digest) + an alert. Mapping stays a human decision; the watcher just guarantees nothing falls through.</p>
+</div>
+
+<h2>5 · Routes</h2>
+<p>A "route" today = <b>(office, tech, day_of_week)</b> derived from <code>task_schedules</code>; <code>v_routes_summary</code> already rolls it up (stop counts, frequency mix, value). ION's own <code>route_name</code>/<code>zone</code> ride on <code>ion.recurring_tasks</code>.</p>
+<p>A visit attaches to its route through <code>visits.task_schedule_id</code> → the schedule's tech + day + office. So "every visit tied to a route" depends on <code>task_schedule_id</code> being reliably set — that's what step&nbsp;3 (resolve/relink) does, and it should be folded into the daily run so new visits are route-attributed same-day.</p>
+<div class="q"><b>Decide:</b> keep routes <i>derived</i> (view over task_schedules, simplest, already audited) — or promote to a first-class <code>maintenance.routes</code> table (stable route id/name, capacity, color) if tools need to reference a route as an entity. Recommendation: stay derived until a tool needs a durable route id.</div>
+
+<h2>6 · History &amp; freshness</h2>
+<ul>
+<li><b>Visits</b> — immutable grain (one row per LogID). Re-pull corrects in place; the row <i>is</i> the historical record. No SCD needed; add a <code>visits_audit</code> only if we need to track post-hoc edits.</li>
+<li><b>Tasks &amp; schedules (routes)</b> — change over time (reroutes, price changes) and are <b>already audited</b> via <code>tasks_audit</code> / <code>task_schedules_audit</code> (before/after/diff jsonb). That's our route-history.</li>
+<li><b>Canonical lists &amp; aliases</b> — append-only; aliases are never deleted (techs change route prefixes, ION renames items). History is the append log.</li>
+<li><b>Freshness contract</b> — "current through yesterday by ~5:30 am ET, self-healing on a 14-day window." Tools can assume visits ≤ 1 day stale and fully resolved (tech, chemical, task, route).</li>
+</ul>
+
+<h2>7 · Open decisions / build queue</h2>
+<div class="q"><b>A. Fold reading + checklist resolvers into ingest</b> (mirror consumables): backfill existing <code>reading_id</code>/<code>checklist_id</code>, then resolve inline going forward. Requires curating the approved <code>reading_definitions</code> / <code>task_definitions</code> lists first.</div>
+<div class="q"><b>B. Build the drift watcher</b> — daily check + flag queue for unmapped items/readings/checklist + out-of-range readings. Decide the alert channel (email? a dashboard table?).</div>
+<div class="q"><b>C. Route attribution</b> — fold <code>task_schedule_id</code> relink into the daily run so visits are route-tagged same-day; confirm derived-route vs a <code>routes</code> table.</div>
+<div class="q"><b>D. Cadence sign-off</b> — daily 5 am visit sync; weekly route/schedule + non-active task sync; daily drift watcher. Confirm times.</div>
+<div class="q"><b>E. Legacy cleanup</b> — retire wide <code>chem_readings</code> in favor of tall <code>visit_readings</code>; confirm/drop stray <code>ion.visit_tasks</code>.</div>
+<div class="q"><b>F. Item list completeness</b> — the 25-item chemical list covers ~99% of volume; decide whether to extend canonical chemicals to the tail (DICHLOR, LP-MAX, shocks, stabilizers) so the drift watcher's "unmapped" set shrinks to truly-new items.</div>
+
+</div></body></html>

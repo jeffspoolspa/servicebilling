@@ -1,0 +1,5 @@
+summary: tmp_lookup_9122426059_v2
+description: 'One-off: deep lookup for (912) 242-6059 over 90 days. Delete after use.'
+lock: '!inline u/carter/tmp_lookup_242.script.lock'
+kind: script
+schema: null

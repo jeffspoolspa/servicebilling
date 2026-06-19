@@ -1,4 +1,5 @@
 import { type ReactNode } from "react"
+import { BackButton } from "./back-button"
 
 interface ObjectHeaderProps {
   eyebrow?: string
@@ -6,6 +7,9 @@ interface ObjectHeaderProps {
   sub?: ReactNode
   icon?: ReactNode
   actions?: ReactNode
+  /** Show a "Back" button (browser history) above the title — for detail pages. */
+  back?: boolean
+  backHref?: string
 }
 
 /**
@@ -16,24 +20,31 @@ interface ObjectHeaderProps {
  * (`bg-<tone>/15 border border-<tone>/30`), so the icon reads as an
  * affordance, not a focal point that fights with the title.
  */
-export function ObjectHeader({ eyebrow, title, sub, icon, actions }: ObjectHeaderProps) {
+export function ObjectHeader({ eyebrow, title, sub, icon, actions, back, backHref = "/" }: ObjectHeaderProps) {
   return (
-    <header className="px-7 pt-6 flex items-start gap-4 border-b border-line-soft pb-6 animate-fadeup">
-      {icon && (
-        // [&_svg] normalizes whatever sizing/stroke the caller passed so the
-        // icon reads consistently across every ObjectHeader.
-        <div className="w-10 h-10 rounded-lg bg-cyan/10 border border-cyan/20 grid place-items-center text-cyan shrink-0 mt-0.5 [&_svg]:w-[18px] [&_svg]:h-[18px] [&_svg]:[stroke-width:1.8]">
-          {icon}
+    <header className="px-7 pt-6 border-b border-line-soft pb-6 animate-fadeup">
+      {back && (
+        <div className="mb-3">
+          <BackButton fallbackHref={backHref} />
         </div>
       )}
-      <div className="flex flex-col gap-1 min-w-0">
-        {eyebrow && (
-          <div className="text-[11px] uppercase tracking-[0.16em] text-cyan">{eyebrow}</div>
+      <div className="flex items-start gap-4">
+        {icon && (
+          // [&_svg] normalizes whatever sizing/stroke the caller passed so the
+          // icon reads consistently across every ObjectHeader.
+          <div className="w-10 h-10 rounded-lg bg-cyan/10 border border-cyan/20 grid place-items-center text-cyan shrink-0 mt-0.5 [&_svg]:w-[18px] [&_svg]:h-[18px] [&_svg]:[stroke-width:1.8]">
+            {icon}
+          </div>
         )}
-        <h1 className="text-3xl font-display tracking-tight">{title}</h1>
-        {sub && <div className="text-ink-dim text-[13px]">{sub}</div>}
+        <div className="flex flex-col gap-1 min-w-0">
+          {eyebrow && (
+            <div className="text-[11px] uppercase tracking-[0.16em] text-cyan">{eyebrow}</div>
+          )}
+          <h1 className="text-3xl font-display tracking-tight">{title}</h1>
+          {sub && <div className="text-ink-dim text-[13px]">{sub}</div>}
+        </div>
+        {actions && <div className="ml-auto flex gap-2">{actions}</div>}
       </div>
-      {actions && <div className="ml-auto flex gap-2">{actions}</div>}
     </header>
   )
 }

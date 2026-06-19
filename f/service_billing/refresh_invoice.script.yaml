@@ -1,0 +1,5 @@
+summary: Drop manual recheck call (Phase 2B)
+description: Per-source maintenance triggers fire from billing.invoices column changes.
+lock: '!inline f/service_billing/refresh_invoice.script.lock'
+kind: script
+schema: null

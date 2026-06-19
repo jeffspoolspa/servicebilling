@@ -13,7 +13,7 @@ import { submitLeadIntake } from "@/lib/leads/intake"
  * docs/flows/lead-intake-to-conversion/index.md.
  */
 
-export type ActionState = { ok?: string; error?: string; leadId?: string }
+export type ActionState = { ok?: string; error?: string; leadId?: string; intent?: "create" | "onboard" }
 
 const createSchema = z.object({
   first_name: z.string().trim().min(1, "First name is required"),
@@ -32,6 +32,9 @@ const createSchema = z.object({
   issue_description: z.string().trim().optional(),
   customer_action: z.enum(["auto", "use_existing", "create_new"]).default("auto"),
   existing_customer_id: z.string().trim().optional(),
+  // "create" sends the quote then opens the lead; "onboard" skips the quote and
+  // jumps to the in-app onboarding form (card + pool details) for a walk-in close.
+  intent: z.enum(["create", "onboard"]).default("create"),
 }).refine((d) => (d.email && d.email.length > 0) || (d.phone && d.phone.length > 0), {
   message: "Email or phone is required",
   path: ["email"],
@@ -80,18 +83,24 @@ export async function createInternalLead(
     allow_out_of_area: true,
     customer_action: d.customer_action,
     existing_customer_id: d.existing_customer_id ? Number(d.existing_customer_id) : undefined,
+    // Onboard path skips the quote send — we collect the card + details immediately.
+    notify: d.intent !== "onboard",
   })
 
   if (!result.ok) return { error: result.error ?? "Could not create lead." }
 
   revalidatePath("/leads")
+  // Onboard path: caller redirects straight to the onboarding form; skip the quote note.
+  if (d.intent === "onboard") {
+    return { ok: "Lead created — continue to onboarding.", leadId: result.lead_id, intent: "onboard" }
+  }
   const qboNote = result.qbo === "deferred" ? " QBO customer create deferred — will retry." : ""
   const lead = result.returning ? "Lead created under existing customer." : "Lead created."
   const notifyNote =
     result.notify?.status === "sent" ? ` Quote ${result.notify.channel === "email" ? "emailed" : "texted"}.`
     : result.notify?.status === "failed" ? ` Quote ${result.notify.channel} send deferred.`
     : ""
-  return { ok: lead + qboNote + notifyNote, leadId: result.lead_id }
+  return { ok: lead + qboNote + notifyNote, leadId: result.lead_id, intent: "create" }
 }
 
 const idSchema = z.object({ lead_id: z.string().uuid() })
@@ -147,21 +156,41 @@ export async function sendCardLink(_prev: ActionState, formData: FormData): Prom
   return { ok: `Card-collection link ready (token ${String(res?.token).slice(0, 8)}…, expires ${res?.expires_at}).` }
 }
 
-export async function setStatus(_prev: ActionState, formData: FormData): Promise<ActionState> {
+// Status is derived from what's happened (quote sent, payment on file) — there is
+// no manual status setter. Editing the CUSTOMER (name/contact/address) is allowed.
+export async function updateCustomer(_prev: ActionState, formData: FormData): Promise<ActionState> {
   await requireModuleWrite("leads")
   const parsed = z.object({
     lead_id: z.string().uuid(),
-    status: z.enum(["new", "quoted", "accepted", "converted", "expired", "declined", "disqualified"]),
+    account_id: z.coerce.number().int().positive(),
+    first_name: z.string().trim().min(1, "First name is required"),
+    last_name: z.string().trim().min(1, "Last name is required"),
+    email: z.string().trim().email("Valid email required").or(z.literal("")).optional(),
+    phone: z.string().trim().optional(),
+    street: z.string().trim().optional(),
+    city: z.string().trim().optional(),
+    state: z.string().trim().optional(),
+    zip: z.string().trim().optional(),
   }).safeParse(Object.fromEntries(formData))
-  if (!parsed.success) return { error: "Invalid input." }
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." }
+  const d = parsed.data
 
+  // One standardized, row-locking RPC handles name + contact + address atomically.
+  // NOTE: local-only for now; QBO propagation of edits is a follow-up.
   const sb = createSupabaseAdmin()
-  const { error } = await sb.rpc("bulk_update_lead_status", {
-    p_lead_ids: [parsed.data.lead_id],
-    p_status: parsed.data.status,
+  const { error } = await sb.rpc("update_customer", {
+    p_account_id: d.account_id,
+    p_first_name: d.first_name,
+    p_last_name: d.last_name,
+    p_email: d.email || null,
+    p_phone: d.phone || null,
+    p_street: d.street || null,
+    p_city: d.city || null,
+    p_state: d.state || null,
+    p_zip: d.zip || null,
   })
   if (error) return { error: error.message }
-  revalidatePath(`/leads/${parsed.data.lead_id}`)
-  revalidatePath("/leads")
-  return { ok: `Status set to ${parsed.data.status}.` }
+
+  revalidatePath(`/leads/${d.lead_id}`)
+  return { ok: "Customer updated." }
 }

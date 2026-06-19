@@ -362,12 +362,41 @@ export async function getMissingInvoiceAlerts(limit = 50): Promise<MissingInvoic
 
 // ─── Customers ───────────────────────────────────────────────────────────
 
+// ADR 005: a customer's active, valid (rooftop) service address(es), for the pills.
+export interface LinkedAddress {
+  location_id: number
+  street: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
+  place_id: string | null
+  is_primary: boolean | null
+  lat: number | null
+  lng: number | null
+}
+
 export interface CustomerRow {
   id: number
   qbo_customer_id: string | null
   display_name: string
   email: string | null
   phone: string | null
+  addresses: LinkedAddress[]
+}
+
+// Pull the active linked addresses (from v_customer_active_addresses) for a page of rows.
+async function attachAddresses(ids: number[]): Promise<Map<number, LinkedAddress[]>> {
+  const map = new Map<number, LinkedAddress[]>()
+  if (!ids.length) return map
+  const sb = createAnon("public")
+  const { data } = await sb
+    .from("v_customer_active_addresses")
+    .select("customer_id, addresses")
+    .in("customer_id", ids)
+  for (const r of (data ?? []) as { customer_id: number; addresses: LinkedAddress[] }[]) {
+    map.set(r.customer_id, r.addresses ?? [])
+  }
+  return map
 }
 
 export async function listCustomers(opts?: {
@@ -376,6 +405,7 @@ export async function listCustomers(opts?: {
   offset?: number
   sortBy?: string
   sortDir?: "asc" | "desc"
+  filter?: "needs_address"
 }): Promise<{ rows: CustomerRow[]; total: number }> {
   const sb = createAnon("public")
   const limit = opts?.limit ?? 25
@@ -383,10 +413,13 @@ export async function listCustomers(opts?: {
   const sortBy = opts?.sortBy ?? "display_name"
   const sortDir = opts?.sortDir ?? "asc"
   let q = sb
-    .from("Customers")
+    .from("v_customers_with_status")
     .select("id, qbo_customer_id, display_name, email, phone", { count: "exact" })
     .order(sortBy, { ascending: sortDir === "asc", nullsFirst: false })
     .range(offset, offset + limit - 1)
+  if (opts?.filter === "needs_address") {
+    q = q.eq("has_active_address", false).eq("has_active_task", true)
+  }
   const s = opts?.search?.trim()
   if (s) {
     const safe = s.replace(/[,()]/g, " ").trim()
@@ -397,17 +430,146 @@ export async function listCustomers(opts?: {
     }
   }
   const { data, count } = await q
-  return { rows: (data ?? []) as CustomerRow[], total: count ?? 0 }
+  const base = (data ?? []) as Omit<CustomerRow, "addresses">[]
+  const addrMap = await attachAddresses(base.map((r) => r.id))
+  const rows = base.map((r) => ({ ...r, addresses: addrMap.get(r.id) ?? [] }))
+  return { rows, total: count ?? 0 }
 }
 
 export async function getCustomerById(id: string): Promise<CustomerRow | null> {
   const sb = createAnon("public")
   const { data } = await sb
-    .from("Customers")
+    .from("v_customers_with_status")
     .select("id, qbo_customer_id, display_name, email, phone")
     .eq("id", id)
     .single()
-  return data as CustomerRow | null
+  if (!data) return null
+  const base = data as Omit<CustomerRow, "addresses">
+  const addrMap = await attachAddresses([base.id])
+  return { ...base, addresses: addrMap.get(base.id) ?? [] }
+}
+
+// ─── Service addresses (the entity) ──────────────────────────────────────
+export interface AddressCustomer {
+  customer_id: number
+  name: string
+  type: string | null
+  is_active: boolean
+  serviced: boolean
+}
+export interface AddressWithCustomers {
+  location_id: number
+  place_id: string | null
+  street: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
+  geocode_status: string | null
+  geocode_source: string | null
+  latitude: number | null
+  longitude: number | null
+  customer_count: number
+  active_count: number
+  customers: AddressCustomer[]
+}
+
+export async function getAddressWithCustomers(id: string): Promise<AddressWithCustomers | null> {
+  const sb = createAnon("public")
+  const { data } = await sb
+    .from("v_service_address_customers")
+    .select("*")
+    .eq("location_id", id)
+    .maybeSingle()
+  return (data as AddressWithCustomers | null) ?? null
+}
+
+// ─── Data quality (ADR 006) ──────────────────────────────────────────────
+// Per-customer checklist of the 5 identity fields. "Missing ion_id" only counts as a hard
+// gap for customers with an active maintenance task (a billing-only QBO customer legitimately
+// has no ION record). Email is a soft flag, reported but not in hard_gap_count.
+export interface CustomerDataQualityRow {
+  id: number
+  qbo_customer_id: string | null
+  display_name: string
+  email: string | null
+  phone: string | null
+  ion_cust_id: string | null
+  is_active: boolean | null
+  has_active_task: boolean
+  missing_name: boolean
+  missing_email: boolean
+  missing_phone: boolean
+  missing_qbo: boolean
+  missing_ion: boolean
+  missing_ion_active: boolean
+  hard_gap_count: number
+}
+
+export type DataQualityFilter =
+  | "hard_gaps"
+  | "missing_ion"
+  | "missing_phone"
+  | "missing_qbo"
+  | "missing_email"
+  | "all"
+
+const DQ_COLS =
+  "id, qbo_customer_id, display_name, email, phone, ion_cust_id, is_active, has_active_task, " +
+  "missing_name, missing_email, missing_phone, missing_qbo, missing_ion, missing_ion_active, hard_gap_count"
+
+export async function listCustomerDataQuality(opts?: {
+  search?: string
+  limit?: number
+  offset?: number
+  filter?: DataQualityFilter
+}): Promise<{ rows: CustomerDataQualityRow[]; total: number; counts: Record<DataQualityFilter, number> }> {
+  const sb = createAnon("public")
+  const limit = opts?.limit ?? 25
+  const offset = opts?.offset ?? 0
+  const filter = opts?.filter ?? "hard_gaps"
+
+  // Headline counts for the filter chips.
+  const countWith = async (apply: (q: ReturnType<typeof baseCount>) => ReturnType<typeof baseCount>) => {
+    const { count } = await apply(baseCount())
+    return count ?? 0
+  }
+  function baseCount() {
+    return sb.from("v_customer_data_quality").select("id", { count: "exact", head: true })
+  }
+  const [hard, ion, ph, qbo, email, all] = await Promise.all([
+    countWith((q) => q.gt("hard_gap_count", 0)),
+    countWith((q) => q.eq("missing_ion_active", true)),
+    countWith((q) => q.eq("missing_phone", true)),
+    countWith((q) => q.eq("missing_qbo", true)),
+    countWith((q) => q.eq("missing_email", true)),
+    countWith((q) => q),
+  ])
+
+  let q = sb
+    .from("v_customer_data_quality")
+    .select(DQ_COLS, { count: "exact" })
+    .order("hard_gap_count", { ascending: false })
+    .order("display_name", { ascending: true })
+    .range(offset, offset + limit - 1)
+
+  if (filter === "hard_gaps") q = q.gt("hard_gap_count", 0)
+  else if (filter === "missing_ion") q = q.eq("missing_ion_active", true)
+  else if (filter === "missing_phone") q = q.eq("missing_phone", true)
+  else if (filter === "missing_qbo") q = q.eq("missing_qbo", true)
+  else if (filter === "missing_email") q = q.eq("missing_email", true)
+
+  const s = opts?.search?.trim()
+  if (s) {
+    const safe = s.replace(/[,()]/g, " ").trim()
+    if (safe) q = q.or(`display_name.ilike.%${safe}%,email.ilike.%${safe}%,phone.ilike.%${safe}%`)
+  }
+
+  const { data, count } = await q
+  return {
+    rows: (data ?? []) as unknown as CustomerDataQualityRow[],
+    total: count ?? 0,
+    counts: { hard_gaps: hard, missing_ion: ion, missing_phone: ph, missing_qbo: qbo, missing_email: email, all },
+  }
 }
 
 // ─── Needs review (invoices flagged by pre-processing) ───────────────────

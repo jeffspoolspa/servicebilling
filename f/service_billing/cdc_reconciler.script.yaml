@@ -1,0 +1,12 @@
+summary: Survive dropped pooler connections (reconnect + retry once)
+description: >-
+  The Supabase pooler dropped the run's single long-lived connection mid-batch
+  (2026-06-12, job 019ebd19-2f41-1ceb-b17f-9bc44fcf1c67), cascading into
+  "connection already closed" for every later event and a failed save_cursor.
+  All DB work now goes through a Db wrapper that reconnects on
+  OperationalError/InterfaceError and retries the failed operation once;
+  save_cursor, the drift-error logger, and end-of-run sweeps use the live
+  connection. Header retrofitted to SCRIPT_HEADER convention.
+lock: '!inline f/service_billing/cdc_reconciler.script.lock'
+kind: script
+schema: null

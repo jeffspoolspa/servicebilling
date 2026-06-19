@@ -17,8 +17,56 @@ export default async function RoutesPage({
   const { office: filterOffice } = await searchParams
   const routes = await listRouteSummary()
 
-  const officeStops: Record<string, number> = {}
+  // v_routes_summary groups by (office, tech, day). A tech whose schedule slots
+  // have inconsistent office values (some null) therefore shows up as multiple
+  // rows for one day. A tech's day is a single route — merge to one row per
+  // (tech, day), summing stops/revenue and picking the dominant (most-stops)
+  // office. The route detail page already aggregates by (tech, day).
+  const mergedMap = new Map<string, RouteSummaryRow & { _officeStops: Map<string, number> }>()
   for (const r of routes) {
+    const key = `${r.tech_employee_id}|${r.day_of_week}`
+    let m = mergedMap.get(key)
+    if (!m) {
+      m = { ...r, office: null, _officeStops: new Map<string, number>() }
+      mergedMap.set(key, m)
+    } else {
+      m.stop_count += r.stop_count
+      m.total_price_cents = (m.total_price_cents ?? 0) + (r.total_price_cents ?? 0)
+      m.weekly_count += r.weekly_count
+      m.biweekly_count += r.biweekly_count
+      m.monthly_count += r.monthly_count
+    }
+    if (r.office) m._officeStops.set(r.office, (m._officeStops.get(r.office) ?? 0) + r.stop_count)
+  }
+  // A tech's slots sometimes miss `office`; fall back to the tech's modal office
+  // across all their stops so every route shows a branch (each tech is one branch).
+  const techModalOffice = new Map<string, string>()
+  {
+    const tally = new Map<string, Map<string, number>>()
+    for (const r of routes) {
+      if (!r.office) continue
+      const t = tally.get(r.tech_employee_id) ?? new Map<string, number>()
+      t.set(r.office, (t.get(r.office) ?? 0) + r.stop_count)
+      tally.set(r.tech_employee_id, t)
+    }
+    for (const [tid, t] of tally) {
+      let off = ""
+      let best = 0
+      for (const [o, n] of t) if (n > best) { best = n; off = o }
+      if (off) techModalOffice.set(tid, off)
+    }
+  }
+
+  const merged: RouteSummaryRow[] = [...mergedMap.values()].map(({ _officeStops, ...rest }) => {
+    let office: string | null = null
+    let best = 0
+    for (const [o, n] of _officeStops) if (n > best) { best = n; office = o }
+    if (!office) office = techModalOffice.get(rest.tech_employee_id) ?? null
+    return { ...rest, office }
+  })
+
+  const officeStops: Record<string, number> = {}
+  for (const r of merged) {
     const o = r.office ?? "Unassigned"
     officeStops[o] = (officeStops[o] ?? 0) + r.stop_count
   }
@@ -32,8 +80,8 @@ export default async function RoutesPage({
   })
 
   const filtered = filterOffice
-    ? routes.filter((r) => (r.office ?? "Unassigned") === filterOffice)
-    : routes
+    ? merged.filter((r) => (r.office ?? "Unassigned") === filterOffice)
+    : merged
 
   // Group by day_of_week (when filtered to a single office) or by office (when "All")
   const byDay = new Map<number, RouteSummaryRow[]>()
@@ -61,6 +109,12 @@ export default async function RoutesPage({
               {visibleRoutes} (tech, day) combinations · {visibleStops} stops · {formatCurrency(visibleRevenue / 100)} per cycle
             </div>
           </div>
+          <Link
+            href={"/maintenance/routes/addresses" as never}
+            className="text-[12px] text-cyan hover:underline whitespace-nowrap"
+          >
+            Address QA →
+          </Link>
         </div>
 
         {days.length === 0 && (

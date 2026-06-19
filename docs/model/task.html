@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task — the service contract | JPS model</title>
+<style>
+  :root{
+    --bg:#fbfbfa; --fg:#1c1c1a; --muted:#6b6b66; --line:#e4e3df;
+    --accent:#0b6e6e; --accent-soft:#e6f1f1;
+    --code-bg:#f3f2ef; --code-fg:#3a3a36;
+    --why-bg:#eef4ff; --why-bar:#3b6fd4;
+    --break-bg:#fff4ec; --break-bar:#d4761f;
+    --incode-bg:#f3f2ef; --incode-bar:#7a7a72;
+    --maxw:880px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:16px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{display:grid; grid-template-columns:248px minmax(0,1fr); gap:0; max-width:1240px; margin:0 auto;}
+  /* sidebar */
+  nav.toc{
+    position:sticky; top:0; align-self:start; height:100vh; overflow:auto;
+    border-right:1px solid var(--line); padding:26px 18px 40px;
+  }
+  nav.toc .brand{font-weight:700; font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:14px;}
+  nav.toc a{display:block; color:var(--fg); text-decoration:none; padding:5px 8px; border-radius:6px; font-size:14px; line-height:1.35;}
+  nav.toc a:hover{background:var(--accent-soft); color:var(--accent);}
+  nav.toc .sub{padding-left:14px; font-size:13px; color:var(--muted);}
+  nav.toc .tools{margin-top:18px; padding-top:14px; border-top:1px solid var(--line); display:flex; gap:8px; flex-wrap:wrap;}
+  nav.toc button{font:inherit; font-size:12px; cursor:pointer; border:1px solid var(--line); background:#fff; color:var(--fg); border-radius:6px; padding:5px 9px;}
+  nav.toc button:hover{border-color:var(--accent); color:var(--accent);}
+  /* main */
+  main{padding:42px 52px 120px; max-width:var(--maxw);}
+  h1{font-size:31px; line-height:1.15; margin:0 0 4px;}
+  .kicker{color:var(--accent); font-weight:600; font-size:13px; letter-spacing:.07em; text-transform:uppercase; margin-bottom:10px;}
+  h2{font-size:21px; margin:46px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line);}
+  h3{font-size:16px; margin:26px 0 8px;}
+  p{margin:11px 0;}
+  .lead{font-size:18px; color:#333;}
+  a.x{color:var(--accent); text-decoration:none; border-bottom:1px solid var(--accent-soft);}
+  code,.mono{font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em;}
+  code{background:var(--code-bg); color:var(--code-fg); padding:1px 5px; border-radius:4px;}
+  abbr[title]{text-decoration:underline dotted var(--muted); text-underline-offset:3px; cursor:help;}
+  ul,ol{margin:11px 0; padding-left:22px;} li{margin:5px 0;}
+  table{border-collapse:collapse; width:100%; margin:14px 0; font-size:14.5px;}
+  th,td{border:1px solid var(--line); padding:8px 11px; text-align:left; vertical-align:top;}
+  th{background:#f4f4f1; font-weight:650;}
+  td code{font-size:.84em;}
+  /* callouts */
+  .call{border-left:4px solid var(--line); border-radius:0 8px 8px 0; padding:11px 15px; margin:16px 0; font-size:14.7px;}
+  .call .tag{font-weight:700; font-size:11px; letter-spacing:.06em; text-transform:uppercase; display:block; margin-bottom:3px;}
+  .why{background:var(--why-bg); border-color:var(--why-bar);} .why .tag{color:var(--why-bar);}
+  .brk{background:var(--break-bg); border-color:var(--break-bar);} .brk .tag{color:var(--break-bar);}
+  .incode{background:var(--incode-bg); border-color:var(--incode-bar); font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace; font-size:13px;}
+  .incode .tag{color:var(--incode-bar); font-family:-apple-system,sans-serif;}
+  .incode .path{color:var(--accent); font-weight:600;}
+  /* details */
+  details{border:1px solid var(--line); border-radius:8px; padding:0 15px; margin:14px 0; background:#fff;}
+  details[open]{padding-bottom:8px;}
+  summary{cursor:pointer; font-weight:600; padding:11px 0; list-style:none;}
+  summary::-webkit-details-marker{display:none;}
+  summary::before{content:"\25B8"; color:var(--accent); display:inline-block; width:1.1em; transition:transform .15s;}
+  details[open] summary::before{transform:rotate(90deg);}
+  /* flow diagram */
+  .flow{display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin:18px 0 8px;}
+  .flow .node{flex:1 1 0; min-width:120px; border:1px solid var(--line); background:#fff; border-radius:9px; padding:11px 12px; text-align:center;}
+  .flow .node b{display:block; font-size:14px;} .flow .node span{font-size:12px; color:var(--muted);}
+  .flow .node.hot{border-color:var(--accent); background:var(--accent-soft);} .flow .node.hot b{color:var(--accent);}
+  .flow .arrow{display:flex; align-items:center; padding:0 6px; color:var(--muted); font-size:20px;}
+  /* relationship cards */
+  .rel{border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin:10px 0; background:#fff;}
+  .rel .edge{font-weight:600;}
+  .rel .card{display:inline-block; font-size:11px; font-weight:700; letter-spacing:.04em; background:var(--accent-soft); color:var(--accent); border-radius:5px; padding:2px 7px; margin-left:6px;}
+  .rel .by{display:block; font-size:13px; color:var(--muted); margin-top:3px;}
+  .pill{display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:20px;}
+  .pill.live{background:#e7f6ec; color:#1c7a3f;} .pill.warn{background:#fdeede; color:#a35a12;}
+  .meta{color:var(--muted); font-size:13.5px; margin:2px 0 0;}
+  hr{border:0; border-top:1px solid var(--line); margin:34px 0;}
+  @media (max-width:880px){ .wrap{grid-template-columns:1fr} nav.toc{display:none} main{padding:28px 20px 80px} }
+  @media print{
+    nav.toc{display:none} .wrap{display:block} main{max-width:100%; padding:0}
+    details{border:0; padding:0} details summary{display:none} details > *:not(summary){display:block!important}
+    a.x{border:0} .call,.rel,table,.flow .node{break-inside:avoid}
+    body{font-size:11.5pt}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="toc">
+  <div class="brand">JPS · Data Model</div>
+  <a href="#top">Task — the service contract</a>
+  <a class="sub" href="#what">What it is &amp; tells us</a>
+  <a class="sub" href="#flow">Where it sits in the flow</a>
+  <a class="sub" href="#shape">The shape (header + slots)</a>
+  <a class="sub" href="#lifecycle">Lifecycle</a>
+  <a class="sub" href="#extract">Where it comes from</a>
+  <a class="sub" href="#ion">How it maps to ION</a>
+  <a class="sub" href="#rel">Relationships</a>
+  <a class="sub" href="#debug">Debugging guide</a>
+  <a class="sub" href="#open">Open questions</a>
+  <div class="tools">
+    <button onclick="document.querySelectorAll('details').forEach(d=>d.open=true)">Expand all</button>
+    <button onclick="document.querySelectorAll('details').forEach(d=>d.open=false)">Collapse</button>
+    <button onclick="window.print()">Print</button>
+  </div>
+</nav>
+
+<main id="top">
+  <div class="kicker">JPS Maintenance · Data Object</div>
+  <h1>Task — the service contract</h1>
+  <p class="lead">A <strong>task is one maintenance customer's standing service contract at one place.</strong>
+  An <em>active task means an active maintenance customer.</em> It is the engine of the whole
+  maintenance process: signup creates a task, the task's schedule generates visits, and every
+  month the task is active it owes exactly one invoice.</p>
+
+  <div class="call why">
+    <span class="tag">Why this doc exists</span>
+    Code visibility + getting what's in our heads onto paper. Each section maps a concept to the
+    exact place it lives in code or the database, so relationships are forced to be concrete and
+    debugging starts from "where do I look," not "what even is this." Green pills mark facts
+    <span class="pill live">verified live</span> against the database; amber pills mark
+    <span class="pill warn">drift / unsettled</span>.
+  </div>
+
+  <h2 id="what">What it is &amp; what it's telling us</h2>
+  <p>Reading one task answers: <em>is this place under contract right now, since when, and on what
+  commercial terms</em> — who pays (its service location → customer), how often we come, who is
+  supposed to come, what we charge, what chemicals are expected to cost, and what's bundled into
+  the price.</p>
+  <p>It is the <strong>"should"</strong> against which <a class="x" href="#rel">visits</a> (the
+  "did") and invoices (the "billed") are checked. Its single most important job:</p>
+  <ul>
+    <li>every completed visit can be <strong>attributed</strong> to a paying contract — no task means the visit is unbillable;</li>
+    <li>the monthly billing run can ask <strong>"did every active contract get invoiced this month?"</strong></li>
+  </ul>
+
+  <h2 id="flow">Where it sits in the flow</h2>
+  <div class="flow">
+    <div class="node"><b>Customer signs up</b><span>becomes a service location + customer</span></div>
+    <div class="arrow">→</div>
+    <div class="node hot"><b>TASK created</b><span>the standing contract</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>Schedule → Visits</b><span>each visit carries task_id</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>Invoice</b><span>one per active month</span></div>
+  </div>
+  <p class="meta">The task is the hinge. Everything upstream exists to create it; everything downstream
+  reads from it.</p>
+
+  <h2 id="shape">The shape — two tables, one concept</h2>
+  <p>A task is a thin <strong>header</strong> plus one or more <strong>schedule slots</strong>. The
+  commercial and operational specifics live on the <em>slots</em>, not the header — this is the key
+  structural fact to internalize.</p>
+
+  <h3>Header — <code>maintenance.tasks</code> <span class="pill live">verified live</span></h3>
+  <p class="meta">The contract identity + lifecycle. Notice what's <em>not</em> here: no price, no
+  frequency, no tech, no service type.</p>
+  <table>
+    <tr><th>Column</th><th>Plain meaning</th></tr>
+    <tr><td><code>service_location_id</code></td><td>where service happens → its customer is who's billed</td></tr>
+    <tr><td><code>status</code></td><td><code>active</code> / <code>paused</code> / <code>closed</code> — is this customer on service now</td></tr>
+    <tr><td><code>pause_reason</code></td><td>why paused <span class="pill warn">confirm meaning</span></td></tr>
+    <tr><td><code>starts_on</code> / <code>ends_on</code></td><td>contract window; <code>ends_on</code> NULL = ongoing (the normal case)</td></tr>
+    <tr><td><code>chem_budget_cents</code></td><td>expected chemical spend for this customer <span class="pill warn">confirm use</span></td></tr>
+    <tr><td><code>included_items</code> <span class="mono">(jsonb)</span></td><td>what's bundled into the price before extras are billed <span class="pill warn">confirm</span></td></tr>
+    <tr><td><code>ion_task_id</code>, <code>external_data</code>, <code>external_source</code></td><td>provenance / ION linkage — see <a class="x" href="#ion">ION map</a></td></tr>
+  </table>
+
+  <h3>Slots — <code>maintenance.task_schedules</code> <span class="pill live">verified live</span></h3>
+  <p class="meta">The recurrence + money + people. One row per recurring slot; a task can have several.</p>
+  <table>
+    <tr><th>Column</th><th>Plain meaning</th></tr>
+    <tr><td><code>day_of_week</code></td><td>which weekday this slot's visit lands on</td></tr>
+    <tr><td><code>tech_employee_id</code></td><td>who is <em>supposed</em> to do it (the scheduled tech)</td></tr>
+    <tr><td><code>frequency</code></td><td><code>weekly</code> / <code>biweekly_a</code> / <code>biweekly_b</code> / <code>monthly</code> / <code>daily</code> (A/B = alternating weeks)</td></tr>
+    <tr><td><code>billing_method</code></td><td><code>per_visit</code> or <code>flat_rate_monthly</code></td></tr>
+    <tr><td><code>price_per_visit_cents</code></td><td>charge per visit (per-visit tasks)</td></tr>
+    <tr><td><code>flat_rate_monthly_cents</code></td><td>monthly charge (flat-rate tasks)</td></tr>
+    <tr><td><code>active</code>, <code>starts_on</code>/<code>ends_on</code></td><td>is this slot live; the slot's own window</td></tr>
+    <tr><td><code>ion_task_id</code></td><td><strong>the stable ION identity</strong> — one ION recurring task = one slot</td></tr>
+    <tr><td><code>sequence</code>, <code>office</code>, <code>skimmer_id</code></td><td>ordering / office / Skimmer linkage</td></tr>
+  </table>
+
+  <details>
+    <summary>Why price/cadence/tech live on the slot, not the header</summary>
+    <p>Because one contract can recur in several distinct ways at once:</p>
+    <ul>
+      <li>A weekly customer serviced <strong>Mon + Fri</strong> is <em>one task, two slots</em>.</li>
+      <li>A community with an <strong>$85 pool contract and a $50 chemical-testing contract</strong> is,
+      in our model, <em>one task with two slots at different rates</em> — because of the one-open-task rule below.</li>
+    </ul>
+    <div class="call why"><span class="tag">Consequence</span>
+    "What does this customer cost?" is never a single number on the task — it's the sum across the
+    task's active slots. Billing reads the slots.</div>
+  </details>
+
+  <details>
+    <summary>One open task per location — rule the DB enforces</summary>
+    <p>A <abbr title="A database index that requires uniqueness only for rows matching a condition — here, only rows whose status is active or paused.">partial unique index</abbr>
+    <code>tasks_one_open_per_loc</code> allows only <strong>one</strong> task with status active/paused per
+    service location. So when ION shows a <em>second</em> contract at a place that already has an open
+    task, the sync <strong>attaches it as another slot</strong> rather than creating a second task — the
+    "merged" shape (15 legacy tasks bundle several ION tasks this way).</p>
+    <div class="incode"><span class="tag">In code</span>
+    enforced by index <span class="path">tasks_one_open_per_loc</span> · honored in
+    <span class="path">f/ION/_lib/upsert_tasks.py:sync_recurring_tasks</span> (open_task_by_loc)</div>
+    <p class="meta">Open question #3 below: is "one contract per place" the real business truth, or just
+    how we collapsed ION's multiple recurring tasks?</p>
+  </details>
+
+  <h2 id="lifecycle">Lifecycle — what flips the status</h2>
+  <table>
+    <tr><th>Event</th><th>What happens</th></tr>
+    <tr><td>New ION recurring task</td><td>task created <code>active</code> (or a slot attached to the location's open task), with a minimal slot</td></tr>
+    <tr><td>Still present in ION</td><td>kept <code>active</code>; financial terms refreshed from the report</td></tr>
+    <tr><td>Disappears from ION's active report</td><td><strong>cancellation</strong> — slots go <code>active=false</code>, then task goes <code>closed</code> once no active slot remains</td></tr>
+  </table>
+  <div class="call why">
+    <span class="tag">The rule the code encodes but never says out loud</span>
+    On cancellation, <code>ends_on</code> is set to the <strong>date of the last actual visit</strong>
+    (<code>max(visits.visit_date)</code>), <em>not</em> the sync date — a cancellation ends when service
+    last happened. And we <strong>mark closed, never delete</strong> (closing also frees the location to
+    take a new contract under the one-open rule).
+  </div>
+  <div class="incode"><span class="tag">In code</span>
+  <span class="path">f/ION/_lib/upsert_tasks.py:sync_recurring_tasks</span> — the "soft-deactivate" block; audited in <span class="path">maintenance.tasks_audit</span></div>
+
+  <h2 id="extract">Where it comes from — extraction</h2>
+  <p>Every task's data is <strong>pulled from ION as a single black-box function call</strong>, then mapped into
+  our tables. We document the function's contract here; ION's internals stay in the
+  <a class="x" href="ion-api.html">ION API doc</a>.</p>
+
+  <div class="flow">
+    <div class="node"><b>Your code</b><span>recurring_tasks flow</span></div>
+    <div class="arrow">→</div>
+    <div class="node hot"><b>list_recurring_tasks</b><span>the puller (black box)</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>RecurringTask[]</b><span>~487 typed rows</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>upsert_tasks</b><span>our mapper</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>tasks + schedules</b><span>our model</span></div>
+  </div>
+
+  <h3>1 &middot; The puller — what we call ION with</h3>
+  <table>
+    <tr><th>Function</th><td><code>f/ION/api/list_recurring_tasks.main(filters?)</code></td></tr>
+    <tr><th>Pass</th><td>optional <code>{ techid, OfficeID, serviceType }</code> — each defaults to <code>0</code> = all; usually omitted</td></tr>
+    <tr><th>Returns</th><td><code>RecurringTask[]</code> — ~487 typed rows (<code>ionTaskId</code>, <code>taskPrice</code>, <code>billingType</code>, <code>serviceRepeat</code>, <code>taskStart</code>/<code>taskEnd</code>, …)</td></tr>
+  </table>
+  <p class="meta">Internally 3 sub-steps — session (login, cached) → prime + fetch report HTML → normalize to typed
+  rows. Irrelevant when calling; the map for when it breaks is <a class="x" href="ion-api.html#internals">ION API → inside the box</a>.</p>
+
+  <h3>2 &middot; The mapper — what turns rows into our tasks</h3>
+  <table>
+    <tr><th>Function</th><td><code>f/ION/_lib/upsert_tasks.sync_recurring_tasks(rows, conn, dry_run=True)</code></td></tr>
+    <tr><th>Does</th><td>reconciles <code>RecurringTask[]</code> into <code>maintenance.tasks</code> + <code>task_schedules</code> keyed by <code>ion_task_id</code> — insert new, refresh financial terms, soft-close any gone from the report. Field rules are in <a class="x" href="#ion">How it maps to ION</a>, below.</td></tr>
+    <tr><th>Safety</th><td><code>dry_run=true</code> by default — does all writes in one transaction, then rolls back</td></tr>
+  </table>
+  <div class="incode"><span class="tag">In code</span>
+  flow <span class="path">f/ION/recurring_tasks.flow</span> — step a <span class="path">f/ION/api/list_recurring_tasks</span> → step b <span class="path">f/ION/_lib/upsert_tasks</span></div>
+  <div class="call brk"><span class="tag">Most likely silent failure</span>
+  The puller maps report columns <strong>by position</strong>; if ION reorders or inserts a column, fields
+  mismap with no error thrown. Detail: <a class="x" href="ion-api.html#internals">ION API → normalize</a>.</div>
+
+  <h2 id="ion">How it maps to ION — the cleaning pattern</h2>
+  <p>ION is the leader for <em>task existence and financial terms</em>; our model is the clean copy. The
+  translation is an
+  <abbr title="A deliberate translation boundary between an external system and your own model, whose only job is to stop the external system's mess from leaking into your clean model.">anti-corruption layer</abbr>:
+  <code>parser → normalize → upsert</code>. Three things to understand:</p>
+
+  <h3>1. Identity is <code>ionTaskId</code></h3>
+  <p>ION's "RecurringtasksActive" report returns exactly one row per ION task; <code>ionTaskId</code> is
+  the stable key, stored on <code>task_schedules.ion_task_id</code>, verified 1:1 with our tasks. Every
+  sync update matches on it.</p>
+
+  <h3>2. The report is a thin financial subset</h3>
+  <p>It has <strong>no day-of-week and no tech</strong>, and can't see the bi-weekly A/B split. Those (the
+  per-day slots, A/B alternation) came from a richer <strong>one-time 2026-04-26 import</strong> and the UI
+  — so the ongoing sync deliberately <em>never</em> overwrites <code>day_of_week</code>,
+  <code>tech_employee_id</code>, <code>sequence</code>, or an already-set <code>frequency</code>. ION's
+  <em>full</em> per-task detail (Service Type, Service Profile, Assigned-To grid, Invoice Type, Recurring
+  Note) lives on the ION task screen and is captured separately.</p>
+
+  <h3>3. Field map (report string → our column)</h3>
+  <table>
+    <tr><th>ION report field</th><th>Our column</th><th>Cleaning rule</th></tr>
+    <tr><td><code>billingType</code></td><td><code>billing_method</code></td><td><code>flat_rate_monthly</code> if "FLAT" in text, else <code>per_visit</code></td></tr>
+    <tr><td><code>serviceRepeat</code></td><td><code>frequency</code></td><td>Weekly→weekly, Bi-Weekly→biweekly_a, Daily→daily, Monthly→monthly</td></tr>
+    <tr><td><code>taskPrice</code></td><td><code>price_per_visit_cents</code> <em>or</em> <code>flat_rate_monthly_cents</code></td><td>routed by billing_method; flat price = the monthly amount</td></tr>
+    <tr><td><code>taskStart</code> / <code>taskEnd</code></td><td><code>starts_on</code> / <code>ends_on</code></td><td>M/D/Y → date; blank end = ongoing</td></tr>
+    <tr><td><code>ionCustId</code>, <code>serviceType</code>, <code>zone</code>, <code>routeName</code>, <code>lockCombo</code>, <code>recurringNotes</code>…</td><td><code>external_data</code> <span class="mono">(jsonb)</span></td><td>kept verbatim for provenance, not first-class columns</td></tr>
+  </table>
+  <div class="incode"><span class="tag">In code</span>
+  <span class="path">f/ION/_lib/upsert_tasks.py</span> (map_billing_method, map_frequency, parse_price_cents, _build_external_data) ·
+  report from <span class="path">f/ION/api/list_recurring_tasks.ts</span> · runs <code>dry_run=True</code> by default (does the work in a transaction, then rolls back)</div>
+
+  <h2 id="rel">Relationships — forced concrete</h2>
+  <p>Each edge below names its cardinality and <strong>the code or constraint that actually enforces it</strong>,
+  so the relationship is a fact you can verify, not a belief.</p>
+
+  <div class="rel"><span class="edge">customer → service location</span><span class="card">1 → N</span>
+    <span class="by">one customer can own many locations · <code>public.service_locations.account_id → public."Customers".id</code></span></div>
+  <div class="rel"><span class="edge">service location → task</span><span class="card">1 → 0..1 open (+ closed history)</span>
+    <span class="by">at most one open task per location · index <code>tasks_one_open_per_loc</code></span></div>
+  <div class="rel"><span class="edge">task → schedule slot</span><span class="card">1 → N</span>
+    <span class="by">a task's recurrence/price/tech live on its slots · <code>maintenance.task_schedules.task_id</code></span></div>
+  <div class="rel"><span class="edge">slot → visits</span><span class="card">1 → N</span>
+    <span class="by">a slot generates many visits over time · <code>maintenance.visits.task_schedule_id</code></span></div>
+  <div class="rel"><span class="edge">task → visits</span><span class="card">1 → N (some unattributed)</span>
+    <span class="by">each visit carries <code>task_id</code>; ~15% are NULL = orphans · attributed in <code>f/ION/_lib/upsert.py:resolve_task_and_schedule</code></span></div>
+  <div class="rel"><span class="edge">task → billing period → invoice</span><span class="card">1 → N months → 1:1</span>
+    <span class="by">one period per active month, each 1:1 with that month's invoice · <code>maintenance.task_billing_periods</code></span></div>
+  <div class="rel"><span class="edge">task slot ↔ ION recurring task</span><span class="card">1 ↔ 1</span>
+    <span class="by"><code>task_schedules.ion_task_id</code> = ION's <code>ionTaskId</code> (verified 1:1)</span></div>
+
+  <h2 id="debug">Debugging guide — symptom → where to look</h2>
+
+  <div class="call brk">
+    <span class="tag">Orphan visit (unbillable)</span>
+    <strong>Symptom:</strong> a completed visit isn't on any customer's invoice; a customer seems under-billed.<br>
+    <strong>Look:</strong> <code>SELECT … FROM maintenance.visits WHERE task_id IS NULL</code>
+    (~2,965 of 19,627 live). <strong>Cause:</strong> no task at that location, or rate/date inference couldn't
+    pick one. <strong>Fix path:</strong> <code>f/ION/_lib/taskless_visits.py</code> →
+    <code>f/ION/api/resolve_visit_tasks_via_log.ts</code> (reads the log's EventID) →
+    <code>f/ION/_lib/link_visits_by_event.py</code>.
+  </div>
+
+  <div class="call brk">
+    <span class="tag">Visit attributed to the wrong slot</span>
+    <strong>Symptom:</strong> multi-contract location (e.g. WINDING RIVER: two $85 + two $50 tasks); a visit lands
+    on the wrong rate.<br>
+    <strong>Look:</strong> <code>f/ION/_lib/upsert.py:_choose_task</code> and the <code>ambiguous_sl</code> set —
+    same rate + same type can't be told apart from the bulk report. <strong>Fix:</strong> the EventID
+    correction pass overrides inference with ION's recorded <code>ionTaskId</code>.
+  </div>
+
+  <div class="call brk">
+    <span class="tag">A whole customer is missing a task</span>
+    <strong>Symptom:</strong> a real maintenance customer has visits but no task → all their visits orphan.<br>
+    <strong>Look:</strong> <code>f/ION/_lib/upsert_tasks.py</code> <code>unresolved_examples</code> in the sync stats.
+    <strong>Cause:</strong> the new ION task's address/name didn't match a service location (QBO spelling drift,
+    typo, co-located customers). It is reported, never guessed.
+  </div>
+
+  <div class="call brk">
+    <span class="tag">Migrations don't match the live database <span class="pill warn">drift</span></span>
+    <strong>Symptom:</strong> reading <code>supabase/migrations/</code> describes a different shape than reality.<br>
+    <strong>Known drift:</strong> live has unique index <code>visits_uniq_log_natural</code> (5-tuple) and columns
+    <code>ion_log_id</code>, <code>ion_calendar_id</code>, <code>ion_addlog_url</code> that exist in <em>no</em>
+    committed migration; the newest repo migration creates a different (3-tuple) index. <strong>Trust the live DB</strong>
+    (<code>pg_indexes</code>, <code>information_schema.columns</code>), not the migration files, until reconciled.
+  </div>
+
+  <h2 id="open">Open questions for Carter</h2>
+  <ol>
+    <li><code>chem_budget_cents</code> / <code>included_items</code> — exact business meaning and how billing uses them.</li>
+    <li><code>pause</code> vs <code>closed</code> in practice — what real events cause each; what <code>pause_reason</code> holds.</li>
+    <li>Is "one open contract per location" the real business rule, or our collapse of ION's multiple recurring tasks?
+        (decides whether the <em>task</em> or the <em>slot</em> is truly "the contract")</li>
+    <li>Where does <strong>service type</strong> ("POOL MAINTENANCE 55", "GREEN POOL", "CHEMICAL TESTING") belong —
+        task, slot, or visit only? Today it's only in <code>external_data</code> + on the visit.</li>
+  </ol>
+
+  <hr>
+  <p class="meta">Sources: live <code>maintenance.tasks</code> / <code>maintenance.task_schedules</code> (Supabase
+  <code>vvprodiuwraceabviyes</code>); <code>f/ION/_lib/upsert_tasks.py</code>, <code>f/ION/_lib/upsert.py</code>;
+  <code>docs/entities/task.md</code>. Verified live 2026-06-09.</p>
+</main>
+</div>
+</body>
+</html>

@@ -42,7 +42,6 @@ const SERVICE_LINKS: ModuleLink[] = [
     matches: [
       "/service-billing",
       "/invoices",
-      "/customers",
     ],
   },
 ]
@@ -86,15 +85,16 @@ function moduleLinksFor(path: string): ModuleLink[] | null {
   if (
     path.startsWith("/service") ||
     path.startsWith("/work-orders") ||
-    path.startsWith("/invoices") ||
-    path.startsWith("/customers")
+    path.startsWith("/invoices")
   ) {
     return SERVICE_LINKS
   }
   if (path.startsWith("/maintenance")) {
     return MAINTENANCE_LINKS
   }
-  // /home, /admin/*, /employees have no module sub-nav yet.
+  // /home, /customers, /admin/*, /employees have no module sub-nav.
+  // Customers is shared across Service + Maintenance, so it intentionally
+  // doesn't show either module's contextual nav strip.
   return null
 }
 
@@ -255,11 +255,7 @@ function deriveCrumbs(path: string): Crumb[] {
   }
   if (path.startsWith("/customers")) {
     const parts = path.split("/").filter(Boolean)
-    const crumbs: Crumb[] = [
-      { label: "Service", href: "/service" },
-      { label: "Billing", href: "/service-billing" },
-      { label: "Customers", href: "/customers" },
-    ]
+    const crumbs: Crumb[] = [{ label: "Customers", href: "/customers" }]
     if (parts.length > 1) crumbs.push({ label: parts[1] })
     return crumbs
   }

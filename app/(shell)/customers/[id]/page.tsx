@@ -4,6 +4,8 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { Users } from "lucide-react"
 import { notFound } from "next/navigation"
 import { getCustomerById } from "@/lib/queries/dashboard"
+import { CustomerAddressCell } from "@/components/customers/customer-address-cell"
+import { AddressMap } from "@/components/customers/address-map"
 
 export const dynamic = "force-dynamic"
 
@@ -18,7 +20,7 @@ export default async function CustomerDetailPage({ params }: PageProps) {
 
   return (
     <>
-      <ObjectHeader
+      <ObjectHeader back
         eyebrow="Customer"
         title={customer.display_name}
         sub={`ID ${customer.id} · QBO ${customer.qbo_customer_id ?? "—"} · ${customer.email ?? "no email"}`}
@@ -56,6 +58,25 @@ export default async function CustomerDetailPage({ params }: PageProps) {
               <span className="text-ink-mute">QBO Customer ID</span>
               <span className="text-cyan font-mono">{customer.qbo_customer_id ?? "—"}</span>
             </div>
+          </CardBody>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Service Address</CardTitle>
+          </CardHeader>
+          <CardBody className="text-sm space-y-3">
+            <CustomerAddressCell customerId={customer.id} addresses={customer.addresses} manage />
+            {customer.addresses.map((a) =>
+              a.lat != null && a.lng != null ? (
+                <AddressMap
+                  key={a.location_id}
+                  token={process.env.MAPBOX_TOKEN ?? null}
+                  lat={a.lat}
+                  lng={a.lng}
+                  height={200}
+                />
+              ) : null,
+            )}
           </CardBody>
         </Card>
         <Card>
