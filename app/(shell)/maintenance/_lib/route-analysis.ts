@@ -13,6 +13,9 @@ import { createSupabaseServer } from "@/lib/supabase/server"
  *   - nearest_office  — closest office by a robust median center over trusted coords.
  *   - is_cross_office — a trusted, office-assigned stop whose nearest office is clearly
  *                       (>8mi) closer than its assigned office: a real misassignment.
+ *   - far_from_route  — a trusted stop >25mi from the median center of its own (tech x day)
+ *                       route: the sharpest wrong-address signal (e.g. a Sea Island pool
+ *                       mislabeled to Savannah). nearest_mate_mi is displayed context.
  */
 
 /** The three home offices (everything else is unassigned). Order = north→south. */
@@ -43,6 +46,10 @@ export interface RouteStop {
   nearest_office: string | null
   nearest_office_mi: number | null
   is_cross_office: boolean
+  route_mates: number | null
+  route_center_mi: number | null
+  nearest_mate_mi: number | null
+  far_from_route: boolean
 }
 
 export interface RouteLoadRow {
