@@ -74,9 +74,10 @@ def relink(supabase_connection, dry_run=True, overwrite=False, since=None):
         sched_by_task = defaultdict(list)
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT task_id, id, day_of_week, tech_employee_id, price_per_visit_cents
-                FROM maintenance.task_schedules
-                WHERE active AND day_of_week IS NOT NULL
+                SELECT ts.task_id, ts.id, ts.day_of_week, ts.tech_employee_id, t.price_per_visit_cents
+                FROM maintenance.task_schedules ts
+                JOIN maintenance.tasks t ON t.id = ts.task_id
+                WHERE ts.active AND ts.day_of_week IS NOT NULL
             """)
             for tid, sid, dow, tech, ppv in cur.fetchall():
                 sched_by_task[tid].append({"id": sid, "dow": dow, "tech": tech, "ppv": ppv})
