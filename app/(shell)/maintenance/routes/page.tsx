@@ -109,12 +109,20 @@ export default async function RoutesPage({
               {visibleRoutes} (tech, day) combinations · {visibleStops} stops · {formatCurrency(visibleRevenue / 100)} per cycle
             </div>
           </div>
-          <Link
-            href={"/maintenance/routes/addresses" as never}
-            className="text-[12px] text-cyan hover:underline whitespace-nowrap"
-          >
-            Address QA →
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link
+              href={"/maintenance/routes/map" as never}
+              className="text-[12px] text-cyan hover:underline whitespace-nowrap"
+            >
+              Territory map →
+            </Link>
+            <Link
+              href={"/maintenance/routes/addresses" as never}
+              className="text-[12px] text-cyan hover:underline whitespace-nowrap"
+            >
+              Address QA →
+            </Link>
+          </div>
         </div>
 
         {days.length === 0 && (
