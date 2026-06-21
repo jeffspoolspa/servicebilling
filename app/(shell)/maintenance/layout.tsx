@@ -1,4 +1,6 @@
+import { Suspense } from "react"
 import { MaintenanceTabs } from "./maintenance-tabs"
+import { UnroutedBanner } from "./_components/unrouted-banner"
 import { requireModuleAccess } from "@/lib/auth/access"
 
 /**
@@ -29,6 +31,10 @@ export default async function MaintenanceLayout({
       </div>
 
       <MaintenanceTabs />
+
+      <Suspense fallback={null}>
+        <UnroutedBanner />
+      </Suspense>
 
       {children}
     </>
