@@ -18,8 +18,9 @@ import { createSupabaseServer } from "@/lib/supabase/server"
  *                       mislabeled to Savannah). nearest_mate_mi is displayed context.
  */
 
-/** The three home offices (everything else is unassigned). Order = north→south. */
-export const HOME_OFFICES = ["Richmond Hill", "Brunswick", "St. Marys"] as const
+/** The home offices = split_part(branches.name, ',', 1), ADR 007. Order = north→south.
+ *  A stop with no office is unresolved-address (no trusted coordinate). */
+export const HOME_OFFICES = ["Savannah", "Richmond Hill", "Brunswick", "Saint Marys"] as const
 
 export interface RouteStop {
   schedule_id: string

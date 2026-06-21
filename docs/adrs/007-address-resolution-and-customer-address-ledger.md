@@ -161,6 +161,28 @@ resolve to a rooftop (e.g. a Sea Island cottage) lands in `needs_review` for the
 "stored ZIP-region ≠ ION's", not the broader far-from-route heuristic (which also catches legit
 spread-out routes).
 
+### 8. Office is ONE geographic value, derived from the service location (2026-06-21)
+
+Office (the servicing branch: Brunswick / Richmond Hill / Saint Marys / Savannah) was assigned three
+ways: `Customers.office_id` via `resolve_office` on the **billing** coordinate (wrong for snowbirds,
+null when billing isn't geocoded); the routing UI read the **deprecated** `maintenance.task_schedules.office`
+(null on ~41 customers → "Unassigned"); and `work_orders.office_name` was a free-text ION column. Three
+vocabularies, and the routing tool used the worst.
+
+**Decision.** Office is the nearest `branches` row to the **service location's own** rooftop coordinate
+— one geographic value, the single source of truth:
+- `service_locations.office_id` (+ `office_distance_mi`), set by a trigger from `resolve_office(lat,lng)`
+  whenever the coordinate or `geocode_status` changes, **gated on `geocode_status = 'ok'`**. So an
+  unresolved address has no office — "no office" ⟺ "needs address fix" (the banner population, §7).
+- `Customers.office_id` re-derived from the customer's representative service location (was billing).
+- The routing views (`maintenance.v_routes_summary`, `public.v_route_stops`) read the geographic branch
+  via `service_locations.office_id`, not `task_schedules.office`. Office labels = `split_part(branches.name, ',', 1)`.
+
+Result: 462/474 active maintenance customers resolve to a geographic office; the remaining 12 are exactly
+the unresolved-address set the banner surfaces. The deprecated `task_schedules.office` is no longer read
+by routing. **Follow-up:** the maintenance *customers* and *visits* lists still group by the old office
+(`v_task_schedules_with_context.office` / ION visit office) — repoint those to the geographic office too.
+
 ## Consequences
 
 **Good:**
