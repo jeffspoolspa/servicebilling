@@ -8,9 +8,10 @@ import "server-only"
  * arrives with a raw address (lead intake, ION ingestion, the API) calls this to
  * pin the address up front instead of waiting for the nightly geocode backfill.
  *
- * It mirrors f/google_maps/geocode_service_locations.py exactly: strict Geocoding
- * first, accept ONLY a precise (ROOFTOP / RANGE_INTERPOLATED, non-partial) result
- * inside the service bbox; on a coarse/zero result fall back to a GUARDED Places
+ * It mirrors f/google_maps/geocode_service_locations.py exactly: a city is REQUIRED
+ * (a bare street bounds-biases to a wrong major-GA city -> needs_review); strict
+ * Geocoding first, accept ONLY a precise (ROOFTOP / RANGE_INTERPOLATED, non-partial)
+ * result inside the service bbox; on a coarse/zero result fall back to a GUARDED Places
  * Find Place fuzzy match that is accepted only if the corrected address AGREES
  * with the input (same house number, fuzzy street, same city) and is itself a
  * rooftop. A guessed city/ZIP centroid is never accepted (the "magnet centroid"
@@ -166,6 +167,11 @@ async function fuzzyResolve(input: RawAddress): Promise<ResolvedAddress | null> 
 export async function resolveServiceAddress(input: RawAddress): Promise<ResolveResult> {
   if (!KEY) return { resolved: false, reason: "no_key" }
   if (!input.street?.trim()) return { resolved: false, reason: "needs_review" }
+  // City is REQUIRED (ADR 007). A bare street, geocoded with the service-area bounds
+  // bias, resolves to a same-named street in a wrong major-GA city (a Sea Island pool
+  // -> "Savannah") and would be stamped 'ok'. Don't guess -- defer to manual / ION
+  // backfill. Mirrors the no-city guard in f/google_maps/geocode_service_locations.py.
+  if (!input.city?.trim()) return { resolved: false, reason: "needs_review" }
 
   const bounds = `${SERVICE_BBOX.minLat},${SERVICE_BBOX.minLng}|${SERVICE_BBOX.maxLat},${SERVICE_BBOX.maxLng}`
   const address = [input.street, input.city, input.state || "GA", input.zip].filter(Boolean).join(", ")

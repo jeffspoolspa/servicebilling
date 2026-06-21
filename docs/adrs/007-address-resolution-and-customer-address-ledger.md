@@ -130,6 +130,37 @@ address and stamps `source`:
    surface "service inferred from billing — verify" for commercial / property-manager accounts where
    billing ≠ service.
 
+### 7. A city is required to geocode; billing is never a geocode hint (2026-06-21)
+
+**Failure mode found.** `service_locations` are born street-only from the visits ingester
+(`f/ION/_lib/upsert`) — it get-or-creates by normalized *street*, landing no city/ZIP. The geocoder
+then filled the gap by (a) bounds-biasing the bare street to the service area and (b) falling back to
+the customer's **billing** city when the service city was null. Both are wrong: a bare "375 40th
+Street" geocoded with the SE-GA bounds resolves to a *same-named street in a wrong major city*
+(Savannah / Statesboro), and billing is the **mailing** address — often a PO box in another town (an
+Eastman PO box for a Sea Island pool). The result was confident-but-wrong rooftops stamped `ok` — ~8
+maintenance pools mislocated 60–90 mi from their route (FOSTER/STUCKEY/REHLAENDER → "Savannah",
+REGAN → "Statesboro", SHEFFIELD → "Fayetteville"). ION had the correct city/ZIP the whole time
+(`ion.recurring_tasks` — Sea Island 31561, St Simons 31522); the pipeline just never landed it.
+
+**Decision.**
+- **City is required.** `geocode_service_locations` and `resolveServiceAddress` no longer geocode a
+  city-less address — they return `needs_review`. A street with no city is unverifiable; flag it, don't
+  guess. (Mirrored in both the Python geocoder and the TS resolver; keep them in sync.)
+- **Billing is never a geocode hint.** Drop the `s_city or b_city` fallback. Billing ≠ service (§6);
+  using it to *locate* a pool is what produced the PO-box pins.
+- **ION is the city/ZIP authority.** `f/ION/reconcile_service_addresses` (scheduled) lands
+  `ion.recurring_tasks` city/state/zip onto the `service_location`: **fill** null cities, and **correct**
+  rows whose stored ZIP-region *and* city both disagree with ION (overwrite + drop the wrong pin +
+  `needs_review` to re-pin). The "city must also differ" guard avoids ION's own ZIP anomalies. This
+  runs on the ingestion cadence so a street-only row gets ION's city before the geocoder sees it.
+
+Net: a wrong city/ZIP from a bad geocode is corrected from ION automatically; an address ION can't
+resolve to a rooftop (e.g. a Sea Island cottage) lands in `needs_review` for the in-app editor
+(`/maintenance/customers/[id]`) — never a silent wrong pin. The sharp wrong-address detector is
+"stored ZIP-region ≠ ION's", not the broader far-from-route heuristic (which also catches legit
+spread-out routes).
+
 ## Consequences
 
 **Good:**
@@ -182,3 +213,4 @@ address and stamps `source`:
 - Operation: [resolve-or-create-customer](../operations/resolve-or-create-customer.md) — the composer's caller contract
 - Data quality: `public.v_customer_data_quality` + `/customers/data-quality`
 - RPC: `public.upsert_service_location`; resolver: `f/google_maps/geocode_service_locations.py`
+  (city-required, §7); ION address authority: `f/ION/reconcile_service_addresses.py` (scheduled)

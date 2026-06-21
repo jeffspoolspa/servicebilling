@@ -209,7 +209,8 @@ Pool maintenance: scheduled visits, technician routes, chemistry readings, consu
 - ION flows: `f/ION/visits`, `f/ION/work_orders`, `f/ION/consumables_usage`, `f/ION/refresh_stale_work_orders`
 - `f/ION/_lib/*` — shared session, parser, normalize, upsert
 - `f/ION/_discover/*` — diagnostic probes (consider archiving)
-- `f/google_maps/geocode_service_locations` — geocodes the pool address onto `public.service_locations`, validating each result against the SE-GA/NE-FL service bbox (rejects/flags out-of-area geocodes). Source of truth for route geocoding.
+- `f/google_maps/geocode_service_locations` — geocodes the pool address onto `public.service_locations`, validating each result against the SE-GA/NE-FL service bbox (rejects/flags out-of-area geocodes). Source of truth for route geocoding. **A city is required** (ADR 007 §7): a city-less street is flagged `needs_review`, never bounds-bias-guessed to a wrong major-GA city; billing is never used as a geocode hint.
+- `f/ION/reconcile_service_addresses` — lands ION's `recurring_tasks` city/state/zip onto `service_locations` (ION is the address authority, ADR 007 §7): fills null cities, and corrects rows whose stored ZIP-region + city both disagree with ION (re-queues geocode). Scheduled; runs before the geocode so street-only rows get a real city first.
 - `f/google_maps/geocode_customers` [deprecated], `f/google_maps/normalize_customer_addresses` — legacy billing-address geocode onto `public."Customers"`; superseded by `geocode_service_locations` (kept only as a fallback account-level pin, with a bbox guard).
 
 **Database tables**:
