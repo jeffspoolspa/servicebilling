@@ -70,6 +70,14 @@ function norm(s: string | null | undefined): string {
   return up.split(/\s+/).filter(Boolean).map((t) => ABBR[t] ?? t).join(" ").trim()
 }
 
+// City names must NOT get the street-abbrev expansion: "St Simons" would become
+// "STREET SIMONS" and fail the city-agreement guard against Google's "Saint Simons
+// Island" / "St. Simons Island". Uppercase + strip punctuation + collapse whitespace
+// only -- no ABBR mapping. Mirrors _norm_city in the Python geocoder.
+function normCity(s: string | null | undefined): string {
+  return (s ?? "").toUpperCase().replace(/[^A-Z0-9 ]/g, " ").split(/\s+/).filter(Boolean).join(" ")
+}
+
 /** 1 − normalized Levenshtein distance; 1.0 == identical. Mirrors the Python _ratio. */
 function ratio(a: string, b: string): number {
   if (!a && !b) return 1
@@ -135,7 +143,7 @@ async function fuzzyResolve(input: RawAddress): Promise<ResolvedAddress | null> 
   const query = [clean, input.city, input.state || "GA", input.zip].filter(Boolean).join(", ")
   const inNum = clean.match(/^\s*(\d+)/)?.[1] ?? null
   const inStreet = norm(clean.replace(/^\s*\d+/, ""))
-  const inCity = norm(input.city)
+  const inCity = normCity(input.city)
 
   let res: GeocodeResult | null
   try {
@@ -158,7 +166,7 @@ async function fuzzyResolve(input: RawAddress): Promise<ResolvedAddress | null> 
   // Agreement guard — the corrected address must be the SAME place as the input.
   if (!(inNum && candNum && inNum === candNum)) return null
   if (ratio(inStreet, norm(long("route"))) < 0.72) return null
-  const ccN = norm(candCity)
+  const ccN = normCity(candCity)
   if (!(inCity && ccN && (ccN.includes(inCity) || inCity.includes(ccN) || ratio(inCity, ccN) >= 0.7))) return null
   void short
   return toAddress(res)
