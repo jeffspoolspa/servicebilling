@@ -12,6 +12,28 @@ import { createSupabaseServer } from "@/lib/supabase/server"
  * aggregates schedules. v_active_techs counts active schedules.
  */
 
+/** A customer with active maintenance tasks whose service address is unresolved
+ *  (no link, needs_review, or no coordinate) — so it can't be geocoded → can't get a
+ *  geographic office → can't be placed on a route. Backs the maintenance warning banner. */
+export interface UnroutedCustomer {
+  customer_id: number
+  display_name: string | null
+  service_location_id: number | null
+  street: string | null
+  city: string | null
+  zip: string | null
+  reason: "needs_review" | "out_of_area" | "no_location" | string
+}
+
+export async function listUnroutedCustomers(): Promise<UnroutedCustomer[]> {
+  const sb = await createSupabaseServer()
+  const { data } = await sb
+    .from("v_maintenance_unrouted")
+    .select("customer_id, display_name, service_location_id, street, city, zip, reason")
+    .order("display_name")
+  return (data ?? []) as UnroutedCustomer[]
+}
+
 export type BillingMethod = "per_visit" | "flat_rate_monthly"
 
 export interface VisitContextRow {
