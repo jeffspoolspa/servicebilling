@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic"
 const OFFICE_COLOR: Record<string, string> = {
   "Richmond Hill": "#38bdf8",
   Brunswick: "#34d399",
-  "St. Marys": "#fbbf24",
+  "Saint Marys": "#fbbf24",
+  Savannah: "#a78bfa",
 }
 const UNASSIGNED_COLOR = "#94a3b8"
 const officeColor = (o: string | null) => (o && OFFICE_COLOR[o]) || UNASSIGNED_COLOR

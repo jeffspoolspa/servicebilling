@@ -7,7 +7,8 @@ import { OfficeTabs } from "../_components/office-tabs"
 export const metadata = { title: "Maintenance · Routes" }
 export const dynamic = "force-dynamic"
 
-const OFFICE_ORDER = ["Brunswick", "Richmond Hill", "St. Marys"] as const
+// Geographic office labels = split_part(branches.name, ',', 1) (ADR 007). Drives tab order.
+const OFFICE_ORDER = ["Brunswick", "Richmond Hill", "Saint Marys", "Savannah"] as const
 
 export default async function RoutesPage({
   searchParams,
