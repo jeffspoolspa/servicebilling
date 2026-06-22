@@ -5,6 +5,7 @@ import { Pill } from "@/components/ui/pill"
 import { formatCurrency } from "@/lib/utils/format"
 import { DAY_NAMES, getMaintenanceCustomerDetail, type VisitContextRow } from "../../_lib/views"
 import { ServiceLocationEditor } from "@/components/maintenance/service-location-editor"
+import { OfficeOverride } from "@/components/maintenance/office-override"
 
 const GEO_TONE: Record<string, "grass" | "sun" | "coral" | "neutral"> = {
   ok: "grass",
@@ -43,7 +44,8 @@ export default async function MaintenanceCustomerDetailPage({
   const detail = await getMaintenanceCustomerDetail(customerId)
   if (!detail) notFound()
 
-  const { customer, service_locations, tasks, schedules, visits, audit } = detail
+  const { customer, branches, service_locations, tasks, schedules, visits, audit } = detail
+  const officeName = branches.find((b) => b.id === customer.office_id)?.name ?? null
   const activeSchedules = schedules.filter((s) => s.active && s.task_status === "active")
   const inactiveSchedules = schedules.filter((s) => !s.active || s.task_status !== "active")
 
@@ -76,6 +78,16 @@ export default async function MaintenanceCustomerDetailPage({
             {customer.customer_type && <span>{customer.customer_type}</span>}
             {customer.email && <span>{customer.email}</span>}
             {customer.phone && <span>{customer.phone}</span>}
+          </div>
+          <div className="text-[12px] mt-2">
+            <OfficeOverride
+              customerId={customer.id}
+              officeId={customer.office_id}
+              officeName={officeName}
+              overridden={customer.office_overridden}
+              distanceMi={customer.office_distance_mi}
+              branches={branches}
+            />
           </div>
         </div>
         <div className="text-right">

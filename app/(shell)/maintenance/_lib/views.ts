@@ -358,7 +358,12 @@ export interface MaintenanceCustomerDetail {
     email: string | null
     phone: string | null
     customer_type: string | null
+    office_id: string | null
+    office_overridden: boolean
+    office_distance_mi: number | null
   }
+  /** The offices (branches) for the override dropdown. */
+  branches: Array<{ id: string; name: string }>
   service_locations: Array<{
     id: number
     street: string | null
@@ -390,10 +395,17 @@ export async function getMaintenanceCustomerDetail(
   const supabase = await createSupabaseServer()
   const { data: cust } = await supabase
     .from("Customers")
-    .select("id, display_name, qbo_customer_id, is_active, email, phone, customer_type")
+    .select("id, display_name, qbo_customer_id, is_active, email, phone, customer_type, office_id, office_overridden, office_distance_mi")
     .eq("id", customerId)
     .maybeSingle()
   if (!cust) return null
+
+  const { data: branchRows } = await supabase
+    .from("branches")
+    .select("id, name")
+    .eq("active", true)
+    .order("name")
+  const branches = (branchRows ?? []) as MaintenanceCustomerDetail["branches"]
 
   const { data: locs } = await supabase
     .from("service_locations")
@@ -406,6 +418,7 @@ export async function getMaintenanceCustomerDetail(
   if (locIds.length === 0) {
     return {
       customer: cust as MaintenanceCustomerDetail["customer"],
+      branches,
       service_locations: [],
       tasks: [],
       schedules: [],
@@ -487,6 +500,7 @@ export async function getMaintenanceCustomerDetail(
 
   return {
     customer: cust as MaintenanceCustomerDetail["customer"],
+    branches,
     service_locations: locations,
     tasks,
     schedules,
