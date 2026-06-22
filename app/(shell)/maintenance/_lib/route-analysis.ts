@@ -10,9 +10,12 @@ import { createSupabaseServer } from "@/lib/supabase/server"
  *   - geo_trusted     — coordinate is rooftop-confirmed (geocode_status=ok AND place_id).
  *                       Untrusted coords (stale points on never-resolved addresses) are
  *                       never used for distance/centroid math.
- *   - nearest_office  — closest office by a robust median center over trusted coords.
- *   - is_cross_office — a trusted, office-assigned stop whose nearest office is clearly
- *                       (>8mi) closer than its assigned office: a real misassignment.
+ *   - office          — the ROUTE office = the TECH's branch (a route is tech x day), ADR 007 §9.
+ *   - customer_office — the CUSTOMER's own office (Customers.office_id, geography/override).
+ *   - nearest_office  — closest CUSTOMER-office median center over trusted coords (geographic).
+ *   - is_cross_office — customer_office <> route office. Structurally common where an office has
+ *                       no tech of its own (its customers ride an adjacent office's route), so
+ *                       it's informational, not an anomaly highlight.
  *   - far_from_route  — a trusted stop >25mi from the median center of its own (tech x day)
  *                       route: the sharpest wrong-address signal (e.g. a Sea Island pool
  *                       mislabeled to Savannah). nearest_mate_mi is displayed context.
@@ -27,6 +30,7 @@ export interface RouteStop {
   tech_employee_id: string | null
   tech_name: string | null
   office: string | null
+  customer_office: string | null
   day_of_week: number | null
   sequence: number | null
   frequency: string | null
