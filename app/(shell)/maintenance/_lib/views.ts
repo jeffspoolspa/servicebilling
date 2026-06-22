@@ -411,6 +411,7 @@ export async function getMaintenanceCustomerDetail(
     .from("service_locations")
     .select("id, street, city, state, zip, is_primary, geocode_status, latitude, longitude, place_id")
     .eq("account_id", customerId)
+    .eq("is_active", true)
     .order("is_primary", { ascending: false })
     .order("id", { ascending: true })
   const locations = (locs ?? []) as MaintenanceCustomerDetail["service_locations"]

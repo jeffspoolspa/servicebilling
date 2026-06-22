@@ -9,6 +9,7 @@ import {
 import {
   editServiceLocationAddress,
   mergeServiceLocationIntoExisting,
+  retireServiceLocation,
 } from "@/app/(shell)/maintenance/customers/address-edit-actions"
 
 /**
@@ -27,7 +28,7 @@ export function ServiceLocationEditor({
   current: string
 }) {
   const router = useRouter()
-  const [mode, setMode] = useState<"idle" | "edit">("idle")
+  const [mode, setMode] = useState<"idle" | "edit" | "remove">("idle")
   const [picked, setPicked] = useState<PickedAddress | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -73,14 +74,65 @@ export function ServiceLocationEditor({
     }
   }
 
+  async function remove() {
+    setBusy(true)
+    setErr(null)
+    const res = await retireServiceLocation(locationId, customerId)
+    setBusy(false)
+    if (res.ok) {
+      reset()
+      router.refresh()
+    } else {
+      setErr(res.error)
+    }
+  }
+
   if (mode === "idle") {
     return (
-      <button
-        onClick={() => setMode("edit")}
-        className="text-[11px] text-ink-mute underline decoration-dotted hover:text-cyan"
-      >
-        Edit
-      </button>
+      <span className="inline-flex items-center gap-2.5">
+        <button
+          onClick={() => setMode("edit")}
+          className="text-[11px] text-ink-mute underline decoration-dotted hover:text-cyan"
+        >
+          Edit
+        </button>
+        <button
+          onClick={() => setMode("remove")}
+          className="text-[11px] text-ink-mute underline decoration-dotted hover:text-coral"
+        >
+          Remove
+        </button>
+      </span>
+    )
+  }
+
+  if (mode === "remove") {
+    return (
+      <div className="min-w-[220px] space-y-2 py-1">
+        <div className="text-[12px] text-ink">
+          Remove <span className="text-ink-mute">{current || "this location"}</span> from this customer?
+        </div>
+        <div className="text-[11px] text-ink-mute">
+          Drops the link and retires the row. Refused if any task or visit still points here (merge those first).
+        </div>
+        {err && <div className="text-[12px] text-coral">{err}</div>}
+        <div className="flex gap-2">
+          <button
+            disabled={busy}
+            onClick={remove}
+            className="rounded-md bg-coral/15 px-3 py-1 text-xs text-coral hover:bg-coral/25 disabled:opacity-50"
+          >
+            {busy ? "Removing…" : "Remove"}
+          </button>
+          <button
+            disabled={busy}
+            onClick={reset}
+            className="rounded-md px-3 py-1 text-xs text-ink-mute hover:text-ink"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     )
   }
 

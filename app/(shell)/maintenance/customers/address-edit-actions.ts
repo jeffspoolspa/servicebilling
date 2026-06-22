@@ -70,6 +70,39 @@ export async function editServiceLocationAddress(
 }
 
 /**
+ * Remove a service_location from a customer (ADR 007 §9): drop the link + soft-delete the row.
+ * For cleaning up duplicate / orphan rows. Refuses (returns in_use) if the row still has tasks or
+ * visits — those must be merged/repointed first, so billing data is never orphaned.
+ */
+export async function retireServiceLocation(
+  locationId: number,
+  customerId: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const sb = await createSupabaseServer()
+  const {
+    data: { user },
+  } = await sb.auth.getUser()
+  if (!user) return { ok: false, error: "unauthorized" }
+
+  const { data, error } = await sb.rpc("retire_service_location", { p_location_id: locationId })
+  if (error) return { ok: false, error: error.message }
+
+  const res = data as { ok: boolean; reason?: string; tasks?: number; visits?: number }
+  if (!res.ok) {
+    if (res.reason === "in_use") {
+      return {
+        ok: false,
+        error: `In use — ${res.tasks} task(s), ${res.visits} visit(s) point here. Merge or repoint them first, then remove.`,
+      }
+    }
+    return { ok: false, error: res.reason ?? "remove failed" }
+  }
+  revalidatePath(`/maintenance/customers/${customerId}`)
+  revalidatePath("/maintenance")
+  return { ok: true }
+}
+
+/**
  * Merge a duplicate service_location onto an existing canonical one (ADR 007): repoint this
  * customer's tasks/visits/pools/link from the duplicate onto the canonical row, then retire the
  * duplicate. Resolves the "tasks stuck on the raw row while a correct row exists" case. The RPC
