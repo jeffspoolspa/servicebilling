@@ -23,7 +23,7 @@ analysis. The geocode now lives here, on the service address.
 
 | Field | Type | Describes | Values / constraints |
 |---|---|---|---|
-| `id` | bigint | Service-location identity | PK; FK target for `pools`, `maintenance.tasks` |
+| `id` | bigint | Service-location identity | PK; referenced by `pools`, `maintenance.visits`, `customer_service_addresses` (NOT `maintenance.tasks` — that link was dropped, ADR 007 §9) |
 | `account_id` | bigint | Owning customer account | FK → `Customers.id`, `ON DELETE CASCADE` |
 | `street` | text | Street address (often the only populated address field) | NOT NULL |
 | `city` / `state` / `zip` | text | Rest of the address | frequently null (street-only) |

@@ -1,7 +1,9 @@
 # How a maintenance task links to customers & addresses
 
-> Status: [active] — current state of `maintenance.tasks` linkage, why the REGINA
-> mis-attribution happened, and how to harden the process. Companion to
+> Status: [active] — updated 2026-06-22 (ADR 007 §9): a task now carries **`customer_id` only** (from
+> `ion_cust_id`), **no `service_location_id`** (the column was dropped). The REGINA mis-attribution is
+> now structurally impossible; the sections below are corrected to the live model, with the old
+> location-owner path kept as the worked cautionary example. Companion to
 > [task.md](../entities/task.md), [service-location.md](../entities/service-location.md),
 > [customer.md](../entities/customer.md), and [integrations/ion.md](../integrations/ion.md).
 
@@ -11,13 +13,13 @@ A `maintenance.tasks` row carries three pointers to other records:
 
 | Column | Points at | Enforced by FK? | Meaning |
 |---|---|---|---|
-| `customer_id` | `public."Customers".id` | **No (soft)** | Who is serviced / billed |
-| `service_location_id` | `public.service_locations.id` | **No (soft)** | Where the pool is |
-| `ion_task_id` | `ion.recurring_tasks.ion_task_id` | **No (soft)** | **The ION task id — 1:1 with the task, now populated on every task** (unique index `uq_tasks_ion_task_id`). The key the visit→task link matches on. |
+| `customer_id` | `public."Customers".id` | **No (soft)** | Who is serviced / billed — sourced from `ion_cust_id` (ADR 006). |
+| ~~`service_location_id`~~ | — | — | **REMOVED 2026-06-22 (ADR 007 §9).** A task no longer carries a location (a contract can outlive an address change); the **visit's** location is derived from the customer's confirmed link-table address by `public.reconcile_visit_locations`. |
+| `ion_task_id` | `ion.recurring_tasks.ion_task_id` | **No (soft)** | **The ION task id — 1:1 with the task, populated on every task** (unique index `uq_tasks_ion_task_id`). The key the visit→task link matches on. |
 
-`visits.task_id → tasks.id` is the visit's parent link. **`customer_id` and `service_location_id`
-are columns holding ids with no FK** — nothing in the database stops a task from pointing at the
-wrong customer, so a bad resolve is silent.
+`visits.task_id → tasks.id` is the visit's parent link. **`customer_id` is a column holding an id with
+no FK** — nothing in the database stops a task from pointing at the wrong customer, so a bad resolve is
+silent (which is why the owner is sourced from the authoritative `ion_cust_id`, not inferred).
 
 ## Tasks, schedules, and visits (the 3-level shape)
 
@@ -48,22 +50,23 @@ not from the active report. (Gap to close: ~14k historical visits still have no 
 ids with no synthesized task/schedule.)
 
 ```
-                       resolves by (address, name)
-ion.recurring_tasks  ───────────────────────────────►  service_locations  (the WHERE)
-  (the source: ion_task_id,                                   │
-   qbo_customer_id, customer_name,                            │ account_id  (the owner)
-   service_address)                                           ▼
-        │                                              public."Customers"  (the WHO)
-        │  ion_task_id                                        ▲
-        ▼                                                     │ customer_id (copied from
-  maintenance.tasks  ─────────────────────────────────────────  the location's account_id)
+ion.recurring_tasks  ── ion_cust_id ──►  public."Customers"  (the WHO; via Customers.ion_cust_id, ADR 006)
+  (the source: ion_task_id,                      ▲
+   ion_cust_id, customer_name)                   │ customer_id
+        │  ion_task_id                            │
+        ▼                                         │
+  maintenance.tasks  ───────────────────────────────  (NO service_location_id — ADR 007 §9)
         │  task_id (FK)
         ▼
-  maintenance.visits   (also carry soft customer_id / service_location_id)
+  maintenance.visits  ── customer_id ──►  reconcile_visit_locations ──►  service_locations
+                          (the visit's location is the customer's confirmed address)
 ```
-Text fallback: ION's recurring-task sync is the source of truth. Ingestion resolves a
-`service_location_id` from the address+name, then sets the task's `customer_id` from **that
-location's `account_id`** (its owner) — *not* from the ION record's own `qbo_customer_id`.
+Text fallback (CURRENT, ADR 006 + ADR 007 §9): ION's recurring-task sync is the source of truth.
+Ingestion sets the task's `customer_id` directly from **`ion_cust_id` -> `Customers.ion_cust_id`** (the
+authoritative per-task owner) — the task carries no location. A *visit's* `service_location_id` is
+resolved later from its customer's confirmed address (`reconcile_visit_locations`). The old
+"resolve a `service_location_id` by address+name, then copy `customer_id` from the location's
+`account_id`" path is retired (it was the REGINA cause — see below).
 
 ## Task closure: by ION end date, with the no-visits-after-end invariant (resolved 2026-06-18)
 
@@ -99,14 +102,21 @@ at their live ION end dates; committing the redesigned `upsert_tasks`; building 
 pushed to the last visit). Result: 0 invariant violations, 0 active tasks with a past end date. The
 whole app keys "active customer" off `maintenance.tasks.status`, so this is what keeps that honest.
 
-## How the links get set (ION ingestion)
+## How the links get set (ION ingestion) — CURRENT
 
-In `f/ION/_lib/upsert.py`:
-1. `resolve_service_location_id(addr, name)` — find the location by normalized address + name.
-2. The task's customer is then taken from the location's owner — literally
-   `JOIN public."Customers" c ON c.id = sl.account_id` (upsert.py:131). **customer = location owner.**
-3. The ION record's own `qbo_customer_id` (the authoritative per-task customer) is **not** used
-   to set `customer_id`.
+The live recurring-task sync `f/ION/_lib/upsert_tasks.py` (recurring_tasks flow, daily 4am) sets
+**`task.customer_id` from ION's own customer id**: `ion_cust_id` -> `Customers.ion_cust_id` (ADR 006,
+the authoritative per-task owner). A task carries **no `service_location_id`** (dropped 2026-06-22,
+ADR 007 §9); the visit's location is resolved from the customer's confirmed address by
+`public.reconcile_visit_locations`. There is no location-owner inference and no address resolution on
+the task — which is what structurally prevents the REGINA failure below.
+
+> **Retired model (the REGINA cause).** The old bulk ingester `f/ION/_lib/upsert.py` resolved a
+> `service_location_id` by address+name, then copied `task.customer_id` from **that location's
+> `account_id`** (the owner) — so distinct ION customers sharing one placeholder location all inherited
+> its single owner. That path is dead (the bulk visit ingester is retired; `upsert_tasks` keys on
+> `ion_cust_id`, and the task has no location column at all). Kept below as the worked example of why
+> owner-by-location is wrong.
 
 ION tells us, per task, how confident the address/name resolve was (`resolved_via`):
 
@@ -135,25 +145,16 @@ The location-owner inference is correct when **one** customer owns **one** locat
 whenever **many** ION customers collapse onto **one** shared/placeholder location: they all
 inherit that location's single owner.
 
-## How to fix the process
+## How it was fixed (DONE — 2026-06-22)
 
-1. **Source `customer_id` from ION's persisted customer key, not the location.** We now persist
-   ION's own customer id on the QBO customer row as `Customers.ion_cust_id` (fuzzy-match-once —
-   ION exposes no QBO id; see [ADR 006](../adrs/006-ion-customer-id-fuzzy-match-once.md)).
-   Ingestion should set `task.customer_id` by matching `ion.recurring_tasks.ion_cust_id` →
-   `Customers.ion_cust_id` — the per-task authoritative owner — instead of `sl.account_id`.
-   Keep the location-owner path only as a last-resort fallback when no `ion_cust_id` resolves.
-   *(This ingestion edit is skill-gated and tracked separately; the `ion_cust_id` column +
-   683-customer backfill are already done.)*
-2. **Never let distinct customers share a placeholder location.** An empty/`"."` address should
-   not resolve to a single shared row that then donates its owner. Either give each its own
-   (unresolved) location, or leave `service_location_id` null until a real address is set via the
-   app dropdown.
-3. **Consider a soft guard.** A periodic check (or the existing reconciler) can flag
-   `tasks` where `customer.qbo_customer_id <> ion.recurring_tasks.qbo_customer_id` — the exact
-   query that found this (it returned 2). Add a real FK on `tasks.customer_id` /
-   `service_location_id` so future bad ids fail loudly rather than silently.
-
-The ingestion change lives in the skill-gated ION code (`f/ION/_lib/upsert.py`) — read the
-`ion-automation` skill before editing. The REGINA records themselves were already corrected
-(re-pointed to PARRISH and LUCAS).
+1. **`customer_id` comes from ION's customer key, not the location.** `Customers.ion_cust_id` is
+   persisted (fuzzy-match-once, ION exposes no QBO id; [ADR 006](../adrs/006-ion-customer-id-fuzzy-match-once.md)),
+   and `upsert_tasks` / `recover_orphan_tasks` set `task.customer_id` by `ion_cust_id ->
+   Customers.ion_cust_id`. **No location-owner fallback** — a task with no resolvable `ion_cust_id` is
+   left unresolved rather than mis-attributed. (Verified: a recurring_tasks dry-run resolved all 492
+   active rows, `unresolved_new: 0`, including empty-address tasks that used to hit `ion_name_match`.)
+2. **A task no longer has a location to mis-share.** `tasks.service_location_id` was dropped
+   (ADR 007 §9); placeholder/junk locations can no longer donate an owner. The visit's location is the
+   customer's confirmed address (`reconcile_visit_locations`).
+3. **Soft guard.** The reconciler can still flag `tasks` where `customer.qbo_customer_id <>
+   ion.recurring_tasks.qbo_customer_id`. The REGINA records were corrected (re-pointed to PARRISH and LUCAS).

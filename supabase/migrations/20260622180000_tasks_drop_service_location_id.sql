@@ -1,0 +1,12 @@
+-- ADR 007 §9 — DROP maintenance.tasks.service_location_id (a task carries customer_id, not a
+-- location). EXPAND/CONTRACT, step B (the contract). Applied only AFTER all three live ION
+-- ingesters were redeployed off the column and verified on the new shape:
+--   * f/ION/ingest_day_logs (1436087babca0733) — visit's customer_id from the task; location via
+--     reconcile_visit_locations (this also fixed the ts.billing_method outage of 2026-06-19).
+--   * f/ION/_lib/upsert_tasks (69b622f39ac77cc9) — new tasks created with customer_id only
+--     (ion_cust_id -> Customers); verified by a recurring_tasks dry-run (492 rows, unresolved_new=0).
+--   * f/ION/recover_orphan_tasks (f95e02fa86bfe8e2) — orphan tasks created with customer_id only;
+--     the VISIT still gets its location from the customer's confirmed address.
+-- Step A (20260622170000) already dropped NOT NULL + the FK. No view/function depends on the column
+-- (views repointed in the epic2 set; reconcile_visit_locations reads only csa./v.service_location_id).
+alter table maintenance.tasks drop column if exists service_location_id;
