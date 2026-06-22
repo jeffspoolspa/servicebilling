@@ -87,12 +87,12 @@ export async function retireServiceLocation(
   const { data, error } = await sb.rpc("retire_service_location", { p_location_id: locationId })
   if (error) return { ok: false, error: error.message }
 
-  const res = data as { ok: boolean; reason?: string; tasks?: number; visits?: number }
+  const res = data as { ok: boolean; reason?: string; visits?: number }
   if (!res.ok) {
     if (res.reason === "in_use") {
       return {
         ok: false,
-        error: `In use — ${res.tasks} task(s), ${res.visits} visit(s) point here. Merge or repoint them first, then remove.`,
+        error: `In use — ${res.visits} visit(s) point here. Merge them onto the canonical location first, then remove.`,
       }
     }
     return { ok: false, error: res.reason ?? "remove failed" }
