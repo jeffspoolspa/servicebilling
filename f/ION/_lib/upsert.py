@@ -4,6 +4,14 @@
 """
 f/ION/_lib/upsert
 
+[RETIRED as the visit ingester] `upsert_canonical` (the bulk CompletedLogDetail path, source='ion')
+is SUPERSEDED by per-log ingestion (`f/ION/ingest_day_logs`, dedup on `ion_log_id`) — there are zero
+`external_source='ion'` visits. Do NOT treat this as the live visit ingester. This module survives only
+as a UTILITY provider (`_connect`, `normalize_address`, `normalize_customer_name`) imported by other
+scripts. The address-based `build_resolvers` / `resolve_task_and_schedule` task match is dead; a visit's
+task is the ION EventID and its location comes from the customer (ADR 007 §9). See
+docs/flows/sync/ion-visits.md.
+
 Layer 3 of the ION ingest pipeline:
     parser   ->  raw ION dicts
     normalize ->  canonical-shaped dicts (this is the input)
