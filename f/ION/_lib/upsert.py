@@ -557,6 +557,12 @@ def upsert_canonical(canonical_rows, supabase_connection, source="ion"):
                 "office": v.get("office"),
                 "notes": v.get("notes"),
                 "external_source": source,
+                # The raw address ION reported on this visit -- kept for debugging only
+                # (NOT used to resolve service_location_id, which is the customer/task's
+                # canonical address). ADR 007 §9.
+                "raw_service_address": ", ".join(
+                    p for p in [primary_addr, v.get("_city"), v.get("_state"), v.get("_zip")] if p
+                ) or None,
             })
             per_row_extras.append({
                 "pool_id": pool_id,
@@ -581,14 +587,15 @@ def upsert_canonical(canonical_rows, supabase_connection, source="ion"):
                        scheduled_date, visit_date,
                        scheduled_tech_id, actual_tech_id, started_at, ended_at,
                        status, visit_type, price_cents, billing_method, is_serviceable,
-                       office, notes, external_source)
+                       office, notes, external_source, raw_service_address)
                     VALUES
                       (%(service_location_id)s, %(pool_id)s, %(service_type)s, %(task_id)s, %(ion_task_id)s, %(task_schedule_id)s,
                        %(scheduled_date)s, %(visit_date)s,
                        %(scheduled_tech_id)s, %(actual_tech_id)s, %(started_at)s, %(ended_at)s,
                        %(status)s, %(visit_type)s, %(price_cents)s, %(billing_method)s, %(is_serviceable)s,
-                       %(office)s, %(notes)s, %(external_source)s)
+                       %(office)s, %(notes)s, %(external_source)s, %(raw_service_address)s)
                     ON CONFLICT (service_location_id, scheduled_date, service_type, pool_id, started_at) DO UPDATE SET
+                      raw_service_address = COALESCE(EXCLUDED.raw_service_address, maintenance.visits.raw_service_address),
                       task_id             = COALESCE(EXCLUDED.task_id, maintenance.visits.task_id),
                       ion_task_id         = COALESCE(EXCLUDED.ion_task_id, maintenance.visits.ion_task_id),
                       task_schedule_id    = COALESCE(EXCLUDED.task_schedule_id, maintenance.visits.task_schedule_id),
