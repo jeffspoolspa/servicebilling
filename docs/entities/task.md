@@ -21,7 +21,7 @@ Mixed leadership: seeded from ION (`external_source`, `external_data`) via `f/IO
 - [Task Schedule](task-schedule.md) — one or more cadence+price rows per task (the schedule the engine runs)
 - [Visit](visit.md) — occurrences generated from the schedule; each carries this `task_id`
 - [Task Billing Period](task-billing-period.md) — **one per active month** (1:N); the coverage unit
-- Service location (`service_location_id`) -> [Customer](customer.md) via `qbo_customer_id` (see `v_tasks_with_context`)
+- [Customer](customer.md) — the task carries `customer_id` (ADR 006, the authoritative owner). A task does **not** carry a service location (ADR 007 §9 — `service_location_id` is being dropped); its address is the customer's confirmed link-table location, surfaced via `v_tasks_with_context` → `v_customer_primary_location`.
 
 ## Flows this entity participates in
 

@@ -2,8 +2,8 @@
 
 > Status: [active]
 > Kind: [sync]
-> Verification: [verified] — bulk sync traced against `f/ION/visits.flow` 2026-06-01; the
-> authoritative EventID linker (`link_visits_via_log.flow`) + `tasks.ion_task_id` re-trace 2026-06-18
+> Verification: [verified] — per-log `ion_log_id` ingestion + EventID linker re-traced 2026-06-18;
+> ADR 007 §9 re-trace 2026-06-22 (task→customer→location; bulk `CompletedLogDetail` confirmed retired)
 > Leader: ION Pool Care (visit records)
 > Cache: [maintenance.visits](../../entities/visit.md) (+ chem_readings, consumables_usage, visit_tasks) — `[cache: ION + native]`
 
@@ -47,35 +47,35 @@ flowchart LR
 
 Same shape as [ion-work-orders](ion-work-orders.md): column rename, currency/date coercion, empty-string-to-NULL. Visit tasks are normalized through the alias map in `_lib/normalize.py` (`TASK_ALIASES`, e.g. "Brsh" -> `brushed_pool`) and written to `maintenance.visit_tasks` via DELETE-then-INSERT per visit (so re-scraping a visit replaces its task set cleanly).
 
-## Visit → task resolution (two passes; EventID is ground truth)
+## Visit → task → customer → location (EventID is the spine; ADR 007 §9)
 
-A visit's true task is the **ION EventID** = the `ion_task_id` recorded on its service log. Resolution
-happens in two passes:
+A visit's identity and links all come from its ION **service log**, never from address matching:
 
-**Pass 1 — provisional, by service location (`_lib/upsert.py`).** The bulk Service Log report is
-matched to a task by **`service_location_id`** (`build_resolvers` / `resolve_task_and_schedule`),
-then a schedule slot by `day_of_week` + `actual_tech`. This is a best-effort first guess:
-- **Multi-task locations are mis-resolved** — `tasks_by_sl[service_location_id]` keeps one task per
-  location; locations with several active tasks (price / start date / service type) need a combined
-  best-match (date window + day + tech + `price_cents` vs rate + service type). Price matches only
-  ~59% (40% of visits are flat-rate). Ambiguous cases flag for review.
+- **task** — the log's **EventID** = `task_schedules.ion_task_id`. `ingest_day_logs` sets
+  `visits.task_id` directly from it; `f/ION/link_visits_via_log.flow` is the recovery/override
+  (`taskless_visits` → `resolve_visit_tasks_via_log`: loglist → LogID → **`addLog.cfm`** → the EventID →
+  `link_visits_by_event`: set `visits.task_id` where `task_schedules.ion_task_id = EventID`). EventID is
+  ground truth. See [task-record-linkage](../../operations/task-record-linkage.md).
+- **customer** — the log's `CustomerID` (→ `Customers.ion_cust_id`), and equivalently `task.customer_id`
+  (the authoritative per-task owner, ADR 006).
+- **service_location** — derived from the **customer's** confirmed link-table locations
+  (`public.reconcile_visit_locations`, [ADR 007 §9](../../adrs/007-address-resolution-and-customer-address-ledger.md)):
+  one confirmed location → take it; several → fuzzy-match the visit's `raw_service_address` (pg_trgm).
+  A task **no longer carries a `service_location_id`** (the column is being dropped) — the visit's
+  location is the customer's confirmed address, not an independently-resolved one.
 
-**Pass 2 — authoritative, by EventID via the log (`f/ION/link_visits_via_log.flow`).** Overrides
-pass 1. Three steps: `taskless_visits` (find `task_id IS NULL` + an `ion_cust_id` hint) →
-`resolve_visit_tasks_via_log` (loglist → LogID → **`addLog.cfm`** → the EventID; this is the only
-place we fetch the log page directly) → `link_visits_by_event` (set `visits.task_id` to the task
-whose **`task_schedules.ion_task_id = EventID`** — and equally `tasks.ion_task_id`, the now-populated
-1:1 key, see [task-record-linkage](../../operations/task-record-linkage.md)). `sl_mismatch` is flagged
-but the EventID link wins.
+> **[retired]** The bulk `CompletedLogDetail` report **and its provisional by-`service_location_id` task
+> match** — `f/ION/_lib/upsert.py` (`upsert_canonical` / `build_resolvers` / `resolve_task_and_schedule`,
+> `tasks_by_sl`, `source='ion'`) — are dead (zero `'ion'` rows). **Do not treat `_lib/upsert.py` as the
+> live visit ingester** (it survives only as a utility module — `_connect`, `normalize_*`). The old
+> "Pass 1 provisional by service location" no longer exists; EventID is the only task link.
 
-**The gap (`event_not_in_db`).** When a visit's EventID has **no task in our DB**, it can't link →
-`task_id` stays NULL. This is the one-time 2026-04-26 task import never covering **expired** tasks: a
-full year of 2025 visits (~14.4k, 562 EventIDs) are orphaned — and worse, those orphans have **no
-`service_location_id` either**, so even `taskless_visits` (which joins on `service_location_id`)
-can't see them. The fix is exactly what `link_visits_by_event` names: a **`get_task_detail` capture**
-of the missing EventIDs (prime the customer from the log's `CustomerID` → `get_task_detail(EventID)`
-→ upsert the task + schedule → link the visits). A recurring ION → tasks/schedules sync
-(`_lib/upsert_tasks.py` / `upsert_schedules.py`) is what keeps this from recurring.
+**The gap (`event_not_in_db`).** When a visit's EventID has **no task in our DB**, `task_id` stays NULL
+until a **`get_task_detail` capture** primes the task (prime the customer from the log's `CustomerID` →
+`get_task_detail(EventID)` → upsert the task + schedule → link the visits; `recover_orphan_tasks`). The
+recurring ION → tasks/schedules sync (`_lib/upsert_tasks.py` / `upsert_schedules.py`) keeps it from
+recurring. (Historic note: the 2026-04-26 one-time import skipped expired tasks, orphaning ~14.4k 2025
+visits across 562 EventIDs.)
 
 ## Leadership
 

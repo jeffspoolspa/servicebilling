@@ -6,11 +6,13 @@
 
 ## What it is
 
-A physical service address (where a pool actually is) belonging to a customer
-account. One account (`public."Customers"`) can have many service locations
-(`account_id` → `Customers.id`, `ON DELETE CASCADE`). Maintenance tasks, pools,
-and visits hang off a service location, not off the account — so the service
-location, not the billing record, is the right place to pin a map coordinate.
+A physical service address (where a pool actually is) belonging to a customer.
+The authoritative customer↔location link is the **`customer_service_addresses`** ledger
+(ADR 005); `account_id` → `Customers.id` is the **legacy** owner (to be dropped, ADR 005 Phase 5)
+and can mismatch the task's authoritative `customer_id`. **Tasks no longer reference a service
+location** (ADR 007 §9 — a task carries `customer_id`); pools and visits still do, and a visit's
+location is derived from its customer's confirmed location (`reconcile_visit_locations`). The
+service location — not the billing record — is the right place to pin a map coordinate.
 
 This matters because the account's billing address is often an out-of-state
 snowbird/owner address. Geocoding *that* (the old `geocode_customers.py`
