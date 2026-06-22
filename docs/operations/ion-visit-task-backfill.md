@@ -1,8 +1,11 @@
 # Historical visit → task linking pipeline ("every visit gets a task")
 
-> Status: [active] — the (previously undocumented) set of Windmill flows that backfilled
-> ~1.5 years of ION visits and linked them to tasks, plus the known residual gap. Companion to
-> [ion-visits sync](../flows/sync/ion-visits.md) and [task-record-linkage](task-record-linkage.md).
+> Status: [active] — updated 2026-06-22. The (previously undocumented) set of Windmill flows that
+> backfilled ~1.5 years of ION visits and linked them to tasks. **The "real fix" below is now LIVE:**
+> the log-detail ingester (`f/ION/daily_visit_ingest` -> `ingest_day_logs` + `recover_orphan_tasks` +
+> `reconcile_visit_locations`) replaced the bulk-report guesser, so #1/#4/#6's address-based linking is
+> historical. Companion to [ion-visits sync](../flows/sync/ion-visits.md) and
+> [task-record-linkage](task-record-linkage.md).
 
 Every `maintenance.visits` row should link to a `maintenance.tasks` row (`visits.task_id`), because
 visits are what billing reconciles. ION's active-tasks report only covers *currently active* tasks,
@@ -57,11 +60,14 @@ serviced day (tech via `_resolve_tech`, frequency via `_map_frequency`), and set
 `visits.task_id` + `customer_id` + **`ion_cust_id`** + `service_location_id`. Each statement
 auto-commits, so a mid-run stop is safe to resume.
 
-## The real fix (so this stops recurring)
+## The real fix (LIVE since 2026-06)
 
-The daily sync ([ion-visits](../flows/sync/ion-visits.md)) ingests a bulk report and **guesses the
-task by `service_location`**, which is why orphans happen and why this whole recovery stack exists.
-The durable fix is a **log-detail-centric ingester**: by-day log list (`customerLogDetails.cfm`) →
-`addLog.cfm` per log (carries **both `EventID` and `CustomerID`**) → ingest the visit already
-carrying its true task + customer, with a resolver that creates the task if missing. Then no visit
-can orphan. Tracked as a separate change to the live sync.
+The bulk-report daily sync that **guessed the task by `service_location`** — the reason orphans
+happened and this whole recovery stack exists — is **retired**. The durable fix shipped: the
+**log-detail-centric ingester** `f/ION/daily_visit_ingest` (every 2h): by-day log list
+(`customerLogDetails.cfm`) → `addLog.cfm` per log (carries **both `EventID` and `CustomerID`**) →
+`ingest_day_logs` writes the visit already carrying its true task (EventID) + `customer_id`, then
+`recover_orphan_tasks` creates any missing task (customer-keyed) and `reconcile_visit_locations`
+sets the visit's location from the customer's confirmed address (ADR 007 §9 — a task carries no
+location). No address-based task guessing remains, so a visit can only orphan when its EventID has no
+task in our DB yet (`event_not_in_db`), which `recover_orphan_tasks` then drains.
