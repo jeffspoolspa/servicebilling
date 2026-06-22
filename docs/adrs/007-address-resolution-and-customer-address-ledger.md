@@ -183,6 +183,29 @@ the unresolved-address set the banner surfaces. The deprecated `task_schedules.o
 by routing. **Follow-up:** the maintenance *customers* and *visits* lists still group by the old office
 (`v_task_schedules_with_context.office` / ION visit office) — repoint those to the geographic office too.
 
+### 9. Office lives on the CUSTOMER and the TECH — never denormalized (2026-06-21)
+
+§8 made office geographic, but it still has to answer two different questions, so it lives in exactly two
+places and everything else **joins** to one of them (no copies onto tasks / schedules / visits / work orders
+— a copy is a thing to keep in sync and get wrong):
+
+- **Customer office** — `Customers.office_id`, the nearest branch to the customer's representative service
+  address, but **manually overridable**. `recompute_customer_office()` derives it; a trigger on
+  `service_locations` keeps it fresh on any re-geocode / edit / merge; `set_customer_office` /
+  `clear_customer_office_override` set or release a sticky override (`office_overridden` — the auto-recompute
+  skips an overridden row). This is the office for **customer** queries/filtering.
+- **Tech office** — `employees.branch_id` (the tech belongs to a branch). This is the office for **routes**.
+
+**A route is `tech × day`, so a route's office is the TECH's office** — independent of which office each
+customer belongs to. The routing views group/filter by the tech's branch, not the customer's or the pool's.
+A stop where the **customer's** office ≠ the **route/tech's** office is the meaningful *cross-office* signal
+(distinct from §7's distance-based *wrong-address* signal). Because office sits on just customer and tech,
+filtering "by office" works from either side and survives either one changing, with no multi-table update.
+
+Implemented in passes: customer office + override + sync + UI (this migration); routing views repointed to
+the tech's branch + per-stop customer-office + cross-office flag, and the customers/visits lists repointed to
+the customer office (next).
+
 ## Consequences
 
 **Good:**
