@@ -65,7 +65,6 @@ const READING_ORDER: [string, string][] = [
   ["pH", "pH"],
   ["Cyanuric Acid", "CYA"],
   ["Total Alkalinity", "TA"],
-  ["Total Chlorine", "TC"],
   ["Salinity", "Salt"],
 ]
 
@@ -338,25 +337,26 @@ function VisitCalendar({ customerId, month }: { customerId: number; month: strin
                   className="text-right px-2"
                   title={d.service_names ?? undefined}
                 >
-                  <div className="text-ink font-mono num">
+                  <span className="text-ink font-mono num">
                     {formatVisitDate(d.visit_date)}
-                  </div>
+                  </span>
                   {qc && (
-                    <div className="text-[9px] text-indigo-300 uppercase tracking-wide leading-3">
+                    <span className="ml-1 text-[9px] text-indigo-300 uppercase tracking-wide">
                       QC
-                    </div>
+                    </span>
                   )}
                 </TableHead>
               )
             })}
-            <TableHead className="text-right pl-4">Total</TableHead>
+            <TableHead className="text-right pl-4">Qty</TableHead>
+            <TableHead className="text-right">Total $</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {readingRows.length > 0 && (
             <TableRow className="hover:bg-transparent">
               <TableCell
-                colSpan={days.length + 2}
+                colSpan={days.length + 3}
                 className="sticky left-0 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute"
               >
                 Readings
@@ -372,12 +372,13 @@ function VisitCalendar({ customerId, month }: { customerId: number; month: strin
                 </TableCell>
               ))}
               <TableCell />
+              <TableCell />
             </TableRow>
           ))}
           {items.length > 0 && (
             <TableRow className="hover:bg-transparent">
               <TableCell
-                colSpan={days.length + 2}
+                colSpan={days.length + 3}
                 className="sticky left-0 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute"
               >
                 Chemicals sold
@@ -398,7 +399,10 @@ function VisitCalendar({ customerId, month }: { customerId: number; month: strin
                 </TableCell>
               ))}
               <TableCell className="text-right pl-4 font-mono num text-ink">
-                {tot.qty} · {formatCurrency(tot.cents / 100)}
+                {tot.qty}
+              </TableCell>
+              <TableCell className="text-right font-mono num text-ink">
+                {formatCurrency(tot.cents / 100)}
               </TableCell>
             </TableRow>
           ))}
@@ -414,7 +418,9 @@ function VisitCalendar({ customerId, month }: { customerId: number; month: strin
               </TableCell>
             ))}
             <TableCell className="text-right pl-4 font-mono num font-semibold">
-              {totalQty > 0 && `${totalQty} · `}
+              {totalQty > 0 ? totalQty : ""}
+            </TableCell>
+            <TableCell className="text-right font-mono num font-semibold">
               {formatCurrency(grandTotal / 100)}
             </TableCell>
           </TableRow>
