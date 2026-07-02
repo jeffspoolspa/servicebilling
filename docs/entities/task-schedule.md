@@ -6,15 +6,20 @@
 
 ## What it is
 
-How often a [Task](task.md) is serviced and what it costs — the billing terms. One task can have multiple schedules (e.g., different days/techs). Key columns:
+How often a [Task](task.md) is serviced — the routing cadence. One task can have multiple schedules (one row per scheduled weekday, mirroring ION's day1–day7 tech roster). Key columns:
 
-- `day_of_week`, `frequency` (weekly / biweekly / monthly), `sequence` (stop order on the route)
-- **`billing_method`** — `per_visit` or `flat_rate_monthly`
-- `price_per_visit_cents` and `flat_rate_monthly_cents` — the two pricing modes
+- `day_of_week`, `frequency` (`weekly` / `biweekly_a` / `biweekly_b` / `daily` / `monthly`), `sequence` (stop order on the route)
 - `tech_employee_id`, `office`, `active`, `starts_on` / `ends_on`
 - `ion_task_id` (ION linkage), `skimmer_id` (legacy — ION is the current leader per [ADR 002](../adrs/002-ion-api-layer.md))
 
-This is the **source of the expected bill**: the proposed visits-vs-invoice reconciliation ([monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md)) multiplies `price_per_visit_cents × completed visits` (or uses `flat_rate_monthly_cents`) and compares to what QBO billed.
+**Financial columns were dropped 2026-06-19** — `billing_method` / rate live on the [Task](task.md)
+(ADR 007 §9); schedules are routing/cadence only. The expected bill comes from
+`tasks.price_per_visit_cents × billable visits` (or `tasks.flat_rate_monthly_cents`).
+
+**Feeds `tasks.frequency`:** any insert/update/delete here fires the `task_schedules_freq` trigger,
+which rolls the task's schedule rows up into `tasks.frequency` + `tasks.days_per_week`
+(see [Task](task.md) Classification). ION clears the day roster on old closed tasks, so historical
+tasks may legitimately have no schedule rows — their frequency comes from ION's recurrence text.
 
 Mixed leadership like [Task](task.md): ION-seeded, app-edited (`lib/entities/task/mutations.ts`). Changes audited in `maintenance.task_schedules_audit`.
 

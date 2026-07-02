@@ -23,6 +23,32 @@ A library of typed data-retrieval functions, one per data type, that hide ION's 
 
 **The report-fetch recipe (proven 2026-06-01 — 487 tasks, byte-identical to the manual XLS):** ION report `.cfm` files are driven by **server-side session state** the Reports UI sets up; a cold call 500s. So before fetching a report you must **prime** the reports context by replaying the UI's request chain — `reports.cfm` → `CustomerRpt.cfm` → `customers.cfm?set=1` → `serviceEvents.cfm?set=1` — then the report returns its data. All of that is raw `ionFetch` (no browser); chromium is only for the initial login. The report comes back as an HTML-table-as-xls which the parser turns into typed rows.
 
+**Two classes of report priming — GET-chain vs form-submit (lesson, 2026-07-01):** the recipe above
+only covers reports whose session state is set by **GET navigation** (recurring tasks). Reports whose
+criteria come from a **criteria form POST** — e.g. the transaction report
+(`transactionRpt.cfm` → `_xls/allTransactions.cfm`) — are stricter: the criteria are applied **only by a
+genuine browser navigation form-submit**. NO fetch POST is accepted as a submission — not raw `ionFetch`
+with the exact captured Chrome navigation headers (byte-identical body, same cookies), and not even an
+in-page `fetch` on Chrome's own network stack. Every fetch POST gets the form re-rendered (it even echoes
+the posted values back) while the session criteria stay untouched — a **silent no-op**. Isolated
+empirically by (a) capturing the browser's POST and replaying it raw with identical headers/cookies/body
+(fails) and (b) in-page fetch POST (also fails; only real `form.submit()` navigation works). Presumed
+Imperva/ColdFusion behavior; do not spend time re-deriving it.
+
+Recipe for form-POST reports (see `f/ION/transactions_report`): chromium → `goto` the criteria form →
+fill fields via `page.evaluate` → `form.submit()` (navigation) → fetch the `_xls/` endpoint **in-page**
+(`page.goto` aborts on the attachment) → parse. Symptom table for debugging:
+| Symptom | Meaning |
+|---|---|
+| `_xls/...cfm` returns 500 | report session state absent — the criteria form was never loaded in a browser this session |
+| 200 but tiny (header only / few rows) | form page was loaded (defaults primed) but criteria never submitted — the fetch-POST no-op |
+| 200 with full data | a real navigation form-submit applied the criteria |
+
+**Beware confounded success:** session state persists across requests on the same cookies, so a raw pull
+run shortly after any browser submit will "work" and wrongly validate the raw approach. Verify any new
+report recipe on a **fresh forced session** (`getOrRefreshSession(ion, {forceRefresh:true})`) with no
+browser touch, or you are testing the previous submit, not your code.
+
 ### Adding a new endpoint
 1. In a `_lib` module, write a `fetch<Thing>(session)` that `ionFetchText`es the ION URL (priming first if it's a report) and parses the HTML into a typed interface.
 2. Add a thin `f/ION/api/get_<thing>` Windmill script (chromium-tagged) that does `loginToIon` → prime/fetch → return.
@@ -35,12 +61,18 @@ A library of typed data-retrieval functions, one per data type, that hide ION's 
 `f/ION/api/get_recurring_tasks(filters)` is the single entry point and composes swappable functions: `getOrRefreshSession` → `getRecurringTasks` (= `ensureReportsPrimed` → `fetchRecurringTasksHtml` → `normalizeRecurringTasks`). Change the normalizer and the same endpoint returns the new shape; callers are unaffected.
 
 ### Write-back
-Still read-only today. [ADR 002](../adrs/002-ion-api-layer.md) adds `f/ION/api` write endpoints behind `dry_run`.
+Live: `f/ION/api/update_task` (ADR 002 pattern) edits one task via its edit form — `dry_run` (default)
+returns the exact POST payload without submitting; `dry_run=false` writes. Proven 2026-07-01: flipped a
+task's `InvoiceType` (field values are the form's option values, e.g. `9` = "Per Visit Itemized (list
+consumables)"), verified by re-read; the next recurring sync is the reflection. Note the write POST goes
+through `ionFetch` and IS accepted — the form-submit-only restriction above applies to the **reports**
+criteria form, not to `addTask.cfm`.
 
 ## Channels in / out
 
 - **In (reflection):** scrape every few hours per sync. No change feed — the full re-scrape IS the reconciliation (no drift detection; known gap).
-- **Out:** none today. [ADR 002](../adrs/002-ion-api-layer.md) adds write-back endpoints (behind `dry_run`, single-path).
+- **In (on demand):** `f/ION/transactions_report(month)` — the All Transactions report (Tasks) → `billing_audit.ion_task_transactions`, one row per ION task invoice; the monthly-billing reconcile target. Uses the browser form-submit prime described above.
+- **Out:** task edits via `f/ION/api/update_task` ([ADR 002](../adrs/002-ion-api-layer.md): behind `dry_run`, single write path, next sync reflects).
 
 ## Flows that depend on ION
 

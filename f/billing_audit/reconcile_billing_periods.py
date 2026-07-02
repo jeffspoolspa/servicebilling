@@ -76,6 +76,7 @@ SELECT id, qbo_customer_id, billing_month, billing_method,
 FROM billing_audit.task_billing_periods
 WHERE qbo_customer_id IS NOT NULL
   AND billing_month < date_trunc('month', now())::date   -- only closed months
+  AND locked_at IS NULL                                  -- skip finalized months
 """
 
 FETCH_INVOICES = """

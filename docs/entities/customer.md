@@ -34,7 +34,8 @@ exception to lowercase naming.)
 | `first_name` / `last_name` | text | Contact name | |
 | `email` / `phone` | text | Contact — used for lead dedup (lower(email) / phone last-10) | |
 | `street` / `city` / `state` / `zip` | text | Billing address | `state` defaults `GA` |
-| `account_type` | text | residential vs commercial | `residential` \| `commercial` |
+| `account_type` | text | residential vs commercial | `residential` \| `commercial` — `[drift]` stale vs the `company` rule below (15 known stale rows on task customers, 2026-07-02); analytics uses the `company` rule |
+| `company` | text | QBO `CompanyName` cache — **QBO is the source; fix there**, cache follows | **filled ⇒ commercial** (the classifier used by `maintenance.v_task_class.is_commercial`); cleaned against ION customer types 2026-07-01 (12 commercials filled, 4 residentials cleared — in QBO) |
 | `is_active` | boolean | Active customer | dedup ignores inactive/deleted |
 | `is_maintenance` | boolean | On a maintenance plan | |
 
