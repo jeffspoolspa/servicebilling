@@ -1,0 +1,1288 @@
+<!doctype html><html><head><meta charset="utf-8"><title>June 2026 Billing Audit — 84 flags</title>
+<style>
+body{font:14px/1.45 -apple-system,Helvetica,sans-serif;margin:24px;color:#222;max-width:1100px}
+h1{font-size:20px} .pp{color:#888;font-size:12px}
+button{margin:0 6px 12px 0;padding:6px 12px;border:2px solid #ccc;background:#fff;border-radius:6px;cursor:pointer;font-weight:600}
+button.on{background:#f2f2f2}
+details.cust{border:1px solid #e2e2e2;border-radius:8px;margin:6px 0;padding:2px 10px;background:#fff}
+summary{cursor:pointer;padding:6px 0}
+.lvl{color:#fff;font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;margin-right:6px}
+.stat{margin-left:12px;font-size:12.5px;color:#444}
+.tag.warn{background:#fdecea;color:#c0392b;font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:8px}
+table{border-collapse:collapse;margin:8px 0;width:100%}
+th,td{text-align:left;padding:4px 10px;border-bottom:1px solid #eee;font-size:13px}
+th{color:#666;font-weight:600;font-size:12px}
+.cat td{font-weight:600}
+.r-md{background:#fff6e6} .r-hi{background:#fdecea}
+.peer-table{max-width:640px}
+</style></head><body>
+<h1>June 2026 Billing Audit — 84 flagged customer-months</h1>
+<p class="pp">Source: billing_audit.v_customer_month_cpv (visits-based, pre-QBO). CPV = core + specialty + spa chemicals per serviceable visit-day.
+Row highlight: <span style="background:#fff6e6">≥1.5× peer</span> · <span style="background:#fdecea">≥2.5× peer</span>. Click a row to drill down.</p>
+<table class="peer-table"><tr><th>Peer group (June /visit)</th><th>CPV</th><th>Core</th><th>Specialty</th><th>Parts</th><th>Extra svc</th></tr><tr><td>weekly_residential</td><td>$29.61</td><td>$24.75</td><td>$4.6</td><td>$0.69</td><td>$0.45</td></tr><tr><td>low_freq</td><td>$34.09</td><td>$31.81</td><td>$1.37</td><td>$0.16</td><td>$0</td></tr><tr><td>commercial</td><td>$34.19</td><td>$32.16</td><td>$2.04</td><td>$0.36</td><td>$0.35</td></tr></table>
+<div><button onclick="flt('HIGH')" style='border-color:#c0392b'>HIGH (4)</button><button onclick="flt('WATCH')" style='border-color:#d35400'>WATCH (14)</button><button onclick="flt('SELF_SPIKE')" style='border-color:#8e44ad'>SELF_SPIKE (11)</button><button onclick="flt('PCT_SPIKE')" style='border-color:#7f8c8d'>PCT_SPIKE (55)</button><button onclick="flt('ALL')" class="on">ALL (84)</button></div>
+
+<details class="cust" data-lvl="HIGH">
+<summary><span class="lvl" style="background:#c0392b">HIGH</span>
+ <b>Tucker, Alex and Jodie</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$147.83</b> (4.3× peer)</span>
+ <span class="stat">chem $296 / 2 visits</span>
+ <span class="stat">fz 2.69 · sz 4.51 · 121.3%</span>
+ <span class='tag warn'>LOW FC 0.5</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $66.79 ·
+    readings: FC 0.5 / CYA 55 / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$148.00 <span class='pp'>vs $31.81 (4.7×)</span></td><td class=''>$0.00 <span class='pp'>vs $1.37</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>16</td><td>$128</td><td>8</td><td>0.72</td><td><b>11.0×</b></td></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>6</td><td>$87</td><td>3</td><td>0.34</td><td><b>8.9×</b></td></tr><tr class='r-hi'><td>CHLORINE TABLET</td><td>core</td><td>7</td><td>$49</td><td>3.5</td><td>0.52</td><td><b>6.7×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.5</td><td>0.26</td><td><b>1.9×</b></td></tr><tr class='r-hi'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>11</td><td>$11</td><td>5.5</td><td>0.53</td><td><b>10.4×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>8</td><td>$8</td><td>4</td><td>0.26</td><td><b>15.7×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="HIGH">
+<summary><span class="lvl" style="background:#c0392b">HIGH</span>
+ <b>CUMBERLAND HARBOR</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$112.55</b> (3.3× peer)</span>
+ <span class="stat">chem $2,363 / 21 visits</span>
+ <span class="stat">fz 2.73 · sz 1.75 · 186.2%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $39.33 ·
+    readings: FC 5.9 / CYA 67 / pH 7.5 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$104.00 <span class='pp'>vs $32.16 (3.2×)</span></td><td class='r-hi'>$8.57 <span class='pp'>vs $2.04 (4.2×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.36</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-md'><td>CHLORINE TABLET 50LB</td><td>core</td><td>2</td><td>$700</td><td>0.1</td><td>0.05</td><td><b>1.8×</b></td></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>30</td><td>$435</td><td>1.43</td><td>0.04</td><td><b>38.8×</b></td></tr><tr class='r-hi'><td>MURIATIC ACID 1GAL</td><td>core</td><td>31</td><td>$403</td><td>1.48</td><td>0.09</td><td><b>16.6×</b></td></tr><tr class='r-hi'><td>50LB SODIUM BICARB</td><td>core</td><td>6</td><td>$300</td><td>0.29</td><td>0.05</td><td><b>6.3×</b></td></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>26</td><td>$254</td><td>1.24</td><td>0.13</td><td><b>9.2×</b></td></tr><tr class='r-hi'><td>PHOSPHATE REMOVER - HIGH STRENGTH (LP-MAX) 1QT</td><td>specialty</td><td>1</td><td>$60</td><td>0.05</td><td>0.01</td><td><b>8.2×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>2</td><td>$60</td><td>0.1</td><td>0.01</td><td><b>13.4×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>16</td><td>$40</td><td>0.76</td><td>0.38</td><td><b>2.0×</b></td></tr><tr class='r-hi'><td>DICHLOR 2LB</td><td>specialty</td><td>1</td><td>$33</td><td>0.05</td><td>0</td><td><b>36.9×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>6</td><td>$30</td><td>0.29</td><td>0.01</td><td><b>19.7×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="HIGH">
+<summary><span class="lvl" style="background:#c0392b">HIGH</span>
+ <b>McQueen, Karli</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$103.07</b> (3.5× peer)</span>
+ <span class="stat">chem $515 / 5 visits</span>
+ <span class="stat">fz 2.77 · sz 6.86 · 236.8%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $30.6 ·
+    readings: FC 3.6 / CYA 32 / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$103.00 <span class='pp'>vs $24.75 (4.2×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>LIQUID STABILIZER 1GAL</td><td>core</td><td>3</td><td>$147</td><td>0.6</td><td>0.01</td><td><b>45.3×</b></td></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>7</td><td>$102</td><td>1.4</td><td>0.16</td><td><b>8.9×</b></td></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>5</td><td>$66</td><td>1</td><td>0.05</td><td><b>19.7×</b></td></tr><tr class='r-hi'><td>MURIATIC ACID 1GAL</td><td>core</td><td>5</td><td>$65</td><td>1</td><td>0.24</td><td><b>4.1×</b></td></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>7</td><td>$56</td><td>1.4</td><td>0.46</td><td><b>3.0×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>18</td><td>$46</td><td>3.6</td><td>1.51</td><td><b>2.4×</b></td></tr><tr class='r-md'><td>CHLORINE TABLET</td><td>core</td><td>5</td><td>$35</td><td>1</td><td>0.63</td><td><b>1.6×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="HIGH">
+<summary><span class="lvl" style="background:#c0392b">HIGH</span>
+ <b>DYKES, TINA</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$85.84</b> (2.9× peer)</span>
+ <span class="stat">chem $429 / 5 visits</span>
+ <span class="stat">fz 2.11 · sz 2 · 40.8%</span>
+ <span class='tag warn'>LOW CYA 18</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $60.98 ·
+    readings: FC 3.2 / CYA 18 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$50.60 <span class='pp'>vs $24.75 (2.0×)</span></td><td class='r-hi'>$20.80 <span class='pp'>vs $4.60 (4.5×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>12</td><td>$96</td><td>2.4</td><td>0.46</td><td><b>5.2×</b></td></tr><tr class='r-hi'><td>BROMINATING TABS 1.5LB</td><td>spa</td><td>2</td><td>$72</td><td>0.4</td><td>0</td><td><b>181.1×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>2</td><td>$62</td><td>0.4</td><td>0.04</td><td><b>10.6×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.2</td><td>0.04</td><td><b>5.1×</b></td></tr><tr class='r-md'><td>CHLORINE TABLET</td><td>core</td><td>6</td><td>$42</td><td>1.2</td><td>0.63</td><td><b>1.9×</b></td></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>4</td><td>$39</td><td>0.8</td><td>0.22</td><td><b>3.7×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.4</td><td>0.24</td><td><b>1.7×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>4</td><td>$20</td><td>0.8</td><td>0.18</td><td><b>4.4×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>4</td><td>$10</td><td>0.8</td><td>1.51</td><td><b>0.5×</b></td></tr><tr class='r-hi'><td>ALK &amp; PH LIFT 1LB</td><td>core</td><td>1</td><td>$9</td><td>0.2</td><td>0.01</td><td><b>34.0×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>Walker, Leslie</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$305.98</b> (9.0× peer)</span>
+ <span class="stat">chem $612 / 2 visits</span>
+ <span class="stat">fz 6.43 · sz — · —%</span>
+ <span class='tag warn'>LOW FC 0</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $40.48 ·
+    readings: FC 0 / CYA — / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$306.00 <span class='pp'>vs $31.81 (9.6×)</span></td><td class=''>$0.00 <span class='pp'>vs $1.37</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLET 50LB</td><td>core</td><td>1</td><td>$350</td><td>0.5</td><td>0.01</td><td><b>74.5×</b></td></tr><tr class='r-hi'><td>CAL HYPO 50LB</td><td>core</td><td>1</td><td>$262</td><td>0.5</td><td>0.01</td><td><b>74.5×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>Waterways Cottonham</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$163.44</b> (4.8× peer)</span>
+ <span class="stat">chem $4,903 / 30 visits</span>
+ <span class="stat">fz 4.51 · sz -0.04 · -3.1%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $168.64 ·
+    readings: FC 8 / CYA 93 / pH 7.3 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$163.43 <span class='pp'>vs $32.16 (5.1×)</span></td><td class=''>$0.00 <span class='pp'>vs $2.04</span></td><td class=''>$0.00 <span class='pp'>vs $0.36</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLET 50LB</td><td>core</td><td>12</td><td>$4,200</td><td>0.4</td><td>0.05</td><td><b>7.5×</b></td></tr><tr class='r-hi'><td>50LB SODIUM BICARB</td><td>core</td><td>7</td><td>$350</td><td>0.23</td><td>0.05</td><td><b>5.2×</b></td></tr><tr class='r-hi'><td>SODA ASH 50LB</td><td>core</td><td>3</td><td>$237</td><td>0.1</td><td>0.02</td><td><b>6.5×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>64</td><td>$64</td><td>2.13</td><td>0.6</td><td><b>3.6×</b></td></tr><tr class='r-md'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>4</td><td>$52</td><td>0.13</td><td>0.06</td><td><b>2.4×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>Wetherington, Lisa</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$120.63</b> (4.1× peer)</span>
+ <span class="stat">chem $483 / 4 visits</span>
+ <span class="stat">fz 3.43 · sz 1.17 · 19.1%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $101.25 ·
+    readings: FC 2.9 / CYA 65 / pH 7.6 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$99.75 <span class='pp'>vs $24.75 (4.0×)</span></td><td class='r-hi'>$21.00 <span class='pp'>vs $4.60 (4.6×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class='r-hi'>$7.50 <span class='pp'>vs $0.45 (16.7×)</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLET</td><td>core</td><td>31</td><td>$217</td><td>7.75</td><td>0.63</td><td><b>12.3×</b></td></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>19.5</td><td>$156</td><td>4.88</td><td>0.46</td><td><b>10.6×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1.1</td><td>$46</td><td>0.28</td><td>0.04</td><td><b>7.0×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>1.3</td><td>$37</td><td>0.31</td><td>0.01</td><td><b>30.0×</b></td></tr><tr class='r-hi'><td>HALF HOUR MAINTENANCE</td><td>extra svc</td><td>1</td><td>$30</td><td>0.25</td><td>0.01</td><td><b>48.5×</b></td></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.5</td><td>0.05</td><td><b>9.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>Grand Lake Lodge and Spa</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$116.54</b> (3.4× peer)</span>
+ <span class="stat">chem $2,564 / 22 visits</span>
+ <span class="stat">fz 2.87 · sz 1.43 · 118.4%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $53.36 ·
+    readings: FC 6.7 / CYA 94 / pH 7.5 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$116.55 <span class='pp'>vs $32.16 (3.6×)</span></td><td class=''>$0.00 <span class='pp'>vs $2.04</span></td><td class=''>$0.00 <span class='pp'>vs $0.36</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLET 50LB</td><td>core</td><td>6</td><td>$2,100</td><td>0.27</td><td>0.05</td><td><b>5.1×</b></td></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>20</td><td>$262</td><td>0.91</td><td>0.06</td><td><b>16.2×</b></td></tr><tr class='r-hi'><td>50LB SODIUM BICARB</td><td>core</td><td>3</td><td>$150</td><td>0.14</td><td>0.05</td><td><b>3.0×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>4</td><td>$52</td><td>0.18</td><td>0.09</td><td><b>2.0×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>STEMPF, PETER</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$115.98</b> (3.9× peer)</span>
+ <span class="stat">chem $116 / 1 visits</span>
+ <span class="stat">fz 3.26 · sz — · —%</span>
+ <span class='tag warn'>LOW FC 1</span><span class='tag warn'>CL-LOCK?</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $54.25 ·
+    readings: FC 1 / CYA 100 / pH 7.2 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$85.00 <span class='pp'>vs $24.75 (3.4×)</span></td><td class='r-hi'>$31.00 <span class='pp'>vs $4.60 (6.7×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLET</td><td>core</td><td>5</td><td>$35</td><td>5</td><td>0.63</td><td><b>8.0×</b></td></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>4</td><td>$32</td><td>4</td><td>0.46</td><td><b>8.7×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>1</td><td>0.04</td><td><b>26.6×</b></td></tr><tr class='r-hi'><td>SODIUM BICARB 1LB</td><td>core</td><td>4</td><td>$10</td><td>4</td><td>1.51</td><td><b>2.7×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>4</td><td>$4</td><td>4</td><td>0.61</td><td><b>6.6×</b></td></tr><tr class='r-md'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>4</td><td>$4</td><td>4</td><td>2.13</td><td><b>1.9×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>WATERS AT GATEWAY</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$112.13</b> (3.3× peer)</span>
+ <span class="stat">chem $1,009 / 9 visits</span>
+ <span class="stat">fz 2.71 · sz — · —%</span>
+ <span class='tag warn'>LOW FC 1.3</span><span class='tag warn'>CL-LOCK?</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $50.48 ·
+    readings: FC 1.3 / CYA 96 / pH 7.3 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$112.11 <span class='pp'>vs $32.16 (3.5×)</span></td><td class=''>$0.00 <span class='pp'>vs $2.04</span></td><td class=''>$0.00 <span class='pp'>vs $0.36</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLET 50LB</td><td>core</td><td>2</td><td>$700</td><td>0.22</td><td>0.05</td><td><b>4.1×</b></td></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>12</td><td>$157</td><td>1.33</td><td>0.06</td><td><b>23.7×</b></td></tr><tr class='r-hi'><td>50LB SODIUM BICARB</td><td>core</td><td>2</td><td>$100</td><td>0.22</td><td>0.05</td><td><b>4.9×</b></td></tr><tr class='r-hi'><td>MURIATIC ACID 1GAL</td><td>core</td><td>4</td><td>$52</td><td>0.44</td><td>0.09</td><td><b>5.0×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>Jenkins, Holly</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$100.60</b> (3.4× peer)</span>
+ <span class="stat">chem $503 / 5 visits</span>
+ <span class="stat">fz 2.67 · sz — · —%</span>
+ <span class='tag warn'>LOW FC 0</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $151.82 ·
+    readings: FC 0 / CYA 44 / pH 7.4 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$100.60 <span class='pp'>vs $24.75 (4.1×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>36</td><td>$288</td><td>7.2</td><td>0.46</td><td><b>15.6×</b></td></tr><tr class='r-hi'><td>CHLORINE TABLET</td><td>core</td><td>29</td><td>$203</td><td>5.8</td><td>0.63</td><td><b>9.2×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>5</td><td>$13</td><td>1</td><td>1.51</td><td><b>0.7×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>RISHER, CECIL</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$95.64</b> (3.2× peer)</span>
+ <span class="stat">chem $287 / 3 visits</span>
+ <span class="stat">fz 2.48 · sz — · —%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $— ·
+    readings: FC 2.7 / CYA 43 / pH 7.7 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$51.33 <span class='pp'>vs $24.75 (2.1×)</span></td><td class='r-hi'>$44.33 <span class='pp'>vs $4.60 (9.6×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLET</td><td>core</td><td>11</td><td>$77</td><td>3.67</td><td>0.63</td><td><b>5.8×</b></td></tr><tr class='r-hi'><td>PHOSPHATE REMOVER - HIGH STRENGTH (LP-MAX) 1QT</td><td>specialty</td><td>1</td><td>$60</td><td>0.33</td><td>0.01</td><td><b>28.3×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.33</td><td>0.04</td><td><b>8.5×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>0.33</td><td>0.04</td><td><b>8.9×</b></td></tr><tr class='r-md'><td>CAL HYPO 1LB</td><td>core</td><td>3</td><td>$24</td><td>1</td><td>0.46</td><td><b>2.2×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>8</td><td>$20</td><td>2.67</td><td>1.51</td><td><b>1.8×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.33</td><td>0.24</td><td><b>1.4×</b></td></tr><tr class='r-md'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1</td><td>$10</td><td>0.33</td><td>0.22</td><td><b>1.5×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>5</td><td>$5</td><td>1.67</td><td>0.61</td><td><b>2.8×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>5</td><td>$5</td><td>1.67</td><td>2.13</td><td><b>0.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>PARRISH, FONTAYNE</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$93.10</b> (3.1× peer)</span>
+ <span class="stat">chem $372 / 4 visits</span>
+ <span class="stat">fz 2.39 · sz — · —%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $30.36 ·
+    readings: FC 5 / CYA 45 / pH 7.6 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$86.00 <span class='pp'>vs $24.75 (3.5×)</span></td><td class='r-md'>$7.00 <span class='pp'>vs $4.60 (1.5×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>12</td><td>$96</td><td>3</td><td>0.46</td><td><b>6.5×</b></td></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>6</td><td>$87</td><td>1.5</td><td>0.16</td><td><b>9.5×</b></td></tr><tr class='r-hi'><td>CHLORINE TABLET</td><td>core</td><td>10</td><td>$70</td><td>2.5</td><td>0.63</td><td><b>4.0×</b></td></tr><tr class='r-hi'><td>LIQUID STABILIZER 1GAL</td><td>core</td><td>1</td><td>$49</td><td>0.25</td><td>0.01</td><td><b>18.9×</b></td></tr><tr class='r-hi'><td>SWIMTRINE QT</td><td>specialty</td><td>0.5</td><td>$28</td><td>0.13</td><td>0</td><td><b>29.8×</b></td></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.5</td><td>0.05</td><td><b>9.8×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>6.5</td><td>$16</td><td>1.63</td><td>1.51</td><td><b>1.1×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>LINDSAY, KATHY</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$92.76</b> (3.1× peer)</span>
+ <span class="stat">chem $186 / 2 visits</span>
+ <span class="stat">fz 2.38 · sz — · —%</span>
+ <span class='tag warn'>LOW FC 0</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $— ·
+    readings: FC 0 / CYA 77 / pH 7.4 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$56.00 <span class='pp'>vs $24.75 (2.3×)</span></td><td class='r-hi'>$36.50 <span class='pp'>vs $4.60 (7.9×)</span></td><td class='r-hi'>$11.00 <span class='pp'>vs $0.69 (15.9×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>10</td><td>$80</td><td>5</td><td>0.46</td><td><b>10.8×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.5</td><td>0.04</td><td><b>12.8×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>0.5</td><td>0.04</td><td><b>13.3×</b></td></tr><tr class='r-hi'><td>PSI GAUGE (BACK MOUNT)</td><td>part</td><td>1</td><td>$22</td><td>0.5</td><td>0</td><td><b>339.5×</b></td></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>2</td><td>$20</td><td>1</td><td>0.22</td><td><b>4.6×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.5</td><td>0.24</td><td><b>2.1×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>Dryden (Timmons View)</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$92.19</b> (3.1× peer)</span>
+ <span class="stat">chem $369 / 4 visits</span>
+ <span class="stat">fz 2.35 · sz -0.35 · -20.1%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $115.34 ·
+    readings: FC 2 / CYA 78 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$85.00 <span class='pp'>vs $24.75 (3.4×)</span></td><td class='r-md'>$7.25 <span class='pp'>vs $4.60 (1.6×)</span></td><td class='r-hi'>$22.50 <span class='pp'>vs $0.69 (32.6×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>18</td><td>$144</td><td>4.5</td><td>0.46</td><td><b>9.7×</b></td></tr><tr class='r-hi'><td>CHLORINE TABLET</td><td>core</td><td>20</td><td>$140</td><td>5</td><td>0.63</td><td><b>8.0×</b></td></tr><tr class='r-hi'><td>POLARIS ALL PURPOSE BAG (K16)</td><td>part</td><td>1</td><td>$90</td><td>0.25</td><td>0</td><td><b>113.2×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>12</td><td>$30</td><td>3</td><td>1.51</td><td><b>2.0×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>1</td><td>$29</td><td>0.24</td><td>0.01</td><td><b>23.0×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.5</td><td>0.24</td><td><b>2.1×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>HAYES, BRITTANY</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$74.40</b> (2.5× peer)</span>
+ <span class="stat">chem $223 / 3 visits</span>
+ <span class="stat">fz 1.68 · sz 3.75 · 101.4%</span>
+ <span class='tag warn'>LOW FC 0.7</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $36.95 ·
+    readings: FC 0.7 / CYA 33 / pH 7.9 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$51.33 <span class='pp'>vs $24.75 (2.1×)</span></td><td class='r-hi'>$23.00 <span class='pp'>vs $4.60 (5.0×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>OXIDIZER CHLORINE FREE SHOCK</td><td>specialty</td><td>2</td><td>$38</td><td>0.67</td><td>0.02</td><td><b>43.1×</b></td></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>4</td><td>$32</td><td>1.33</td><td>0.46</td><td><b>2.9×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>0.33</td><td>0.04</td><td><b>8.9×</b></td></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>3</td><td>$29</td><td>1</td><td>0.22</td><td><b>4.6×</b></td></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>2</td><td>$29</td><td>0.67</td><td>0.16</td><td><b>4.2×</b></td></tr><tr class='r-hi'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.67</td><td>0.24</td><td><b>2.8×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>4</td><td>$20</td><td>1.33</td><td>0.18</td><td><b>7.4×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>4</td><td>$10</td><td>1.33</td><td>1.51</td><td><b>0.9×</b></td></tr><tr class='r-md'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>4</td><td>$4</td><td>1.33</td><td>0.61</td><td><b>2.2×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>4</td><td>$4</td><td>1.33</td><td>2.13</td><td><b>0.6×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>LANG, BEN</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$71.47</b> (2.4× peer)</span>
+ <span class="stat">chem $357 / 5 visits</span>
+ <span class="stat">fz 1.57 · sz 3.52 · 85.9%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $38.44 ·
+    readings: FC 2 / CYA 28 / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$56.80 <span class='pp'>vs $24.75 (2.3×)</span></td><td class='r-hi'>$14.60 <span class='pp'>vs $4.60 (3.2×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>12</td><td>$96</td><td>2.4</td><td>0.46</td><td><b>5.2×</b></td></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>6</td><td>$59</td><td>1.2</td><td>0.22</td><td><b>5.5×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.2</td><td>0.04</td><td><b>5.1×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>16</td><td>$40</td><td>3.2</td><td>1.51</td><td><b>2.1×</b></td></tr><tr class='r-hi'><td>MURIATIC ACID 1GAL</td><td>core</td><td>3</td><td>$39</td><td>0.6</td><td>0.24</td><td><b>2.5×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>0.2</td><td>0.04</td><td><b>5.3×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>4</td><td>$20</td><td>0.8</td><td>0.18</td><td><b>4.4×</b></td></tr><tr class=''><td>SALT 40LB</td><td>core</td><td>1</td><td>$15</td><td>0.2</td><td>0.16</td><td><b>1.3×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>8</td><td>$8</td><td>1.6</td><td>0.61</td><td><b>2.6×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>8</td><td>$8</td><td>1.6</td><td>2.13</td><td><b>0.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="WATCH">
+<summary><span class="lvl" style="background:#d35400">WATCH</span>
+ <b>Smiley, Leigh</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$59.96</b> (2.0× peer)</span>
+ <span class="stat">chem $300 / 5 visits</span>
+ <span class="stat">fz 1.13 · sz 2.93 · 40.5%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $42.67 ·
+    readings: FC 1.6 / CYA 48 / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$59.00 <span class='pp'>vs $24.75 (2.4×)</span></td><td class=''>$1.00 <span class='pp'>vs $4.60 (0.2×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>8</td><td>$105</td><td>1.6</td><td>0.05</td><td><b>31.5×</b></td></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>7</td><td>$56</td><td>1.4</td><td>0.46</td><td><b>3.0×</b></td></tr><tr class='r-hi'><td>MURIATIC ACID 1GAL</td><td>core</td><td>3</td><td>$39</td><td>0.6</td><td>0.24</td><td><b>2.5×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>12</td><td>$30</td><td>2.4</td><td>1.51</td><td><b>1.6×</b></td></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>2</td><td>$29</td><td>0.4</td><td>0.16</td><td><b>2.5×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>4</td><td>$20</td><td>0.8</td><td>0.18</td><td><b>4.4×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>16</td><td>$16</td><td>3.2</td><td>0.61</td><td><b>5.3×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>0.2</td><td>$5</td><td>0.03</td><td>0.01</td><td><b>3.1×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="SELF_SPIKE">
+<summary><span class="lvl" style="background:#8e44ad">SELF_SPIKE</span>
+ <b>KRENING, CERI</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$56.07</b> (1.9× peer)</span>
+ <span class="stat">chem $224 / 4 visits</span>
+ <span class="stat">fz 0.98 · sz 7.41 · 221.7%</span>
+ <span class='tag warn'>LOW FC 0.8</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $17.43 ·
+    readings: FC 0.8 / CYA 40 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-md'>$40.25 <span class='pp'>vs $24.75 (1.6×)</span></td><td class='r-hi'>$15.75 <span class='pp'>vs $4.60 (3.4×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class='r-hi'>$12.50 <span class='pp'>vs $0.45 (27.8×)</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>FAST DISSOLVE STABILIZER 1 LB</td><td>core</td><td>5</td><td>$55</td><td>1.25</td><td>0</td><td><b>339.5×</b></td></tr><tr class='r-hi'><td>SALT CELL CLEAN</td><td>extra svc</td><td>1</td><td>$50</td><td>0.25</td><td>0.01</td><td><b>42.4×</b></td></tr><tr class='r-hi'><td>DICHLOR 2LB</td><td>specialty</td><td>1</td><td>$33</td><td>0.25</td><td>0</td><td><b>113.2×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>1</td><td>$30</td><td>0.25</td><td>0.01</td><td><b>24.0×</b></td></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>3</td><td>$29</td><td>0.75</td><td>0.22</td><td><b>3.4×</b></td></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>2</td><td>$29</td><td>0.5</td><td>0.16</td><td><b>3.2×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>8</td><td>$20</td><td>2</td><td>1.51</td><td><b>1.3×</b></td></tr><tr class='r-hi'><td>SALT TEST STRIPS</td><td>testing</td><td>1</td><td>$18</td><td>0.25</td><td>0.03</td><td><b>8.9×</b></td></tr><tr class='r-md'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>15</td><td>$15</td><td>3.75</td><td>2.13</td><td><b>1.8×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.25</td><td>0.24</td><td><b>1.0×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="SELF_SPIKE">
+<summary><span class="lvl" style="background:#8e44ad">SELF_SPIKE</span>
+ <b>SUMMEROUR, GRETCHEN</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$53.19</b> (1.8× peer)</span>
+ <span class="stat">chem $160 / 3 visits</span>
+ <span class="stat">fz 0.87 · sz 4.93 · 135.8%</span>
+ <span class='tag warn'>LOW CYA 23</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $22.56 ·
+    readings: FC 1.7 / CYA 23 / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-md'>$43.00 <span class='pp'>vs $24.75 (1.7×)</span></td><td class='r-hi'>$10.33 <span class='pp'>vs $4.60 (2.2×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class='r-hi'>$16.67 <span class='pp'>vs $0.45 (37.0×)</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>SALT CELL CLEAN</td><td>extra svc</td><td>1</td><td>$50</td><td>0.33</td><td>0.01</td><td><b>56.6×</b></td></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>3</td><td>$44</td><td>1</td><td>0.16</td><td><b>6.3×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>0.33</td><td>0.04</td><td><b>8.9×</b></td></tr><tr class='r-md'><td>CAL HYPO 1LB</td><td>core</td><td>3</td><td>$24</td><td>1</td><td>0.46</td><td><b>2.2×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>3</td><td>$15</td><td>1</td><td>0.18</td><td><b>5.6×</b></td></tr><tr class='r-md'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1.5</td><td>$15</td><td>0.5</td><td>0.22</td><td><b>2.3×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.33</td><td>0.24</td><td><b>1.4×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>3</td><td>$8</td><td>1</td><td>1.51</td><td><b>0.7×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>7</td><td>$7</td><td>2.33</td><td>2.13</td><td><b>1.1×</b></td></tr><tr class='r-md'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>4</td><td>$4</td><td>1.33</td><td>0.61</td><td><b>2.2×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="SELF_SPIKE">
+<summary><span class="lvl" style="background:#8e44ad">SELF_SPIKE</span>
+ <b>HAYES, KRISTIN</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$53.00</b> (1.8× peer)</span>
+ <span class="stat">chem $159 / 3 visits</span>
+ <span class="stat">fz 0.87 · sz 2.6 · 63.2%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $32.47 ·
+    readings: FC 5 / CYA 83 / pH 7.6 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-md'>$39.00 <span class='pp'>vs $24.75 (1.6×)</span></td><td class='r-hi'>$14.00 <span class='pp'>vs $4.60 (3.0×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>8</td><td>$64</td><td>2.67</td><td>0.46</td><td><b>5.8×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.33</td><td>0.04</td><td><b>8.5×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>8</td><td>$20</td><td>2.67</td><td>1.51</td><td><b>1.8×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.33</td><td>0.24</td><td><b>1.4×</b></td></tr><tr class='r-md'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1</td><td>$10</td><td>0.33</td><td>0.22</td><td><b>1.5×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>5</td><td>$5</td><td>1.67</td><td>0.61</td><td><b>2.8×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>5</td><td>$5</td><td>1.67</td><td>2.13</td><td><b>0.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="SELF_SPIKE">
+<summary><span class="lvl" style="background:#8e44ad">SELF_SPIKE</span>
+ <b>WILES, DEBBIE</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$51.90</b> (1.8× peer)</span>
+ <span class="stat">chem $208 / 4 visits</span>
+ <span class="stat">fz 0.82 · sz 8.35 · 301.2%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $12.94 ·
+    readings: FC 3.7 / CYA 64 / pH 7.9 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$25.75 <span class='pp'>vs $24.75 (1.0×)</span></td><td class='r-hi'>$26.00 <span class='pp'>vs $4.60 (5.7×)</span></td><td class='r-hi'>$6.00 <span class='pp'>vs $0.69 (8.7×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>2</td><td>$62</td><td>0.5</td><td>0.04</td><td><b>13.3×</b></td></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>6</td><td>$48</td><td>1.5</td><td>0.46</td><td><b>3.2×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.25</td><td>0.04</td><td><b>6.4×</b></td></tr><tr class='r-hi'><td>CHLORINATOR CHECK VALVE (RAINBOW 300)</td><td>part</td><td>2</td><td>$24</td><td>0.5</td><td>0.01</td><td><b>61.7×</b></td></tr><tr class='r-md'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>2</td><td>$20</td><td>0.5</td><td>0.22</td><td><b>2.3×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.25</td><td>0.24</td><td><b>1.0×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>4</td><td>$10</td><td>1</td><td>1.51</td><td><b>0.7×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>9</td><td>$9</td><td>2.25</td><td>2.13</td><td><b>1.1×</b></td></tr><tr class='r-md'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>4</td><td>$4</td><td>1</td><td>0.61</td><td><b>1.7×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="SELF_SPIKE">
+<summary><span class="lvl" style="background:#8e44ad">SELF_SPIKE</span>
+ <b>PERRETT, KRISTEN</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$45.71</b> (1.5× peer)</span>
+ <span class="stat">chem $183 / 4 visits</span>
+ <span class="stat">fz 0.59 · sz 3.12 · 73.5%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $26.35 ·
+    readings: FC 4.4 / CYA 98 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$23.00 <span class='pp'>vs $24.75 (0.9×)</span></td><td class='r-hi'>$22.75 <span class='pp'>vs $4.60 (4.9×)</span></td><td class='r-hi'>$6.00 <span class='pp'>vs $0.69 (8.7×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>PHOSPHATE REMOVER - HIGH STRENGTH (LP-MAX) 1QT</td><td>specialty</td><td>1</td><td>$60</td><td>0.25</td><td>0.01</td><td><b>21.2×</b></td></tr><tr class='r-md'><td>CHLORINE TABLET</td><td>core</td><td>6</td><td>$42</td><td>1.5</td><td>0.63</td><td><b>2.4×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>0.25</td><td>0.04</td><td><b>6.6×</b></td></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>2.5</td><td>$24</td><td>0.63</td><td>0.22</td><td><b>2.9×</b></td></tr><tr class='r-hi'><td>CHLORINATOR CHECK VALVE (RAINBOW 300)</td><td>part</td><td>2</td><td>$24</td><td>0.5</td><td>0.01</td><td><b>61.7×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.25</td><td>0.24</td><td><b>1.0×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>3</td><td>$8</td><td>0.75</td><td>1.51</td><td><b>0.5×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>5</td><td>$5</td><td>1.25</td><td>2.13</td><td><b>0.6×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="SELF_SPIKE">
+<summary><span class="lvl" style="background:#8e44ad">SELF_SPIKE</span>
+ <b>SAMS, CHINA</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$42.56</b> (1.4× peer)</span>
+ <span class="stat">chem $170 / 4 visits</span>
+ <span class="stat">fz 0.47 · sz 6.3 · 150.3%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $17.01 ·
+    readings: FC 8.3 / CYA 28 / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$32.00 <span class='pp'>vs $24.75 (1.3×)</span></td><td class='r-hi'>$10.50 <span class='pp'>vs $4.60 (2.3×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>8</td><td>$64</td><td>2</td><td>0.46</td><td><b>4.3×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.25</td><td>0.04</td><td><b>6.4×</b></td></tr><tr class='r-hi'><td>MURIATIC ACID 1GAL</td><td>core</td><td>3</td><td>$39</td><td>0.75</td><td>0.24</td><td><b>3.1×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>8</td><td>$20</td><td>2</td><td>1.51</td><td><b>1.3×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>3</td><td>$3</td><td>0.75</td><td>2.13</td><td><b>0.4×</b></td></tr><tr class=''><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>2</td><td>$2</td><td>0.5</td><td>0.61</td><td><b>0.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="SELF_SPIKE">
+<summary><span class="lvl" style="background:#8e44ad">SELF_SPIKE</span>
+ <b>Price, Ed</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$37.20</b> (1.1× peer)</span>
+ <span class="stat">chem $112 / 3 visits</span>
+ <span class="stat">fz 0.07 · sz 9.56 · 1,417.1%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $2.45 ·
+    readings: FC 3.3 / CYA 37 / pH 7.3 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$37.33 <span class='pp'>vs $31.81 (1.2×)</span></td><td class=''>$0.00 <span class='pp'>vs $1.37</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>LIQUID STABILIZER 1GAL</td><td>core</td><td>1</td><td>$49</td><td>0.33</td><td>0.05</td><td><b>7.1×</b></td></tr><tr class=''><td>CAL HYPO 1LB</td><td>core</td><td>2.5</td><td>$20</td><td>0.83</td><td>0.72</td><td><b>1.1×</b></td></tr><tr class=''><td>CHLORINE TABLET</td><td>core</td><td>2</td><td>$14</td><td>0.67</td><td>0.52</td><td><b>1.3×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.33</td><td>0.26</td><td><b>1.3×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>5</td><td>$13</td><td>1.67</td><td>1.48</td><td><b>1.1×</b></td></tr><tr class='r-hi'><td>SODA ASH 1LB</td><td>core</td><td>1</td><td>$3</td><td>0.33</td><td>0.03</td><td><b>12.4×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="SELF_SPIKE">
+<summary><span class="lvl" style="background:#8e44ad">SELF_SPIKE</span>
+ <b>ENGLISH, DAN</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$35.52</b> (1.2× peer)</span>
+ <span class="stat">chem $178 / 5 visits</span>
+ <span class="stat">fz 0.2 · sz 3.21 · 88.5%</span>
+ <span class='tag warn'>LOW CYA 24</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $18.85 ·
+    readings: FC 4.3 / CYA 24 / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$8.80 <span class='pp'>vs $24.75 (0.4×)</span></td><td class='r-hi'>$26.60 <span class='pp'>vs $4.60 (5.8×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>PHOSPHATE REMOVER - HIGH STRENGTH (LP-MAX) 1QT</td><td>specialty</td><td>1</td><td>$60</td><td>0.2</td><td>0.01</td><td><b>17.0×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.2</td><td>0.04</td><td><b>5.1×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>0.2</td><td>0.04</td><td><b>5.3×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>4.5</td><td>$22</td><td>0.9</td><td>0.18</td><td><b>5.0×</b></td></tr><tr class=''><td>CAL HYPO 1LB</td><td>core</td><td>1.5</td><td>$12</td><td>0.3</td><td>0.46</td><td><b>0.6×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>3</td><td>$8</td><td>0.6</td><td>1.51</td><td><b>0.4×</b></td></tr><tr class=''><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>0.3</td><td>$2</td><td>0.05</td><td>0.22</td><td><b>0.2×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="SELF_SPIKE">
+<summary><span class="lvl" style="background:#8e44ad">SELF_SPIKE</span>
+ <b>Strojny, Margaret</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$35.45</b> (1.0× peer)</span>
+ <span class="stat">chem $71 / 2 visits</span>
+ <span class="stat">fz 0.02 · sz 8.98 · 838.8%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $3.78 ·
+    readings: FC 6.5 / CYA 90 / pH 7.3 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$28.00 <span class='pp'>vs $31.81 (0.9×)</span></td><td class='r-hi'>$7.50 <span class='pp'>vs $1.37 (5.5×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>6</td><td>$48</td><td>3</td><td>0.72</td><td><b>4.1×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>0.3</td><td>$9</td><td>0.16</td><td>0.02</td><td><b>9.4×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>3</td><td>$8</td><td>1.5</td><td>1.48</td><td><b>1.0×</b></td></tr><tr class='r-hi'><td>ALGAECIDE 90 DAY - COPPER</td><td>specialty</td><td>0.2</td><td>$6</td><td>0.1</td><td>0</td><td><b>74.5×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="SELF_SPIKE">
+<summary><span class="lvl" style="background:#8e44ad">SELF_SPIKE</span>
+ <b>DUCKWORTH, JIM</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$32.28</b> (1.1× peer)</span>
+ <span class="stat">chem $161 / 5 visits</span>
+ <span class="stat">fz 0.08 · sz 3.11 · 53.2%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $21.07 ·
+    readings: FC 5.9 / CYA 46 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$32.20 <span class='pp'>vs $24.75 (1.3×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>3</td><td>$44</td><td>0.6</td><td>0.16</td><td><b>3.8×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>8</td><td>$40</td><td>1.6</td><td>0.18</td><td><b>8.9×</b></td></tr><tr class='r-hi'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>35</td><td>$35</td><td>7</td><td>2.13</td><td><b>3.3×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>12</td><td>$30</td><td>2.4</td><td>1.51</td><td><b>1.6×</b></td></tr><tr class='r-hi'><td>SALT TEST STRIPS</td><td>testing</td><td>1</td><td>$18</td><td>0.2</td><td>0.03</td><td><b>7.1×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.2</td><td>0.24</td><td><b>0.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="SELF_SPIKE">
+<summary><span class="lvl" style="background:#8e44ad">SELF_SPIKE</span>
+ <b>POUNDS, JESSICA</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$31.68</b> (1.1× peer)</span>
+ <span class="stat">chem $127 / 4 visits</span>
+ <span class="stat">fz 0.06 · sz 5.14 · 17.4%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $26.97 ·
+    readings: FC 6 / CYA 48 / pH 7.7 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$31.75 <span class='pp'>vs $24.75 (1.3×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>2</td><td>$29</td><td>0.5</td><td>0.16</td><td><b>3.2×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.5</td><td>0.24</td><td><b>2.1×</b></td></tr><tr class='r-hi'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>24</td><td>$24</td><td>6</td><td>2.13</td><td><b>2.8×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>8</td><td>$20</td><td>2</td><td>1.51</td><td><b>1.3×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>2</td><td>$10</td><td>0.5</td><td>0.18</td><td><b>2.8×</b></td></tr><tr class=''><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1</td><td>$10</td><td>0.25</td><td>0.22</td><td><b>1.1×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>8</td><td>$8</td><td>2</td><td>0.61</td><td><b>3.3×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>Lopez, Scott</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$101.25</b> (3.0× peer)</span>
+ <span class="stat">chem $202 / 2 visits</span>
+ <span class="stat">fz 1.58 · sz 2.5 · 58.7%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $63.81 ·
+    readings: FC 1.5 / CYA 40 / pH 7.9 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$101.00 <span class='pp'>vs $31.81 (3.2×)</span></td><td class=''>$0.00 <span class='pp'>vs $1.37</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>7</td><td>$56</td><td>3.5</td><td>0.72</td><td><b>4.8×</b></td></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>3</td><td>$44</td><td>1.5</td><td>0.34</td><td><b>4.5×</b></td></tr><tr class='r-hi'><td>SODIUM BICARB 1LB</td><td>core</td><td>17</td><td>$43</td><td>8.5</td><td>1.48</td><td><b>5.7×</b></td></tr><tr class='r-hi'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>1</td><td>0.26</td><td><b>3.8×</b></td></tr><tr class='r-hi'><td>CHLORINE TABLET</td><td>core</td><td>3</td><td>$21</td><td>1.5</td><td>0.52</td><td><b>2.9×</b></td></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.5</td><td>0.1</td><td><b>5.0×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>SHROPSHIRE, NATALIE</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$90.74</b> (2.7× peer)</span>
+ <span class="stat">chem $181 / 2 visits</span>
+ <span class="stat">fz 1.33 · sz 2.24 · 225.3%</span>
+ <span class='tag warn'>LOW CYA 15</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $27.9 ·
+    readings: FC 2.5 / CYA 15 / pH 7.6 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$90.50 <span class='pp'>vs $31.81 (2.8×)</span></td><td class=''>$0.00 <span class='pp'>vs $1.37</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>LIQUID STABILIZER 1GAL</td><td>core</td><td>2</td><td>$98</td><td>1</td><td>0.05</td><td><b>21.3×</b></td></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>3</td><td>$39</td><td>1.5</td><td>0.1</td><td><b>14.9×</b></td></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>2</td><td>$29</td><td>1</td><td>0.34</td><td><b>3.0×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>6</td><td>$15</td><td>3</td><td>1.48</td><td><b>2.0×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>Yellow Bluff</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$73.55</b> (2.2× peer)</span>
+ <span class="stat">chem $662 / 9 visits</span>
+ <span class="stat">fz 1.36 · sz 1.12 · 113.7%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $34.42 ·
+    readings: FC 3 / CYA 41 / pH 7.7 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$73.56 <span class='pp'>vs $32.16 (2.3×)</span></td><td class=''>$0.00 <span class='pp'>vs $2.04</span></td><td class=''>$0.00 <span class='pp'>vs $0.36</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-md'><td>CHLORINE TABLET 50LB</td><td>core</td><td>1</td><td>$350</td><td>0.11</td><td>0.05</td><td><b>2.1×</b></td></tr><tr class='r-hi'><td>CAL HYPO 50LB</td><td>core</td><td>1</td><td>$262</td><td>0.11</td><td>0.01</td><td><b>14.3×</b></td></tr><tr class='r-hi'><td>50LB SODIUM BICARB</td><td>core</td><td>1</td><td>$50</td><td>0.11</td><td>0.05</td><td><b>2.5×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>Petrou, Kelly</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$72.87</b> (2.5× peer)</span>
+ <span class="stat">chem $364 / 5 visits</span>
+ <span class="stat">fz 1.62 · sz 2.35 · 211.5%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $23.39 ·
+    readings: FC 4.2 / CYA 42 / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$72.80 <span class='pp'>vs $24.75 (2.9×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>7</td><td>$102</td><td>1.4</td><td>0.16</td><td><b>8.9×</b></td></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>10</td><td>$80</td><td>2</td><td>0.46</td><td><b>4.3×</b></td></tr><tr class='r-hi'><td>SODIUM BICARB 1LB</td><td>core</td><td>28</td><td>$71</td><td>5.6</td><td>1.51</td><td><b>3.7×</b></td></tr><tr class='r-hi'><td>MURIATIC ACID 1GAL</td><td>core</td><td>5</td><td>$65</td><td>1</td><td>0.24</td><td><b>4.1×</b></td></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.4</td><td>0.05</td><td><b>7.9×</b></td></tr><tr class=''><td>CHLORINE TABLET</td><td>core</td><td>3</td><td>$21</td><td>0.6</td><td>0.63</td><td><b>1.0×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>Walton, Joseph</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$66.73</b> (2.3× peer)</span>
+ <span class="stat">chem $267 / 4 visits</span>
+ <span class="stat">fz 1.39 · sz 2.32 · 79.3%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $37.22 ·
+    readings: FC 4.5 / CYA 100 / pH 7.5 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$54.50 <span class='pp'>vs $24.75 (2.2×)</span></td><td class='r-hi'>$12.25 <span class='pp'>vs $4.60 (2.7×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLET</td><td>core</td><td>16</td><td>$112</td><td>4</td><td>0.63</td><td><b>6.4×</b></td></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>7.5</td><td>$60</td><td>1.88</td><td>0.46</td><td><b>4.1×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>0.8</td><td>$34</td><td>0.2</td><td>0.04</td><td><b>5.1×</b></td></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.5</td><td>0.05</td><td><b>9.8×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>8</td><td>$20</td><td>2</td><td>1.51</td><td><b>1.3×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>0.5</td><td>$15</td><td>0.13</td><td>0.01</td><td><b>12.0×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>Griffin Park On Amhearst</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$66.23</b> (1.9× peer)</span>
+ <span class="stat">chem $861 / 13 visits</span>
+ <span class="stat">fz 1.11 · sz 1.17 · 110.7%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $31.43 ·
+    readings: FC 4.2 / CYA 33 / pH 7.2 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-hi'>$66.23 <span class='pp'>vs $32.16 (2.1×)</span></td><td class=''>$0.00 <span class='pp'>vs $2.04</span></td><td class='r-hi'>$1.77 <span class='pp'>vs $0.36 (4.9×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLET 50LB</td><td>core</td><td>2</td><td>$700</td><td>0.15</td><td>0.05</td><td><b>2.9×</b></td></tr><tr class='r-hi'><td>SODA ASH 50LB</td><td>core</td><td>1</td><td>$79</td><td>0.08</td><td>0.02</td><td><b>5.0×</b></td></tr><tr class='r-md'><td>50LB SODIUM BICARB</td><td>core</td><td>1</td><td>$50</td><td>0.08</td><td>0.05</td><td><b>1.7×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>32</td><td>$32</td><td>2.46</td><td>0.6</td><td><b>4.1×</b></td></tr><tr class='r-hi'><td>CHLORINATOR LID O-RING (RAINBOW 300)</td><td>part</td><td>1</td><td>$23</td><td>0.08</td><td>0</td><td><b>119.2×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>HOOKER, NANCY</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$61.65</b> (2.1× peer)</span>
+ <span class="stat">chem $247 / 4 visits</span>
+ <span class="stat">fz 1.19 · sz 2.07 · 199.2%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $20.61 ·
+    readings: FC 3.9 / CYA 30 / pH 7.9 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-md'>$43.25 <span class='pp'>vs $24.75 (1.7×)</span></td><td class='r-hi'>$18.25 <span class='pp'>vs $4.60 (4.0×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>8</td><td>$64</td><td>2</td><td>0.46</td><td><b>4.3×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.25</td><td>0.04</td><td><b>6.4×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>0.25</td><td>0.04</td><td><b>6.6×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>12</td><td>$30</td><td>3</td><td>1.51</td><td><b>2.0×</b></td></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>3</td><td>$29</td><td>0.75</td><td>0.22</td><td><b>3.4×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.5</td><td>0.24</td><td><b>2.1×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>4</td><td>$20</td><td>1</td><td>0.18</td><td><b>5.6×</b></td></tr><tr class=''><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>2</td><td>$2</td><td>0.5</td><td>0.61</td><td><b>0.8×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>2</td><td>$2</td><td>0.5</td><td>2.13</td><td><b>0.2×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>CABRERA, CARLOS</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$57.19</b> (1.9× peer)</span>
+ <span class="stat">chem $172 / 3 visits</span>
+ <span class="stat">fz 1.02 · sz 1.75 · 91.4%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $29.89 ·
+    readings: FC 3.2 / CYA 87 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$26.33 <span class='pp'>vs $24.75 (1.1×)</span></td><td class='r-hi'>$30.67 <span class='pp'>vs $4.60 (6.7×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.33</td><td>0.04</td><td><b>8.5×</b></td></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>4</td><td>$32</td><td>1.33</td><td>0.46</td><td><b>2.9×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>0.33</td><td>0.04</td><td><b>8.9×</b></td></tr><tr class='r-hi'><td>OXIDIZER CHLORINE FREE SHOCK</td><td>specialty</td><td>1</td><td>$19</td><td>0.33</td><td>0.02</td><td><b>21.6×</b></td></tr><tr class='r-md'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1.5</td><td>$15</td><td>0.5</td><td>0.22</td><td><b>2.3×</b></td></tr><tr class='r-md'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>14</td><td>$14</td><td>4.67</td><td>2.13</td><td><b>2.2×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.33</td><td>0.24</td><td><b>1.4×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>6</td><td>$6</td><td>2</td><td>0.61</td><td><b>3.3×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>O&#x27;BRIEN, ROBERT</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$55.77</b> (1.6× peer)</span>
+ <span class="stat">chem $1,227 / 22 visits</span>
+ <span class="stat">fz 0.74 · sz 1.3 · 51.3%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $36.87 ·
+    readings: FC 4.6 / CYA 33 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$43.64 <span class='pp'>vs $32.16 (1.4×)</span></td><td class='r-hi'>$12.14 <span class='pp'>vs $2.04 (5.9×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.36</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>SODIUM BICARB 1LB</td><td>core</td><td>97</td><td>$245</td><td>4.41</td><td>0.38</td><td><b>11.7×</b></td></tr><tr class='r-hi'><td>MURIATIC ACID 1GAL</td><td>core</td><td>15</td><td>$195</td><td>0.68</td><td>0.09</td><td><b>7.7×</b></td></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>19</td><td>$152</td><td>0.86</td><td>0.09</td><td><b>9.2×</b></td></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>14.5</td><td>$141</td><td>0.66</td><td>0.13</td><td><b>4.9×</b></td></tr><tr class='r-hi'><td>OXIDIZER CHLORINE FREE SHOCK</td><td>specialty</td><td>6</td><td>$114</td><td>0.27</td><td>0.02</td><td><b>15.1×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>3</td><td>$93</td><td>0.14</td><td>0.01</td><td><b>16.2×</b></td></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>6</td><td>$87</td><td>0.27</td><td>0.04</td><td><b>7.4×</b></td></tr><tr class='r-hi'><td>PHOSPHATE REMOVER - HIGH STRENGTH (LP-MAX) 1QT</td><td>specialty</td><td>1</td><td>$60</td><td>0.05</td><td>0.01</td><td><b>7.8×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>58</td><td>$58</td><td>2.64</td><td>0.6</td><td><b>4.4×</b></td></tr><tr class='r-md'><td>CHLORINE TABLET</td><td>core</td><td>8</td><td>$56</td><td>0.36</td><td>0.17</td><td><b>2.2×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>Hendricks, Tim</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$48.04</b> (1.6× peer)</span>
+ <span class="stat">chem $240 / 5 visits</span>
+ <span class="stat">fz 0.68 · sz 2.29 · 61.6%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $29.72 ·
+    readings: FC 4.4 / CYA 62 / pH 7.7 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-md'>$48.00 <span class='pp'>vs $24.75 (1.9×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>5</td><td>$73</td><td>1</td><td>0.16</td><td><b>6.3×</b></td></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>9</td><td>$72</td><td>1.8</td><td>0.46</td><td><b>3.9×</b></td></tr><tr class='r-md'><td>CHLORINE TABLET</td><td>core</td><td>5</td><td>$35</td><td>1</td><td>0.63</td><td><b>1.6×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.4</td><td>0.24</td><td><b>1.7×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>8</td><td>$20</td><td>1.6</td><td>1.51</td><td><b>1.1×</b></td></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.2</td><td>0.05</td><td><b>3.9×</b></td></tr><tr class='r-hi'><td>CALCIUM CHLORIDE 1LB</td><td>core</td><td>1</td><td>$2</td><td>0.2</td><td>0.07</td><td><b>2.7×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>Foss, Angie</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$48.03</b> (1.6× peer)</span>
+ <span class="stat">chem $240 / 5 visits</span>
+ <span class="stat">fz 0.68 · sz 1.4 · 95.8%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $24.53 ·
+    readings: FC 4.4 / CYA 96 / pH 7.7 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$34.20 <span class='pp'>vs $24.75 (1.4×)</span></td><td class='r-hi'>$13.80 <span class='pp'>vs $4.60 (3.0×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>SODIUM BICARB 1LB</td><td>core</td><td>28</td><td>$71</td><td>5.6</td><td>1.51</td><td><b>3.7×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>2.3</td><td>$69</td><td>0.46</td><td>0.01</td><td><b>44.1×</b></td></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>4</td><td>$52</td><td>0.8</td><td>0.05</td><td><b>15.7×</b></td></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>6</td><td>$48</td><td>1.2</td><td>0.46</td><td><b>2.6×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>RODRIGUEZ, STEPHANIE</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$46.16</b> (1.6× peer)</span>
+ <span class="stat">chem $231 / 5 visits</span>
+ <span class="stat">fz 0.61 · sz 1.35 · 78.7%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $25.83 ·
+    readings: FC 5.4 / CYA 112 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-md'>$37.80 <span class='pp'>vs $24.75 (1.5×)</span></td><td class='r-md'>$8.40 <span class='pp'>vs $4.60 (1.8×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class='r-hi'>$6.00 <span class='pp'>vs $0.45 (13.3×)</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLET</td><td>core</td><td>9</td><td>$63</td><td>1.8</td><td>0.63</td><td><b>2.9×</b></td></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>5</td><td>$49</td><td>1</td><td>0.22</td><td><b>4.6×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>12</td><td>$30</td><td>2.4</td><td>1.51</td><td><b>1.6×</b></td></tr><tr class='r-hi'><td>HALF HOUR MAINTENANCE</td><td>extra svc</td><td>1</td><td>$30</td><td>0.2</td><td>0.01</td><td><b>38.8×</b></td></tr><tr class='r-hi'><td>FILTER CLEANER 1QT</td><td>specialty</td><td>1</td><td>$27</td><td>0.2</td><td>0.01</td><td><b>38.8×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.4</td><td>0.24</td><td><b>1.7×</b></td></tr><tr class='r-md'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>21</td><td>$21</td><td>4.2</td><td>2.13</td><td><b>2.0×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>0.5</td><td>$15</td><td>0.1</td><td>0.01</td><td><b>9.6×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>MOHLE, IDELL</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$43.57</b> (1.5× peer)</span>
+ <span class="stat">chem $218 / 5 visits</span>
+ <span class="stat">fz 0.51 · sz 1.52 · 74.5%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $24.97 ·
+    readings: FC 7.2 / CYA 72 / pH 7.6 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$29.00 <span class='pp'>vs $24.75 (1.2×)</span></td><td class='r-hi'>$14.60 <span class='pp'>vs $4.60 (3.2×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLET</td><td>core</td><td>13</td><td>$91</td><td>2.6</td><td>0.63</td><td><b>4.1×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.2</td><td>0.04</td><td><b>5.1×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>0.2</td><td>0.04</td><td><b>5.3×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>8</td><td>$20</td><td>1.6</td><td>1.51</td><td><b>1.1×</b></td></tr><tr class='r-md'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>16</td><td>$16</td><td>3.2</td><td>2.13</td><td><b>1.5×</b></td></tr><tr class=''><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1</td><td>$10</td><td>0.2</td><td>0.22</td><td><b>0.9×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>8</td><td>$8</td><td>1.6</td><td>0.61</td><td><b>2.6×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>KURRASCH, SHAMRA</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$43.09</b> (1.5× peer)</span>
+ <span class="stat">chem $215 / 5 visits</span>
+ <span class="stat">fz 0.49 · sz 1.11 · 53.9%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $27.99 ·
+    readings: FC 6 / CYA 27 / pH 7.7 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$34.60 <span class='pp'>vs $24.75 (1.4×)</span></td><td class='r-md'>$8.40 <span class='pp'>vs $4.60 (1.8×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>8</td><td>$64</td><td>1.6</td><td>0.46</td><td><b>3.5×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.2</td><td>0.04</td><td><b>5.1×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>7</td><td>$35</td><td>1.4</td><td>0.18</td><td><b>7.8×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.4</td><td>0.24</td><td><b>1.7×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>8</td><td>$20</td><td>1.6</td><td>1.51</td><td><b>1.1×</b></td></tr><tr class=''><td>SALT 40LB</td><td>core</td><td>1</td><td>$15</td><td>0.2</td><td>0.16</td><td><b>1.3×</b></td></tr><tr class=''><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1</td><td>$10</td><td>0.2</td><td>0.22</td><td><b>0.9×</b></td></tr><tr class=''><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>2</td><td>$2</td><td>0.4</td><td>0.61</td><td><b>0.7×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>2</td><td>$2</td><td>0.4</td><td>2.13</td><td><b>0.2×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>JURKOVICH, ABBIE</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$42.52</b> (1.4× peer)</span>
+ <span class="stat">chem $170 / 4 visits</span>
+ <span class="stat">fz 0.47 · sz 0.99 · 56.9%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $27.1 ·
+    readings: FC 2.8 / CYA 60 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class='r-md'>$37.75 <span class='pp'>vs $24.75 (1.5×)</span></td><td class=''>$4.75 <span class='pp'>vs $4.60 (1.0×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>8</td><td>$64</td><td>2</td><td>0.46</td><td><b>4.3×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>8</td><td>$20</td><td>2</td><td>1.51</td><td><b>1.3×</b></td></tr><tr class='r-md'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>2</td><td>$20</td><td>0.5</td><td>0.22</td><td><b>2.3×</b></td></tr><tr class='r-hi'><td>OXIDIZER CHLORINE FREE SHOCK</td><td>specialty</td><td>1</td><td>$19</td><td>0.25</td><td>0.02</td><td><b>16.2×</b></td></tr><tr class='r-md'><td>SALT 40LB</td><td>core</td><td>1</td><td>$15</td><td>0.25</td><td>0.16</td><td><b>1.6×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.25</td><td>0.24</td><td><b>1.0×</b></td></tr><tr class='r-hi'><td>SODA ASH 1LB</td><td>core</td><td>4</td><td>$12</td><td>1</td><td>0.03</td><td><b>30.9×</b></td></tr><tr class='r-md'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>4</td><td>$4</td><td>1</td><td>0.61</td><td><b>1.7×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>4</td><td>$4</td><td>1</td><td>2.13</td><td><b>0.5×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>Griffin Park On Cypress</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$39.14</b> (1.1× peer)</span>
+ <span class="stat">chem $861 / 22 visits</span>
+ <span class="stat">fz 0.16 · sz 0.87 · 57.6%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $24.83 ·
+    readings: FC 4.9 / CYA 27 / pH 7.4 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$39.14 <span class='pp'>vs $32.16 (1.2×)</span></td><td class=''>$0.00 <span class='pp'>vs $2.04</span></td><td class=''>$0.00 <span class='pp'>vs $0.36</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-md'><td>CHLORINE TABLET 50LB</td><td>core</td><td>2</td><td>$700</td><td>0.09</td><td>0.05</td><td><b>1.7×</b></td></tr><tr class='r-hi'><td>SODA ASH 50LB</td><td>core</td><td>1</td><td>$79</td><td>0.05</td><td>0.02</td><td><b>2.9×</b></td></tr><tr class=''><td>50LB SODIUM BICARB</td><td>core</td><td>1</td><td>$50</td><td>0.05</td><td>0.05</td><td><b>1.0×</b></td></tr><tr class='r-md'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>32</td><td>$32</td><td>1.45</td><td>0.6</td><td><b>2.4×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>MCKINNA, RICHARD</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$38.47</b> (1.3× peer)</span>
+ <span class="stat">chem $154 / 4 visits</span>
+ <span class="stat">fz 0.31 · sz 1.39 · 53.9%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $25 ·
+    readings: FC 3.5 / CYA 45 / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$20.25 <span class='pp'>vs $24.75 (0.8×)</span></td><td class='r-hi'>$18.25 <span class='pp'>vs $4.60 (4.0×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.25</td><td>0.04</td><td><b>6.4×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>0.25</td><td>0.04</td><td><b>6.6×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.5</td><td>0.24</td><td><b>2.1×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>10</td><td>$25</td><td>2.5</td><td>1.51</td><td><b>1.7×</b></td></tr><tr class='r-md'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>2</td><td>$20</td><td>0.5</td><td>0.22</td><td><b>2.3×</b></td></tr><tr class='r-hi'><td>SALT TEST STRIPS</td><td>testing</td><td>1</td><td>$18</td><td>0.25</td><td>0.03</td><td><b>8.9×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>2</td><td>$10</td><td>0.5</td><td>0.18</td><td><b>2.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>COOK, CINDY - SSI</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$36.44</b> (1.2× peer)</span>
+ <span class="stat">chem $182 / 5 visits</span>
+ <span class="stat">fz 0.24 · sz 1.35 · 79.8%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $20.27 ·
+    readings: FC 3.9 / CYA 46 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$16.00 <span class='pp'>vs $24.75 (0.6×)</span></td><td class='r-hi'>$20.40 <span class='pp'>vs $4.60 (4.4×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>PHOSPHATE REMOVER - HIGH STRENGTH (LP-MAX) 1QT</td><td>specialty</td><td>1</td><td>$60</td><td>0.2</td><td>0.01</td><td><b>17.0×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.2</td><td>0.04</td><td><b>5.1×</b></td></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>4</td><td>$39</td><td>0.8</td><td>0.22</td><td><b>3.7×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>6</td><td>$15</td><td>1.2</td><td>1.51</td><td><b>0.8×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.2</td><td>0.24</td><td><b>0.8×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>11</td><td>$11</td><td>2.2</td><td>2.13</td><td><b>1.0×</b></td></tr><tr class=''><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>2</td><td>$2</td><td>0.4</td><td>0.61</td><td><b>0.7×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>DURR, EDWIN</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$35.69</b> (1.2× peer)</span>
+ <span class="stat">chem $178 / 5 visits</span>
+ <span class="stat">fz 0.21 · sz 0.9 · 61.6%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $22.08 ·
+    readings: FC 6.7 / CYA 100 / pH 7.6 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$30.20 <span class='pp'>vs $24.75 (1.2×)</span></td><td class=''>$5.40 <span class='pp'>vs $4.60 (1.2×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLET</td><td>core</td><td>16</td><td>$112</td><td>3.2</td><td>0.63</td><td><b>5.1×</b></td></tr><tr class='r-hi'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>40</td><td>$40</td><td>8</td><td>2.13</td><td><b>3.8×</b></td></tr><tr class='r-hi'><td>FILTER CLEANER 1QT</td><td>specialty</td><td>1</td><td>$27</td><td>0.2</td><td>0.01</td><td><b>38.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>BLUE HERON INN BNB</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$35.02</b> (1.0× peer)</span>
+ <span class="stat">chem $315 / 9 visits</span>
+ <span class="stat">fz 0.01 · sz 1.79 · 56.7%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $22.34 ·
+    readings: FC 3.6 / CYA 84 / pH 7.5 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$32.00 <span class='pp'>vs $32.16 (1.0×)</span></td><td class='r-md'>$3.00 <span class='pp'>vs $2.04 (1.5×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.36</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLET</td><td>core</td><td>29</td><td>$203</td><td>3.22</td><td>0.17</td><td><b>19.3×</b></td></tr><tr class='r-hi'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>36</td><td>$36</td><td>4</td><td>0.53</td><td><b>7.5×</b></td></tr><tr class='r-hi'><td>SODIUM BICARB 1LB</td><td>core</td><td>12</td><td>$30</td><td>1.33</td><td>0.38</td><td><b>3.5×</b></td></tr><tr class='r-hi'><td>FILTER CLEANER 1QT</td><td>specialty</td><td>1</td><td>$27</td><td>0.11</td><td>0</td><td><b>86.1×</b></td></tr><tr class='r-md'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>2</td><td>$20</td><td>0.22</td><td>0.13</td><td><b>1.7×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>D&#x27;Angelo, Brenda</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$34.00</b> (1.1× peer)</span>
+ <span class="stat">chem $170 / 5 visits</span>
+ <span class="stat">fz 0.14 · sz 0.74 · 74.6%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $19.47 ·
+    readings: FC 4.8 / CYA 95 / pH 7.4 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$30.20 <span class='pp'>vs $24.75 (1.2×)</span></td><td class=''>$3.80 <span class='pp'>vs $4.60 (0.8×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>18</td><td>$144</td><td>3.6</td><td>0.46</td><td><b>7.8×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>0.6</td><td>$19</td><td>0.13</td><td>0.01</td><td><b>12.3×</b></td></tr><tr class=''><td>CHLORINE TABLET</td><td>core</td><td>1</td><td>$7</td><td>0.2</td><td>0.63</td><td><b>0.3×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>Holesovsky, Dave</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$33.03</b> (1.1× peer)</span>
+ <span class="stat">chem $165 / 5 visits</span>
+ <span class="stat">fz 0.11 · sz 0.7 · 75.2%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $18.85 ·
+    readings: FC 4.6 / CYA 93 / pH 7.5 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$26.40 <span class='pp'>vs $24.75 (1.1×)</span></td><td class='r-md'>$6.60 <span class='pp'>vs $4.60 (1.4×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>10</td><td>$80</td><td>2</td><td>0.46</td><td><b>4.3×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>13</td><td>$33</td><td>2.6</td><td>1.51</td><td><b>1.7×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>0.6</td><td>$25</td><td>0.12</td><td>0.04</td><td><b>3.1×</b></td></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.2</td><td>0.05</td><td><b>3.9×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>0.3</td><td>$7</td><td>0.05</td><td>0.01</td><td><b>4.8×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>0.5</td><td>$6</td><td>0.1</td><td>0.24</td><td><b>0.4×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>Mulbury, Renee</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$29.86</b> (0.9× peer)</span>
+ <span class="stat">chem $60 / 2 visits</span>
+ <span class="stat">fz -0.11 · sz 1.59 · 157%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $11.62 ·
+    readings: FC 10 / CYA 35 / pH 7.5 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$27.50 <span class='pp'>vs $31.81 (0.9×)</span></td><td class='r-md'>$2.50 <span class='pp'>vs $1.37 (1.8×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>5</td><td>$40</td><td>2.5</td><td>0.72</td><td><b>3.4×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>3</td><td>$15</td><td>1.5</td><td>0.2</td><td><b>7.6×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>0.2</td><td>$5</td><td>0.08</td><td>0.02</td><td><b>4.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>The Marshes</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$27.65</b> (0.8× peer)</span>
+ <span class="stat">chem $802 / 29 visits</span>
+ <span class="stat">fz -0.25 · sz 0.58 · 62.9%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $16.97 ·
+    readings: FC 6.5 / CYA 42 / pH 7.5 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$27.66 <span class='pp'>vs $32.16 (0.9×)</span></td><td class=''>$0.00 <span class='pp'>vs $2.04</span></td><td class=''>$0.00 <span class='pp'>vs $0.36</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class=''><td>CHLORINE TABLET 50LB</td><td>core</td><td>2</td><td>$700</td><td>0.07</td><td>0.05</td><td><b>1.3×</b></td></tr><tr class='r-hi'><td>Z - WATER TESTING REAGENT 2 OZ</td><td>testing</td><td>5</td><td>$115</td><td>0.17</td><td>0.01</td><td><b>12.1×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>4</td><td>$52</td><td>0.14</td><td>0.09</td><td><b>1.5×</b></td></tr><tr class=''><td>50LB SODIUM BICARB</td><td>core</td><td>1</td><td>$50</td><td>0.03</td><td>0.05</td><td><b>0.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>Magnolia Hill</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$26.92</b> (0.8× peer)</span>
+ <span class="stat">chem $350 / 13 visits</span>
+ <span class="stat">fz -0.27 · sz 0.79 · 72.1%</span>
+ <span class='tag warn'>LOW CYA 16</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $15.64 ·
+    readings: FC 7.1 / CYA 16 / pH 7.5 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$26.92 <span class='pp'>vs $32.16 (0.8×)</span></td><td class=''>$0.00 <span class='pp'>vs $2.04</span></td><td class='r-hi'>$4.92 <span class='pp'>vs $0.36 (13.7×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class=''><td>CHLORINE TABLET 50LB</td><td>core</td><td>1</td><td>$350</td><td>0.08</td><td>0.05</td><td><b>1.4×</b></td></tr><tr class='r-hi'><td>R172385D</td><td>part</td><td>1</td><td>$64</td><td>0.08</td><td>0</td><td><b>119.2×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>McAllister Point</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$26.92</b> (0.8× peer)</span>
+ <span class="stat">chem $350 / 13 visits</span>
+ <span class="stat">fz -0.27 · sz 0.62 · 69%</span>
+ <span class='tag warn'>LOW CYA 10</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $15.93 ·
+    readings: FC 7.2 / CYA 10 / pH 7.4 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$26.92 <span class='pp'>vs $32.16 (0.8×)</span></td><td class=''>$0.00 <span class='pp'>vs $2.04</span></td><td class='r-hi'>$1.77 <span class='pp'>vs $0.36 (4.9×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class=''><td>CHLORINE TABLET 50LB</td><td>core</td><td>1</td><td>$350</td><td>0.08</td><td>0.05</td><td><b>1.4×</b></td></tr><tr class='r-hi'><td>PSI GAUGE (BOTT MOUNT)</td><td>part</td><td>1</td><td>$23</td><td>0.08</td><td>0</td><td><b>119.2×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>BHURWAL, ABHISHEK</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$26.08</b> (0.9× peer)</span>
+ <span class="stat">chem $104 / 4 visits</span>
+ <span class="stat">fz -0.16 · sz 0.84 · 108.9%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $12.49 ·
+    readings: FC 5.5 / CYA 75 / pH 7.9 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$26.00 <span class='pp'>vs $24.75 (1.1×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-md'><td>CHLORINE TABLET</td><td>core</td><td>5</td><td>$35</td><td>1.25</td><td>0.63</td><td><b>2.0×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.5</td><td>0.24</td><td><b>2.1×</b></td></tr><tr class='r-md'><td>CAL HYPO 1LB</td><td>core</td><td>3</td><td>$24</td><td>0.75</td><td>0.46</td><td><b>1.6×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>3</td><td>$8</td><td>0.75</td><td>1.51</td><td><b>0.5×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>5</td><td>$5</td><td>1.25</td><td>2.13</td><td><b>0.6×</b></td></tr><tr class=''><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>0.5</td><td>$5</td><td>0.13</td><td>0.22</td><td><b>0.6×</b></td></tr><tr class=''><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>2</td><td>$2</td><td>0.5</td><td>0.61</td><td><b>0.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>ASHER, LESLIE</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$25.87</b> (0.8× peer)</span>
+ <span class="stat">chem $52 / 2 visits</span>
+ <span class="stat">fz -0.2 · sz 1.74 · 134.6%</span>
+ <span class='tag warn'>LOW FC 1</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $11.03 ·
+    readings: FC 1 / CYA 35 / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$26.00 <span class='pp'>vs $31.81 (0.8×)</span></td><td class=''>$0.00 <span class='pp'>vs $1.37</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>SALT TEST STRIPS</td><td>testing</td><td>1</td><td>$18</td><td>0.5</td><td>0.03</td><td><b>18.6×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>6</td><td>$15</td><td>3</td><td>1.48</td><td><b>2.0×</b></td></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1.5</td><td>$15</td><td>0.75</td><td>0.06</td><td><b>13.1×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.5</td><td>0.26</td><td><b>1.9×</b></td></tr><tr class='r-hi'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>5</td><td>$5</td><td>2.5</td><td>0.53</td><td><b>4.7×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>4</td><td>$4</td><td>2</td><td>0.26</td><td><b>7.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>HAMILTON, FAITH</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$25.80</b> (0.9× peer)</span>
+ <span class="stat">chem $129 / 5 visits</span>
+ <span class="stat">fz -0.17 · sz 1.4 · 98.7%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $12.98 ·
+    readings: FC 3 / CYA 84 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$11.20 <span class='pp'>vs $24.75 (0.5×)</span></td><td class='r-hi'>$14.60 <span class='pp'>vs $4.60 (3.2×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.2</td><td>0.04</td><td><b>5.1×</b></td></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>0.2</td><td>0.04</td><td><b>5.3×</b></td></tr><tr class=''><td>CAL HYPO 1LB</td><td>core</td><td>2.5</td><td>$20</td><td>0.5</td><td>0.46</td><td><b>1.1×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>7.5</td><td>$19</td><td>1.5</td><td>1.51</td><td><b>1.0×</b></td></tr><tr class=''><td>CHLORINE TABLET</td><td>core</td><td>1</td><td>$7</td><td>0.2</td><td>0.63</td><td><b>0.3×</b></td></tr><tr class='r-md'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>5</td><td>$5</td><td>1</td><td>0.61</td><td><b>1.7×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>5</td><td>$5</td><td>1</td><td>2.13</td><td><b>0.5×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>VALLE, MICHELLE</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$24.84</b> (0.8× peer)</span>
+ <span class="stat">chem $99 / 4 visits</span>
+ <span class="stat">fz -0.2 · sz 2.74 · 98.1%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $12.54 ·
+    readings: FC 3.5 / CYA 50 / pH 7.9 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$24.75 <span class='pp'>vs $24.75 (1.0×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class='r-hi'>$12.50 <span class='pp'>vs $0.45 (27.8×)</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>SALT CELL CLEAN</td><td>extra svc</td><td>1</td><td>$50</td><td>0.25</td><td>0.01</td><td><b>42.4×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>12</td><td>$30</td><td>3</td><td>1.51</td><td><b>2.0×</b></td></tr><tr class='r-hi'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>24</td><td>$24</td><td>6</td><td>2.13</td><td><b>2.8×</b></td></tr><tr class='r-md'><td>SALT 40LB</td><td>core</td><td>1</td><td>$15</td><td>0.25</td><td>0.16</td><td><b>1.6×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.25</td><td>0.24</td><td><b>1.0×</b></td></tr><tr class=''><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1</td><td>$10</td><td>0.25</td><td>0.22</td><td><b>1.1×</b></td></tr><tr class=''><td>CAL HYPO 1LB</td><td>core</td><td>1</td><td>$8</td><td>0.25</td><td>0.46</td><td><b>0.5×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>HOUCHINS, CLINT</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$23.88</b> (0.8× peer)</span>
+ <span class="stat">chem $119 / 5 visits</span>
+ <span class="stat">fz -0.24 · sz 1.59 · 87.6%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $12.73 ·
+    readings: FC 8.1 / CYA 34 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$15.40 <span class='pp'>vs $24.75 (0.6×)</span></td><td class='r-md'>$8.40 <span class='pp'>vs $4.60 (1.8×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.2</td><td>0.04</td><td><b>5.1×</b></td></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>4</td><td>$20</td><td>0.8</td><td>0.18</td><td><b>4.4×</b></td></tr><tr class='r-hi'><td>SALT TEST STRIPS</td><td>testing</td><td>1</td><td>$18</td><td>0.2</td><td>0.03</td><td><b>7.1×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>6</td><td>$15</td><td>1.2</td><td>1.51</td><td><b>0.8×</b></td></tr><tr class=''><td>SALT 40LB</td><td>core</td><td>1</td><td>$15</td><td>0.2</td><td>0.16</td><td><b>1.3×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>11</td><td>$11</td><td>2.2</td><td>2.13</td><td><b>1.0×</b></td></tr><tr class=''><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1</td><td>$10</td><td>0.2</td><td>0.22</td><td><b>0.9×</b></td></tr><tr class='r-md'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>7</td><td>$7</td><td>1.4</td><td>0.61</td><td><b>2.3×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>FRASCA, CAROLINE</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$23.71</b> (0.8× peer)</span>
+ <span class="stat">chem $119 / 5 visits</span>
+ <span class="stat">fz -0.25 · sz 1.25 · 71.2%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $13.85 ·
+    readings: FC 6.6 / CYA 90 / pH 7.7 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$18.40 <span class='pp'>vs $24.75 (0.7×)</span></td><td class=''>$5.40 <span class='pp'>vs $4.60 (1.2×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class=''><td>CHLORINE TABLET</td><td>core</td><td>4</td><td>$28</td><td>0.8</td><td>0.63</td><td><b>1.3×</b></td></tr><tr class='r-md'><td>SODIUM BICARB 1LB</td><td>core</td><td>11</td><td>$28</td><td>2.2</td><td>1.51</td><td><b>1.5×</b></td></tr><tr class='r-hi'><td>FILTER CLEANER 1QT</td><td>specialty</td><td>1</td><td>$27</td><td>0.2</td><td>0.01</td><td><b>38.8×</b></td></tr><tr class='r-md'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>23</td><td>$23</td><td>4.6</td><td>2.13</td><td><b>2.2×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.2</td><td>0.24</td><td><b>0.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>MOYE, TULLY</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$23.45</b> (0.8× peer)</span>
+ <span class="stat">chem $117 / 5 visits</span>
+ <span class="stat">fz -0.26 · sz 2.14 · 334.6%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $5.4 ·
+    readings: FC — / CYA — / pH 7.5 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$1.80 <span class='pp'>vs $24.75 (0.1×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>BROMINE CONCENTRATE 2LB</td><td>spa</td><td>3</td><td>$108</td><td>0.6</td><td>0</td><td><b>163.0×</b></td></tr><tr class='r-hi'><td>ALK &amp; PH LIFT 1LB</td><td>core</td><td>1</td><td>$9</td><td>0.2</td><td>0.01</td><td><b>34.0×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>ROGERS, RITA</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$23.42</b> (0.8× peer)</span>
+ <span class="stat">chem $94 / 4 visits</span>
+ <span class="stat">fz -0.26 · sz 0.53 · 57%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $14.92 ·
+    readings: FC 3.8 / CYA 55 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$13.00 <span class='pp'>vs $24.75 (0.5×)</span></td><td class='r-hi'>$10.50 <span class='pp'>vs $4.60 (2.3×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.25</td><td>0.04</td><td><b>6.4×</b></td></tr><tr class='r-md'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>2</td><td>$20</td><td>0.5</td><td>0.22</td><td><b>2.3×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.25</td><td>0.24</td><td><b>1.0×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>4</td><td>$10</td><td>1</td><td>1.51</td><td><b>0.7×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>6</td><td>$6</td><td>1.5</td><td>2.13</td><td><b>0.7×</b></td></tr><tr class=''><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>3</td><td>$3</td><td>0.75</td><td>0.61</td><td><b>1.2×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>BETZ, CHRISTY</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$23.05</b> (0.8× peer)</span>
+ <span class="stat">chem $115 / 5 visits</span>
+ <span class="stat">fz -0.27 · sz 3.81 · 82.4%</span>
+ <span class='tag warn'>LOW CYA 19</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $12.64 ·
+    readings: FC 5.9 / CYA 19 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$23.00 <span class='pp'>vs $24.75 (0.9×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>33</td><td>$33</td><td>6.6</td><td>2.13</td><td><b>3.1×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.4</td><td>0.24</td><td><b>1.7×</b></td></tr><tr class='r-hi'><td>SALT TEST STRIPS</td><td>testing</td><td>1</td><td>$18</td><td>0.2</td><td>0.03</td><td><b>7.1×</b></td></tr><tr class=''><td>SALT 40LB</td><td>core</td><td>1</td><td>$15</td><td>0.2</td><td>0.16</td><td><b>1.3×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>11</td><td>$11</td><td>2.2</td><td>0.61</td><td><b>3.6×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>4</td><td>$10</td><td>0.8</td><td>1.51</td><td><b>0.5×</b></td></tr><tr class='r-md'><td>CYANURIC ACID 1LB</td><td>core</td><td>2</td><td>$10</td><td>0.4</td><td>0.18</td><td><b>2.2×</b></td></tr><tr class=''><td>CAL HYPO 1LB</td><td>core</td><td>1</td><td>$8</td><td>0.2</td><td>0.46</td><td><b>0.4×</b></td></tr><tr class='r-hi'><td>CALCIUM CHLORIDE 1LB</td><td>core</td><td>2</td><td>$3</td><td>0.4</td><td>0.07</td><td><b>5.4×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>GILLIS, PETE</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$22.91</b> (0.8× peer)</span>
+ <span class="stat">chem $92 / 4 visits</span>
+ <span class="stat">fz -0.28 · sz 1.82 · 70.5%</span>
+ <span class='tag warn'>LOW CYA 16</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $13.43 ·
+    readings: FC 6.3 / CYA 16 / pH 7.7 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$23.00 <span class='pp'>vs $24.75 (0.9×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>2</td><td>$29</td><td>0.5</td><td>0.16</td><td><b>3.2×</b></td></tr><tr class='r-md'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>20</td><td>$20</td><td>5</td><td>2.13</td><td><b>2.4×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.25</td><td>0.24</td><td><b>1.0×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>4</td><td>$10</td><td>1</td><td>1.51</td><td><b>0.7×</b></td></tr><tr class='r-hi'><td>ALK &amp; PH LOWER 1.5LB</td><td>core</td><td>1</td><td>$10</td><td>0.25</td><td>0</td><td><b>67.9×</b></td></tr><tr class=''><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1</td><td>$10</td><td>0.25</td><td>0.22</td><td><b>1.1×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>SLECHTA, SCOTT</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$22.67</b> (0.8× peer)</span>
+ <span class="stat">chem $91 / 4 visits</span>
+ <span class="stat">fz -0.29 · sz 1.76 · 153.2%</span>
+ <span class='tag warn'>CL-LOCK?</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $8.95 ·
+    readings: FC 1.5 / CYA 95 / pH 7.7 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$22.75 <span class='pp'>vs $24.75 (0.9×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-md'><td>CAL HYPO 1LB</td><td>core</td><td>3</td><td>$24</td><td>0.75</td><td>0.46</td><td><b>1.6×</b></td></tr><tr class='r-md'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>20</td><td>$20</td><td>5</td><td>2.13</td><td><b>2.4×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>6</td><td>$15</td><td>1.5</td><td>1.51</td><td><b>1.0×</b></td></tr><tr class=''><td>CHLORINE TABLET</td><td>core</td><td>2</td><td>$14</td><td>0.5</td><td>0.63</td><td><b>0.8×</b></td></tr><tr class=''><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1</td><td>$10</td><td>0.25</td><td>0.22</td><td><b>1.1×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>8</td><td>$8</td><td>2</td><td>0.61</td><td><b>3.3×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>BELL, ERIN</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$21.64</b> (0.7× peer)</span>
+ <span class="stat">chem $108 / 5 visits</span>
+ <span class="stat">fz -0.33 · sz 5.2 · 174.4%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $7.89 ·
+    readings: FC 5.4 / CYA 126 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$15.60 <span class='pp'>vs $24.75 (0.6×)</span></td><td class=''>$6.00 <span class='pp'>vs $4.60 (1.3×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>1</td><td>$30</td><td>0.2</td><td>0.01</td><td><b>19.2×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.4</td><td>0.24</td><td><b>1.7×</b></td></tr><tr class='r-md'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>25</td><td>$25</td><td>5</td><td>2.13</td><td><b>2.4×</b></td></tr><tr class='r-md'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>2</td><td>$20</td><td>0.4</td><td>0.22</td><td><b>1.8×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>8</td><td>$8</td><td>1.6</td><td>0.61</td><td><b>2.6×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>Turners Cove</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$20.00</b> (0.6× peer)</span>
+ <span class="stat">chem $760 / 38 visits</span>
+ <span class="stat">fz -0.51 · sz 1.46 · 152.7%</span>
+ <span class='tag warn'>LOW CYA 18</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $7.92 ·
+    readings: FC 6.3 / CYA 18 / pH 7.9 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$18.42 <span class='pp'>vs $32.16 (0.6×)</span></td><td class=''>$1.58 <span class='pp'>vs $2.04 (0.8×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.36</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class=''><td>CHLORINE TABLET 50LB</td><td>core</td><td>2</td><td>$700</td><td>0.05</td><td>0.05</td><td><b>1.0×</b></td></tr><tr class='r-hi'><td>Z - WATER TESTING REAGENT 2 OZ</td><td>testing</td><td>6</td><td>$138</td><td>0.16</td><td>0.01</td><td><b>11.1×</b></td></tr><tr class='r-hi'><td>ALGAECIDE - TREATMENT (YELLOW BLAST) 2LB</td><td>specialty</td><td>2</td><td>$60</td><td>0.05</td><td>0.01</td><td><b>7.4×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>Skinner, Justin</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$19.98</b> (0.6× peer)</span>
+ <span class="stat">chem $40 / 2 visits</span>
+ <span class="stat">fz -0.34 · sz 0.7 · 89.2%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $10.56 ·
+    readings: FC 1.5 / CYA 90 / pH 7.4 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$20.00 <span class='pp'>vs $31.81 (0.6×)</span></td><td class=''>$0.00 <span class='pp'>vs $1.37</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>5</td><td>$40</td><td>2.5</td><td>0.72</td><td><b>3.4×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>HORNE, BRENDA &amp; RUSSELL</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$19.78</b> (0.7× peer)</span>
+ <span class="stat">chem $79 / 4 visits</span>
+ <span class="stat">fz -0.4 · sz 3.44 · 98.4%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $9.97 ·
+    readings: FC 5.9 / CYA 55 / pH 7.9 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$19.75 <span class='pp'>vs $24.75 (0.8×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>23</td><td>$23</td><td>5.75</td><td>2.13</td><td><b>2.7×</b></td></tr><tr class='r-md'><td>SALT 40LB</td><td>core</td><td>1</td><td>$15</td><td>0.25</td><td>0.16</td><td><b>1.6×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.25</td><td>0.24</td><td><b>1.0×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>4</td><td>$10</td><td>1</td><td>1.51</td><td><b>0.7×</b></td></tr><tr class=''><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1</td><td>$10</td><td>0.25</td><td>0.22</td><td><b>1.1×</b></td></tr><tr class='r-hi'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>9</td><td>$9</td><td>2.25</td><td>0.61</td><td><b>3.7×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>JONES, EMILY</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$18.53</b> (0.6× peer)</span>
+ <span class="stat">chem $74 / 4 visits</span>
+ <span class="stat">fz -0.44 · sz 0.77 · 56.8%</span>
+ <span class='tag warn'>LOW FC 0.3</span></summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $11.82 ·
+    readings: FC 0.3 / CYA 65 / pH 7.9 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$18.50 <span class='pp'>vs $24.75 (0.7×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class='r-hi'>$5.50 <span class='pp'>vs $0.69 (8.0×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>4</td><td>$39</td><td>1</td><td>0.22</td><td><b>4.6×</b></td></tr><tr class='r-hi'><td>TABLET FLOATER (3IN)</td><td>part</td><td>1</td><td>$22</td><td>0.25</td><td>0</td><td><b>339.5×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>6</td><td>$15</td><td>1.5</td><td>1.51</td><td><b>1.0×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.25</td><td>0.24</td><td><b>1.0×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>7</td><td>$7</td><td>1.75</td><td>2.13</td><td><b>0.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>RETTSTADT, RICH</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$18.37</b> (0.6× peer)</span>
+ <span class="stat">chem $92 / 5 visits</span>
+ <span class="stat">fz -0.45 · sz 1.41 · 116.4%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $8.49 ·
+    readings: FC 7 / CYA 58 / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$12.20 <span class='pp'>vs $24.75 (0.5×)</span></td><td class=''>$6.20 <span class='pp'>vs $4.60 (1.3×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>ENZYME 1QT</td><td>specialty</td><td>1</td><td>$31</td><td>0.2</td><td>0.04</td><td><b>5.3×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>2</td><td>$26</td><td>0.4</td><td>0.24</td><td><b>1.7×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>6</td><td>$15</td><td>1.2</td><td>1.51</td><td><b>0.8×</b></td></tr><tr class=''><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1</td><td>$10</td><td>0.2</td><td>0.22</td><td><b>0.9×</b></td></tr><tr class=''><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>5</td><td>$5</td><td>1</td><td>2.13</td><td><b>0.5×</b></td></tr><tr class='r-hi'><td>CALCIUM CHLORIDE 1LB</td><td>core</td><td>2</td><td>$3</td><td>0.4</td><td>0.07</td><td><b>5.4×</b></td></tr><tr class=''><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>2</td><td>$2</td><td>0.4</td><td>0.61</td><td><b>0.7×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>MCDANIEL, KEN</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$17.98</b> (0.6× peer)</span>
+ <span class="stat">chem $72 / 4 visits</span>
+ <span class="stat">fz -0.46 · sz 0.85 · 50.4%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $11.95 ·
+    readings: FC 7.4 / CYA 50 / pH 7.9 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$18.00 <span class='pp'>vs $24.75 (0.7×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>SALT 40LB</td><td>core</td><td>2</td><td>$29</td><td>0.5</td><td>0.16</td><td><b>3.2×</b></td></tr><tr class='r-md'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>20</td><td>$20</td><td>5</td><td>2.13</td><td><b>2.4×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.25</td><td>0.24</td><td><b>1.0×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>4</td><td>$10</td><td>1</td><td>1.51</td><td><b>0.7×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>KAUFFMAN, PEGGY</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$16.62</b> (0.6× peer)</span>
+ <span class="stat">chem $66 / 4 visits</span>
+ <span class="stat">fz -0.52 · sz 1.02 · 58.7%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $10.47 ·
+    readings: FC 8.8 / CYA 45 / pH 7.9 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$9.75 <span class='pp'>vs $24.75 (0.4×)</span></td><td class='r-md'>$6.75 <span class='pp'>vs $4.60 (1.5×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>FILTER CLEANER 1QT</td><td>specialty</td><td>1</td><td>$27</td><td>0.25</td><td>0.01</td><td><b>48.5×</b></td></tr><tr class='r-hi'><td>SALT TEST STRIPS</td><td>testing</td><td>1</td><td>$18</td><td>0.25</td><td>0.03</td><td><b>8.9×</b></td></tr><tr class='r-md'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>15</td><td>$15</td><td>3.75</td><td>2.13</td><td><b>1.8×</b></td></tr><tr class='r-md'><td>SALT 40LB</td><td>core</td><td>1</td><td>$15</td><td>0.25</td><td>0.16</td><td><b>1.6×</b></td></tr><tr class=''><td>SODIUM BICARB 1LB</td><td>core</td><td>4</td><td>$10</td><td>1</td><td>1.51</td><td><b>0.7×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>SMITH, SUSAN</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$16.32</b> (0.6× peer)</span>
+ <span class="stat">chem $65 / 4 visits</span>
+ <span class="stat">fz -0.53 · sz 3 · 422.4%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $3.12 ·
+    readings: FC 4.5 / CYA 100 / pH 7.4 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$2.25 <span class='pp'>vs $24.75 (0.1×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLETS 1IN (SPA)</td><td>spa</td><td>2</td><td>$56</td><td>0.5</td><td>0</td><td><b>339.5×</b></td></tr><tr class='r-hi'><td>ALK &amp; PH LIFT 1LB</td><td>core</td><td>1</td><td>$9</td><td>0.25</td><td>0.01</td><td><b>42.4×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>BURKS, LISA</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$15.09</b> (0.4× peer)</span>
+ <span class="stat">chem $45 / 3 visits</span>
+ <span class="stat">fz -0.46 · sz 1.4 · 120.4%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $6.85 ·
+    readings: FC — / CYA — / pH 7.7 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$3.00 <span class='pp'>vs $31.81 (0.1×)</span></td><td class=''>$0.00 <span class='pp'>vs $1.37</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>BROMINATING TABS 1.5LB</td><td>spa</td><td>1</td><td>$36</td><td>0.33</td><td>0.01</td><td><b>49.7×</b></td></tr><tr class='r-hi'><td>ALK &amp; PH LIFT 1LB</td><td>core</td><td>1</td><td>$9</td><td>0.33</td><td>0.01</td><td><b>49.7×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>AYLOR-DIAZ, CHARLOTTE</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$14.00</b> (0.4× peer)</span>
+ <span class="stat">chem $28 / 2 visits</span>
+ <span class="stat">fz -0.48 · sz 1.76 · 121.1%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $6.33 ·
+    readings: FC 3 / CYA 100 / pH 7.2 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$0.00 <span class='pp'>vs $31.81</span></td><td class=''>$0.00 <span class='pp'>vs $1.37</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CHLORINE TABLETS 1IN (SPA)</td><td>spa</td><td>1</td><td>$28</td><td>0.5</td><td>0.01</td><td><b>74.5×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>HEIN, RAY</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$13.75</b> (0.4× peer)</span>
+ <span class="stat">chem $27 / 2 visits</span>
+ <span class="stat">fz -0.49 · sz 3.85 · 487.1%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $2.34 ·
+    readings: FC 5.3 / CYA 40 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$13.50 <span class='pp'>vs $31.81 (0.4×)</span></td><td class=''>$0.00 <span class='pp'>vs $1.37</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-md'><td>SALT 40LB</td><td>core</td><td>1</td><td>$15</td><td>0.5</td><td>0.34</td><td><b>1.5×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.5</td><td>0.26</td><td><b>1.9×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>GOLLETTI, JODI</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$13.75</b> (0.4× peer)</span>
+ <span class="stat">chem $27 / 2 visits</span>
+ <span class="stat">fz -0.49 · sz 3.03 · 215.2%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $4.36 ·
+    readings: FC 5 / CYA 30 / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$13.50 <span class='pp'>vs $31.81 (0.4×)</span></td><td class=''>$0.00 <span class='pp'>vs $1.37</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-md'><td>SALT 40LB</td><td>core</td><td>1</td><td>$15</td><td>0.5</td><td>0.34</td><td><b>1.5×</b></td></tr><tr class='r-md'><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.5</td><td>0.26</td><td><b>1.9×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>SOLECITTO, JOHN</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$13.32</b> (0.4× peer)</span>
+ <span class="stat">chem $120 / 9 visits</span>
+ <span class="stat">fz -0.75 · sz 0.62 · 74.3%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $7.64 ·
+    readings: FC 6.9 / CYA 87 / pH 7.6 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$13.33 <span class='pp'>vs $32.16 (0.4×)</span></td><td class=''>$0.00 <span class='pp'>vs $2.04</span></td><td class=''>$0.00 <span class='pp'>vs $0.36</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CAL HYPO 1LB</td><td>core</td><td>4</td><td>$32</td><td>0.44</td><td>0.09</td><td><b>4.7×</b></td></tr><tr class='r-hi'><td>SODIUM BICARB 1LB</td><td>core</td><td>12</td><td>$30</td><td>1.33</td><td>0.38</td><td><b>3.5×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.11</td><td>0.09</td><td><b>1.2×</b></td></tr><tr class='r-hi'><td>SODA ASH 1LB</td><td>core</td><td>4</td><td>$12</td><td>0.44</td><td>0.02</td><td><b>22.9×</b></td></tr><tr class='r-hi'><td>PHOSPHATE REMOVER (LPE) 1OZ</td><td>core</td><td>12</td><td>$12</td><td>1.33</td><td>0.53</td><td><b>2.5×</b></td></tr><tr class='r-md'><td>LIQUID CLARIFIER (MCB) 1OZ</td><td>core</td><td>11</td><td>$11</td><td>1.22</td><td>0.6</td><td><b>2.0×</b></td></tr><tr class=''><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>1</td><td>$10</td><td>0.11</td><td>0.13</td><td><b>0.8×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>WINDING RIVER COMMUNITY</b> <span class="pp">(commercial)</span>
+ <span class="stat">CPV <b>$12.96</b> (0.4× peer)</span>
+ <span class="stat">chem $674 / 52 visits</span>
+ <span class="stat">fz -0.76 · sz 1.14 · 118.5%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $27.64 · self seasonal mean $5.93 ·
+    readings: FC 6.5 / CYA 63 / pH 7.6 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$12.96 <span class='pp'>vs $32.16 (0.4×)</span></td><td class=''>$0.00 <span class='pp'>vs $2.04</span></td><td class=''>$0.38 <span class='pp'>vs $0.36 (1.1×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.35</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>LIQUID CHLORINE 2.5GAL</td><td>core</td><td>64</td><td>$624</td><td>1.23</td><td>0.13</td><td><b>9.2×</b></td></tr><tr class=''><td>50LB SODIUM BICARB</td><td>core</td><td>1</td><td>$50</td><td>0.02</td><td>0.05</td><td><b>0.4×</b></td></tr><tr class='r-hi'><td>R172240z</td><td>part</td><td>1</td><td>$20</td><td>0.02</td><td>0</td><td><b>9.9×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>SADOWSKI, NICOLE</b> <span class="pp">(low_freq)</span>
+ <span class="stat">CPV <b>$12.54</b> (0.4× peer)</span>
+ <span class="stat">chem $25 / 2 visits</span>
+ <span class="stat">fz -0.52 · sz 2.15 · 200.4%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $22.99 · self seasonal mean $4.17 ·
+    readings: FC 5.3 / CYA 65 / pH 7.5 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$12.50 <span class='pp'>vs $31.81 (0.4×)</span></td><td class=''>$0.00 <span class='pp'>vs $1.37</span></td><td class=''>$0.00 <span class='pp'>vs $0.16</span></td><td class=''>$0.00 <span class='pp'>vs $0.00</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>LIQUID SHOCK 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.5</td><td>0.1</td><td><b>5.0×</b></td></tr><tr class=''><td>CAL HYPO 1LB</td><td>core</td><td>1.5</td><td>$12</td><td>0.75</td><td>0.72</td><td><b>1.0×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>HODGE, MELISSA</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$11.33</b> (0.4× peer)</span>
+ <span class="stat">chem $57 / 5 visits</span>
+ <span class="stat">fz -0.72 · sz 6.23 · 228.4%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $3.45 ·
+    readings: FC 5.1 / CYA 40 / pH 7.8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$3.00 <span class='pp'>vs $24.75 (0.1×)</span></td><td class='r-md'>$8.40 <span class='pp'>vs $4.60 (1.8×)</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>ALGAECIDE - PREV (NMP) 1QT</td><td>specialty</td><td>1</td><td>$42</td><td>0.2</td><td>0.04</td><td><b>5.1×</b></td></tr><tr class=''><td>SALT 40LB</td><td>core</td><td>1</td><td>$15</td><td>0.2</td><td>0.16</td><td><b>1.3×</b></td></tr></table>
+</div></details>
+<details class="cust" data-lvl="PCT_SPIKE">
+<summary><span class="lvl" style="background:#7f8c8d">PCT_SPIKE</span>
+ <b>DEEDS, CHERYL</b> <span class="pp">(weekly_residential)</span>
+ <span class="stat">CPV <b>$10.98</b> (0.4× peer)</span>
+ <span class="stat">chem $33 / 3 visits</span>
+ <span class="stat">fz -0.73 · sz 2.04 · 101%</span>
+ </summary>
+<div class="body">
+ <p class="pp">peer median CPV $24.82 · self seasonal mean $5.46 ·
+    readings: FC 5.8 / CYA 33 / pH 8 ·
+    discounts $0</p>
+ <table class="cat"><tr><th></th><th>Core /visit</th><th>Specialty /visit</th><th>Parts /visit</th><th>Extra svc /visit</th></tr>
+ <tr><td class="pp">you vs peer</td><td class=''>$11.00 <span class='pp'>vs $24.75 (0.4×)</span></td><td class=''>$0.00 <span class='pp'>vs $4.60</span></td><td class=''>$0.00 <span class='pp'>vs $0.69</span></td><td class=''>$0.00 <span class='pp'>vs $0.45</span></td></tr></table>
+ <table class="items"><tr><th>Item</th><th>Cat</th><th>Qty</th><th>$</th><th>Qty/visit</th><th>Peer qty/visit</th><th>×</th></tr><tr class='r-hi'><td>CYANURIC ACID 1LB</td><td>core</td><td>4</td><td>$20</td><td>1.33</td><td>0.18</td><td><b>7.4×</b></td></tr><tr class=''><td>MURIATIC ACID 1GAL</td><td>core</td><td>1</td><td>$13</td><td>0.33</td><td>0.24</td><td><b>1.4×</b></td></tr></table>
+</div></details>
+<script>
+function flt(l){document.querySelectorAll('details.cust').forEach(d=>d.style.display=(l=='ALL'||d.dataset.lvl==l)?'':'none');
+document.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.textContent.startsWith(l)));}
+</script></body></html>
