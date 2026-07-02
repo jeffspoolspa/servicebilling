@@ -15,19 +15,29 @@ import { RunActions } from "./_components/run-actions"
 export const metadata = { title: "Maintenance · Billing" }
 export const dynamic = "force-dynamic"
 
-const STATUS_TONE: Record<ProcessingStatus, "neutral" | "cyan" | "sun" | "grass"> = {
+// pending -> [held_for_review | ready] (the review gate, mirrors work-orders
+// pre-processing) -> processed -> paid
+const STATUS_TONE: Record<ProcessingStatus, "neutral" | "cyan" | "coral" | "sun" | "grass" | "teal"> = {
   pending: "neutral",
-  synced_to_qbo: "cyan",
+  held_for_review: "coral",
+  ready: "teal",
   processed: "sun",
   paid: "grass",
 }
 const STATUS_LABEL: Record<ProcessingStatus, string> = {
   pending: "pending",
-  synced_to_qbo: "synced to QBO",
+  held_for_review: "held for review",
+  ready: "ready",
   processed: "processed",
   paid: "paid",
 }
-const STATUSES: ProcessingStatus[] = ["pending", "synced_to_qbo", "processed", "paid"]
+const STATUSES: ProcessingStatus[] = [
+  "pending",
+  "held_for_review",
+  "ready",
+  "processed",
+  "paid",
+]
 
 const ION_TONE = { match: "grass", mismatch: "coral", missing: "neutral" } as const
 
@@ -50,7 +60,7 @@ export default async function MaintenanceBillingPage({
       <div className="px-7 pt-6 pb-10">
         <Card className="p-8 text-center text-ink-mute text-[13px]">
           Billing data unavailable — apply migration
-          20260702100000_maintenance_billing_module_rpcs.sql.
+          20260702130000_maintenance_billing_module_rpcs.sql.
           <div className="mt-2 text-[11px]">{e instanceof Error ? e.message : String(e)}</div>
         </Card>
       </div>
@@ -93,7 +103,8 @@ export default async function MaintenanceBillingPage({
 
   const counts: Record<ProcessingStatus, number> = {
     pending: 0,
-    synced_to_qbo: 0,
+    held_for_review: 0,
+    ready: 0,
     processed: 0,
     paid: 0,
   }

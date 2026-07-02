@@ -3,7 +3,7 @@ import { createSupabaseServer } from "@/lib/supabase/server"
 /**
  * Module-private reads for /maintenance/billing. billing_audit is not
  * PostgREST-exposed, so everything goes through the public SECURITY DEFINER
- * RPCs from migration 20260702100000_maintenance_billing_module_rpcs.sql.
+ * RPCs from migration 20260702130000_maintenance_billing_module_rpcs.sql.
  */
 
 export interface BillingMonthRow {
@@ -15,7 +15,12 @@ export interface BillingMonthRow {
   high_hold_customers: number
 }
 
-export type ProcessingStatus = "pending" | "synced_to_qbo" | "processed" | "paid"
+export type ProcessingStatus =
+  | "pending"
+  | "held_for_review"
+  | "ready"
+  | "processed"
+  | "paid"
 
 export interface BillingPeriodRow {
   id: string
@@ -75,6 +80,22 @@ export interface BillingFlagRow {
   computed_at: string
 }
 
+/** The 2x-clean-median review queue (billing_audit.v_billing_review_flags). */
+export interface ReviewFlagRow {
+  customer_id: number
+  customer_name: string | null
+  month: string
+  peer_group: string | null
+  provides_chems: boolean | null
+  visits: number | null
+  total_usd: number | null
+  group_clean_median: number | null
+  x_median: number | null
+  audit_flag_level: string | null
+  audit_status: string | null
+  audit_notes: string | null
+}
+
 export interface FlagItemRow {
   item_name: string
   category: string | null
@@ -108,6 +129,10 @@ export function listBillingFlags(
     p_month: month,
     p_include_watch: includeWatch,
   })
+}
+
+export function listReviewFlags(month: string): Promise<ReviewFlagRow[]> {
+  return rpc<ReviewFlagRow>("maint_billing_review_flags", { p_month: month })
 }
 
 export function listFlagItems(

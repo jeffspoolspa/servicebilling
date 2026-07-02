@@ -56,7 +56,19 @@ from the autopay charge list AND from `send_monthly_invoices` until someone mark
 the customer's other unpaid months still process. Held invoices stay `pending` and are picked
 up by the next run after review — no state to reset.
 
-**Processing status (derived, UI-only):** the `/maintenance/billing` view derives
-pending → synced_to_qbo (`qbo_invoice_id` set) → processed (confirmed non-dry-run
-`autopay_transactions` charge OR invoice emailed) → paid (`billing.invoices.balance <= 0`)
-in `public.maint_billing_periods`. Nothing stores this — the sources of truth stay where they are.
+**Processing status (derived, UI-only):** the `/maintenance/billing` view derives, in
+`public.maint_billing_periods` (mirrors the work-orders pre-processing framing: review gate
+before ready):
+pending (no `qbo_invoice_id`) → held_for_review (synced but the customer-month has an
+unreviewed HIGH flag) | ready (synced, no hold) → processed (confirmed non-dry-run
+`autopay_transactions` charge OR invoice emailed) → paid (`billing.invoices.balance <= 0`).
+Nothing stores this — the sources of truth stay where they are. A "preprocessed (credits
+applied)" step belongs in the chain but is not derivable today: `apply_maint_credits` runs
+inside the autopay flow and leaves no per-period marker; add it when it does.
+
+**Review queues (two, different purposes):** the primary manual-review queue is
+`billing_audit.v_billing_review_flags` (Carter's rule: month's net consumable bill > 2x the
+peer group's CLEAN median AND >= $150; residential medians exclude provides-chems pools;
+intentionally wide — pool volume is a known missing normalizer). The CPV z-score audit
+(`customer_month_audit`) is the second list and the only HOLD source. Both surface on
+`/maintenance/billing/flags`.

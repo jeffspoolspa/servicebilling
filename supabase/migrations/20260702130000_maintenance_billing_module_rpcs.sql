@@ -1,24 +1,53 @@
--- Maintenance billing module: public RPC surface for the /maintenance/billing UI.
+-- Maintenance billing module: public RPC read surface for the /maintenance/billing UI.
 --
--- The Next.js maintenance section gets a Billing tab over the monthly-maintenance-billing
--- flow: a billing-months view of billing_audit.task_billing_periods (the write-ahead
--- invoice promise), a HIGH-flag review page over billing_audit.customer_month_audit, and
--- autopay/send orchestration hooks. billing_audit is NOT PostgREST-exposed, so — same
--- pattern as public.estimate_maint_chemicals (migration 20260604161204) — the app reads
--- it through public SECURITY DEFINER wrappers. Granted to authenticated only (billing
--- data; the app always calls with a staff session), never anon.
+-- Module: docs/flows/monthly-maintenance-billing/index.md (proposer)
+-- Objects land in `public` (functions only, no tables); per SCHEMA_OWNERSHIP the
+-- underlying data stays owned by billing_audit / billing / maintenance.
 --
--- Processing status is DERIVED, never stored (no new state table):
---   pending        no QBO invoice linked yet (qbo_invoice_id IS NULL)
---   synced_to_qbo  qbo_invoice_id set
---   processed      autopay charge landed (billing.autopay_transactions, non-dry-run,
---                  confirmed-charge status) OR the invoice was emailed
---                  (maintenance_invoices.send_status='sent' / QBO EmailSent)
---   paid           billing.invoices mirror balance <= 0
+-- ─────────────────────────────────────────────────────────────────
+-- BACKGROUND
+-- ─────────────────────────────────────────────────────────────────
+-- The Next.js maintenance section gets a Billing tab over the
+-- monthly-maintenance-billing flow: a billing-months view of
+-- billing_audit.task_billing_periods (the write-ahead invoice promise), a flag
+-- review page (the 2x-clean-median review queue + the CPV z-score audit), and
+-- autopay/send orchestration hooks. billing_audit is NOT PostgREST-exposed, so
+-- (same pattern as public.estimate_maint_chemicals, migration 20260604161204)
+-- the app reads it through public SECURITY DEFINER wrappers. Granted to
+-- authenticated only (billing data; the app always calls with a staff session),
+-- never anon.
 --
--- HARD RULE surfaced here (enforced in the autopay/send engines, same change):
--- a customer-month with an unreviewed HIGH CPV flag (customer_month_audit,
--- flag_level='HIGH', audit_status='flagged') is held from autopay + sending.
+-- Live-verified 2026-07-02: ion_task_transactions (ion_task_id text, month date),
+-- autopay_transactions.billing_month text 'YYYY-MM', maintenance_invoices
+-- (billing_month date, qbo_invoice_id text UNIQUE in data).
+--
+-- ─────────────────────────────────────────────────────────────────
+-- DESIGN
+-- ─────────────────────────────────────────────────────────────────
+-- 1. maint_billing_months()        month picker rollups
+-- 2. maint_billing_periods(month)  the promise rows joined with customer,
+--    v_task_class, ION task-invoice sums, the billing.invoices mirror, and a
+--    DERIVED processing status (nothing stored; mirrors the work-orders
+--    pre-processing framing):
+--      pending          no QBO invoice linked yet
+--      held_for_review  synced, but the customer-month has an unreviewed HIGH
+--                       flag (customer_month_audit) -> review gate before ready
+--      ready            synced, no unreviewed HIGH flag, not yet processed
+--      processed        confirmed non-dry-run autopay charge OR invoice emailed
+--      paid             billing.invoices mirror balance <= 0
+--    ("preprocessed / credits applied" is not derivable today: apply_maint_credits
+--    leaves no per-period marker. Add it to the chain when it does.)
+-- 3. maint_billing_flags(month)         CPV z-score audit rows (hold source)
+-- 4. maint_billing_review_flags(month)  the 2x-clean-median review queue
+--    (billing_audit.v_billing_review_flags, migration 20260702120000), joined
+--    with any z-audit row for the same customer-month for review context
+-- 5. maint_billing_flag_items(...)      per-item drill-down
+-- 6. maint_billing_flag_review(...)     the ONE write: audit_status/audit_notes
+--    on customer_month_audit; reviewing a HIGH releases the autopay/send hold
+--
+-- HARD RULE surfaced here (enforced in the autopay list builder and
+-- send_monthly_invoices, same change): a customer-month with an unreviewed HIGH
+-- CPV flag is held from autopay + sending.
 
 -- 1) Month list: one row per billing month with rollups for the month picker/summary.
 create or replace function public.maint_billing_months()
@@ -47,9 +76,7 @@ as $$
   order by tbp.billing_month desc;
 $$;
 
--- 2) The billing-months view rows: one per invoice promise for the month, joined with
---    customer, task class, ION invoice total (ion_task_transactions summed per task),
---    the QBO invoice mirror, and the derived processing status + HIGH-flag hold.
+-- 2) The billing-months view rows: one per invoice promise for the month.
 create or replace function public.maint_billing_periods(p_month date)
 returns table (
   id                        uuid,
@@ -85,18 +112,18 @@ returns table (
   autopay_charged           boolean,
   invoice_sent              boolean,
   high_flag_hold            boolean,
-  processing_status         text      -- pending | synced_to_qbo | processed | paid
+  processing_status         text      -- pending | held_for_review | ready | processed | paid
 )
 language sql stable security definer
 set search_path = billing_audit, public
 as $$
   with ion as (
     -- ION's month-end task invoices; a split re-bill means >1 row per task, so SUM
-    select itt.ion_task_id::text as ion_task_id,
+    select itt.ion_task_id,
            sum(itt.amt_cents)::bigint as amt_cents,
            count(*)::int as txn_count
     from ion_task_transactions itt
-    where itt.month::date = p_month
+    where itt.month = p_month
     group by 1
   )
   select
@@ -125,7 +152,8 @@ as $$
       when apt.charged is true
         or mi.send_status = 'sent' or i.email_status = 'EmailSent'
         then 'processed'
-      when tbp.qbo_invoice_id is not null then 'synced_to_qbo'
+      when tbp.qbo_invoice_id is not null and hold.held is true then 'held_for_review'
+      when tbp.qbo_invoice_id is not null then 'ready'
       else 'pending'
     end
   from task_billing_periods tbp
@@ -141,8 +169,7 @@ as $$
     select true as charged
     from billing.autopay_transactions t
     where t.qbo_customer_id = tbp.qbo_customer_id
-      -- autopay_transactions.billing_month is 'YYYY-MM' text; left() also tolerates a date
-      and left(t.billing_month::text, 7) = to_char(p_month, 'YYYY-MM')
+      and t.billing_month = to_char(p_month, 'YYYY-MM')
       and coalesce(t.dry_run, false) = false
       and t.status in ('charge_success', 'payment_created', 'completed', 'verified')
     limit 1
@@ -157,8 +184,8 @@ as $$
   where tbp.billing_month = p_month;
 $$;
 
--- 3) Flag review list: the month's CPV-audit flags (HIGH always; WATCH opt-in),
---    all audit_status values so reviewed/resolved history stays visible.
+-- 3) CPV z-score audit rows (HIGH always; WATCH opt-in), all audit_status values
+--    so reviewed/resolved history stays visible. This list is the HOLD source.
 create or replace function public.maint_billing_flags(
   p_month date,
   p_include_watch boolean default false
@@ -198,7 +225,39 @@ as $$
            a.fleet_z desc nulls last;
 $$;
 
--- 4) Flag drill-down: per-item usage this month vs the customer's usual month
+-- 4) The primary review queue: >2x the peer group's clean median AND >= $150
+--    (billing_audit.v_billing_review_flags, Carter's rule, migration 20260702120000).
+--    Left-joined with any z-audit row for the same customer-month so review
+--    status/notes show where they exist. The view itself is stateless.
+create or replace function public.maint_billing_review_flags(p_month date)
+returns table (
+  customer_id        bigint,
+  customer_name      text,
+  month              date,
+  peer_group         text,
+  provides_chems     boolean,
+  visits             numeric,
+  total_usd          numeric,
+  group_clean_median numeric,
+  x_median           numeric,
+  audit_flag_level   text,
+  audit_status       text,
+  audit_notes        text
+)
+language sql stable security definer
+set search_path = billing_audit, public
+as $$
+  select v.customer_id, v.display_name, v.month, v.peer_group, v.provides_chems,
+         v.visits::numeric, v.total_usd, v.group_clean_median, v.x_median,
+         a.flag_level, a.audit_status, a.audit_notes
+  from v_billing_review_flags v
+  left join customer_month_audit a
+    on a.customer_id = v.customer_id and a.month = v.month
+  where v.month = p_month
+  order by v.x_median desc nulls last;
+$$;
+
+-- 5) Flag drill-down: per-item usage this month vs the customer's usual month
 --    (their avg over the prior 12 months) and the peer-group average among
 --    customers who used the item that month. Recurring tasks only — same scope
 --    as v_customer_month_cpv, so the numbers reconcile with the flag.
@@ -263,7 +322,7 @@ as $$
   order by cur.usd desc nulls last;
 $$;
 
--- 5) Review action: mark a flagged customer-month reviewed/resolved (with a note),
+-- 6) Review action: mark a flagged customer-month reviewed/resolved (with a note),
 --    or re-flag it. Reviewing releases the autopay/send hold.
 create or replace function public.maint_billing_flag_review(
   p_customer_id bigint,
@@ -291,12 +350,21 @@ $$;
 revoke all on function public.maint_billing_months() from public, anon;
 revoke all on function public.maint_billing_periods(date) from public, anon;
 revoke all on function public.maint_billing_flags(date, boolean) from public, anon;
+revoke all on function public.maint_billing_review_flags(date) from public, anon;
 revoke all on function public.maint_billing_flag_items(bigint, date) from public, anon;
 revoke all on function public.maint_billing_flag_review(bigint, date, text, text) from public, anon;
 grant execute on function public.maint_billing_months() to authenticated, service_role;
 grant execute on function public.maint_billing_periods(date) to authenticated, service_role;
 grant execute on function public.maint_billing_flags(date, boolean) to authenticated, service_role;
+grant execute on function public.maint_billing_review_flags(date) to authenticated, service_role;
 grant execute on function public.maint_billing_flag_items(bigint, date) to authenticated, service_role;
 grant execute on function public.maint_billing_flag_review(bigint, date, text, text) to authenticated, service_role;
 
 notify pgrst, 'reload schema';
+
+-- ─────────────────────────────────────────────────────────────────
+-- SANITY CHECK
+-- ─────────────────────────────────────────────────────────────────
+-- select * from public.maint_billing_months();
+-- select count(*) from public.maint_billing_periods('2026-06-01');      -- June: 222 promises
+-- select count(*) from public.maint_billing_review_flags('2026-06-01'); -- June: 62 accounts

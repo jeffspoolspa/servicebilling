@@ -87,12 +87,14 @@ Text fallback: a promise is born `visits_accruing`; the reconcile step moves it 
 
 The `/maintenance/billing` UI shows one row per promise for a selected month via
 `public.maint_billing_periods` (billing_audit is not PostgREST-exposed; migration
-`20260702100000`), joined with the customer, `maintenance.v_task_class`, ION's task-invoice
+`20260702130000`), joined with the customer, `maintenance.v_task_class`, ION's task-invoice
 sum (`ion_task_transactions`, $1 match tolerance), and the QBO mirror (`billing.invoices`).
-The RPC also derives a UI-only **processing status** — pending (no `qbo_invoice_id`) →
-synced_to_qbo → processed (confirmed autopay charge OR invoice emailed) → paid (mirror
-balance <= 0) — and the HIGH-flag autopay/send hold from `customer_month_audit`. Derived,
-never stored: this table stays the reconcile ledger, not a processing-state store.
+The RPC also derives a UI-only **processing status** with a review gate (mirrors the
+work-orders pre-processing framing) — pending (no `qbo_invoice_id`) → held_for_review
+(synced, unreviewed HIGH flag) | ready → processed (confirmed autopay charge OR invoice
+emailed) → paid (mirror balance <= 0) — and the HIGH-flag autopay/send hold from
+`customer_month_audit`. Derived, never stored: this table stays the reconcile ledger, not
+a processing-state store.
 
 ## Flows this entity participates in
 

@@ -5,8 +5,10 @@ import { formatCurrency } from "@/lib/utils/format"
 import {
   listBillingFlags,
   listBillingMonths,
+  listReviewFlags,
   formatMonth,
   type BillingFlagRow,
+  type ReviewFlagRow,
 } from "../_lib/queries"
 import { MonthSelect } from "../_components/month-select"
 
@@ -30,7 +32,7 @@ export default async function BillingFlagsPage({
       <div className="px-7 pt-6 pb-10">
         <Card className="p-8 text-center text-ink-mute text-[13px]">
           Billing data unavailable — apply migration
-          20260702100000_maintenance_billing_module_rpcs.sql.
+          20260702130000_maintenance_billing_module_rpcs.sql.
           <div className="mt-2 text-[11px]">{e instanceof Error ? e.message : String(e)}</div>
         </Card>
       </div>
@@ -45,19 +47,23 @@ export default async function BillingFlagsPage({
     monthOptions[0]?.value ??
     new Date().toISOString().slice(0, 7)
   const includeWatch = sp.watch === "1"
+  const monthDate = `${selected}-01`
 
-  const flags = await listBillingFlags(`${selected}-01`, includeWatch)
-  const open = flags.filter((f) => f.audit_status === "flagged" && f.flag_level === "HIGH")
+  const [reviewQueue, flags] = await Promise.all([
+    listReviewFlags(monthDate),
+    listBillingFlags(monthDate, includeWatch),
+  ])
+  const openHigh = flags.filter((f) => f.audit_status === "flagged" && f.flag_level === "HIGH")
 
   return (
-    <div className="px-7 pt-6 pb-10 space-y-4">
+    <div className="px-7 pt-6 pb-10 space-y-6">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div className="flex items-end gap-4">
           <div>
-            <h2 className="font-display text-[16px]">Billing-audit flags</h2>
+            <h2 className="font-display text-[16px]">Billing review</h2>
             <div className="text-ink-mute text-[12px] mt-0.5">
-              CPV outliers vs peers (pre-QBO audit) · {open.length} unreviewed HIGH ·
-              unreviewed HIGH = held from autopay + sending
+              {reviewQueue.length} in the 2x-median queue · {openHigh.length} unreviewed HIGH
+              (held from autopay + sending)
             </div>
           </div>
           <MonthSelect
@@ -66,6 +72,60 @@ export default async function BillingFlagsPage({
             }
             value={selected}
           />
+        </div>
+        <Link
+          href={`/maintenance/billing?month=${selected}` as never}
+          className="text-[12px] text-ink-mute hover:text-ink underline underline-offset-2"
+        >
+          Back to billing months
+        </Link>
+      </div>
+
+      <section>
+        <div className="flex items-center gap-3 mb-2">
+          <h3 className="font-display text-[13px] text-ink">
+            Review queue — over 2x the group&apos;s clean median
+          </h3>
+          <span className="text-[11px] text-ink-mute">
+            net consumable bill &gt; 2x peer clean median and at least $150; medians exclude
+            provides-chems pools. Pool volume not yet normalized — intentionally wide.
+          </span>
+        </div>
+        <Card>
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-ink-mute border-b border-line-soft">
+                <th className="px-4 py-2 font-medium">Customer</th>
+                <th className="px-4 py-2 font-medium">Peer group</th>
+                <th className="px-4 py-2 font-medium text-right">Visits</th>
+                <th className="px-4 py-2 font-medium text-right">Total $</th>
+                <th className="px-4 py-2 font-medium text-right">Group median</th>
+                <th className="px-4 py-2 font-medium text-right">x median</th>
+                <th className="px-4 py-2 font-medium">Z-audit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reviewQueue.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-ink-mute">
+                    Nothing over 2x the clean median for {formatMonth(monthDate)}.
+                  </td>
+                </tr>
+              )}
+              {reviewQueue.map((r) => (
+                <ReviewRow key={r.customer_id} r={r} month={selected} />
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      </section>
+
+      <section>
+        <div className="flex items-center gap-3 mb-2">
+          <h3 className="font-display text-[13px] text-ink">CPV z-score audit flags</h3>
+          <span className="text-[11px] text-ink-mute">
+            the hold source: an unreviewed HIGH here blocks autopay + sending
+          </span>
           <Link
             href={
               `/maintenance/billing/flags?month=${selected}${includeWatch ? "" : "&watch=1"}` as never
@@ -76,51 +136,96 @@ export default async function BillingFlagsPage({
             </Pill>
           </Link>
         </div>
-        <Link
-          href={`/maintenance/billing?month=${selected}` as never}
-          className="text-[12px] text-ink-mute hover:text-ink underline underline-offset-2"
-        >
-          Back to billing months
-        </Link>
-      </div>
-
-      <Card>
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="text-left text-ink-mute border-b border-line-soft">
-              <th className="px-4 py-2 font-medium">Customer</th>
-              <th className="px-4 py-2 font-medium">Peer group</th>
-              <th className="px-4 py-2 font-medium text-right">Visits</th>
-              <th className="px-4 py-2 font-medium text-right">Chem $</th>
-              <th className="px-4 py-2 font-medium text-right">CPV</th>
-              <th className="px-4 py-2 font-medium text-right">Peer median</th>
-              <th className="px-4 py-2 font-medium text-right">Fleet z</th>
-              <th className="px-4 py-2 font-medium text-right">Self z</th>
-              <th className="px-4 py-2 font-medium">Flag</th>
-              <th className="px-4 py-2 font-medium">Review</th>
-            </tr>
-          </thead>
-          <tbody>
-            {flags.length === 0 && (
-              <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-ink-mute">
-                  No flags for {formatMonth(`${selected}-01`)}. Run the billing audit to
-                  populate this list.
-                </td>
+        <Card>
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-ink-mute border-b border-line-soft">
+                <th className="px-4 py-2 font-medium">Customer</th>
+                <th className="px-4 py-2 font-medium">Peer group</th>
+                <th className="px-4 py-2 font-medium text-right">Visits</th>
+                <th className="px-4 py-2 font-medium text-right">Chem $</th>
+                <th className="px-4 py-2 font-medium text-right">CPV</th>
+                <th className="px-4 py-2 font-medium text-right">Peer median</th>
+                <th className="px-4 py-2 font-medium text-right">Fleet z</th>
+                <th className="px-4 py-2 font-medium text-right">Self z</th>
+                <th className="px-4 py-2 font-medium">Flag</th>
+                <th className="px-4 py-2 font-medium">Review</th>
               </tr>
-            )}
-            {flags.map((f) => (
-              <FlagRow key={`${f.customer_id}`} f={f} month={selected} />
-            ))}
-          </tbody>
-        </table>
-      </Card>
+            </thead>
+            <tbody>
+              {flags.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="px-4 py-8 text-center text-ink-mute">
+                    No z-score flags for {formatMonth(monthDate)}. Run the billing audit to
+                    populate this list.
+                  </td>
+                </tr>
+              )}
+              {flags.map((f) => (
+                <FlagRow key={`${f.customer_id}`} f={f} month={selected} />
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      </section>
     </div>
   )
 }
 
 function num(v: number | null, digits = 2): string {
-  return v == null ? "—" : v.toFixed(digits)
+  return v == null ? "—" : Number(v).toFixed(digits)
+}
+
+function ReviewRow({ r, month }: { r: ReviewFlagRow; month: string }) {
+  return (
+    <tr className="border-b border-line-soft/40 last:border-0 hover:bg-white/[0.02]">
+      <td className="px-4 py-2.5 text-ink">
+        <Link
+          href={`/maintenance/billing/flags/${r.customer_id}?month=${month}` as never}
+          className="hover:text-cyan"
+        >
+          {r.customer_name ?? `#${r.customer_id}`}
+        </Link>
+        {r.provides_chems && (
+          <span className="ml-2 text-[10px] text-ink-mute uppercase tracking-wide">
+            provides chems
+          </span>
+        )}
+      </td>
+      <td className="px-4 py-2.5 text-ink-mute text-[11px]">{r.peer_group ?? "—"}</td>
+      <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">{num(r.visits, 0)}</td>
+      <td className="px-4 py-2.5 text-right font-mono num text-ink">
+        {r.total_usd == null ? "—" : formatCurrency(r.total_usd)}
+      </td>
+      <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">
+        {r.group_clean_median == null ? "—" : formatCurrency(r.group_clean_median)}
+      </td>
+      <td className="px-4 py-2.5 text-right font-mono num">
+        <span className={r.x_median != null && r.x_median >= 3 ? "text-coral" : "text-sun"}>
+          {num(r.x_median, 1)}x
+        </span>
+      </td>
+      <td className="px-4 py-2.5">
+        {r.audit_flag_level ? (
+          <span className="inline-flex items-center gap-1.5">
+            <Pill
+              tone={FLAG_TONE[r.audit_flag_level as keyof typeof FLAG_TONE] ?? "sun"}
+              dot
+            >
+              {r.audit_flag_level}
+            </Pill>
+            {r.audit_status && (
+              <Pill tone={AUDIT_TONE[r.audit_status as keyof typeof AUDIT_TONE] ?? "neutral"}>
+                {r.audit_status}
+              </Pill>
+            )}
+          </span>
+        ) : (
+          <span className="text-ink-mute text-[11px]">—</span>
+        )}
+      </td>
+    </tr>
+  )
 }
 
 function FlagRow({ f, month }: { f: BillingFlagRow; month: string }) {
