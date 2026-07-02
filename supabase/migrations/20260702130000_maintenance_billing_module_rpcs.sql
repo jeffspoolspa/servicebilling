@@ -390,7 +390,78 @@ as $$
   order by cur.usd desc nulls last;
 $$;
 
--- 7) Autopay roster for the /maintenance/billing/autopay tab and the process
+-- 7) Per-visit detail for the Bills row expansion: one row per service DAY of
+--    the customer-month, with the day's chemistry readings and the chemicals
+--    sold (the "calendar" pivot: dates as columns, readings above chemicals).
+--    All tasks included — a QC visit day shows up here too.
+create or replace function public.maint_billing_customer_visits(
+  p_customer_id bigint,
+  p_month date
+)
+returns table (
+  visit_date       date,
+  service_names    text,
+  readings         jsonb,   -- {reading name: avg numeric value}
+  chems            jsonb,   -- [{item, qty, cents}] by cents desc
+  chem_total_cents bigint
+)
+language sql stable security definer
+set search_path = billing_audit, public
+as $$
+  with v as (
+    select v.id, v.visit_date::date as d, vc.service_name
+    from maintenance.visits v
+    join maintenance.tasks t on t.id = v.task_id
+    left join maintenance.v_task_class vc on vc.task_id = t.id
+    where t.customer_id = p_customer_id
+      and date_trunc('month', v.visit_date)::date = p_month
+  ),
+  days as (
+    select d, string_agg(distinct service_name, ' + ') as service_names
+    from v group by d
+  ),
+  r as (
+    -- readings are text in visit_readings; average numeric values per day
+    -- (multi-pool days collapse), skip non-numeric entries
+    select v.d, vr.name, avg(x.val) as val
+    from maintenance.visit_readings vr
+    join v on v.id = vr.visit_id
+    cross join lateral (
+      select case when vr.value ~ '^[0-9]+\.?[0-9]*$' then vr.value::numeric end as val
+    ) x
+    where vr.name in ('Free Chlorine', 'pH', 'Cyanuric Acid',
+                      'Total Alkalinity', 'Total Chlorine', 'Salinity')
+      and x.val is not null
+    group by v.d, vr.name
+  ),
+  rj as (
+    select d, jsonb_object_agg(name, round(val, 2)) as readings from r group by d
+  ),
+  c as (
+    select v.d, cu.item_name, sum(cu.quantity) as qty,
+           (round(sum(cu.quantity) * max(cc.unit_price_cents)))::bigint as cents
+    from maintenance.consumables_usage cu
+    join v on v.id = cu.visit_id
+    left join maintenance.consumables cc on cc.ion_item_id = cu.ion_item_id
+    where cu.item_name is not null
+    group by v.d, cu.item_name
+  ),
+  cj as (
+    select d,
+           jsonb_agg(jsonb_build_object('item', item_name, 'qty', qty, 'cents', cents)
+                     order by cents desc nulls last) as chems,
+           coalesce(sum(cents), 0)::bigint as chem_total_cents
+    from c group by d
+  )
+  select days.d, days.service_names, rj.readings, cj.chems,
+         coalesce(cj.chem_total_cents, 0)
+  from days
+  left join rj on rj.d = days.d
+  left join cj on cj.d = days.d
+  order by days.d;
+$$;
+
+-- 8) Autopay roster for the /maintenance/billing/autopay tab and the process
 --    tab's card cross-reference. billing.autopay_customers has no authenticated
 --    grant (card metadata), so this goes through the same definer surface.
 create or replace function public.maint_billing_autopay_roster()
@@ -415,7 +486,7 @@ as $$
   order by ac.customer_name;
 $$;
 
--- 8) Review action: mark a customer-month reviewed/resolved (with a note), or
+-- 9) Review action: mark a customer-month reviewed/resolved (with a note), or
 --    re-flag it. UPSERT so one table tracks review state for BOTH lists: a
 --    z-audit row updates in place (reviewing a HIGH releases the autopay/send
 --    hold); a 2x-median-queue customer with no z-row gets a REVIEW_2X row
@@ -449,6 +520,7 @@ revoke all on function public.maint_billing_periods(date) from public, anon;
 revoke all on function public.maint_billing_flags(date, boolean) from public, anon;
 revoke all on function public.maint_billing_review_flags(date) from public, anon;
 revoke all on function public.maint_billing_customer_month(bigint, date) from public, anon;
+revoke all on function public.maint_billing_customer_visits(bigint, date) from public, anon;
 revoke all on function public.maint_billing_autopay_roster() from public, anon;
 revoke all on function public.maint_billing_flag_items(bigint, date) from public, anon;
 revoke all on function public.maint_billing_flag_review(bigint, date, text, text) from public, anon;
@@ -457,6 +529,7 @@ grant execute on function public.maint_billing_periods(date) to authenticated, s
 grant execute on function public.maint_billing_flags(date, boolean) to authenticated, service_role;
 grant execute on function public.maint_billing_review_flags(date) to authenticated, service_role;
 grant execute on function public.maint_billing_customer_month(bigint, date) to authenticated, service_role;
+grant execute on function public.maint_billing_customer_visits(bigint, date) to authenticated, service_role;
 grant execute on function public.maint_billing_autopay_roster() to authenticated, service_role;
 grant execute on function public.maint_billing_flag_items(bigint, date) to authenticated, service_role;
 grant execute on function public.maint_billing_flag_review(bigint, date, text, text) to authenticated, service_role;

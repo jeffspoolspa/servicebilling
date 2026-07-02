@@ -9,9 +9,10 @@ import {
   type BillingPeriodRow,
   type ProcessingStatus,
 } from "./_lib/queries"
+import { STATUS_LABEL, STATUS_TONE } from "./_lib/status"
 import { MonthSelect } from "./_components/month-select"
 import { RefreshButton } from "./_components/refresh-button"
-import { STATUS_LABEL, STATUS_TONE } from "./_lib/status"
+import { BillsTable, type CustomerBill } from "./_components/bills-table"
 
 export const metadata = { title: "Maintenance · Billing" }
 export const dynamic = "force-dynamic"
@@ -23,8 +24,6 @@ const STATUSES: ProcessingStatus[] = [
   "processed",
   "paid",
 ]
-
-const ION_TONE = { match: "grass", mismatch: "coral", missing: "neutral" } as const
 
 function cents(v: number | null | undefined): string {
   return v == null ? "—" : formatCurrency(v / 100)
@@ -101,7 +100,7 @@ export default async function MaintenanceBillingPage({
     if (r.ion_match === "mismatch") ionMismatch++
   }
 
-  // The aggregated bill: group task rows under their customer, customer subtotals
+  // One row per customer; tasks + calendar live in the expansion
   const byCustomer = new Map<string, BillingPeriodRow[]>()
   for (const r of rows) {
     const key = r.customer_name ?? `#${r.qbo_customer_id ?? "unknown"}`
@@ -109,7 +108,51 @@ export default async function MaintenanceBillingPage({
     arr.push(r)
     byCustomer.set(key, arr)
   }
-  const customers = [...byCustomer.keys()].sort((a, b) => a.localeCompare(b))
+  const customers: CustomerBill[] = [...byCustomer.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([name, list]) => ({
+      key: name,
+      customer_id: list[0].customer_id,
+      name,
+      on_autopay: list[0].on_autopay,
+      hold: list.some((r) => r.high_flag_hold),
+      visits: list.reduce((s, r) => s + r.billable_visit_count, 0),
+      labor_cents: list.reduce((s, r) => s + (r.expected_labor_cents ?? 0), 0),
+      chem_cents: list.reduce((s, r) => s + (r.expected_consumable_cents ?? 0), 0),
+      expected_cents: list.reduce((s, r) => s + (r.expected_total_cents ?? 0), 0),
+      ion_cents: list.some((r) => r.ion_amt_cents != null)
+        ? list.reduce((s, r) => s + (r.ion_amt_cents ?? 0), 0)
+        : null,
+      // one chip per ION invoice — a QC task's own invoice shows as a 2nd chip
+      ion_chips: list.flatMap((r) =>
+        (r.ion_invoice_numbers ?? "")
+          .split(", ")
+          .filter(Boolean)
+          .map((number) => ({ number, match: r.ion_match })),
+      ),
+      qbo_docs: list
+        .map((r) => r.qbo_doc_number)
+        .filter(Boolean)
+        .map((d) => `#${d}`)
+        .join(", "),
+      statuses: list.map((r) => r.processing_status),
+      tasks: list.map((r) => ({
+        id: r.id,
+        service_name: r.service_name,
+        category: r.category,
+        frequency: r.frequency,
+        visits: r.billable_visit_count,
+        labor_cents: r.expected_labor_cents,
+        chem_cents: r.expected_consumable_cents,
+        expected_cents: r.expected_total_cents,
+        unpriced: r.unpriced_count,
+        ion_cents: r.ion_amt_cents,
+        ion_numbers: r.ion_invoice_numbers,
+        ion_match: r.ion_match,
+        reconcile_status: r.reconcile_status,
+        status: r.processing_status,
+      })),
+    }))
 
   const baseParams = (over: Record<string, string | undefined>) => {
     const p = new URLSearchParams()
@@ -175,147 +218,7 @@ export default async function MaintenanceBillingPage({
         )}
       </div>
 
-      <Card>
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="text-left text-ink-mute border-b border-line-soft">
-              <th className="px-4 py-2 font-medium">Customer / task</th>
-              <th className="px-4 py-2 font-medium text-right">Visits</th>
-              <th className="px-4 py-2 font-medium text-right">Labor</th>
-              <th className="px-4 py-2 font-medium text-right">Chems</th>
-              <th className="px-4 py-2 font-medium text-right">Expected</th>
-              <th className="px-4 py-2 font-medium text-right">ION invoice</th>
-              <th className="px-4 py-2 font-medium">QBO invoice</th>
-              <th className="px-4 py-2 font-medium">Status</th>
-            </tr>
-          </thead>
-          {customers.length === 0 && (
-            <tbody>
-              <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-ink-mute">
-                  No bills match this filter.
-                </td>
-              </tr>
-            </tbody>
-          )}
-          {customers.map((name) => {
-            const list = byCustomer.get(name)!
-            const first = list[0]
-            const subtotal = list.reduce((s, r) => s + (r.expected_total_cents ?? 0), 0)
-            const ionSubtotal = list.some((r) => r.ion_amt_cents != null)
-              ? list.reduce((s, r) => s + (r.ion_amt_cents ?? 0), 0)
-              : null
-            return (
-              <tbody key={name} className="border-b border-line-soft/60 last:border-0">
-                <tr className="bg-white/[0.02]">
-                  <td className="px-4 pt-2.5 pb-1 text-ink font-medium" colSpan={4}>
-                    {first.high_flag_hold && first.customer_id ? (
-                      <Link
-                        href={
-                          `/maintenance/billing/review/${first.customer_id}?month=${selected}` as never
-                        }
-                        className="hover:text-coral"
-                      >
-                        {name}
-                      </Link>
-                    ) : (
-                      name
-                    )}
-                    {first.on_autopay && (
-                      <span className="ml-2 text-[10px] text-teal uppercase tracking-wide">
-                        autopay
-                      </span>
-                    )}
-                    {first.high_flag_hold && (
-                      <Pill tone="coral" dot className="ml-2">
-                        hold
-                      </Pill>
-                    )}
-                    {list.length > 1 && (
-                      <span className="ml-2 text-[10px] text-ink-mute">
-                        {list.length} tasks
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 pt-2.5 pb-1 text-right font-mono num text-ink font-medium">
-                    {cents(subtotal)}
-                  </td>
-                  <td className="px-4 pt-2.5 pb-1 text-right font-mono num text-ink-dim">
-                    {cents(ionSubtotal)}
-                  </td>
-                  <td colSpan={2}></td>
-                </tr>
-                {list.map((r) => (
-                  <TaskRow key={r.id} r={r} />
-                ))}
-              </tbody>
-            )
-          })}
-        </table>
-      </Card>
+      <BillsTable customers={customers} month={selected} />
     </div>
-  )
-}
-
-function TaskRow({ r }: { r: BillingPeriodRow }) {
-  return (
-    <tr className="hover:bg-white/[0.02] align-top">
-      <td className="pl-8 pr-4 py-1.5 text-ink-dim">
-        {r.service_name ?? "—"}
-        <span className="ml-2 text-[10px] text-ink-mute">
-          {[r.category, r.frequency].filter(Boolean).join(" · ")}
-        </span>
-      </td>
-      <td className="px-4 py-1.5 text-right font-mono num text-ink-dim">
-        {r.billable_visit_count}
-      </td>
-      <td className="px-4 py-1.5 text-right font-mono num text-ink-dim">
-        {cents(r.expected_labor_cents)}
-      </td>
-      <td className="px-4 py-1.5 text-right font-mono num text-ink-dim">
-        {cents(r.expected_consumable_cents)}
-        {r.unpriced_count > 0 && (
-          <span className="ml-1 text-[10px] text-sun font-sans">
-            {r.unpriced_count} unpriced
-          </span>
-        )}
-      </td>
-      <td className="px-4 py-1.5 text-right font-mono num text-ink">
-        {cents(r.expected_total_cents)}
-      </td>
-      <td className="px-4 py-1.5 text-right">
-        <span className="font-mono num text-ink-dim">{cents(r.ion_amt_cents)}</span>
-        <span className="ml-1.5 align-middle">
-          <Pill tone={ION_TONE[r.ion_match]}>{r.ion_match}</Pill>
-        </span>
-        {r.ion_invoice_numbers && (
-          <div className="text-[10px] text-ink-mute font-mono">#{r.ion_invoice_numbers}</div>
-        )}
-      </td>
-      <td className="px-4 py-1.5 text-ink-dim">
-        {r.qbo_doc_number ? (
-          <>
-            <span className="font-mono text-xs">#{r.qbo_doc_number}</span>
-            <div className="text-[10px] text-ink-mute">
-              {r.qbo_balance != null && r.qbo_balance > 0
-                ? `${formatCurrency(r.qbo_balance)} due`
-                : "paid"}
-            </div>
-          </>
-        ) : (
-          "—"
-        )}
-      </td>
-      <td className="px-4 py-1.5">
-        <Pill tone={STATUS_TONE[r.processing_status]} dot>
-          {STATUS_LABEL[r.processing_status]}
-        </Pill>
-        {r.reconcile_status === "mismatch" && (
-          <div className="mt-0.5">
-            <Pill tone="coral">reconcile mismatch</Pill>
-          </div>
-        )}
-      </td>
-    </tr>
   )
 }
