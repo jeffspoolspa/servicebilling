@@ -3,6 +3,15 @@
 import { useEffect, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { formatCurrency } from "@/lib/utils/format"
 import { STATUS_LABEL, STATUS_TONE } from "../_lib/status"
 import type { ProcessingStatus } from "../_lib/queries"
@@ -311,78 +320,116 @@ function VisitCalendar({ customerId, month }: { customerId: number; month: strin
     }
   }
   const grandTotal = days.reduce((s, d) => s + Number(d.chem_total_cents), 0)
+  const totalQty = [...itemTotals.values()].reduce((s, t) => s + t.qty, 0)
 
   return (
-    <div className="overflow-x-auto">
-      <table className="text-[11px] font-mono num">
-        <thead>
-          <tr className="text-ink-mute border-b border-line-soft">
-            <th className="text-left pr-4 py-1 font-sans font-medium sticky left-0 bg-[#0B1826]">
-              Visit
-            </th>
+    <div className="rounded-lg border border-line-soft overflow-hidden">
+      <Table className="text-[11px]">
+        <TableHeader>
+          <TableRow className="hover:bg-transparent bg-white/[0.02]">
+            <TableHead className="sticky left-0 bg-bg-elev z-10 min-w-[180px]">
+              Visit date
+            </TableHead>
             {days.map((d) => {
               const qc = d.service_names?.toUpperCase().includes("QUALITY CONTROL")
               return (
-                <th
+                <TableHead
                   key={d.visit_date}
-                  className="px-2 py-1 font-medium text-right whitespace-nowrap"
+                  className="text-right px-2"
                   title={d.service_names ?? undefined}
                 >
-                  {Number(d.visit_date.slice(8, 10))}
-                  {qc && <span className="text-indigo-300 ml-0.5">QC</span>}
-                </th>
+                  <div className="text-ink font-mono num">
+                    {formatVisitDate(d.visit_date)}
+                  </div>
+                  {qc && (
+                    <div className="text-[9px] text-indigo-300 uppercase tracking-wide leading-3">
+                      QC
+                    </div>
+                  )}
+                </TableHead>
               )
             })}
-            <th className="pl-3 py-1 font-sans font-medium text-right">Total</th>
-          </tr>
-        </thead>
-        <tbody>
+            <TableHead className="text-right pl-4">Total</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {readingRows.length > 0 && (
+            <TableRow className="hover:bg-transparent">
+              <TableCell
+                colSpan={days.length + 2}
+                className="sticky left-0 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute"
+              >
+                Readings
+              </TableCell>
+            </TableRow>
+          )}
           {readingRows.map(([name, label]) => (
-            <tr key={name} className="border-b border-line-soft/20 text-ink-dim">
-              <td className="text-left pr-4 py-1 font-sans sticky left-0 bg-[#0B1826]">
-                {label}
-              </td>
+            <TableRow key={name} className="text-ink-dim">
+              <TableCell className="sticky left-0 bg-bg-elev z-10">{label}</TableCell>
               {days.map((d) => (
-                <td key={d.visit_date} className="px-2 py-1 text-right">
+                <TableCell key={d.visit_date} className="text-right px-2 font-mono num">
                   {d.readings?.[name] ?? ""}
-                </td>
+                </TableCell>
               ))}
-              <td></td>
-            </tr>
+              <TableCell />
+            </TableRow>
           ))}
+          {items.length > 0 && (
+            <TableRow className="hover:bg-transparent">
+              <TableCell
+                colSpan={days.length + 2}
+                className="sticky left-0 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute"
+              >
+                Chemicals sold
+              </TableCell>
+            </TableRow>
+          )}
           {items.map(([item, tot]) => (
-            <tr key={item} className="border-b border-line-soft/20 text-ink-dim">
-              <td
-                className="text-left pr-4 py-1 font-sans sticky left-0 bg-[#0B1826] max-w-[220px] truncate"
+            <TableRow key={item} className="text-ink-dim">
+              <TableCell
+                className="sticky left-0 bg-bg-elev z-10 max-w-[220px] truncate"
                 title={item}
               >
                 {item}
-              </td>
+              </TableCell>
               {days.map((d) => (
-                <td key={d.visit_date} className="px-2 py-1 text-right">
+                <TableCell key={d.visit_date} className="text-right px-2 font-mono num">
                   {qtyByItemDate.get(`${item}|${d.visit_date}`) ?? ""}
-                </td>
+                </TableCell>
               ))}
-              <td className="pl-3 py-1 text-right whitespace-nowrap text-ink">
+              <TableCell className="text-right pl-4 font-mono num text-ink">
                 {tot.qty} · {formatCurrency(tot.cents / 100)}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-          <tr className="text-ink">
-            <td className="text-left pr-4 py-1 font-sans sticky left-0 bg-[#0B1826]">$ / visit</td>
+        </TableBody>
+        <TableFooter>
+          <TableRow className="text-ink hover:bg-transparent">
+            <TableCell className="sticky left-0 bg-bg-elev z-10">Chemicals $ / visit</TableCell>
             {days.map((d) => (
-              <td key={d.visit_date} className="px-2 py-1 text-right whitespace-nowrap">
+              <TableCell key={d.visit_date} className="text-right px-2 font-mono num">
                 {Number(d.chem_total_cents) > 0
                   ? formatCurrency(Number(d.chem_total_cents) / 100)
                   : ""}
-              </td>
+              </TableCell>
             ))}
-            <td className="pl-3 py-1 text-right whitespace-nowrap font-medium">
+            <TableCell className="text-right pl-4 font-mono num font-semibold">
+              {totalQty > 0 && `${totalQty} · `}
               {formatCurrency(grandTotal / 100)}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </TableCell>
+          </TableRow>
+        </TableFooter>
+      </Table>
     </div>
   )
+}
+
+/** '2026-06-02' -> 'Jun 2' */
+function formatVisitDate(iso: string): string {
+  const d = new Date(iso.slice(0, 10) + "T12:00:00Z")
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(d)
 }
