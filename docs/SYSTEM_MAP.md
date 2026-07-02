@@ -218,7 +218,7 @@ Pool maintenance: scheduled visits, technician routes, chemistry readings, consu
 
 **Database tables**:
 - `maintenance.visits` — central. FK → work_orders, employees, service_locations, tasks, task_schedules
-- `maintenance.chem_readings` — readings from visits (FK → pools, visits)
+- `maintenance.chem_readings` — `[drift]` documented as the readings table but EMPTY in prod (verified 2026-07-02); readings actually land in `maintenance.visit_readings` (name/value rows per visit: 'Free Chlorine', 'pH', 'Cyanuric Acid', filter PSI, etc.). The billing drill-down reads visit_readings; reconcile the ingest docs + `/maintenance/visits/[id]` chem panel.
 - `maintenance.consumables_usage` — chemicals used per visit
 - `maintenance.consumables` — consumable/service **item master** (one row per `ion_item_id`; `unit_price_cents` = billed/QBO price). Price lookup for `billing_audit.task_billing_periods.expected_consumable_cents` (priced by `ion_item_id`, immune to the `consumables_usage.item_id` null-out). 142 rows; 106 seeded from QBO, ~36 priced manually.
 - `maintenance.visit_tasks` — per-visit checklist completion (brushing, vacuuming, salt cell clean, etc.). One row per canonical task per visit. Canonical names + alias mapping live in `f/ION/_lib/normalize.py` (TASK_ALIASES + TASK_DEFINITIONS). Added 2026-05-28 to close the gap where this data was being parsed but discarded.

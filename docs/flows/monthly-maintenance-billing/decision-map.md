@@ -71,4 +71,6 @@ inside the autopay flow and leaves no per-period marker; add it when it does.
 peer group's CLEAN median AND >= $150; residential medians exclude provides-chems pools;
 intentionally wide — pool volume is a known missing normalizer). The CPV z-score audit
 (`customer_month_audit`) is the second list and the only HOLD source. Both surface on
-`/maintenance/billing/flags`.
+`/maintenance/billing/flags`. Review state for both lists lives in ONE table
+(`customer_month_audit`): reviewing a 2x-queue customer with no z-audit row upserts a
+`REVIEW_2X` row (never holds); reviewing a HIGH row releases the hold.

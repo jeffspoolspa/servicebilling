@@ -54,6 +54,15 @@ export default async function BillingFlagsPage({
     listBillingFlags(monthDate, includeWatch),
   ])
   const openHigh = flags.filter((f) => f.audit_status === "flagged" && f.flag_level === "HIGH")
+  const groupCounts = new Map<string, number>()
+  for (const r of reviewQueue) {
+    const g = r.peer_group ?? "?"
+    groupCounts.set(g, (groupCounts.get(g) ?? 0) + 1)
+  }
+  const groupSummary = [...groupCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([g, n]) => `${n} ${g}`)
+    .join(" · ")
 
   return (
     <div className="px-7 pt-6 pb-10 space-y-6">
@@ -62,8 +71,9 @@ export default async function BillingFlagsPage({
           <div>
             <h2 className="font-display text-[16px]">Billing review</h2>
             <div className="text-ink-mute text-[12px] mt-0.5">
-              {reviewQueue.length} in the 2x-median queue · {openHigh.length} unreviewed HIGH
-              (held from autopay + sending)
+              {reviewQueue.length} in the 2x-median queue
+              {groupSummary && ` (${groupSummary})`} · {openHigh.length} unreviewed HIGH (held
+              from autopay + sending)
             </div>
           </div>
           <MonthSelect
@@ -101,7 +111,7 @@ export default async function BillingFlagsPage({
                 <th className="px-4 py-2 font-medium text-right">Total $</th>
                 <th className="px-4 py-2 font-medium text-right">Group median</th>
                 <th className="px-4 py-2 font-medium text-right">x median</th>
-                <th className="px-4 py-2 font-medium">Z-audit</th>
+                <th className="px-4 py-2 font-medium">Review</th>
               </tr>
             </thead>
             <tbody>
@@ -208,12 +218,14 @@ function ReviewRow({ r, month }: { r: ReviewFlagRow; month: string }) {
       <td className="px-4 py-2.5">
         {r.audit_flag_level ? (
           <span className="inline-flex items-center gap-1.5">
-            <Pill
-              tone={FLAG_TONE[r.audit_flag_level as keyof typeof FLAG_TONE] ?? "sun"}
-              dot
-            >
-              {r.audit_flag_level}
-            </Pill>
+            {r.audit_flag_level !== "REVIEW_2X" && (
+              <Pill
+                tone={FLAG_TONE[r.audit_flag_level as keyof typeof FLAG_TONE] ?? "sun"}
+                dot
+              >
+                {r.audit_flag_level}
+              </Pill>
+            )}
             {r.audit_status && (
               <Pill tone={AUDIT_TONE[r.audit_status as keyof typeof AUDIT_TONE] ?? "neutral"}>
                 {r.audit_status}
@@ -221,7 +233,7 @@ function ReviewRow({ r, month }: { r: ReviewFlagRow; month: string }) {
             )}
           </span>
         ) : (
-          <span className="text-ink-mute text-[11px]">—</span>
+          <span className="text-ink-mute text-[11px]">not reviewed</span>
         )}
       </td>
     </tr>

@@ -4,6 +4,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { formatCurrency } from "@/lib/utils/format"
 import {
+  getCustomerMonth,
   listBillingFlags,
   listFlagItems,
   listReviewFlags,
@@ -29,18 +30,33 @@ export default async function FlagDrilldownPage({
   if (!customerId || !month || !/^\d{4}-\d{2}$/.test(month)) notFound()
   const monthDate = `${month}-01`
 
-  const [flags, reviewQueue, items] = await Promise.all([
+  const [flags, reviewQueue, items, cm] = await Promise.all([
     listBillingFlags(monthDate, true),
     listReviewFlags(monthDate),
     listFlagItems(customerId, monthDate),
+    getCustomerMonth(customerId, monthDate),
   ])
   const flag = flags.find((f) => f.customer_id === customerId)
   const review = reviewQueue.find((r) => r.customer_id === customerId)
-  if (!flag && !review) notFound()
+  if (!flag && !review && !cm) notFound()
 
   const name = flag?.customer_name ?? review?.customer_name ?? `Customer #${customerId}`
-  const peerGroup = flag?.peer_group ?? review?.peer_group ?? "—"
-  const usd = (v: number | null | undefined) => (v == null ? "—" : formatCurrency(v))
+  const peerGroup = flag?.peer_group ?? review?.peer_group ?? cm?.peer_group ?? "—"
+  // review state may exist on either surface: a z-audit row or a REVIEW_2X row
+  const auditStatus = flag?.audit_status ?? review?.audit_status ?? null
+  const auditNote = flag?.audit_notes ?? review?.audit_notes ?? null
+  const isHold = flag?.flag_level === "HIGH" && flag.audit_status === "flagged"
+  const usd = (v: number | null | undefined) => (v == null ? "—" : formatCurrency(Number(v)))
+
+  const breakdown: { label: string; value: number | null | undefined }[] = [
+    { label: "Core", value: cm?.core_usd },
+    { label: "Specialty", value: cm?.specialty_usd },
+    { label: "Spa", value: cm?.spa_usd },
+    { label: "Testing", value: cm?.testing_usd },
+    { label: "Parts", value: cm?.parts_usd },
+    { label: "Extra service", value: cm?.extra_service_usd },
+    { label: "Discounts", value: cm?.discount_usd },
+  ]
 
   return (
     <div className="px-7 pt-6 pb-10 space-y-4 max-w-5xl">
@@ -53,20 +69,24 @@ export default async function FlagDrilldownPage({
           <div className="flex items-center gap-2 mt-1.5">
             {review && (
               <Pill tone={review.x_median != null && review.x_median >= 3 ? "coral" : "sun"} dot>
-                {review.x_median != null ? `${Number(review.x_median).toFixed(1)}x group median` : "2x-median queue"}
+                {review.x_median != null
+                  ? `${Number(review.x_median).toFixed(1)}x group median`
+                  : "2x-median queue"}
               </Pill>
             )}
             {flag && (
-              <>
-                <Pill tone={flag.flag_level === "HIGH" ? "coral" : "sun"} dot>
-                  {flag.flag_level}
-                </Pill>
-                <Pill tone={AUDIT_TONE[flag.audit_status] ?? "neutral"}>{flag.audit_status}</Pill>
-              </>
+              <Pill tone={flag.flag_level === "HIGH" ? "coral" : "sun"} dot>
+                {flag.flag_level}
+              </Pill>
+            )}
+            {auditStatus && (
+              <Pill tone={AUDIT_TONE[auditStatus as keyof typeof AUDIT_TONE] ?? "neutral"}>
+                {auditStatus}
+              </Pill>
             )}
             <span className="text-[11px] text-ink-mute">
               {peerGroup}
-              {review?.provides_chems && " · provides chems"}
+              {(review?.provides_chems ?? cm?.provides_chems) && " · provides chems"}
             </span>
           </div>
         </div>
@@ -79,30 +99,50 @@ export default async function FlagDrilldownPage({
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        <Stat label="Visits" value={fmtInt(flag?.visits ?? review?.visits)} />
+        <Stat label="Visits" value={fmtInt(cm?.visits ?? flag?.visits ?? review?.visits)} />
         {review ? (
           <>
             <Stat label="Total consumables $" value={usd(review.total_usd)} accent />
             <Stat label="Group clean median" value={usd(review.group_clean_median)} />
           </>
         ) : (
-          <Stat label="Chem $" value={usd(flag?.chem_usd)} />
+          <Stat label="Chem $" value={usd(cm?.chem_usd ?? flag?.chem_usd)} />
         )}
+        <Stat label="CPV" value={usd(cm?.cpv ?? flag?.cpv)} accent={!review} />
         {flag && (
           <>
-            <Stat label="CPV" value={usd(flag.cpv)} accent={!review} />
             <Stat label="Peer median CPV" value={usd(flag.peer_median)} />
-            <Stat label="Fleet z" value={flag.fleet_z?.toFixed(2) ?? "—"} />
-            <Stat label="Self z" value={flag.self_z?.toFixed(2) ?? "—"} />
+            <Stat label="Fleet z" value={flag.fleet_z != null ? Number(flag.fleet_z).toFixed(2) : "—"} />
           </>
         )}
       </div>
 
+      {cm && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Stat
+            label={`Avg FC (${cm.reading_count} readings)`}
+            value={cm.avg_fc != null ? `${cm.avg_fc} ppm` : "—"}
+          />
+          <Stat label="Avg pH" value={cm.avg_ph != null ? String(cm.avg_ph) : "—"} />
+          <Stat label="Avg CYA" value={cm.avg_cya != null ? `${cm.avg_cya} ppm` : "—"} />
+          <Card className="px-4 py-3">
+            <div className="text-[10px] uppercase tracking-wide text-ink-mute">
+              Category breakdown
+            </div>
+            <div className="text-[11px] font-mono num text-ink-dim mt-1 leading-5">
+              {breakdown
+                .filter((b) => b.value != null && Number(b.value) !== 0)
+                .map((b) => `${b.label} ${usd(b.value)}`)
+                .join(" · ") || "—"}
+            </div>
+          </Card>
+        </div>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>
-            Per-item usage — {formatMonth(monthDate)} vs this customer&apos;s usual month vs
-            peers
+            {`Per-item usage — ${formatMonth(monthDate)} vs this customer's usual month vs peers`}
           </CardTitle>
         </CardHeader>
         <table className="w-full text-[12px]">
@@ -127,8 +167,8 @@ export default async function FlagDrilldownPage({
             )}
             {items.map((it) => {
               const ratio =
-                it.month_usd != null && it.usual_usd != null && it.usual_usd > 0
-                  ? it.month_usd / it.usual_usd
+                it.month_usd != null && it.usual_usd != null && Number(it.usual_usd) > 0
+                  ? Number(it.month_usd) / Number(it.usual_usd)
                   : null
               return (
                 <tr
@@ -138,7 +178,7 @@ export default async function FlagDrilldownPage({
                   <td className="px-4 py-2 text-ink">{it.item_name}</td>
                   <td className="px-4 py-2 text-ink-mute text-[11px]">{it.category ?? "—"}</td>
                   <td className="px-4 py-2 text-right font-mono num text-ink-dim">
-                    {it.month_qty ?? "—"}
+                    {it.month_qty != null ? Number(it.month_qty) : "—"}
                     {it.usual_qty != null && (
                       <span className="text-ink-mute"> / {Number(it.usual_qty).toFixed(1)}</span>
                     )}
@@ -156,7 +196,11 @@ export default async function FlagDrilldownPage({
                     {ratio == null ? (
                       <span className="text-ink-mute">new</span>
                     ) : (
-                      <span className={ratio >= 2 ? "text-coral" : ratio >= 1.3 ? "text-sun" : "text-ink-mute"}>
+                      <span
+                        className={
+                          ratio >= 2 ? "text-coral" : ratio >= 1.3 ? "text-sun" : "text-ink-mute"
+                        }
+                      >
                         {ratio.toFixed(1)}x
                       </span>
                     )}
@@ -181,27 +225,18 @@ export default async function FlagDrilldownPage({
           <CardTitle>Review</CardTitle>
         </CardHeader>
         <CardBody>
-          {flag ? (
-            <>
-              {flag.flag_level === "HIGH" && flag.audit_status === "flagged" && (
-                <div className="text-[12px] text-coral mb-3">
-                  This customer-month is held from autopay and invoice sending until reviewed.
-                </div>
-              )}
-              <ReviewActions
-                customerId={customerId}
-                month={monthDate}
-                currentStatus={flag.audit_status}
-                currentNote={flag.audit_notes}
-              />
-            </>
-          ) : (
-            <div className="text-[12px] text-ink-mute">
-              2x-median queue entry only — no z-score audit row for this customer-month, so
-              there is no hold and no review state to record here. Fix anything wrong in
-              ION; the queue recomputes from visits.
+          {isHold && (
+            <div className="text-[12px] text-coral mb-3">
+              This customer-month is held from autopay and invoice sending until reviewed.
             </div>
           )}
+          <ReviewActions
+            customerId={customerId}
+            month={monthDate}
+            currentStatus={auditStatus}
+            currentNote={auditNote}
+            isHold={isHold}
+          />
         </CardBody>
       </Card>
     </div>

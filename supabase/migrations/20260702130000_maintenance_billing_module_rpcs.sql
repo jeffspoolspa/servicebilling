@@ -41,9 +41,15 @@
 -- 4. maint_billing_review_flags(month)  the 2x-clean-median review queue
 --    (billing_audit.v_billing_review_flags, migration 20260702120000), joined
 --    with any z-audit row for the same customer-month for review context
--- 5. maint_billing_flag_items(...)      per-item drill-down
--- 6. maint_billing_flag_review(...)     the ONE write: audit_status/audit_notes
---    on customer_month_audit; reviewing a HIGH releases the autopay/send hold
+-- 5. maint_billing_customer_month(...)  drill-down header: the customer-month
+--    CPV row (category breakdown: core/specialty/spa/testing/parts/extra/discount)
+--    + avg FC/pH/CYA chem readings for the month
+-- 6. maint_billing_flag_items(...)      per-item drill-down
+-- 7. maint_billing_flag_review(...)     the ONE write. UPSERTs
+--    customer_month_audit so ONE table tracks review state for BOTH lists: a
+--    z-audit row updates in place; a 2x-queue customer with no z-row gets a
+--    REVIEW_2X row created. REVIEW_2X never holds (holds key on flag_level
+--    'HIGH' only); reviewing a HIGH releases the autopay/send hold.
 --
 -- HARD RULE surfaced here (enforced in the autopay list builder and
 -- send_monthly_invoices, same change): a customer-month with an unreviewed HIGH
@@ -257,7 +263,66 @@ as $$
   order by v.x_median desc nulls last;
 $$;
 
--- 5) Flag drill-down: per-item usage this month vs the customer's usual month
+-- 5) Drill-down header: the customer-month CPV row (category breakdown) plus
+--    average FC/pH/CYA readings for the month (readings surface misdosing:
+--    e.g. high chlorine spend with FC still low points at CYA/turnover issues).
+--    Readings come from maintenance.visit_readings (name/value rows per visit;
+--    'Free Chlorine' / 'pH' / 'Cyanuric Acid') — NOT maintenance.chem_readings,
+--    which is empty (live-verified 2026-07-02; doc drift flagged). Values are
+--    text; non-numeric entries are skipped.
+create or replace function public.maint_billing_customer_month(
+  p_customer_id bigint,
+  p_month date
+)
+returns table (
+  customer_id       bigint,
+  month             date,
+  peer_group        text,
+  season            text,
+  provides_chems    boolean,
+  visits            numeric,
+  chem_usd          numeric,
+  cpv               numeric,
+  core_usd          numeric,
+  specialty_usd     numeric,
+  spa_usd           numeric,
+  testing_usd       numeric,
+  parts_usd         numeric,
+  extra_service_usd numeric,
+  discount_usd      numeric,
+  avg_fc            numeric,
+  avg_ph            numeric,
+  avg_cya           numeric,
+  reading_count     int
+)
+language sql stable security definer
+set search_path = billing_audit, public
+as $$
+  select p.customer_id, p.month, p.peer_group, p.season, p.provides_chems,
+         p.visits::numeric, p.chem_usd, p.cpv,
+         p.core_usd, p.specialty_usd, p.spa_usd, p.testing_usd,
+         p.parts_usd, p.extra_service_usd, p.discount_usd,
+         r.avg_fc, r.avg_ph, r.avg_cya, coalesce(r.n, 0)
+  from v_customer_month_cpv p
+  left join lateral (
+    select round(avg(x.val) filter (where vr.name = 'Free Chlorine'), 1) as avg_fc,
+           round(avg(x.val) filter (where vr.name = 'pH'), 2)            as avg_ph,
+           round(avg(x.val) filter (where vr.name = 'Cyanuric Acid'), 0) as avg_cya,
+           count(x.val)::int as n
+    from maintenance.visit_readings vr
+    join maintenance.visits v on v.id = vr.visit_id
+    join maintenance.tasks t on t.id = v.task_id
+    cross join lateral (
+      select case when vr.value ~ '^[0-9]+\.?[0-9]*$' then vr.value::numeric end as val
+    ) x
+    where t.customer_id = p_customer_id
+      and date_trunc('month', v.visit_date)::date = p_month
+      and vr.name in ('Free Chlorine', 'pH', 'Cyanuric Acid')
+  ) r on true
+  where p.customer_id = p_customer_id and p.month = p_month;
+$$;
+
+-- 6) Flag drill-down: per-item usage this month vs the customer's usual month
 --    (their avg over the prior 12 months) and the peer-group average among
 --    customers who used the item that month. Recurring tasks only — same scope
 --    as v_customer_month_cpv, so the numbers reconcile with the flag.
@@ -322,8 +387,11 @@ as $$
   order by cur.usd desc nulls last;
 $$;
 
--- 6) Review action: mark a flagged customer-month reviewed/resolved (with a note),
---    or re-flag it. Reviewing releases the autopay/send hold.
+-- 7) Review action: mark a customer-month reviewed/resolved (with a note), or
+--    re-flag it. UPSERT so one table tracks review state for BOTH lists: a
+--    z-audit row updates in place (reviewing a HIGH releases the autopay/send
+--    hold); a 2x-median-queue customer with no z-row gets a REVIEW_2X row
+--    created. REVIEW_2X never holds — holds key on flag_level = 'HIGH' only.
 create or replace function public.maint_billing_flag_review(
   p_customer_id bigint,
   p_month date,
@@ -338,11 +406,12 @@ begin
   if p_status not in ('flagged', 'reviewed', 'resolved') then
     raise exception 'invalid audit_status: %', p_status;
   end if;
-  update customer_month_audit
-     set audit_status = p_status,
-         audit_notes  = coalesce(p_note, audit_notes)
-   where customer_id = p_customer_id and month = p_month;
-  return found;
+  insert into customer_month_audit (customer_id, month, flag_level, audit_status, audit_notes)
+  values (p_customer_id, p_month, 'REVIEW_2X', p_status, p_note)
+  on conflict (customer_id, month) do update
+    set audit_status = excluded.audit_status,
+        audit_notes  = coalesce(excluded.audit_notes, customer_month_audit.audit_notes);
+  return true;
 end;
 $$;
 
@@ -351,12 +420,14 @@ revoke all on function public.maint_billing_months() from public, anon;
 revoke all on function public.maint_billing_periods(date) from public, anon;
 revoke all on function public.maint_billing_flags(date, boolean) from public, anon;
 revoke all on function public.maint_billing_review_flags(date) from public, anon;
+revoke all on function public.maint_billing_customer_month(bigint, date) from public, anon;
 revoke all on function public.maint_billing_flag_items(bigint, date) from public, anon;
 revoke all on function public.maint_billing_flag_review(bigint, date, text, text) from public, anon;
 grant execute on function public.maint_billing_months() to authenticated, service_role;
 grant execute on function public.maint_billing_periods(date) to authenticated, service_role;
 grant execute on function public.maint_billing_flags(date, boolean) to authenticated, service_role;
 grant execute on function public.maint_billing_review_flags(date) to authenticated, service_role;
+grant execute on function public.maint_billing_customer_month(bigint, date) to authenticated, service_role;
 grant execute on function public.maint_billing_flag_items(bigint, date) to authenticated, service_role;
 grant execute on function public.maint_billing_flag_review(bigint, date, text, text) to authenticated, service_role;
 

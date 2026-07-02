@@ -4,19 +4,24 @@ import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 
 /**
- * Mark a flagged customer-month reviewed/resolved (with a note) — this is what
- * releases the autopay/send hold. Re-flag puts the hold back.
+ * Mark a customer-month reviewed/resolved (with a note). One table tracks
+ * review state for both lists (billing_audit.customer_month_audit): a z-audit
+ * row updates in place; a 2x-queue customer with no row gets a REVIEW_2X row
+ * created (RPC upsert). Reviewing a HIGH releases the autopay/send hold;
+ * re-flag restores it.
  */
 export function ReviewActions({
   customerId,
   month, // 'YYYY-MM-01'
-  currentStatus,
+  currentStatus, // null = no audit row yet (2x-queue only)
   currentNote,
+  isHold, // unreviewed HIGH -> reviewing releases the autopay/send hold
 }: {
   customerId: number
   month: string
-  currentStatus: string
+  currentStatus: string | null
   currentNote: string | null
+  isHold: boolean
 }) {
   const router = useRouter()
   const [note, setNote] = useState(currentNote ?? "")
@@ -43,6 +48,8 @@ export function ReviewActions({
     startTransition(() => router.refresh())
   }
 
+  const open = currentStatus == null || currentStatus === "flagged"
+
   return (
     <div className="space-y-2">
       <textarea
@@ -53,14 +60,14 @@ export function ReviewActions({
         className="w-full bg-bg-elev border border-line rounded px-2.5 py-2 text-[13px] text-ink placeholder:text-ink-mute/60"
       />
       <div className="flex items-center gap-2">
-        {currentStatus === "flagged" ? (
+        {open ? (
           <>
             <button
               onClick={() => setStatus("reviewed")}
               disabled={pending}
               className="px-3 py-1.5 text-[12px] font-medium rounded border border-grass/30 text-grass bg-grass/10 hover:bg-grass/20 disabled:opacity-50"
             >
-              Mark reviewed (release hold)
+              Mark reviewed{isHold ? " (release hold)" : ""}
             </button>
             <button
               onClick={() => setStatus("resolved")}
@@ -86,7 +93,7 @@ export function ReviewActions({
               disabled={pending}
               className="px-3 py-1.5 text-[12px] font-medium rounded border border-coral/30 text-coral bg-coral/10 hover:bg-coral/20 disabled:opacity-50"
             >
-              Re-flag (restore hold)
+              Re-flag
             </button>
           </>
         )}

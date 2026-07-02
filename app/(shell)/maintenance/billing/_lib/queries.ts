@@ -96,6 +96,29 @@ export interface ReviewFlagRow {
   audit_notes: string | null
 }
 
+/** Drill-down header: customer-month CPV row + category breakdown + avg readings. */
+export interface CustomerMonthRow {
+  customer_id: number
+  month: string
+  peer_group: string | null
+  season: string | null
+  provides_chems: boolean | null
+  visits: number | null
+  chem_usd: number | null
+  cpv: number | null
+  core_usd: number | null
+  specialty_usd: number | null
+  spa_usd: number | null
+  testing_usd: number | null
+  parts_usd: number | null
+  extra_service_usd: number | null
+  discount_usd: number | null
+  avg_fc: number | null
+  avg_ph: number | null
+  avg_cya: number | null
+  reading_count: number
+}
+
 export interface FlagItemRow {
   item_name: string
   category: string | null
@@ -133,6 +156,17 @@ export function listBillingFlags(
 
 export function listReviewFlags(month: string): Promise<ReviewFlagRow[]> {
   return rpc<ReviewFlagRow>("maint_billing_review_flags", { p_month: month })
+}
+
+export async function getCustomerMonth(
+  customerId: number,
+  month: string,
+): Promise<CustomerMonthRow | null> {
+  const rows = await rpc<CustomerMonthRow>("maint_billing_customer_month", {
+    p_customer_id: customerId,
+    p_month: month,
+  })
+  return rows[0] ?? null
 }
 
 export function listFlagItems(
