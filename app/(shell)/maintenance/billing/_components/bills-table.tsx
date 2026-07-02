@@ -348,8 +348,7 @@ function VisitCalendar({ customerId, month }: { customerId: number; month: strin
                 </TableHead>
               )
             })}
-            <TableHead className="text-right pl-4">Qty</TableHead>
-            <TableHead className="text-right">Total $</TableHead>
+            <TableHead colSpan={2} />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -378,10 +377,16 @@ function VisitCalendar({ customerId, month }: { customerId: number; month: strin
           {items.length > 0 && (
             <TableRow className="hover:bg-transparent">
               <TableCell
-                colSpan={days.length + 3}
+                colSpan={days.length + 1}
                 className="sticky left-0 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute"
               >
                 Chemicals sold
+              </TableCell>
+              <TableCell className="text-right pl-4 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                Qty
+              </TableCell>
+              <TableCell className="text-right py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                Total $
               </TableCell>
             </TableRow>
           )}
