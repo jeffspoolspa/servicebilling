@@ -43,6 +43,7 @@ export interface BillingPeriodRow {
   unpriced_count: number
   ion_amt_cents: number | null
   ion_txn_count: number | null
+  ion_invoice_numbers: string | null
   ion_match: "match" | "mismatch" | "missing"
   qbo_invoice_id: string | null
   qbo_doc_number: string | null
@@ -177,6 +178,24 @@ export function listFlagItems(
     p_customer_id: customerId,
     p_month: month,
   })
+}
+
+/** The autopay roster — via the definer RPC (billing.autopay_customers has no
+ *  authenticated grant; card metadata stays behind the RPC surface). */
+export interface AutopayCustomerRow {
+  qbo_customer_id: string
+  customer_name: string | null
+  payment_method: string | null
+  card_type: string | null
+  last_four: string | null
+  email: string | null
+  payment_status: string | null
+  consecutive_declines: number | null
+  is_active: boolean | null
+}
+
+export function listAutopayCustomers(): Promise<AutopayCustomerRow[]> {
+  return rpc<AutopayCustomerRow>("maint_billing_autopay_roster")
 }
 
 /** '2026-06-01' -> 'Jun 2026' */

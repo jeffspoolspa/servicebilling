@@ -108,6 +108,9 @@ value:
           test_qbo_customer_id:
             type: javascript
             expr: flow_input.test_qbo_customer_id
+          only_qbo_customer_ids:
+            type: javascript
+            expr: flow_input.only_qbo_customer_ids
         lock: >-
           !inline
           build_autopay_list_from_maintenance_invoices.inline_script.lock
@@ -229,7 +232,17 @@ schema:
     - dry_run
     - test_mode
     - test_qbo_customer_id
+    - only_qbo_customer_ids
   properties:
+    only_qbo_customer_ids:
+      type: array
+      items:
+        type: string
+      description: >-
+        Optional batch filter from the /maintenance/billing/process UI: charge
+        only these QBO customer ids (each still sweeps all their unpaid maint
+        invoices). Ignored when test_mode is set.
+      default: null
     billing_month:
       type: string
       description: 'Billing month in YYYY-MM format (e.g., 2026-03 for March 2026)'

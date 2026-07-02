@@ -91,7 +91,7 @@ export default async function FlagDrilldownPage({
           </div>
         </div>
         <Link
-          href={`/maintenance/billing/flags?month=${month}` as never}
+          href={`/maintenance/billing/review?month=${month}` as never}
           className="text-[12px] text-ink-mute hover:text-ink underline underline-offset-2"
         >
           Back to review

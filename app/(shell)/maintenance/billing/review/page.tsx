@@ -83,12 +83,6 @@ export default async function BillingFlagsPage({
             value={selected}
           />
         </div>
-        <Link
-          href={`/maintenance/billing?month=${selected}` as never}
-          className="text-[12px] text-ink-mute hover:text-ink underline underline-offset-2"
-        >
-          Back to billing months
-        </Link>
       </div>
 
       <section>
@@ -138,7 +132,7 @@ export default async function BillingFlagsPage({
           </span>
           <Link
             href={
-              `/maintenance/billing/flags?month=${selected}${includeWatch ? "" : "&watch=1"}` as never
+              `/maintenance/billing/review?month=${selected}${includeWatch ? "" : "&watch=1"}` as never
             }
           >
             <Pill tone={includeWatch ? "sun" : "neutral"}>
@@ -191,7 +185,7 @@ function ReviewRow({ r, month }: { r: ReviewFlagRow; month: string }) {
     <tr className="border-b border-line-soft/40 last:border-0 hover:bg-white/[0.02]">
       <td className="px-4 py-2.5 text-ink">
         <Link
-          href={`/maintenance/billing/flags/${r.customer_id}?month=${month}` as never}
+          href={`/maintenance/billing/review/${r.customer_id}?month=${month}` as never}
           className="hover:text-cyan"
         >
           {r.customer_name ?? `#${r.customer_id}`}
@@ -245,7 +239,7 @@ function FlagRow({ f, month }: { f: BillingFlagRow; month: string }) {
     <tr className="border-b border-line-soft/40 last:border-0 hover:bg-white/[0.02]">
       <td className="px-4 py-2.5 text-ink">
         <Link
-          href={`/maintenance/billing/flags/${f.customer_id}?month=${month}` as never}
+          href={`/maintenance/billing/review/${f.customer_id}?month=${month}` as never}
           className="hover:text-cyan"
         >
           {f.customer_name ?? `#${f.customer_id}`}

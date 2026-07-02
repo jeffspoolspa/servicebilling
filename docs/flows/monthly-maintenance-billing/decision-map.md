@@ -52,9 +52,10 @@ processing is per-invoice (per task).
 **HIGH-flag hold (hard rule):** a customer-month with an unreviewed HIGH flag in
 `billing_audit.customer_month_audit` (`flag_level='HIGH'`, `audit_status='flagged'`) is excluded
 from the autopay charge list AND from `send_monthly_invoices` until someone marks it reviewed
-(via `/maintenance/billing/flags`). The hold is per invoice-month: the flagged month is held,
+(via `/maintenance/billing/review`). The hold is per invoice-month: the flagged month is held,
 the customer's other unpaid months still process. Held invoices stay `pending` and are picked
-up by the next run after review — no state to reset.
+up by the next run after review — no state to reset. The `/api/maintenance-billing/process`
+route ALSO re-checks holds server-side before triggering the engine (defense in depth).
 
 **Processing status (derived, UI-only):** the `/maintenance/billing` view derives, in
 `public.maint_billing_periods` (mirrors the work-orders pre-processing framing: review gate

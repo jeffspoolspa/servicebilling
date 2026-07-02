@@ -7,7 +7,8 @@ def main(
     billing_run_id: str,
     dry_run: bool = True,
     test_mode: bool = False,
-    test_qbo_customer_id: str = None
+    test_qbo_customer_id: str = None,
+    only_qbo_customer_ids: list = None,
 ):
     """
     Invoice-driven autopay list builder.
@@ -63,6 +64,11 @@ def main(
         if test_mode and test_qbo_customer_id:
             cur.execute(base_query + " AND mi.qbo_customer_id = %s ORDER BY mi.billing_month, mi.customer_name",
                        (str(test_qbo_customer_id),))
+        elif only_qbo_customer_ids:
+            # Batch selection from the /maintenance/billing/process UI: charge only
+            # these customers (all their unpaid maint invoices still sweep).
+            cur.execute(base_query + " AND mi.qbo_customer_id = ANY(%s) ORDER BY mi.billing_month, mi.customer_name",
+                       ([str(x) for x in only_qbo_customer_ids],))
         else:
             cur.execute(base_query + " ORDER BY mi.billing_month, mi.customer_name")
 

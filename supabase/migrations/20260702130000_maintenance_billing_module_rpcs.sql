@@ -105,6 +105,7 @@ returns table (
   unpriced_count            int,
   ion_amt_cents             bigint,
   ion_txn_count             int,
+  ion_invoice_numbers       text,     -- ION invoice number(s) from the transactions report
   ion_match                 text,     -- match | mismatch | missing
   qbo_invoice_id            text,
   qbo_doc_number            text,
@@ -127,7 +128,9 @@ as $$
     -- ION's month-end task invoices; a split re-bill means >1 row per task, so SUM
     select itt.ion_task_id,
            sum(itt.amt_cents)::bigint as amt_cents,
-           count(*)::int as txn_count
+           count(*)::int as txn_count,
+           -- the ION invoice number(s); becomes the QBO DocNumber at sync
+           string_agg(distinct itt.transaction_id, ', ') as invoice_numbers
     from ion_task_transactions itt
     where itt.month = p_month
     group by 1
@@ -140,7 +143,7 @@ as $$
     tbp.billing_method, tbp.billable_visit_count,
     tbp.expected_labor_cents, tbp.expected_consumable_cents, tbp.expected_total_cents,
     (select count(*) from jsonb_object_keys(coalesce(tbp.unpriced_consumables, '{}'::jsonb)))::int,
-    ion.amt_cents, ion.txn_count,
+    ion.amt_cents, ion.txn_count, ion.invoice_numbers,
     case when ion.amt_cents is null then 'missing'
          -- $1 tolerance, same as the labor reconcile
          when abs(ion.amt_cents - coalesce(tbp.expected_total_cents, 0)) <= 100 then 'match'
@@ -387,7 +390,32 @@ as $$
   order by cur.usd desc nulls last;
 $$;
 
--- 7) Review action: mark a customer-month reviewed/resolved (with a note), or
+-- 7) Autopay roster for the /maintenance/billing/autopay tab and the process
+--    tab's card cross-reference. billing.autopay_customers has no authenticated
+--    grant (card metadata), so this goes through the same definer surface.
+create or replace function public.maint_billing_autopay_roster()
+returns table (
+  qbo_customer_id      text,
+  customer_name        text,
+  payment_method       text,
+  card_type            text,
+  last_four            text,
+  email                text,
+  payment_status       text,
+  consecutive_declines int,
+  is_active            boolean
+)
+language sql stable security definer
+set search_path = billing, public
+as $$
+  select ac.qbo_customer_id, ac.customer_name, ac.payment_method, ac.card_type,
+         ac.last_four, ac.email, ac.payment_status,
+         ac.consecutive_declines::int, ac.is_active
+  from autopay_customers ac
+  order by ac.customer_name;
+$$;
+
+-- 8) Review action: mark a customer-month reviewed/resolved (with a note), or
 --    re-flag it. UPSERT so one table tracks review state for BOTH lists: a
 --    z-audit row updates in place (reviewing a HIGH releases the autopay/send
 --    hold); a 2x-median-queue customer with no z-row gets a REVIEW_2X row
@@ -421,6 +449,7 @@ revoke all on function public.maint_billing_periods(date) from public, anon;
 revoke all on function public.maint_billing_flags(date, boolean) from public, anon;
 revoke all on function public.maint_billing_review_flags(date) from public, anon;
 revoke all on function public.maint_billing_customer_month(bigint, date) from public, anon;
+revoke all on function public.maint_billing_autopay_roster() from public, anon;
 revoke all on function public.maint_billing_flag_items(bigint, date) from public, anon;
 revoke all on function public.maint_billing_flag_review(bigint, date, text, text) from public, anon;
 grant execute on function public.maint_billing_months() to authenticated, service_role;
@@ -428,6 +457,7 @@ grant execute on function public.maint_billing_periods(date) to authenticated, s
 grant execute on function public.maint_billing_flags(date, boolean) to authenticated, service_role;
 grant execute on function public.maint_billing_review_flags(date) to authenticated, service_role;
 grant execute on function public.maint_billing_customer_month(bigint, date) to authenticated, service_role;
+grant execute on function public.maint_billing_autopay_roster() to authenticated, service_role;
 grant execute on function public.maint_billing_flag_items(bigint, date) to authenticated, service_role;
 grant execute on function public.maint_billing_flag_review(bigint, date, text, text) to authenticated, service_role;
 

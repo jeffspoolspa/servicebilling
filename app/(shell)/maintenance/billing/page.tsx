@@ -10,27 +10,12 @@ import {
   type ProcessingStatus,
 } from "./_lib/queries"
 import { MonthSelect } from "./_components/month-select"
-import { RunActions } from "./_components/run-actions"
+import { RefreshButton } from "./_components/refresh-button"
+import { STATUS_LABEL, STATUS_TONE } from "./_lib/status"
 
 export const metadata = { title: "Maintenance · Billing" }
 export const dynamic = "force-dynamic"
 
-// pending -> [held_for_review | ready] (the review gate, mirrors work-orders
-// pre-processing) -> processed -> paid
-const STATUS_TONE: Record<ProcessingStatus, "neutral" | "cyan" | "coral" | "sun" | "grass" | "teal"> = {
-  pending: "neutral",
-  held_for_review: "coral",
-  ready: "teal",
-  processed: "sun",
-  paid: "grass",
-}
-const STATUS_LABEL: Record<ProcessingStatus, string> = {
-  pending: "pending",
-  held_for_review: "held for review",
-  ready: "ready",
-  processed: "processed",
-  paid: "paid",
-}
 const STATUSES: ProcessingStatus[] = [
   "pending",
   "held_for_review",
@@ -55,7 +40,6 @@ export default async function MaintenanceBillingPage({
   try {
     months = await listBillingMonths()
   } catch (e) {
-    // Deploy-before-migration gap: the maint_billing_* RPCs don't exist yet
     return (
       <div className="px-7 pt-6 pb-10">
         <Card className="p-8 text-center text-ink-mute text-[13px]">
@@ -71,7 +55,8 @@ export default async function MaintenanceBillingPage({
     return (
       <div className="px-7 pt-6 pb-10">
         <Card className="p-8 text-center text-ink-mute text-[13px]">
-          No billing periods yet — run f/billing_audit/build_task_billing_periods first.
+          No billing periods yet — hit Refresh bills (or run
+          f/billing_audit/build_task_billing_periods).
         </Card>
       </div>
     )
@@ -116,6 +101,16 @@ export default async function MaintenanceBillingPage({
     if (r.ion_match === "mismatch") ionMismatch++
   }
 
+  // The aggregated bill: group task rows under their customer, customer subtotals
+  const byCustomer = new Map<string, BillingPeriodRow[]>()
+  for (const r of rows) {
+    const key = r.customer_name ?? `#${r.qbo_customer_id ?? "unknown"}`
+    const arr = byCustomer.get(key) ?? []
+    arr.push(r)
+    byCustomer.set(key, arr)
+  }
+  const customers = [...byCustomer.keys()].sort((a, b) => a.localeCompare(b))
+
   const baseParams = (over: Record<string, string | undefined>) => {
     const p = new URLSearchParams()
     const merged = { month: selected, status: sp.status, hold: sp.hold, q: sp.q, ...over }
@@ -124,24 +119,21 @@ export default async function MaintenanceBillingPage({
   }
 
   return (
-    <div className="px-7 pt-6 pb-10 space-y-4">
+    <div className="px-7 pt-5 pb-10 space-y-4">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div className="flex items-end gap-4">
           <div>
-            <h2 className="font-display text-[16px]">Billing months</h2>
+            <h2 className="font-display text-[16px]">Bills</h2>
             <div className="text-ink-mute text-[12px] mt-0.5">
-              {monthMeta.period_count.toLocaleString()} invoice promises ·{" "}
+              {customers.length.toLocaleString()} customers ·{" "}
+              {monthMeta.period_count.toLocaleString()} task bills ·{" "}
               {cents(monthMeta.expected_total_cents)} expected
               {monthMeta.locked && " · month locked"}
             </div>
           </div>
           <MonthSelect months={monthOptions} value={selected} />
         </div>
-        <RunActions
-          month={selected}
-          monthLabel={formatMonth(monthDate)}
-          holdCount={monthMeta.high_hold_customers}
-        />
+        <RefreshButton month={selected} />
       </div>
 
       {holdCount > 0 && (
@@ -152,19 +144,17 @@ export default async function MaintenanceBillingPage({
             period{holdCount === 1 ? "" : "s"} affected).
           </div>
           <Link
-            href={`/maintenance/billing/flags?month=${selected}` as never}
+            href={`/maintenance/billing/review?month=${selected}` as never}
             className="text-[12px] text-coral underline underline-offset-2 shrink-0"
           >
-            Review flags
+            Review
           </Link>
         </Card>
       )}
 
       <div className="flex items-center gap-2 flex-wrap">
         <Link href={baseParams({ status: undefined, hold: undefined })}>
-          <Pill tone={!statusFilter && !holdOnly ? "cyan" : "neutral"}>
-            all {all.length}
-          </Pill>
+          <Pill tone={!statusFilter && !holdOnly ? "cyan" : "neutral"}>all {all.length}</Pill>
         </Link>
         {STATUSES.map((s) => (
           <Link key={s} href={baseParams({ status: s, hold: undefined })}>
@@ -189,8 +179,7 @@ export default async function MaintenanceBillingPage({
         <table className="w-full text-[12px]">
           <thead>
             <tr className="text-left text-ink-mute border-b border-line-soft">
-              <th className="px-4 py-2 font-medium">Customer</th>
-              <th className="px-4 py-2 font-medium">Task</th>
+              <th className="px-4 py-2 font-medium">Customer / task</th>
               <th className="px-4 py-2 font-medium text-right">Visits</th>
               <th className="px-4 py-2 font-medium text-right">Labor</th>
               <th className="px-4 py-2 font-medium text-right">Chems</th>
@@ -200,70 +189,110 @@ export default async function MaintenanceBillingPage({
               <th className="px-4 py-2 font-medium">Status</th>
             </tr>
           </thead>
-          <tbody>
-            {rows.length === 0 && (
+          {customers.length === 0 && (
+            <tbody>
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-ink-mute">
-                  No billing periods match this filter.
+                <td colSpan={8} className="px-4 py-8 text-center text-ink-mute">
+                  No bills match this filter.
                 </td>
               </tr>
-            )}
-            {rows.map((r) => (
-              <PeriodRow key={r.id} r={r} month={selected} />
-            ))}
-          </tbody>
+            </tbody>
+          )}
+          {customers.map((name) => {
+            const list = byCustomer.get(name)!
+            const first = list[0]
+            const subtotal = list.reduce((s, r) => s + (r.expected_total_cents ?? 0), 0)
+            const ionSubtotal = list.some((r) => r.ion_amt_cents != null)
+              ? list.reduce((s, r) => s + (r.ion_amt_cents ?? 0), 0)
+              : null
+            return (
+              <tbody key={name} className="border-b border-line-soft/60 last:border-0">
+                <tr className="bg-white/[0.02]">
+                  <td className="px-4 pt-2.5 pb-1 text-ink font-medium" colSpan={4}>
+                    {first.high_flag_hold && first.customer_id ? (
+                      <Link
+                        href={
+                          `/maintenance/billing/review/${first.customer_id}?month=${selected}` as never
+                        }
+                        className="hover:text-coral"
+                      >
+                        {name}
+                      </Link>
+                    ) : (
+                      name
+                    )}
+                    {first.on_autopay && (
+                      <span className="ml-2 text-[10px] text-teal uppercase tracking-wide">
+                        autopay
+                      </span>
+                    )}
+                    {first.high_flag_hold && (
+                      <Pill tone="coral" dot className="ml-2">
+                        hold
+                      </Pill>
+                    )}
+                    {list.length > 1 && (
+                      <span className="ml-2 text-[10px] text-ink-mute">
+                        {list.length} tasks
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 pt-2.5 pb-1 text-right font-mono num text-ink font-medium">
+                    {cents(subtotal)}
+                  </td>
+                  <td className="px-4 pt-2.5 pb-1 text-right font-mono num text-ink-dim">
+                    {cents(ionSubtotal)}
+                  </td>
+                  <td colSpan={2}></td>
+                </tr>
+                {list.map((r) => (
+                  <TaskRow key={r.id} r={r} />
+                ))}
+              </tbody>
+            )
+          })}
         </table>
       </Card>
     </div>
   )
 }
 
-function PeriodRow({ r, month }: { r: BillingPeriodRow; month: string }) {
+function TaskRow({ r }: { r: BillingPeriodRow }) {
   return (
-    <tr className="border-b border-line-soft/40 last:border-0 hover:bg-white/[0.02] align-top">
-      <td className="px-4 py-2.5 text-ink">
-        {r.high_flag_hold && r.customer_id ? (
-          <Link
-            href={`/maintenance/billing/flags/${r.customer_id}?month=${month}` as never}
-            className="hover:text-coral"
-          >
-            {r.customer_name ?? "(unknown)"}
-          </Link>
-        ) : (
-          (r.customer_name ?? <span className="text-ink-mute">(unknown)</span>)
-        )}
-        {r.on_autopay && (
-          <div className="text-[10px] text-ink-mute uppercase tracking-wide">autopay</div>
-        )}
-      </td>
-      <td className="px-4 py-2.5 text-ink-dim">
+    <tr className="hover:bg-white/[0.02] align-top">
+      <td className="pl-8 pr-4 py-1.5 text-ink-dim">
         {r.service_name ?? "—"}
-        <div className="text-[10px] text-ink-mute">
-          {[r.category, r.frequency].filter(Boolean).join(" · ") || "—"}
-        </div>
+        <span className="ml-2 text-[10px] text-ink-mute">
+          {[r.category, r.frequency].filter(Boolean).join(" · ")}
+        </span>
       </td>
-      <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">
+      <td className="px-4 py-1.5 text-right font-mono num text-ink-dim">
         {r.billable_visit_count}
       </td>
-      <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">
+      <td className="px-4 py-1.5 text-right font-mono num text-ink-dim">
         {cents(r.expected_labor_cents)}
       </td>
-      <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">
+      <td className="px-4 py-1.5 text-right font-mono num text-ink-dim">
         {cents(r.expected_consumable_cents)}
         {r.unpriced_count > 0 && (
-          <div className="text-[10px] text-sun font-sans">{r.unpriced_count} unpriced</div>
+          <span className="ml-1 text-[10px] text-sun font-sans">
+            {r.unpriced_count} unpriced
+          </span>
         )}
       </td>
-      <td className="px-4 py-2.5 text-right font-mono num text-ink">
+      <td className="px-4 py-1.5 text-right font-mono num text-ink">
         {cents(r.expected_total_cents)}
       </td>
-      <td className="px-4 py-2.5 text-right">
+      <td className="px-4 py-1.5 text-right">
         <span className="font-mono num text-ink-dim">{cents(r.ion_amt_cents)}</span>
-        <div className="mt-0.5">
+        <span className="ml-1.5 align-middle">
           <Pill tone={ION_TONE[r.ion_match]}>{r.ion_match}</Pill>
-        </div>
+        </span>
+        {r.ion_invoice_numbers && (
+          <div className="text-[10px] text-ink-mute font-mono">#{r.ion_invoice_numbers}</div>
+        )}
       </td>
-      <td className="px-4 py-2.5 text-ink-dim">
+      <td className="px-4 py-1.5 text-ink-dim">
         {r.qbo_doc_number ? (
           <>
             <span className="font-mono text-xs">#{r.qbo_doc_number}</span>
@@ -277,18 +306,15 @@ function PeriodRow({ r, month }: { r: BillingPeriodRow; month: string }) {
           "—"
         )}
       </td>
-      <td className="px-4 py-2.5">
-        <div className="flex flex-col items-start gap-1">
-          <Pill tone={STATUS_TONE[r.processing_status]} dot>
-            {STATUS_LABEL[r.processing_status]}
-          </Pill>
-          {r.high_flag_hold && (
-            <Pill tone="coral" dot>
-              HIGH-flag hold
-            </Pill>
-          )}
-          {r.reconcile_status === "mismatch" && <Pill tone="coral">reconcile mismatch</Pill>}
-        </div>
+      <td className="px-4 py-1.5">
+        <Pill tone={STATUS_TONE[r.processing_status]} dot>
+          {STATUS_LABEL[r.processing_status]}
+        </Pill>
+        {r.reconcile_status === "mismatch" && (
+          <div className="mt-0.5">
+            <Pill tone="coral">reconcile mismatch</Pill>
+          </div>
+        )}
       </td>
     </tr>
   )
