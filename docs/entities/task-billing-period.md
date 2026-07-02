@@ -83,6 +83,17 @@ Text fallback: a promise is born `visits_accruing`; the reconcile step moves it 
 - [Invoice](invoice.md) (task-linked) — linked 1:1 via `qbo_invoice_id`; the subtotal compared against
 - [Customer](customer.md) — customer-month total = SUM of the customer's promises
 
+## Where it's surfaced
+
+The `/maintenance/billing` UI shows one row per promise for a selected month via
+`public.maint_billing_periods` (billing_audit is not PostgREST-exposed; migration
+`20260702100000`), joined with the customer, `maintenance.v_task_class`, ION's task-invoice
+sum (`ion_task_transactions`, $1 match tolerance), and the QBO mirror (`billing.invoices`).
+The RPC also derives a UI-only **processing status** — pending (no `qbo_invoice_id`) →
+synced_to_qbo → processed (confirmed autopay charge OR invoice emailed) → paid (mirror
+balance <= 0) — and the HIGH-flag autopay/send hold from `customer_month_audit`. Derived,
+never stored: this table stays the reconcile ledger, not a processing-state store.
+
 ## Flows this entity participates in
 
 - [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md) — this entity IS the bridge

@@ -1,0 +1,131 @@
+import { createSupabaseServer } from "@/lib/supabase/server"
+
+/**
+ * Module-private reads for /maintenance/billing. billing_audit is not
+ * PostgREST-exposed, so everything goes through the public SECURITY DEFINER
+ * RPCs from migration 20260702100000_maintenance_billing_module_rpcs.sql.
+ */
+
+export interface BillingMonthRow {
+  billing_month: string // 'YYYY-MM-01'
+  period_count: number
+  expected_total_cents: number
+  locked: boolean
+  mismatch_count: number
+  high_hold_customers: number
+}
+
+export type ProcessingStatus = "pending" | "synced_to_qbo" | "processed" | "paid"
+
+export interface BillingPeriodRow {
+  id: string
+  task_id: string
+  billing_month: string
+  customer_id: number | null
+  customer_name: string | null
+  qbo_customer_id: string | null
+  ion_task_id: string | null
+  service_name: string | null
+  category: string | null
+  frequency: string | null
+  days_per_week: number | null
+  billing_type: string | null
+  billing_method: string | null
+  billable_visit_count: number
+  expected_labor_cents: number | null
+  expected_consumable_cents: number | null
+  expected_total_cents: number | null
+  unpriced_count: number
+  ion_amt_cents: number | null
+  ion_txn_count: number | null
+  ion_match: "match" | "mismatch" | "missing"
+  qbo_invoice_id: string | null
+  qbo_doc_number: string | null
+  qbo_total: number | null
+  qbo_balance: number | null
+  reconcile_status: string
+  labor_ok: boolean | null
+  consumables_ok: boolean | null
+  locked: boolean
+  on_autopay: boolean
+  autopay_charged: boolean
+  invoice_sent: boolean | null
+  high_flag_hold: boolean
+  processing_status: ProcessingStatus
+}
+
+export interface BillingFlagRow {
+  customer_id: number
+  customer_name: string | null
+  qbo_customer_id: string | null
+  month: string
+  peer_group: string | null
+  season: string | null
+  visits: number | null
+  chem_usd: number | null
+  cpv: number | null
+  peer_median: number | null
+  self_mean: number | null
+  fleet_z: number | null
+  self_z: number | null
+  pct_vs_self: number | null
+  flag_level: "HIGH" | "WATCH" | "SELF_SPIKE" | "PCT_SPIKE"
+  audit_status: "flagged" | "reviewed" | "resolved"
+  audit_notes: string | null
+  computed_at: string
+}
+
+export interface FlagItemRow {
+  item_name: string
+  category: string | null
+  month_qty: number | null
+  month_usd: number | null
+  usual_qty: number | null
+  usual_usd: number | null
+  peer_avg_usd: number | null
+}
+
+async function rpc<T>(fn: string, args?: Record<string, unknown>): Promise<T[]> {
+  const supabase = await createSupabaseServer()
+  const { data, error } = await supabase.rpc(fn, args)
+  if (error) throw new Error(`${fn}: ${error.message}`)
+  return (data ?? []) as T[]
+}
+
+export function listBillingMonths(): Promise<BillingMonthRow[]> {
+  return rpc<BillingMonthRow>("maint_billing_months")
+}
+
+export function listBillingPeriods(month: string): Promise<BillingPeriodRow[]> {
+  return rpc<BillingPeriodRow>("maint_billing_periods", { p_month: month })
+}
+
+export function listBillingFlags(
+  month: string,
+  includeWatch: boolean,
+): Promise<BillingFlagRow[]> {
+  return rpc<BillingFlagRow>("maint_billing_flags", {
+    p_month: month,
+    p_include_watch: includeWatch,
+  })
+}
+
+export function listFlagItems(
+  customerId: number,
+  month: string,
+): Promise<FlagItemRow[]> {
+  return rpc<FlagItemRow>("maint_billing_flag_items", {
+    p_customer_id: customerId,
+    p_month: month,
+  })
+}
+
+/** '2026-06-01' -> 'Jun 2026' */
+export function formatMonth(monthDate: string): string {
+  const d = new Date(monthDate.slice(0, 10) + "T12:00:00Z")
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(d)
+}

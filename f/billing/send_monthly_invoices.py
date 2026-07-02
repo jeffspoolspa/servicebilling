@@ -89,18 +89,46 @@ def main(
             FROM billing_audit.maintenance_invoices mi
             LEFT JOIN public."Customers" c ON c.qbo_customer_id = mi.qbo_customer_id
             WHERE mi.billing_month = %s AND mi.send_status = 'pending'
+              -- HARD RULE (billing audit): an unreviewed HIGH CPV flag on this
+              -- customer-month holds the send. Rows stay 'pending' and get picked
+              -- up by the next run once reviewed in /maintenance/billing/flags.
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM billing_audit.customer_month_audit a
+                  JOIN public."Customers" cc ON cc.id = a.customer_id
+                  WHERE cc.qbo_customer_id = mi.qbo_customer_id
+                    AND a.month = mi.billing_month::date
+                    AND a.flag_level = 'HIGH'
+                    AND a.audit_status = 'flagged'
+              )
             ORDER BY mi.customer_name
             """,
             (billing_date,),
         )
         invoices = cur.fetchall()
-        print(f"{len(invoices)} invoices in pending state for {billing_month}")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS held
+            FROM billing_audit.maintenance_invoices mi
+            JOIN public."Customers" c ON c.qbo_customer_id = mi.qbo_customer_id
+            JOIN billing_audit.customer_month_audit a
+              ON a.customer_id = c.id AND a.month = mi.billing_month::date
+             AND a.flag_level = 'HIGH' AND a.audit_status = 'flagged'
+            WHERE mi.billing_month = %s AND mi.send_status = 'pending'
+            """,
+            (billing_date,),
+        )
+        held_high_flag = int(cur.fetchone()["held"])
+        print(f"{len(invoices)} invoices in pending state for {billing_month} "
+              f"({held_high_flag} held on unreviewed HIGH flags)")
 
         if dry_run:
             return {
                 "dry_run": True, "billing_month": billing_month,
                 "memo_stamp": memo_result,
                 "would_send": len(invoices),
+                "held_high_flag": held_high_flag,
                 "invoices": [
                     {"customer": inv["customer_name"], "invoice_id": inv["qbo_invoice_id"],
                      "email": inv["email"],
@@ -114,6 +142,7 @@ def main(
             "sent": 0, "skipped_already_sent": 0, "skipped_already_emailed_qbo": 0,
             "skipped_already_paid": 0, "skipped_balance_check_failed": 0,
             "skipped_no_email": 0, "failed": 0, "errors": [],
+            "held_high_flag": held_high_flag,
         }
 
         for inv in invoices:

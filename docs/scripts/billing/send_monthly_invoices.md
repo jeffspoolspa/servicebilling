@@ -7,7 +7,7 @@
 
 ## Purpose
 
-Emails the month's maintenance invoices to customers via QBO's invoice-send endpoint, with guardrails so nothing is sent twice or sent when inappropriate. First stamps memos ([stamp_invoice_memos](stamp_invoice_memos.md)). Then, for each `pending` invoice: verifies live QBO state and skips if already emailed (`EmailStatus=EmailSent`), already paid (balance <= 0), already in the send log, or has no email on file (held with reason). Every outcome is recorded in `billing.invoice_send_log` and reflected on `maintenance_invoices.send_status`.
+Emails the month's maintenance invoices to customers via QBO's invoice-send endpoint, with guardrails so nothing is sent twice or sent when inappropriate. First stamps memos ([stamp_invoice_memos](stamp_invoice_memos.md)). Then, for each `pending` invoice: verifies live QBO state and skips if already emailed (`EmailStatus=EmailSent`), already paid (balance <= 0), already in the send log, or has no email on file (held with reason). Customer-months with an unreviewed HIGH flag in `billing_audit.customer_month_audit` are excluded up front — they stay `pending` and send on the next run after review in `/maintenance/billing/flags`; the count is returned as `held_high_flag`. Every outcome is recorded in `billing.invoice_send_log` and reflected on `maintenance_invoices.send_status`.
 
 ## Reads
 - `billing_audit.maintenance_invoices` (the month's `send_status='pending'`)

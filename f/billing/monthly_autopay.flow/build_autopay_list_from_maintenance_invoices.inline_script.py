@@ -14,6 +14,12 @@ def main(
     Pulls ALL unpaid maintenance invoices (current + prior months) for each
     autopay customer.  Only maintenance invoices are included (sourced from
     billing_audit.maintenance_invoices).
+
+    HARD RULE (billing audit): a customer-month with an unreviewed HIGH CPV flag
+    (billing_audit.customer_month_audit, flag_level='HIGH', audit_status='flagged')
+    is excluded from the charge list until reviewed in /maintenance/billing/flags.
+    The hold is per invoice-month: the flagged month's invoice is held, the
+    customer's other unpaid months still charge.
     """
     month_name = datetime.strptime(billing_month, "%Y-%m").strftime("%B %Y")
     billing_month_date = f"{billing_month}-01"
@@ -42,6 +48,16 @@ def main(
             FROM billing_audit.maintenance_invoices mi
             JOIN billing.autopay_customers ac ON mi.qbo_customer_id = ac.qbo_customer_id
             WHERE COALESCE(mi.balance_due, mi.invoice_total) > 0
+              -- HIGH-flag hold: unreviewed CPV flag on this customer-month
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM billing_audit.customer_month_audit a
+                  JOIN public."Customers" c ON c.id = a.customer_id
+                  WHERE c.qbo_customer_id = mi.qbo_customer_id
+                    AND a.month = mi.billing_month::date
+                    AND a.flag_level = 'HIGH'
+                    AND a.audit_status = 'flagged'
+              )
         """
 
         if test_mode and test_qbo_customer_id:
@@ -51,6 +67,19 @@ def main(
             cur.execute(base_query + " ORDER BY mi.billing_month, mi.customer_name")
 
         rows = cur.fetchall()
+
+        # Count what the HIGH-flag hold excluded, so the run summary surfaces it
+        cur.execute("""
+            SELECT COUNT(DISTINCT mi.qbo_customer_id)
+            FROM billing_audit.maintenance_invoices mi
+            JOIN billing.autopay_customers ac ON mi.qbo_customer_id = ac.qbo_customer_id
+            JOIN public."Customers" c ON c.qbo_customer_id = mi.qbo_customer_id
+            JOIN billing_audit.customer_month_audit a
+              ON a.customer_id = c.id AND a.month = mi.billing_month::date
+             AND a.flag_level = 'HIGH' AND a.audit_status = 'flagged'
+            WHERE COALESCE(mi.balance_due, mi.invoice_total) > 0
+        """)
+        held_high_flag = cur.fetchone()[0]
 
         customer_map = {}
         for row in rows:
@@ -141,6 +170,7 @@ def main(
         "test_mode": test_mode, "total_customers": len(customers),
         "good_standing": good_count, "payment_issue_customers": issue_count,
         "customers_with_outstanding_maint": customers_with_outstanding,
+        "held_high_flag_customers": held_high_flag,
         "skipped_already_processed": len(skipped_terminal),
         "skipped_terminal_details": skipped_terminal[:10],
         "customers": customers

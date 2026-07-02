@@ -200,10 +200,12 @@ Pool maintenance: scheduled visits, technician routes, chemistry readings, consu
 - `/routes/map` — all-routes territory overview: every active stop on one map colored by office, cross-office outliers flagged (a stop sitting in another office's cluster), + per-route geographic-dispersion table. Reads `public.v_route_stops` / `public.v_route_load`.
 - `/techs` — technician list
 - `/visits`, `/visits/[id]` — visit history + detail
+- `/billing` — the monthly-maintenance-billing surface: one row per `billing_audit.task_billing_periods` invoice promise for the selected month (expected labor/consumables/total, ION invoice sum from `ion_task_transactions` with match indicator, linked QBO invoice from `billing.invoices`, derived processing status pending → synced_to_qbo → processed → paid), plus dry-run/live buttons that trigger the existing `f/billing/monthly_autopay` flow and `f/billing/send_monthly_invoices` script. Reads via the `public.maint_billing_*` SECURITY DEFINER RPCs (billing_audit is not PostgREST-exposed). See [monthly-maintenance-billing](flows/monthly-maintenance-billing/index.md).
+- `/billing/flags`, `/billing/flags/[customerId]` — CPV billing-audit flag review (`billing_audit.customer_month_audit`): CPV vs peer median, fleet/self z, per-item drill-down vs the customer's usual month + peer average; mark reviewed/resolved with a note. An unreviewed HIGH flag holds that customer-month out of autopay + invoice sending (enforced in the Windmill engines).
 - `/inventory` — maintenance inventory snapshot
 
 **API endpoints**:
-- None directly under `app/api/maintenance/` — maintenance UIs query Supabase directly via `lib/queries/`
+- `app/api/maintenance-billing/*` — `flags/review` (flag review RPC), `autopay` + `send` (trigger the existing Windmill engines for a month; dry-run by default). Everything else queries Supabase directly via `lib/queries/`.
 
 **Windmill scripts**:
 - ION flows: `f/ION/visits`, `f/ION/work_orders`, `f/ION/consumables_usage`, `f/ION/refresh_stale_work_orders`

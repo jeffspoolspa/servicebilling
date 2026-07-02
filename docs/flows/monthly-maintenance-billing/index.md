@@ -5,7 +5,7 @@
 > Verification: [verified] for log-based ingestion + per-task LABOR reconcile (May 2026, 473/475 tasks exact); [design] for the canonical service-type/consumable tables, the consumables-quantity reconcile, and the full historical re-ingest
 > Last verified: 2026-06-03
 > Trigger: monthly (after the month closes); ingestion can run daily
-> Code location: `f/ION/ingest_day_logs`, `f/ION/api/{list_day_logs,get_log_detail}`, `f/billing_audit/{build_task_billing_periods,reconcile_billing_periods}`, charging via `f/billing/monthly_autopay`
+> Code location: `f/ION/ingest_day_logs`, `f/ION/api/{list_day_logs,get_log_detail}`, `f/billing_audit/{build_task_billing_periods,reconcile_billing_periods}`, charging via `f/billing/monthly_autopay`; UI at `app/(shell)/maintenance/billing/` (billing-months view + flag review + autopay/send orchestration, reading via the `public.maint_billing_*` RPCs)
 > Entities: [Visit](../../entities/visit.md), [Task](../../entities/task.md), [Task Billing Period](../../entities/task-billing-period.md), [Invoice](../../entities/invoice.md), [Autopay Transaction](../../entities/autopay-transaction.md)
 
 **One-line purpose:** ION services pools all month and bills one invoice per task; we

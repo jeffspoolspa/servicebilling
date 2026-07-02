@@ -48,3 +48,15 @@
 Per reconciled invoice: apply credits → autopay decision → charge (card/ACH) or invoice-only → send →
 reflect balance. Engine: [monthly-autopay](../monthly-autopay.md). Autopay roster is per-customer;
 processing is per-invoice (per task).
+
+**HIGH-flag hold (hard rule):** a customer-month with an unreviewed HIGH flag in
+`billing_audit.customer_month_audit` (`flag_level='HIGH'`, `audit_status='flagged'`) is excluded
+from the autopay charge list AND from `send_monthly_invoices` until someone marks it reviewed
+(via `/maintenance/billing/flags`). The hold is per invoice-month: the flagged month is held,
+the customer's other unpaid months still process. Held invoices stay `pending` and are picked
+up by the next run after review — no state to reset.
+
+**Processing status (derived, UI-only):** the `/maintenance/billing` view derives
+pending → synced_to_qbo (`qbo_invoice_id` set) → processed (confirmed non-dry-run
+`autopay_transactions` charge OR invoice emailed) → paid (`billing.invoices.balance <= 0`)
+in `public.maint_billing_periods`. Nothing stores this — the sources of truth stay where they are.
