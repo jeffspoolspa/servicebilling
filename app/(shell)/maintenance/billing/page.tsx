@@ -1,6 +1,4 @@
-import Link from "next/link"
 import { Card } from "@/components/ui/card"
-import { Pill } from "@/components/ui/pill"
 import { formatCurrency } from "@/lib/utils/format"
 import {
   listBillingMonths,
@@ -9,7 +7,6 @@ import {
   type BillingPeriodRow,
   type ProcessingStatus,
 } from "./_lib/queries"
-import { STATUS_LABEL, STATUS_TONE } from "./_lib/status"
 import { MonthSelect } from "./_components/month-select"
 import { RefreshButton } from "./_components/refresh-button"
 import { BillsTable, type CustomerBill } from "./_components/bills-table"
@@ -85,21 +82,6 @@ export default async function MaintenanceBillingPage({
       (!q || (r.customer_name ?? "").toLowerCase().includes(q)),
   )
 
-  const counts: Record<ProcessingStatus, number> = {
-    pending: 0,
-    held_for_review: 0,
-    ready: 0,
-    processed: 0,
-    paid: 0,
-  }
-  let holdCount = 0
-  let ionMismatch = 0
-  for (const r of all) {
-    counts[r.processing_status]++
-    if (r.high_flag_hold) holdCount++
-    if (r.ion_match === "mismatch") ionMismatch++
-  }
-
   // One row per customer; tasks + calendar live in the expansion
   const byCustomer = new Map<string, BillingPeriodRow[]>()
   for (const r of rows) {
@@ -154,13 +136,6 @@ export default async function MaintenanceBillingPage({
       })),
     }))
 
-  const baseParams = (over: Record<string, string | undefined>) => {
-    const p = new URLSearchParams()
-    const merged = { month: selected, status: sp.status, hold: sp.hold, q: sp.q, ...over }
-    for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v)
-    return `/maintenance/billing?${p.toString()}` as never
-  }
-
   return (
     <div className="px-7 pt-5 pb-10 space-y-4">
       <div className="flex items-end justify-between gap-4 flex-wrap">
@@ -177,45 +152,6 @@ export default async function MaintenanceBillingPage({
           <MonthSelect months={monthOptions} value={selected} />
         </div>
         <RefreshButton month={selected} />
-      </div>
-
-      {holdCount > 0 && (
-        <Card className="px-4 py-3 border-coral/30 bg-coral/5 flex items-center justify-between">
-          <div className="text-[13px] text-coral">
-            {monthMeta.high_hold_customers} customer-month(s) have an unreviewed HIGH
-            billing-audit flag — held from autopay and invoice sending ({holdCount}{" "}
-            period{holdCount === 1 ? "" : "s"} affected).
-          </div>
-          <Link
-            href={`/maintenance/billing/review?month=${selected}` as never}
-            className="text-[12px] text-coral underline underline-offset-2 shrink-0"
-          >
-            Review
-          </Link>
-        </Card>
-      )}
-
-      <div className="flex items-center gap-2 flex-wrap">
-        <Link href={baseParams({ status: undefined, hold: undefined })}>
-          <Pill tone={!statusFilter && !holdOnly ? "cyan" : "neutral"}>all {all.length}</Pill>
-        </Link>
-        {STATUSES.map((s) => (
-          <Link key={s} href={baseParams({ status: s, hold: undefined })}>
-            <Pill tone={statusFilter === s ? STATUS_TONE[s] : "neutral"} dot>
-              {STATUS_LABEL[s]} {counts[s]}
-            </Pill>
-          </Link>
-        ))}
-        <Link href={baseParams({ status: undefined, hold: "1" })}>
-          <Pill tone={holdOnly ? "coral" : "neutral"} dot>
-            holds {holdCount}
-          </Pill>
-        </Link>
-        {ionMismatch > 0 && (
-          <span className="text-[11px] text-ink-mute ml-2">
-            {ionMismatch} ION amount mismatch{ionMismatch === 1 ? "" : "es"}
-          </span>
-        )}
       </div>
 
       <BillsTable customers={customers} month={selected} />

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import {
@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { formatCurrency } from "@/lib/utils/format"
+import { cn } from "@/lib/utils/cn"
 import { STATUS_LABEL, STATUS_TONE } from "../_lib/status"
 import type { ProcessingStatus } from "../_lib/queries"
 
@@ -54,11 +55,21 @@ interface VisitDay {
   visit_date: string
   service_names: string | null
   readings: Record<string, number> | null
-  chems: { item: string; qty: number; cents: number | null }[] | null
+  chems:
+    | { item: string; qty: number; cents: number | null; unit_cents: number | null; category: string | null }[]
+    | null
   chem_total_cents: number
 }
 
 const ION_TONE = { match: "grass", mismatch: "coral", missing: "neutral" } as const
+// consumables.category -> short tag shown next to each chemical line
+const CHEM_TAG: Record<string, { label: string; tone: "cyan" | "indigo" | "neutral" | "teal" | "sun" }> = {
+  core_chemical: { label: "core", tone: "cyan" },
+  specialty_chemical: { label: "specialty", tone: "indigo" },
+  replacement_part: { label: "part", tone: "neutral" },
+  spa: { label: "spa", tone: "teal" },
+  testing: { label: "testing", tone: "sun" },
+}
 // display order + short labels for the readings block of the calendar
 const READING_ORDER: [string, string][] = [
   ["Free Chlorine", "FC"],
@@ -72,6 +83,54 @@ function cents(v: number | null | undefined): string {
   return v == null ? "—" : formatCurrency(v / 100)
 }
 
+// Sortable columns for the Bills table (replaces the old status-filter chips).
+type SortKey = "name" | "tasks" | "visits" | "labor" | "chems" | "expected" | "status"
+const STATUS_ORDER: ProcessingStatus[] = [
+  "pending",
+  "held_for_review",
+  "ready",
+  "processed",
+  "paid",
+]
+const COLUMNS: { key: SortKey | null; label: string; align: "left" | "right" }[] = [
+  { key: "name", label: "Customer", align: "left" },
+  { key: "tasks", label: "Tasks", align: "right" },
+  { key: "visits", label: "Visits", align: "right" },
+  { key: "labor", label: "Labor", align: "right" },
+  { key: "chems", label: "Chems", align: "right" },
+  { key: "expected", label: "Expected", align: "right" },
+  { key: null, label: "QBO", align: "left" },
+  { key: "status", label: "Status", align: "left" },
+]
+// first click: name/status ascend, money/counts descend (largest first)
+const DEFAULT_DIR: Record<SortKey, "asc" | "desc"> = {
+  name: "asc",
+  status: "asc",
+  tasks: "desc",
+  visits: "desc",
+  labor: "desc",
+  chems: "desc",
+  expected: "desc",
+}
+function sortValue(c: CustomerBill, key: SortKey): string | number {
+  switch (key) {
+    case "name":
+      return c.name.toLowerCase()
+    case "tasks":
+      return c.tasks.length
+    case "visits":
+      return c.visits
+    case "labor":
+      return c.labor_cents
+    case "chems":
+      return c.chem_cents
+    case "expected":
+      return c.expected_cents
+    case "status":
+      return Math.min(...c.statuses.map((s) => STATUS_ORDER.indexOf(s)))
+  }
+}
+
 /**
  * The Bills table: one collapsible row per customer. Click a row to reveal the
  * task list (a QC task shows here — and as a second ION invoice chip on the
@@ -80,6 +139,10 @@ function cents(v: number | null | undefined): string {
  */
 export function BillsTable({ customers, month }: { customers: CustomerBill[]; month: string }) {
   const [open, setOpen] = useState<Set<string>>(new Set())
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
+    key: "name",
+    dir: "asc",
+  })
 
   function toggle(key: string) {
     const next = new Set(open)
@@ -88,30 +151,62 @@ export function BillsTable({ customers, month }: { customers: CustomerBill[]; mo
     setOpen(next)
   }
 
+  function sortBy(key: SortKey) {
+    setSort((s) =>
+      s.key === key
+        ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: DEFAULT_DIR[key] },
+    )
+  }
+
+  const sorted = useMemo(() => {
+    const arr = [...customers]
+    arr.sort((a, b) => {
+      const av = sortValue(a, sort.key)
+      const bv = sortValue(b, sort.key)
+      const cmp =
+        typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number)
+      return sort.dir === "asc" ? cmp : -cmp
+    })
+    return arr
+  }, [customers, sort])
+
   return (
     <Card>
       <table className="w-full text-[12px]">
         <thead>
           <tr className="text-left text-ink-mute border-b border-line-soft">
-            <th className="px-4 py-2 font-medium">Customer</th>
-            <th className="px-4 py-2 font-medium text-right">Visits</th>
-            <th className="px-4 py-2 font-medium text-right">Labor</th>
-            <th className="px-4 py-2 font-medium text-right">Chems</th>
-            <th className="px-4 py-2 font-medium text-right">Expected</th>
-            <th className="px-4 py-2 font-medium text-right">ION invoice</th>
-            <th className="px-4 py-2 font-medium">QBO</th>
-            <th className="px-4 py-2 font-medium">Status</th>
+            {COLUMNS.map((col) => {
+              const active = col.key != null && sort.key === col.key
+              return (
+                <th
+                  key={col.label}
+                  className={cn(
+                    "px-4 py-2 font-medium",
+                    col.align === "right" && "text-right",
+                    col.key && "cursor-pointer select-none hover:text-ink",
+                    active && "text-ink",
+                  )}
+                  onClick={col.key ? () => sortBy(col.key!) : undefined}
+                >
+                  {col.label}
+                  {active && (
+                    <span className="ml-1 text-ink-mute">{sort.dir === "asc" ? "▲" : "▼"}</span>
+                  )}
+                </th>
+              )
+            })}
           </tr>
         </thead>
         <tbody>
-          {customers.length === 0 && (
+          {sorted.length === 0 && (
             <tr>
               <td colSpan={8} className="px-4 py-8 text-center text-ink-mute">
-                No bills match this filter.
+                No bills this month.
               </td>
             </tr>
           )}
-          {customers.map((c) => (
+          {sorted.map((c) => (
             <CustomerRows
               key={c.key}
               c={c}
@@ -155,10 +250,8 @@ function CustomerRows({
               hold
             </Pill>
           )}
-          {c.tasks.length > 1 && (
-            <span className="ml-2 text-[10px] text-ink-mute">{c.tasks.length} tasks</span>
-          )}
         </td>
+        <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">{c.tasks.length}</td>
         <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">{c.visits}</td>
         <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">
           {cents(c.labor_cents)}
@@ -168,16 +261,6 @@ function CustomerRows({
         </td>
         <td className="px-4 py-2.5 text-right font-mono num text-ink">
           {cents(c.expected_cents)}
-        </td>
-        <td className="px-4 py-2.5 text-right">
-          <span className="font-mono num text-ink-dim">{cents(c.ion_cents)}</span>
-          <div className="mt-0.5 flex flex-wrap gap-1 justify-end">
-            {c.ion_chips.map((chip) => (
-              <Pill key={chip.number} tone={ION_TONE[chip.match]}>
-                #{chip.number}
-              </Pill>
-            ))}
-          </div>
         </td>
         <td className="px-4 py-2.5 font-mono text-xs text-ink-dim">{c.qbo_docs || "—"}</td>
         <td className="px-4 py-2.5">
@@ -302,10 +385,15 @@ function VisitCalendar({ customerId, month }: { customerId: number; month: strin
   const readingRows = READING_ORDER.filter(([name]) =>
     days.some((d) => d.readings?.[name] != null),
   )
-  const itemTotals = new Map<string, { qty: number; cents: number }>()
+  const itemTotals = new Map<
+    string,
+    { qty: number; cents: number; unit_cents: number | null; category: string | null }
+  >()
   for (const d of days) {
     for (const ch of d.chems ?? []) {
-      const t = itemTotals.get(ch.item) ?? { qty: 0, cents: 0 }
+      const t =
+        itemTotals.get(ch.item) ??
+        { qty: 0, cents: 0, unit_cents: ch.unit_cents ?? null, category: ch.category ?? null }
       t.qty += Number(ch.qty)
       t.cents += ch.cents ?? 0
       itemTotals.set(ch.item, t)
@@ -319,16 +407,13 @@ function VisitCalendar({ customerId, month }: { customerId: number; month: strin
     }
   }
   const grandTotal = days.reduce((s, d) => s + Number(d.chem_total_cents), 0)
-  const totalQty = [...itemTotals.values()].reduce((s, t) => s + t.qty, 0)
 
   return (
     <div className="rounded-lg border border-line-soft overflow-hidden">
       <Table className="text-[11px]">
         <TableHeader>
           <TableRow className="hover:bg-transparent bg-white/[0.02]">
-            <TableHead className="sticky left-0 bg-bg-elev z-10 min-w-[180px]">
-              Visit date
-            </TableHead>
+            <TableHead className="sticky left-0 bg-bg-elev z-10 w-px">Visit date</TableHead>
             {days.map((d) => {
               const qc = d.service_names?.toUpperCase().includes("QUALITY CONTROL")
               return (
@@ -353,7 +438,7 @@ function VisitCalendar({ customerId, month }: { customerId: number; month: strin
         </TableHeader>
         <TableBody>
           {readingRows.length > 0 && (
-            <TableRow className="hover:bg-transparent">
+            <TableRow className="hover:bg-white/[0.04] bg-white/[0.04]">
               <TableCell
                 colSpan={days.length + 3}
                 className="sticky left-0 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute"
@@ -365,17 +450,26 @@ function VisitCalendar({ customerId, month }: { customerId: number; month: strin
           {readingRows.map(([name, label]) => (
             <TableRow key={name} className="text-ink-dim">
               <TableCell className="sticky left-0 bg-bg-elev z-10">{label}</TableCell>
-              {days.map((d) => (
-                <TableCell key={d.visit_date} className="text-right px-2 font-mono num">
-                  {d.readings?.[name] ?? ""}
-                </TableCell>
-              ))}
+              {days.map((d) => {
+                const v = d.readings?.[name]
+                return (
+                  <TableCell
+                    key={d.visit_date}
+                    className={cn(
+                      "text-right px-2 font-mono num",
+                      v != null && "border-l border-line-soft/30",
+                    )}
+                  >
+                    {v ?? ""}
+                  </TableCell>
+                )
+              })}
               <TableCell />
               <TableCell />
             </TableRow>
           ))}
           {items.length > 0 && (
-            <TableRow className="hover:bg-transparent">
+            <TableRow className="hover:bg-white/[0.04] bg-white/[0.04]">
               <TableCell
                 colSpan={days.length + 1}
                 className="sticky left-0 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute"
@@ -392,44 +486,67 @@ function VisitCalendar({ customerId, month }: { customerId: number; month: strin
           )}
           {items.map(([item, tot]) => (
             <TableRow key={item} className="text-ink-dim">
-              <TableCell
-                className="sticky left-0 bg-bg-elev z-10 max-w-[220px] truncate"
-                title={item}
-              >
+              <TableCell className="sticky left-0 bg-bg-elev z-10" title={item}>
                 {item}
+                {tot.unit_cents != null && (
+                  <span className="ml-1 text-ink-mute">
+                    ({formatCurrency(tot.unit_cents / 100)})
+                  </span>
+                )}
+                {tot.category && CHEM_TAG[tot.category] && (
+                  <Pill tone={CHEM_TAG[tot.category].tone} className="ml-2 align-middle">
+                    {CHEM_TAG[tot.category].label}
+                  </Pill>
+                )}
               </TableCell>
-              {days.map((d) => (
-                <TableCell key={d.visit_date} className="text-right px-2 font-mono num">
-                  {qtyByItemDate.get(`${item}|${d.visit_date}`) ?? ""}
-                </TableCell>
-              ))}
-              <TableCell className="text-right pl-4 font-mono num text-ink">
+              {days.map((d) => {
+                const qty = qtyByItemDate.get(`${item}|${d.visit_date}`)
+                return (
+                  <TableCell
+                    key={d.visit_date}
+                    className={cn(
+                      "text-right px-2 font-mono num",
+                      qty != null && "border-l border-line-soft/30",
+                    )}
+                  >
+                    {qty ?? ""}
+                  </TableCell>
+                )
+              })}
+              <TableCell className="text-right pl-4 font-mono num text-ink border-l border-line-soft/30">
                 {tot.qty}
               </TableCell>
-              <TableCell className="text-right font-mono num text-ink">
+              <TableCell className="text-right font-mono num text-ink border-l border-line-soft/30">
                 {formatCurrency(tot.cents / 100)}
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
-        <TableFooter>
-          <TableRow className="text-ink hover:bg-transparent">
-            <TableCell className="sticky left-0 bg-bg-elev z-10">Chemicals $ / visit</TableCell>
-            {days.map((d) => (
-              <TableCell key={d.visit_date} className="text-right px-2 font-mono num">
-                {Number(d.chem_total_cents) > 0
-                  ? formatCurrency(Number(d.chem_total_cents) / 100)
-                  : ""}
+        {items.length > 0 && (
+          <TableFooter>
+            <TableRow className="text-ink hover:bg-transparent">
+              <TableCell className="sticky left-0 bg-bg-elev z-10">Chemicals $ / visit</TableCell>
+              {days.map((d) => {
+                const amt = Number(d.chem_total_cents)
+                return (
+                  <TableCell
+                    key={d.visit_date}
+                    className={cn(
+                      "text-right px-2 font-mono num",
+                      amt > 0 && "border-l border-line-soft/30",
+                    )}
+                  >
+                    {amt > 0 ? formatCurrency(amt / 100) : ""}
+                  </TableCell>
+                )
+              })}
+              <TableCell />
+              <TableCell className="text-right font-mono num font-semibold border-l border-line-soft/30">
+                {formatCurrency(grandTotal / 100)}
               </TableCell>
-            ))}
-            <TableCell className="text-right pl-4 font-mono num font-semibold">
-              {totalQty > 0 ? totalQty : ""}
-            </TableCell>
-            <TableCell className="text-right font-mono num font-semibold">
-              {formatCurrency(grandTotal / 100)}
-            </TableCell>
-          </TableRow>
-        </TableFooter>
+            </TableRow>
+          </TableFooter>
+        )}
       </Table>
     </div>
   )
