@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { SortableHeader } from "@/components/ui/sortable-header"
 import { formatCurrency } from "@/lib/utils/format"
+import { MaintProgressModal, type RunItem, type RunResult } from "./maint-progress-modal"
 
 interface ProcessCustomer {
   qbo_customer_id: string
@@ -54,6 +55,10 @@ export function ProcessActions({
   const [dryRun, setDryRun] = useState(true)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<string | null>(null)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [runItems, setRunItems] = useState<RunItem[]>([])
+  const [runResults, setRunResults] = useState<RunResult[] | null>(null)
+  const [runError, setRunError] = useState<string | null>(null)
 
   const allIds = customers.map((c) => c.qbo_customer_id)
   const allSelected = selected.size === allIds.length && allIds.length > 0
@@ -82,6 +87,24 @@ export function ProcessActions({
       return
     setBusy(true)
     setResult(null)
+    if (!dryRun) {
+      // live run -> batch progress modal (rows advance via Realtime/polling
+      // on the attempt WAL; the sync response is the authoritative finish)
+      setRunItems(
+        customers
+          .filter((c) => selected.has(c.qbo_customer_id))
+          .flatMap((c) =>
+            c.invoice_list.map((inv) => ({
+              period_id: inv.period_id,
+              doc_number: inv.doc_number,
+              customer_name: c.customer_name,
+            })),
+          ),
+      )
+      setRunResults(null)
+      setRunError(null)
+      setModalOpen(true)
+    }
     try {
       const resp = await fetch("/api/maintenance-billing/process", {
         method: "POST",
@@ -91,9 +114,12 @@ export function ProcessActions({
       const json = await resp.json()
       if (!resp.ok) throw new Error(json.error ?? `HTTP ${resp.status}`)
       setResult(json.message ?? "Processing started.")
+      if (!dryRun) setRunResults((json.results ?? []) as RunResult[])
       router.refresh()
     } catch (e) {
-      setResult(`Failed: ${e instanceof Error ? e.message : String(e)}`)
+      const msg = e instanceof Error ? e.message : String(e)
+      setResult(`Failed: ${msg}`)
+      if (!dryRun) setRunError(msg)
     } finally {
       setBusy(false)
     }
@@ -124,6 +150,14 @@ export function ProcessActions({
 
   return (
     <div className="space-y-3">
+      <MaintProgressModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        items={runItems}
+        results={runResults}
+        runError={runError}
+        running={busy}
+      />
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="text-[12px] text-ink-mute">
           {selected.size} of {customers.length} selected ·{" "}
