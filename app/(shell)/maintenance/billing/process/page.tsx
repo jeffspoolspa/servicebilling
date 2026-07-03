@@ -31,6 +31,7 @@ export default async function ProcessPage({
 }: {
   searchParams: Promise<{
     month?: string
+    q?: string
     segment?: string
     autopay?: string
     office?: string
@@ -79,7 +80,10 @@ export default async function ProcessPage({
     ? sp.frequency
     : undefined
 
+  const q = (sp.q ?? "").trim().toLowerCase()
+
   const matches = (p: BillingPeriodRow) =>
+    (!q || (p.customer_name ?? "").toLowerCase().includes(q)) &&
     (!segment || p.segment === segment) &&
     (autopay === undefined || p.on_autopay === autopay) &&
     (!office || p.office === office) &&

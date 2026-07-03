@@ -1,4 +1,5 @@
 import { Card } from "@/components/ui/card"
+import { SearchBar } from "@/components/ui/search-bar"
 import { Pill } from "@/components/ui/pill"
 import { listAutopayCandidates, listAutopayCustomers } from "../_lib/queries"
 import { AutopayAdd, RosterRowActions } from "../_components/autopay-manage"
@@ -14,13 +15,22 @@ const STATUS_TONE: Record<string, "grass" | "coral" | "sun" | "neutral"> = {
 
 /** The autopay roster (billing.autopay_customers): who is enrolled and the
  *  card/ACH their monthly charge hits. */
-export default async function AutopayRosterPage() {
+export default async function AutopayRosterPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>
+}) {
+  const sp = await searchParams
   const [roster, candidates] = await Promise.all([
     listAutopayCustomers(),
     listAutopayCandidates(),
   ])
   const active = roster.filter((r) => r.is_active !== false)
   const good = active.filter((r) => r.payment_status === "good").length
+  const q = (sp.q ?? "").trim().toLowerCase()
+  const shown = q
+    ? active.filter((r) => (r.customer_name ?? "").toLowerCase().includes(q))
+    : active
 
   return (
     <div className="px-7 pt-5 pb-10 space-y-4">
@@ -32,7 +42,10 @@ export default async function AutopayRosterPage() {
         </div>
       </div>
 
-      <AutopayAdd candidates={candidates} />
+      <div className="flex items-center gap-2 flex-wrap">
+        <SearchBar placeholder="Search customer…" className="w-56" />
+        <AutopayAdd candidates={candidates} />
+      </div>
 
       <Card>
         <table className="w-full text-[12px]">
@@ -47,14 +60,14 @@ export default async function AutopayRosterPage() {
             </tr>
           </thead>
           <tbody>
-            {active.length === 0 && (
+            {shown.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-ink-mute">
                   No autopay enrollments.
                 </td>
               </tr>
             )}
-            {active.map((r) => (
+            {shown.map((r) => (
               <tr
                 key={r.qbo_customer_id}
                 className="border-b border-line-soft/40 last:border-0 hover:bg-white/[0.02]"

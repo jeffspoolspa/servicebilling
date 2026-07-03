@@ -4,6 +4,7 @@ import { useCallback } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
+import { SearchBar } from "@/components/ui/search-bar"
 
 /**
  * URL-driven filter bar for the maintenance billing pages — the same shape as
@@ -47,6 +48,7 @@ export function BillingFilterBar({ filters }: { filters: FilterDef[] }) {
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex flex-wrap items-center gap-2">
+        <SearchBar placeholder="Search customer…" className="w-56" />
         {filters.map((f) => (
           <SelectFilter
             key={f.key}
