@@ -86,8 +86,9 @@ pending -> ion_matched -> [QBO link -> serial preprocess queue] -> needs_review 
    checks — `chem_flag` (the simple rule: month's net consumable bill trips
    `v_billing_review_flags`, > 2x the peer group's clean median AND >= $150, unreviewed;
    remediation = apply a DISCOUNT on the QBO invoice, leaving ION's record of what was sold
-   intact), ion amount vs expected, subtotal (per-row: ION amount vs the linked invoice's QBO
-   total — catches line items lost in the ION→QBO sync), reconcile verdict, sticky
+   intact), ion amount vs expected, subtotal (per-row: ION amount vs the linked invoice's
+   QBO SUBTOTAL — pre-tax, pre-discount, so tax and QBO-side discounts never trip it;
+   catches line items lost in the ION→QBO sync), reconcile verdict, sticky
    `credit_error` — and writes needs_review/ready_to_process. Never demotes `processed`;
    skips locked months. `reviewed_at` (manual mark-ready) passes the data-mismatch gates;
    `chem_flag` releases only via flag review (`customer_month_audit` reviewed/resolved).
