@@ -7,7 +7,6 @@ import { Card } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { SortableHeader } from "@/components/ui/sortable-header"
 import { formatCurrency } from "@/lib/utils/format"
-import { MaintRunTracker, type RunItem } from "./maint-progress-modal"
 
 interface ProcessCustomer {
   qbo_customer_id: string
@@ -55,9 +54,7 @@ export function ProcessActions({
   const [dryRun, setDryRun] = useState(true)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<string | null>(null)
-  const [runItems, setRunItems] = useState<RunItem[]>([])
-  const [runFired, setRunFired] = useState(false)
-  const [runError, setRunError] = useState<string | null>(null)
+
 
   const allIds = customers.map((c) => c.qbo_customer_id)
   const allSelected = selected.size === allIds.length && allIds.length > 0
@@ -86,23 +83,6 @@ export function ProcessActions({
       return
     setBusy(true)
     setResult(null)
-    if (!dryRun) {
-      // fire-and-forget (WO pattern): the route returns a jobId immediately;
-      // the modal tracks progress from the DB rows the engine writes
-      setRunItems(
-        customers
-          .filter((c) => selected.has(c.qbo_customer_id))
-          .flatMap((c) =>
-            c.invoice_list.map((inv) => ({
-              period_id: inv.period_id,
-              doc_number: inv.doc_number,
-              customer_name: c.customer_name,
-            })),
-          ),
-      )
-      setRunFired(false)
-      setRunError(null)
-    }
     try {
       const resp = await fetch("/api/maintenance-billing/process", {
         method: "POST",
@@ -112,11 +92,9 @@ export function ProcessActions({
       const json = await resp.json()
       if (!resp.ok) throw new Error(json.error ?? `HTTP ${resp.status}`)
       setResult(json.message ?? "Processing started.")
-      if (!dryRun) setRunFired(true)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setResult(`Failed: ${msg}`)
-      if (!dryRun) setRunError(msg)
     } finally {
       setBusy(false)
     }
@@ -183,12 +161,6 @@ export function ProcessActions({
           )}
         </div>
         <div className="flex items-center gap-3">
-          <MaintRunTracker
-            items={runItems}
-            runError={runError}
-            fired={runFired}
-            onDismiss={() => setRunItems([])}
-          />
           <label className="flex items-center gap-1.5 text-[12px] text-ink-mute cursor-pointer">
             <input
               type="checkbox"

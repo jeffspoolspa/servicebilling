@@ -4,6 +4,7 @@ import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils/cn"
 import { QueueChip } from "./_components/queue-chip"
+import { ProcessingChip } from "./_components/processing-chip"
 
 /**
  * Stage tabs WITHIN the maintenance billing module (mirrors service-billing's
@@ -48,6 +49,7 @@ export function BillingStageTabs() {
         )
       })}
       <QueueChip />
+      <ProcessingChip />
     </div>
   )
 }
