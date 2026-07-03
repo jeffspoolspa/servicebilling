@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Check, X, Loader2, AlertTriangle, CreditCard, Mail, Receipt } from "lucide-react"
 import { createSupabaseBrowser } from "@/lib/supabase/client"
 
@@ -56,9 +57,12 @@ function derive(r: Row): { kind: Kind; label: string; detail?: string } {
 }
 
 export function ProcessingChip() {
+  const router = useRouter()
   const [rows, setRows] = useState<Row[]>([])
   const [open, setOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement | null>(null)
+  const prevResolvedRef = useRef(0)
+  const lastRefreshRef = useRef(0)
 
   useEffect(() => {
     const sb = createSupabaseBrowser()
@@ -84,11 +88,24 @@ export function ProcessingChip() {
     return () => document.removeEventListener("mousedown", onClick)
   }, [open])
 
-  if (rows.length === 0) return null
-
   const derived = rows.map((r) => ({ r, d: derive(r) }))
   const active = derived.filter(({ d }) => d.kind === "running").length
   const resolved = derived.length - active
+
+  // rows fall off Ready / land in Processed AS the run works: refresh the
+  // page data when new rows resolve (throttled), and once more when the
+  // last one lands
+  useEffect(() => {
+    if (resolved === prevResolvedRef.current) return
+    prevResolvedRef.current = resolved
+    const now = Date.now()
+    if (active === 0 || now - lastRefreshRef.current > 4000) {
+      lastRefreshRef.current = now
+      router.refresh()
+    }
+  }, [resolved, active, router])
+
+  if (rows.length === 0) return null
 
   return (
     <div className="relative self-center" ref={panelRef}>
