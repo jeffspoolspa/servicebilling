@@ -255,3 +255,11 @@
     }
   }
 }
+
+  @keyframes sheet-in-right {
+    from { transform: translateX(24px); opacity: 0.6; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+  .animate-sheet-in-right {
+    animation: sheet-in-right 180ms ease-out;
+  }

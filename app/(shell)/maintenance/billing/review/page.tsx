@@ -11,7 +11,8 @@ import {
 } from "../_lib/queries"
 import { REASON_LABEL } from "../_lib/status"
 import { MonthSelect } from "../_components/month-select"
-import { ReviewQueueActions, RetryPreprocess } from "../_components/review-queue-actions"
+import { ReviewQueueActions } from "../_components/review-queue-actions"
+import { ReviewSheet } from "../_components/review-sheet"
 
 export const metadata = { title: "Maintenance · Needs review" }
 export const dynamic = "force-dynamic"
@@ -80,6 +81,13 @@ export default async function NeedsReviewPage({
         chem,
         notes: [...new Set(list.map((p) => p.reconcile_notes).filter(Boolean))] as string[],
         held_usd: list.reduce((s, p) => s + (p.qbo_total ?? 0), 0),
+        qbo_balance: list.reduce((s, p) => s + (p.qbo_balance ?? 0) * 100, 0),
+        tasks: list.map((p) => ({
+          period_id: p.id,
+          qbo_invoice_id: p.qbo_invoice_id,
+          doc_number: p.qbo_doc_number,
+          service_name: p.service_name,
+        })),
         customer_id: list[0].customer_id,
         qbo_customer_id: list[0].qbo_customer_id,
         ids: list.map((p) => p.id),
@@ -178,11 +186,7 @@ export default async function NeedsReviewPage({
                       </span>
                     )}
                   </div>
-                  {r.reasons.includes("reconcile_mismatch") && r.notes.length > 0 && (
-                    <div className="mt-1 text-[10px] text-ink-mute font-mono break-words">
-                      {r.notes.join(" · ")}
-                    </div>
-                  )}
+
                 </td>
                 <td className="px-4 py-2.5 text-right font-mono num text-ink">
                   {formatCurrency(r.expected / 100)}
@@ -197,21 +201,44 @@ export default async function NeedsReviewPage({
                   {r.qbo_docs || "—"}
                 </td>
                 <td className="px-4 py-2.5">
-                  {r.chemFlagged ? (
-                    <Link
-                      href={`/maintenance/billing/review/${r.customer_id}?month=${selected}` as never}
-                      className="text-[11px] px-2.5 py-1 rounded border border-coral/30 text-coral hover:bg-coral/10"
-                    >
-                      Review chems →
-                    </Link>
-                  ) : r.opError && r.qbo_customer_id ? (
-                    <span className="inline-flex items-center gap-2">
-                      <RetryPreprocess qboCustomerId={r.qbo_customer_id} month={selected} />
+                  <span className="inline-flex items-center gap-2">
+                    <ReviewSheet
+                      row={{
+                        name: r.name,
+                        month: selected,
+                        customer_id: r.customer_id,
+                        qbo_customer_id: r.qbo_customer_id ?? null,
+                        ids: r.ids,
+                        reasons: r.reasons,
+                        notes: r.notes,
+                        opError: r.opError,
+                        chemFlagged: r.chemFlagged,
+                        chem: r.chem
+                          ? {
+                              total_usd: r.chem.total_usd,
+                              median_usd: r.chem.median_usd,
+                              x_median: r.chem.x_median,
+                              peer_group: r.chem.peer_group,
+                            }
+                          : null,
+                        expected: r.expected,
+                        ion: r.ion,
+                        qbo_total: r.qbo_total,
+                        qbo_balance: r.qbo_balance,
+                        tasks: r.tasks,
+                      }}
+                    />
+                    {r.chemFlagged ? (
+                      <Link
+                        href={`/maintenance/billing/review/${r.customer_id}?month=${selected}` as never}
+                        className="text-[11px] px-2.5 py-1 rounded border border-coral/30 text-coral hover:bg-coral/10"
+                      >
+                        Chems →
+                      </Link>
+                    ) : (
                       <ReviewQueueActions ids={r.ids} />
-                    </span>
-                  ) : (
-                    <ReviewQueueActions ids={r.ids} />
-                  )}
+                    )}
+                  </span>
                 </td>
               </tr>
             ))}
