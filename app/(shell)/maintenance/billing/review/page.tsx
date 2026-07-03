@@ -5,6 +5,7 @@ import { formatCurrency } from "@/lib/utils/format"
 import {
   listBillingMonths,
   listBillingPeriods,
+  listChemFlags,
   formatMonth,
   type BillingPeriodRow,
 } from "../_lib/queries"
@@ -54,8 +55,12 @@ export default async function NeedsReviewPage({
     new Date().toISOString().slice(0, 7)
   const monthDate = `${selected}-01`
 
-  const periods = await listBillingPeriods(monthDate)
+  const [periods, chemFlags] = await Promise.all([
+    listBillingPeriods(monthDate),
+    listChemFlags(monthDate),
+  ])
   const held = periods.filter((p) => p.processing_status === "needs_review")
+  const chemByCustomer = new Map(chemFlags.map((f) => [f.customer_id, f]))
 
   // one row per customer; a customer releases as a unit
   const byCustomer = new Map<string, BillingPeriodRow[]>()
@@ -69,8 +74,10 @@ export default async function NeedsReviewPage({
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([name, list]) => {
       const reasons = [...new Set(list.map((p) => p.needs_review_reason).filter(Boolean))] as string[]
+      const chem = list[0].customer_id != null ? chemByCustomer.get(list[0].customer_id) : undefined
       return {
         name,
+        chem,
         customer_id: list[0].customer_id,
         ids: list.map((p) => p.id),
         reasons,
@@ -149,12 +156,19 @@ export default async function NeedsReviewPage({
                   )}
                 </td>
                 <td className="px-4 py-2.5">
-                  <div className="flex gap-1 flex-wrap">
+                  <div className="flex items-center gap-1 flex-wrap">
                     {r.reasons.map((reason) => (
                       <Pill key={reason} tone="coral">
                         {REASON_LABEL[reason] ?? reason}
                       </Pill>
                     ))}
+                    {r.chem && (
+                      <span className="text-[11px] text-ink-mute">
+                        chems {formatCurrency(r.chem.total_usd)} vs{" "}
+                        {formatCurrency(r.chem.median_usd)} {r.chem.peer_group.replace(/_/g, " ")}{" "}
+                        median ({r.chem.x_median}x)
+                      </span>
+                    )}
                   </div>
                 </td>
                 <td className="px-4 py-2.5 text-right font-mono num text-ink">

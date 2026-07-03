@@ -84,13 +84,18 @@ pending -> ion_matched -> [QBO link -> serial preprocess queue] -> needs_review 
 4. **Projection owns every transition — and every review gate evaluates AT PREPROCESS
    (`pre_processed_at` set), never earlier:** `billing_audit.project_maint_processing_status`
    checks — `chem_flag` (the simple rule: month's net consumable bill > 2x the peer group's
-   PLAIN median AND >= $150, unreviewed; provides-chems customers INCLUDED in the median
-   per Carter 2026-07-03. Computed from the snapshot chain, refreshed once per drain
-   tick / hourly reconcile / Refresh-bills: `customer_month_cpv_snapshot` (materialized
-   `v_customer_month_cpv` rollup) -> `chem_flag_medians` (one row per month+peer_group —
-   THE median query) -> `chem_flag_snapshot` (the flag set the projection reads);
-   remediation = apply a DISCOUNT on the QBO invoice, leaving ION's record of what was sold
-   intact), ion amount vs expected, subtotal (per-row: ION amount vs the linked invoice's
+   PLAIN median AND >= $150, unreviewed; provides-chems customers INCLUDED. LIVE, no refresh
+   step (Carter 2026-07-03): a trigger on `consumables_usage` maintains
+   `billing_audit.customer_month_chem_live` (qty x catalog price deltas, ~500 rows/month);
+   `v_chem_flag_medians` (one row per month+peer_group — THE median query) and
+   `v_chem_flags` are plain views over it, current with every ingested visit. Peer group
+   derives live from task tags (`tasks.frequency`/`days_per_week`) + `Customers.company`
+   via `v_customer_peer_group`. Drift backstop: `rebuild_customer_month_chem` trues up
+   from `v_customer_month_cpv` on the hourly reconcile. App surface:
+   `maint_billing_chem_medians` / `maint_billing_chem_flags`; the Needs Review card shows
+   "chems $X vs $Y median (Zx)". Remediation = apply a DISCOUNT on the QBO invoice,
+   leaving ION's record of what was sold intact),
+   ion amount vs expected, subtotal (per-row: ION amount vs the linked invoice's
    QBO SUBTOTAL — pre-tax, pre-discount, so tax and QBO-side discounts never trip it;
    catches line items lost in the ION→QBO sync), reconcile verdict, sticky
    `credit_error` — and writes needs_review/ready_to_process. Never demotes `processed`;

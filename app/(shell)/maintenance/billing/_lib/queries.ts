@@ -202,6 +202,20 @@ export function listAutopayCustomers(): Promise<AutopayCustomerRow[]> {
   return rpc<AutopayCustomerRow>("maint_billing_autopay_roster")
 }
 
+/** Live 2x-rule flag context (billing_audit.v_chem_flags — trigger-maintained
+ *  totals, medians recomputed per query, always current). */
+export interface ChemFlagRow {
+  customer_id: number
+  peer_group: string
+  total_usd: number
+  median_usd: number
+  x_median: number
+}
+
+export function listChemFlags(month: string): Promise<ChemFlagRow[]> {
+  return rpc<ChemFlagRow>("maint_billing_chem_flags", { p_month: month })
+}
+
 /** '2026-06-01' -> 'Jun 2026' */
 export function formatMonth(monthDate: string): string {
   const d = new Date(monthDate.slice(0, 10) + "T12:00:00Z")
