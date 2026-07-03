@@ -15,6 +15,7 @@ const TABS = [
   { href: "/maintenance/billing", label: "Bills" },
   { href: "/maintenance/billing/review", label: "Needs Review" },
   { href: "/maintenance/billing/process", label: "Ready to Process" },
+  { href: "/maintenance/billing/processed", label: "Processed" },
   { href: "/maintenance/billing/autopay", label: "Autopay" },
 ] as const
 

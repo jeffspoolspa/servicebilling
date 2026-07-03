@@ -27,8 +27,10 @@ charged). Per period:
    declined (terminal; bumps the roster's consecutive_declines +
    payment_status, then STILL sends the invoice email — the customer can
    pay it themselves; the attempt row keeps the decline and marks the email;
-   the period stays ready_to_process for a retry) | uncertain (retry with
-   same key) | success.
+   once the invoice email lands, the period moves to PROCESSED — invoice
+   delivered = the month's processing is done, collection tracks on the
+   invoice balance + roster payment_issue) | uncertain (retry with same
+   key) | success.
 4. Record the QBO Payment (CCTransId = charge id) — failure here =
    `payment_orphan`, human recovery only.
 5. **Receipt first** (`payment/{id}/send`), **then** the invoice copy
