@@ -128,9 +128,15 @@ export default async function MaintenanceBillingPage({
   const dir: "asc" | "desc" = sp.dir === "desc" ? "desc" : sp.dir === "asc" ? "asc" : "asc"
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1)
 
+  // Bills is the funnel's FRONT END: by default only periods that haven't
+  // preprocessed yet (pending/ion_matched) — rows fall off as the pipeline
+  // moves them to Needs Review / Ready to Process / Processed. An explicit
+  // status filter still shows any stage here.
   const rows = all.filter(
     (r) =>
-      (!statusFilter || r.processing_status === statusFilter) &&
+      (statusFilter
+        ? r.processing_status === statusFilter
+        : ["pending", "ion_matched"].includes(r.processing_status)) &&
       (!holdOnly || r.high_flag_hold) &&
       (!q || (r.customer_name ?? "").toLowerCase().includes(q)) &&
       (!segment || r.segment === segment) &&
