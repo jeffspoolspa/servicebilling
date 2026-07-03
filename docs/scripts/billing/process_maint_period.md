@@ -25,7 +25,10 @@ charged). Per period:
    dedupes on Request-Id), so a crash can never double-charge.
 3. Charge via Intuit Payments (card charges / ACH echecks). Classification:
    declined (terminal; bumps the roster's consecutive_declines +
-   payment_status) | uncertain (retry with same key) | success.
+   payment_status, then STILL sends the invoice email — the customer can
+   pay it themselves; the attempt row keeps the decline and marks the email;
+   the period stays ready_to_process for a retry) | uncertain (retry with
+   same key) | success.
 4. Record the QBO Payment (CCTransId = charge id) — failure here =
    `payment_orphan`, human recovery only.
 5. **Receipt first** (`payment/{id}/send`), **then** the invoice copy
