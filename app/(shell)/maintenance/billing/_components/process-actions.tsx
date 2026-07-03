@@ -124,6 +124,31 @@ export function ProcessActions({
     }
   }
 
+  async function holdSelected() {
+    const periodIds = customers
+      .filter((c) => selected.has(c.qbo_customer_id))
+      .flatMap((c) => c.invoice_list.map((inv) => inv.period_id))
+    if (periodIds.length === 0) return
+    setBusy(true)
+    setResult(null)
+    try {
+      const resp = await fetch("/api/maintenance-billing/periods/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: periodIds, status: "needs_review" }),
+      })
+      const json = await resp.json()
+      if (!resp.ok) throw new Error(json.error ?? `HTTP ${resp.status}`)
+      setResult(`Held ${json.updated} period(s) for review.`)
+      setSelected(new Set())
+      router.refresh()
+    } catch (e) {
+      setResult(`Failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function sendCopies() {
     setBusy(true)
     setResult(null)
@@ -174,6 +199,14 @@ export function ProcessActions({
             />
             Dry run
           </label>
+          <button
+            onClick={holdSelected}
+            disabled={busy || selected.size === 0}
+            title="Move selected to Needs Review (held until marked ready)"
+            className="px-3 py-1.5 text-[12px] font-medium rounded border border-sun/30 text-sun bg-sun/10 hover:bg-sun/20 disabled:opacity-50"
+          >
+            Hold selected
+          </button>
           <button
             onClick={process}
             disabled={busy || selected.size === 0}

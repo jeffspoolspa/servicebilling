@@ -34,4 +34,6 @@ export const REASON_LABEL: Record<string, string> = {
   chem_flag: "chem bill > 2x median",
   reconcile_mismatch: "reconcile mismatch",
   credit_error: "credit apply failed",
+  enrichment_error: "enrichment failed",
+  manual_hold: "manual hold",
 }
