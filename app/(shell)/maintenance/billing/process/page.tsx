@@ -126,6 +126,7 @@ export default async function ProcessPage({
           doc_number: r.qbo_doc_number,
         })),
         task_count: list.length,
+        sent: list.every((r) => r.invoice_sent === true),
         on_autopay: list[0].on_autopay,
         card,
       }
@@ -133,7 +134,7 @@ export default async function ProcessPage({
     .sort((a, b) => a.customer_name.localeCompare(b.customer_name))
 
   // URL-driven sort (SortableHeader in the table header)
-  const SORT_KEYS = ["name", "tasks", "amount", "balance", "payment"] as const
+  const SORT_KEYS = ["name", "tasks", "amount", "balance", "sent", "payment"] as const
   type SortKey = (typeof SORT_KEYS)[number]
   const sort: SortKey = SORT_KEYS.includes(sp.sort as SortKey) ? (sp.sort as SortKey) : "name"
   const dir: "asc" | "desc" = sp.dir === "desc" ? "desc" : "asc"
@@ -147,6 +148,8 @@ export default async function ProcessPage({
         return c.total_cents
       case "balance":
         return c.balance
+      case "sent":
+        return c.sent ? 1 : 0
       case "payment":
         return c.on_autopay
           ? `autopay ${c.card?.card_type ?? ""} ${c.card?.last_four ?? ""}`
@@ -242,6 +245,7 @@ export default async function ProcessPage({
           customer_name: c.customer_name,
           total_cents: c.total_cents,
           balance_cents: Math.round(c.balance * 100),
+          sent: c.sent,
           on_autopay: c.on_autopay,
           card: c.card
             ? {

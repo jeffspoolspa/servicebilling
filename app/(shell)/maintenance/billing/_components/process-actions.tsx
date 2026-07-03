@@ -23,6 +23,7 @@ interface ProcessCustomer {
   invoices: string
   invoice_list: { period_id: string; doc_number: string | null }[]
   task_count: number
+  sent: boolean
 }
 
 
@@ -179,6 +180,7 @@ export function ProcessActions({
                   { key: null, label: "Invoices", align: "left", defaultDir: "desc" },
                   { key: "amount", label: "Amount", align: "right", defaultDir: "desc" },
                   { key: "balance", label: "Balance", align: "right", defaultDir: "desc" },
+                  { key: "sent", label: "Sent", align: "left", defaultDir: "asc" },
                   { key: "payment", label: "Payment", align: "left", defaultDir: "asc" },
                 ] as const
               ).map((col) => (
@@ -271,6 +273,9 @@ function CustomerRow({
       </td>
       <td className="px-4 py-2.5 text-right font-mono num text-sun">
         {formatCurrency(c.balance_cents / 100)}
+      </td>
+      <td className="px-4 py-2.5">
+        {c.sent ? <span className="text-teal">✓</span> : <span className="text-ink-mute">—</span>}
       </td>
       <td className="px-4 py-2.5">
         {c.on_autopay && c.card ? (

@@ -73,7 +73,7 @@ export default async function ProcessedPage({
       (!frequency || r.frequency === frequency),
   )
 
-  const SORT_KEYS = ["name", "invoice", "amount", "balance", "method"] as const
+  const SORT_KEYS = ["name", "invoice", "amount", "balance", "sent", "method"] as const
   type SortKey = (typeof SORT_KEYS)[number]
   const sort: SortKey = SORT_KEYS.includes(sp.sort as SortKey) ? (sp.sort as SortKey) : "name"
   const dir: "asc" | "desc" = sp.dir === "desc" ? "desc" : "asc"
@@ -89,6 +89,8 @@ export default async function ProcessedPage({
         return r.qbo_total ?? 0
       case "balance":
         return r.qbo_balance ?? 0
+      case "sent":
+        return r.invoice_sent ? 1 : 0
       case "method":
         return method(r)
     }
@@ -146,6 +148,7 @@ export default async function ProcessedPage({
                   { key: "invoice", label: "Invoice", align: "left", defaultDir: "asc" },
                   { key: "amount", label: "Amount", align: "right", defaultDir: "desc" },
                   { key: "balance", label: "Balance", align: "right", defaultDir: "desc" },
+                  { key: "sent", label: "Sent", align: "left", defaultDir: "asc" },
                   { key: "method", label: "Method", align: "left", defaultDir: "asc" },
                 ] as const
               ).map((col) => (
@@ -170,7 +173,7 @@ export default async function ProcessedPage({
           <tbody>
             {paged.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-ink-mute">
+                <td colSpan={6} className="px-4 py-8 text-center text-ink-mute">
                   Nothing processed for {formatMonth(`${selected}-01`)} yet.
                 </td>
               </tr>
@@ -205,6 +208,13 @@ export default async function ProcessedPage({
                     </Pill>
                   ) : (
                     <span className="text-sun">{formatCurrency(r.qbo_balance)}</span>
+                  )}
+                </td>
+                <td className="px-4 py-2.5">
+                  {r.invoice_sent ? (
+                    <span className="text-teal">✓</span>
+                  ) : (
+                    <span className="text-ink-mute">—</span>
                   )}
                 </td>
                 <td className="px-4 py-2.5 text-ink-dim">{method(r)}</td>
