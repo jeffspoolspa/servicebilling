@@ -22,10 +22,19 @@ export const dynamic = "force-dynamic"
  * process -> the existing charging engine runs the card, sends the receipt
  * (autopay) and the invoice copy.
  */
+const SEGMENTS = ["commercial", "residential"] as const
+const FREQUENCIES = ["weekly", "biweekly", "multi_week", "monthly"] as const
+
 export default async function ProcessPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string }>
+  searchParams: Promise<{
+    month?: string
+    segment?: string
+    autopay?: string
+    office?: string
+    frequency?: string
+  }>
 }) {
   const sp = await searchParams
   let months
@@ -58,13 +67,44 @@ export default async function ProcessPage({
   ])
   const cardByCustomer = new Map(roster.map((r) => [r.qbo_customer_id, r]))
 
+  // URL-driven filters (same pattern as Bills): segment, autopay, office, frequency
+  const segment = SEGMENTS.includes(sp.segment as (typeof SEGMENTS)[number])
+    ? sp.segment
+    : undefined
+  const autopay = sp.autopay === "1" ? true : sp.autopay === "0" ? false : undefined
+  const offices = [...new Set(periods.map((r) => r.office).filter(Boolean))].sort() as string[]
+  const office = offices.includes(sp.office ?? "") ? sp.office : undefined
+  const frequency = FREQUENCIES.includes(sp.frequency as (typeof FREQUENCIES)[number])
+    ? sp.frequency
+    : undefined
+
+  const matches = (p: BillingPeriodRow) =>
+    (!segment || p.segment === segment) &&
+    (autopay === undefined || p.on_autopay === autopay) &&
+    (!office || p.office === office) &&
+    (!frequency || p.frequency === frequency)
+
   // One row per customer: autopay charges sweep the customer, and the invoice
   // email goes per invoice — group the customer's ready periods together.
-  const ready = periods.filter((p) => p.processing_status === "ready_to_process")
+  const ready = periods.filter((p) => p.processing_status === "ready_to_process" && matches(p))
   const held = periods.filter((p) => p.processing_status === "needs_review")
   const pending = periods.filter((p) =>
     ["pending", "ion_matched"].includes(p.processing_status),
   )
+
+  const href = (over: Record<string, string | undefined>) => {
+    const q = new URLSearchParams()
+    const merged = {
+      month: selected,
+      segment,
+      autopay: sp.autopay,
+      office,
+      frequency,
+      ...over,
+    }
+    for (const [k, v] of Object.entries(merged)) if (v) q.set(k, v)
+    return `/maintenance/billing/process?${q.toString()}` as never
+  }
 
   const byCustomer = new Map<string, BillingPeriodRow[]>()
   for (const r of ready) {
@@ -87,12 +127,10 @@ export default async function ProcessPage({
           .map((r) => r.qbo_doc_number)
           .filter(Boolean)
           .join(", "),
-        invoice_list: list
-          .filter((r) => r.qbo_invoice_id)
-          .map((r) => ({
-            qbo_invoice_id: r.qbo_invoice_id as string,
-            doc_number: r.qbo_doc_number,
-          })),
+        invoice_list: list.map((r) => ({
+          period_id: r.id,
+          doc_number: r.qbo_doc_number,
+        })),
         task_count: list.length,
         on_autopay: list[0].on_autopay,
         card,
@@ -113,6 +151,34 @@ export default async function ProcessPage({
           </div>
           <MonthSelect months={monthOptions} value={selected} />
         </div>
+      </div>
+
+      {/* filters: segment | autopay | office | frequency (URL-driven) */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {SEGMENTS.map((s) => (
+          <Link key={s} href={href({ segment: segment === s ? undefined : s })}>
+            <Pill tone={segment === s ? "cyan" : "neutral"}>{s}</Pill>
+          </Link>
+        ))}
+        <span className="text-line-soft">|</span>
+        <Link href={href({ autopay: autopay === true ? undefined : "1" })}>
+          <Pill tone={autopay === true ? "teal" : "neutral"}>autopay</Pill>
+        </Link>
+        <Link href={href({ autopay: autopay === false ? undefined : "0" })}>
+          <Pill tone={autopay === false ? "sun" : "neutral"}>invoice email</Pill>
+        </Link>
+        <span className="text-line-soft">|</span>
+        {offices.map((o) => (
+          <Link key={o} href={href({ office: office === o ? undefined : o })}>
+            <Pill tone={office === o ? "teal" : "neutral"}>{o.replace(", GA", "")}</Pill>
+          </Link>
+        ))}
+        <span className="text-line-soft">|</span>
+        {FREQUENCIES.map((f) => (
+          <Link key={f} href={href({ frequency: frequency === f ? undefined : f })}>
+            <Pill tone={frequency === f ? "cyan" : "neutral"}>{f.replace("_", " ")}</Pill>
+          </Link>
+        ))}
       </div>
 
       {held.length > 0 && (

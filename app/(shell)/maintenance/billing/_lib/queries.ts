@@ -202,6 +202,39 @@ export function listAutopayCustomers(): Promise<AutopayCustomerRow[]> {
   return rpc<AutopayCustomerRow>("maint_billing_autopay_roster")
 }
 
+/** Processing attempts = the customer-month's autopay transactions. */
+export interface AttemptRow {
+  id: string
+  created_at: string | null
+  status: string | null
+  dry_run: boolean | null
+  payment_method: string | null
+  card_type: string | null
+  last_four: string | null
+  charge_amount: number | null
+  charge_status: string | null
+  charge_error: string | null
+  charged_at: string | null
+  qbo_payment_id: string | null
+  qbo_invoice_numbers: string[] | null
+  receipt_emailed: boolean | null
+  invoice_emailed: boolean | null
+  emailed_at: string | null
+  error_step: string | null
+  error_message: string | null
+  verified: boolean | null
+}
+
+export function listPeriodAttempts(
+  qboCustomerId: string,
+  month: string, // 'YYYY-MM'
+): Promise<AttemptRow[]> {
+  return rpc<AttemptRow>("maint_billing_period_attempts", {
+    p_qbo_customer_id: qboCustomerId,
+    p_month: month,
+  })
+}
+
 /** Live 2x-rule flag context (billing_audit.v_chem_flags — trigger-maintained
  *  totals, medians recomputed per query, always current). */
 export interface ChemFlagRow {
