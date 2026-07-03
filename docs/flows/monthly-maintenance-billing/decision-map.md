@@ -66,8 +66,10 @@ pending -> ion_matched -> [QBO link -> serial preprocess queue] -> needs_review 
 
 1. **ION match (stage 1):** `billing_audit.match_promises_to_ion(month)` stamps each promise
    with its ION invoice number + amount from `ion_task_transactions` (SUM over split re-bills;
-   the max-amount txn is the representative number). Amount vs `expected_total_cents` beyond
-   $1 → `needs_review: ion_amount_mismatch`. Rides the hourly reconcile schedule.
+   the max-amount txn is the representative number). STAMP ONLY — no gating: nothing holds a
+   period before preprocessing (ION-side misbillings are assumed fixed by billing time; the
+   pre-billing CPV audit workflow catches them earlier). Runs after the UI's Refresh-bills
+   report pull and on the hourly reconcile.
 2. **QBO link (stage 2):** `trg_link_invoice_to_maint_period` on `billing.invoices` — a new
    cached invoice (webhook/CDC) whose `doc_number` = a promise's `ion_invoice_number` AND
    whose customer matches (WO and task invoices share ION's number space — the customer guard
@@ -79,13 +81,19 @@ pending -> ion_matched -> [QBO link -> serial preprocess queue] -> needs_review 
    `preprocess_maint_customer_month`: customer-scoped credit apply (NO invoice email — sending
    would mark EmailSent and let auto-promote skip a hold), stamps `pre_processed_at` +
    `credits_applied`, then projects.
-4. **Projection owns every transition:** `billing_audit.project_maint_processing_status`
-   evaluates all gates — unreviewed HIGH flag, ion amount, subtotal (per-row: ION amount vs
-   the linked invoice's QBO total, the maintenance `subtotal_ok` — catches line items lost in
-   the ION→QBO sync), reconcile verdict, sticky `credit_error` — and writes
-   needs_review/ready_to_process. Never demotes `processed`; skips locked months.
-   `reviewed_at` (set by the manual mark-ready action) passes the data-mismatch gates;
-   the HIGH-flag hold is NOT overridable — it releases only via flag review.
+4. **Projection owns every transition — and every review gate evaluates AT PREPROCESS
+   (`pre_processed_at` set), never earlier:** `billing_audit.project_maint_processing_status`
+   checks — `chem_flag` (the simple rule: month's net consumable bill trips
+   `v_billing_review_flags`, > 2x the peer group's clean median AND >= $150, unreviewed;
+   remediation = apply a DISCOUNT on the QBO invoice, leaving ION's record of what was sold
+   intact), ion amount vs expected, subtotal (per-row: ION amount vs the linked invoice's QBO
+   total — catches line items lost in the ION→QBO sync), reconcile verdict, sticky
+   `credit_error` — and writes needs_review/ready_to_process. Never demotes `processed`;
+   skips locked months. `reviewed_at` (manual mark-ready) passes the data-mismatch gates;
+   `chem_flag` releases only via flag review (`customer_month_audit` reviewed/resolved).
+   The CPV z-score audit (`customer_month_audit` HIGH) is NO LONGER a pipeline gate — it
+   stays the pre-billing analysis tool (its autopay-builder NOT EXISTS remains as the
+   enforced charge gate until the strict status gate is switched on).
 5. **Auto-promote (stage 4):** linked invoice at `balance <= 0` AND `EmailSent` (or a
    confirmed autopay charge) → `processed` — via `trg_promote_maint_period_on_invoice_paid`
    (DISTINCT-guarded; CDC rewrites rows every 15-min tick) and inside every projection call,
@@ -93,11 +101,14 @@ pending -> ion_matched -> [QBO link -> serial preprocess queue] -> needs_review 
    processed outside the app: the cache self-updates, so nothing double-processes.
    `paid` is a derived UI overlay (balance <= 0), not a stored state.
 
-**Review queues (two, different purposes):** the primary manual-review queue is
-`billing_audit.v_billing_review_flags` (Carter's rule: month's net consumable bill > 2x the
-peer group's CLEAN median AND >= $150; residential medians exclude provides-chems pools;
-intentionally wide — pool volume is a known missing normalizer). The CPV z-score audit
-(`customer_month_audit`) is the second list and the only HOLD source. Both surface on
-`/maintenance/billing/flags`. Review state for both lists lives in ONE table
-(`customer_month_audit`): reviewing a 2x-queue customer with no z-audit row upserts a
-`REVIEW_2X` row (never holds); reviewing a HIGH row releases the hold.
+**Review queues (two, different purposes):** the primary manual-review queue AND the
+pipeline's HOLD source (2026-07-02) is `billing_audit.v_billing_review_flags` (Carter's
+rule: month's net consumable bill > 2x the peer group's CLEAN median AND >= $150;
+residential medians exclude provides-chems pools; intentionally wide — pool volume is a
+known missing normalizer). The projection evaluates it at preprocess time as `chem_flag`.
+The CPV z-score audit (`customer_month_audit` HIGH) is the pre-billing analysis tool —
+no longer a pipeline hold (its NOT EXISTS in the autopay builder remains the enforced
+charge gate until the strict status gate is switched on). Both lists surface on
+`/maintenance/billing/flags`. Review state for both lives in ONE table
+(`customer_month_audit`): reviewing upserts a `REVIEW_2X` row (or updates a z-audit row);
+`audit_status` reviewed/resolved releases `chem_flag` via re-projection.

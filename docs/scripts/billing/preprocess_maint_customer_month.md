@@ -19,7 +19,7 @@ Pre-processes ONE maintenance customer-month after its QBO invoice links:
    `task_billing_periods` rows; a credit failure stamps `needs_review_reason =
    'credit_error'` (sticky — only a clean re-run clears it).
 3. **Project:** calls `billing_audit.project_maint_processing_status`, which evaluates
-   ALL gates (HIGH flag, ION amount, subtotal ION-vs-QBO, reconcile verdict) and writes
+   ALL gates (chem_flag = the 2x rule, ION amount, subtotal ION-vs-QBO, reconcile verdict) and writes
    `needs_review` | `ready_to_process` (or `processed` if the invoice already reads
    paid + sent).
 

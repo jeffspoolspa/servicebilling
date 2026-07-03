@@ -52,9 +52,9 @@ The build also **deletes orphan promises** — rows not backed by visits that mo
 | `labor_ok`, `consumables_ok` | reconcile indicators (see below) |
 | `processing_status` | the STORED pipeline state: `pending` → `ion_matched` → `needs_review` \| `ready_to_process` → `processed` (terminal). Written only by `billing_audit.project_maint_processing_status` + the guarded manual RPC |
 | `ion_invoice_number`, `ion_amt_cents`, `ion_matched_at` | stage-1 ION stamps from `ion_task_transactions` (rep = max-amount txn; amount = SUM over split re-bills) |
-| `needs_review_reason` | `ion_amount_mismatch` \| `subtotal_mismatch` \| `high_flag` \| `reconcile_mismatch` \| `credit_error` |
+| `needs_review_reason` | `ion_amount_mismatch` \| `subtotal_mismatch` \| `chem_flag` (the 2x rule, evaluated at preprocess) \| `reconcile_mismatch` \| `credit_error` — all gates evaluate only once `pre_processed_at` is set |
 | `pre_processed_at`, `credits_applied` | preprocess stamps (customer-scoped credit apply, no email) |
-| `reviewed_at` | manual mark-ready override: passes the data-mismatch gates on re-projection (the HIGH-flag hold is NOT overridable) |
+| `reviewed_at` | manual mark-ready override: passes the data-mismatch gates on re-projection (chem_flag is NOT overridable — releases only via flag review) |
 | `processed_at` | terminal stamp (auto paid+sent, confirmed autopay charge, or manual) |
 | `locked_at` | finalized month; builder, matcher, projection, and preprocess all skip it |
 | `opened_at`, `reconciled_at`, `notes`, timestamps | audit |

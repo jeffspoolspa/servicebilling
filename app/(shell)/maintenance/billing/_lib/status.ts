@@ -31,7 +31,7 @@ export const STATUS_LABEL: Record<ProcessingStatus, string> = {
 export const REASON_LABEL: Record<string, string> = {
   ion_amount_mismatch: "ION amount mismatch",
   subtotal_mismatch: "subtotal mismatch",
-  high_flag: "HIGH audit flag",
+  chem_flag: "chem bill > 2x median",
   reconcile_mismatch: "reconcile mismatch",
   credit_error: "credit apply failed",
 }
