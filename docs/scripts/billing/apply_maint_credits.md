@@ -1,6 +1,10 @@
 # f/billing/apply_maint_credits
 
-> Status: [active]
+> Status: [active] — but largely superseded (2026-07-02): the pipeline's
+> [preprocess_maint_customer_month](preprocess_maint_customer_month.md) applies credits
+> per customer AT LINK TIME (no global scan, no invoice-email side effect). This flow
+> step remains as a catch-all sweep before charging; by then most unapplied maint
+> credits are already consumed, so it is normally a no-op.
 > Source: [f/billing/apply_maint_credits.py](../../../f/billing/apply_maint_credits.py)
 > Triggered by: step of `monthly_autopay.flow`, args `billing_month`, `access_token`, `realm_id`, `dry_run`
 > Concurrency: `qbo_writer` (target — not yet applied)

@@ -12,9 +12,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils/format"
 import { cn } from "@/lib/utils/cn"
-import { STATUS_LABEL, STATUS_TONE } from "../_lib/status"
+import { REASON_LABEL, STATUS_LABEL, STATUS_TONE } from "../_lib/status"
 import type { ProcessingStatus } from "../_lib/queries"
 
 export interface TaskLine {
@@ -32,6 +33,7 @@ export interface TaskLine {
   ion_match: "match" | "mismatch" | "missing"
   reconcile_status: string
   status: ProcessingStatus
+  needs_review_reason: string | null
 }
 
 export interface CustomerBill {
@@ -87,10 +89,11 @@ function cents(v: number | null | undefined): string {
 type SortKey = "name" | "tasks" | "visits" | "labor" | "chems" | "expected" | "status"
 const STATUS_ORDER: ProcessingStatus[] = [
   "pending",
-  "held_for_review",
-  "ready",
+  "ion_matched",
+  "queued",
+  "needs_review",
+  "ready_to_process",
   "processed",
-  "paid",
 ]
 const COLUMNS: { key: SortKey | null; label: string; align: "left" | "right" }[] = [
   { key: "name", label: "Customer", align: "left" },
@@ -284,6 +287,53 @@ function CustomerRows({
   )
 }
 
+/** Manual pipeline transitions for the customer's periods (guarded RPC —
+ *  mark-ready stamps reviewed_at; re-projection re-holds unreviewed HIGHs). */
+function StatusActions({ tasks }: { tasks: TaskLine[] }) {
+  const router = useRouter()
+  const [busy, setBusy] = useState(false)
+  const reviewable = tasks.filter((t) => t.status === "needs_review")
+  const readyable = tasks.filter((t) => t.status === "ready_to_process")
+
+  async function setStatus(ids: string[], status: string) {
+    setBusy(true)
+    try {
+      const r = await fetch("/api/maintenance-billing/periods/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, status }),
+      })
+      if (r.ok) router.refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (reviewable.length === 0 && readyable.length === 0) return null
+  return (
+    <div className="flex gap-2">
+      {reviewable.length > 0 && (
+        <button
+          disabled={busy}
+          onClick={() => setStatus(reviewable.map((t) => t.id), "ready_to_process")}
+          className="text-[11px] px-2.5 py-1 rounded border border-teal/30 text-teal hover:bg-teal/10 disabled:opacity-50"
+        >
+          Mark reviewed → ready ({reviewable.length})
+        </button>
+      )}
+      {readyable.length > 0 && (
+        <button
+          disabled={busy}
+          onClick={() => setStatus(readyable.map((t) => t.id), "processed")}
+          className="text-[11px] px-2.5 py-1 rounded border border-grass/30 text-grass hover:bg-grass/10 disabled:opacity-50"
+        >
+          Mark processed ({readyable.length})
+        </button>
+      )}
+    </div>
+  )
+}
+
 function BillDetail({ c, month }: { c: CustomerBill; month: string }) {
   return (
     <div className="space-y-4">
@@ -335,9 +385,9 @@ function BillDetail({ c, month }: { c: CustomerBill; month: string }) {
                 <Pill tone={STATUS_TONE[t.status]} dot>
                   {STATUS_LABEL[t.status]}
                 </Pill>
-                {t.reconcile_status === "mismatch" && (
+                {t.needs_review_reason && (
                   <Pill tone="coral" className="ml-1">
-                    reconcile mismatch
+                    {REASON_LABEL[t.needs_review_reason] ?? t.needs_review_reason}
                   </Pill>
                 )}
               </td>
@@ -345,6 +395,8 @@ function BillDetail({ c, month }: { c: CustomerBill; month: string }) {
           ))}
         </tbody>
       </table>
+
+      <StatusActions tasks={c.tasks} />
 
       {c.customer_id != null ? (
         <VisitCalendar customerId={c.customer_id} month={month} />

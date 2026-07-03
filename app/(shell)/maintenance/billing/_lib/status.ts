@@ -1,21 +1,31 @@
 import type { ProcessingStatus } from "./queries"
 
-// pending -> [held_for_review | ready] (the review gate) -> processed -> paid
+// pending -> ion_matched -> queued -> [needs_review | ready_to_process] -> processed
 export const STATUS_TONE: Record<
   ProcessingStatus,
-  "neutral" | "cyan" | "coral" | "sun" | "grass" | "teal"
+  "neutral" | "cyan" | "coral" | "sun" | "grass" | "teal" | "indigo"
 > = {
   pending: "neutral",
-  held_for_review: "coral",
-  ready: "teal",
-  processed: "sun",
-  paid: "grass",
+  ion_matched: "indigo",
+  queued: "cyan",
+  needs_review: "coral",
+  ready_to_process: "teal",
+  processed: "grass",
 }
 
 export const STATUS_LABEL: Record<ProcessingStatus, string> = {
   pending: "pending",
-  held_for_review: "held for review",
-  ready: "ready",
+  ion_matched: "ion matched",
+  queued: "queued",
+  needs_review: "needs review",
+  ready_to_process: "ready",
   processed: "processed",
-  paid: "paid",
+}
+
+export const REASON_LABEL: Record<string, string> = {
+  ion_amount_mismatch: "ION amount mismatch",
+  subtotal_mismatch: "subtotal mismatch",
+  high_flag: "HIGH audit flag",
+  reconcile_mismatch: "reconcile mismatch",
+  credit_error: "credit apply failed",
 }

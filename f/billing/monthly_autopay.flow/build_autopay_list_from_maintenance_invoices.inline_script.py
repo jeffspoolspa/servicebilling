@@ -87,6 +87,29 @@ def main(
         """)
         held_high_flag = cur.fetchone()[0]
 
+        # REPORT-ONLY (2026-07 pipeline, flip to enforcing after one clean
+        # cycle): which charge-list customers the task_billing_periods
+        # ready_to_process gate would ADDITIONALLY exclude. The stored
+        # pipeline holds on ion/subtotal/reconcile mismatches + credit errors,
+        # not just the HIGH flag — this logs the delta before it gates money.
+        cur.execute("""
+            SELECT DISTINCT mi.qbo_customer_id, mi.customer_name,
+                   tbp.processing_status, tbp.needs_review_reason
+            FROM billing_audit.maintenance_invoices mi
+            JOIN billing.autopay_customers ac ON mi.qbo_customer_id = ac.qbo_customer_id
+            JOIN billing_audit.task_billing_periods tbp
+              ON tbp.qbo_customer_id = mi.qbo_customer_id
+             AND tbp.billing_month = mi.billing_month::date
+            WHERE COALESCE(mi.balance_due, mi.invoice_total) > 0
+              AND tbp.processing_status NOT IN ('ready_to_process', 'processed')
+            ORDER BY mi.customer_name
+        """)
+        gate_would_exclude = [
+            {"qbo_customer_id": r[0], "name": r[1], "processing_status": r[2],
+             "reason": r[3]}
+            for r in cur.fetchall()
+        ]
+
         customer_map = {}
         for row in rows:
             qbo_id = row[0]
@@ -177,6 +200,9 @@ def main(
         "good_standing": good_count, "payment_issue_customers": issue_count,
         "customers_with_outstanding_maint": customers_with_outstanding,
         "held_high_flag_customers": held_high_flag,
+        # report-only until one clean cycle: the tbp ready_to_process gate
+        "pipeline_gate_would_exclude": gate_would_exclude,
+        "pipeline_gate_would_exclude_count": len(gate_would_exclude),
         "skipped_already_processed": len(skipped_terminal),
         "skipped_terminal_details": skipped_terminal[:10],
         "customers": customers

@@ -57,15 +57,41 @@ the customer's other unpaid months still process. Held invoices stay `pending` a
 up by the next run after review — no state to reset. The `/api/maintenance-billing/process`
 route ALSO re-checks holds server-side before triggering the engine (defense in depth).
 
-**Processing status (derived, UI-only):** the `/maintenance/billing` view derives, in
-`public.maint_billing_periods` (mirrors the work-orders pre-processing framing: review gate
-before ready):
-pending (no `qbo_invoice_id`) → held_for_review (synced but the customer-month has an
-unreviewed HIGH flag) | ready (synced, no hold) → processed (confirmed non-dry-run
-`autopay_transactions` charge OR invoice emailed) → paid (`billing.invoices.balance <= 0`).
-Nothing stores this — the sources of truth stay where they are. A "preprocessed (credits
-applied)" step belongs in the chain but is not derivable today: `apply_maint_credits` runs
-inside the autopay flow and leaves no per-period marker; add it when it does.
+**Processing status (STORED, 2026-07-02):** `task_billing_periods.processing_status` is the
+per-period state machine, mirroring the work-order pipeline:
+
+```
+pending -> ion_matched -> [QBO link -> queued (derived)] -> needs_review | ready_to_process -> processed
+```
+
+1. **ION match (stage 1):** `billing_audit.match_promises_to_ion(month)` stamps each promise
+   with its ION invoice number + amount from `ion_task_transactions` (SUM over split re-bills;
+   the max-amount txn is the representative number). Amount vs `expected_total_cents` beyond
+   $1 → `needs_review: ion_amount_mismatch`. Rides the hourly reconcile schedule.
+2. **QBO link (stage 2):** `trg_link_invoice_to_maint_period` on `billing.invoices` — a new
+   cached invoice (webhook/CDC) whose `doc_number` = a promise's `ion_invoice_number` AND
+   whose customer matches (WO and task invoices share ION's number space — the customer guard
+   prevents mislinks) gets `qbo_invoice_id` set and the customer-month enqueued in
+   `maint_preprocess_queue`. The link is the pipeline trigger; the trigger is the ONLY
+   `qbo_invoice_id` writer (reconcile no longer links).
+3. **Preprocess (stage 3, queued serially):** `drain_maint_preprocess_queue` (2-min schedule,
+   one at a time — month-end is a ~520-invoice burst, no fan-out) runs
+   `preprocess_maint_customer_month`: customer-scoped credit apply (NO invoice email — sending
+   would mark EmailSent and let auto-promote skip a hold), stamps `pre_processed_at` +
+   `credits_applied`, then projects.
+4. **Projection owns every transition:** `billing_audit.project_maint_processing_status`
+   evaluates all gates — unreviewed HIGH flag, ion amount, subtotal (per-row: ION amount vs
+   the linked invoice's QBO total, the maintenance `subtotal_ok` — catches line items lost in
+   the ION→QBO sync), reconcile verdict, sticky `credit_error` — and writes
+   needs_review/ready_to_process. Never demotes `processed`; skips locked months.
+   `reviewed_at` (set by the manual mark-ready action) passes the data-mismatch gates;
+   the HIGH-flag hold is NOT overridable — it releases only via flag review.
+5. **Auto-promote (stage 4):** linked invoice at `balance <= 0` AND `EmailSent` (or a
+   confirmed autopay charge) → `processed` — via `trg_promote_maint_period_on_invoice_paid`
+   (DISTINCT-guarded; CDC rewrites rows every 15-min tick) and inside every projection call,
+   which also catches invoices already paid+sent BEFORE linking. Covers invoices manually
+   processed outside the app: the cache self-updates, so nothing double-processes.
+   `paid` is a derived UI overlay (balance <= 0), not a stored state.
 
 **Review queues (two, different purposes):** the primary manual-review queue is
 `billing_audit.v_billing_review_flags` (Carter's rule: month's net consumable bill > 2x the

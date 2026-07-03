@@ -46,11 +46,17 @@ The build also **deletes orphan promises** — rows not backed by visits that mo
 | `expected_consumable_cents` | Model B: `SUM(qty × unit_price_cents)`, priced by `ion_item_id` → `maintenance.consumables` |
 | `unpriced_consumables` | `{item_name: qty}` with no catalog price yet (finite worklist) |
 | `expected_total_cents` | **generated** = labor + consumable |
-| `qbo_invoice_id` | the matched [Invoice](invoice.md) (1:1, nullable until invoiced) |
+| `qbo_invoice_id` | the matched [Invoice](invoice.md) (1:1, nullable until invoiced). Set ONLY by the `billing.invoices` link trigger (DocNumber = `ion_invoice_number` + customer match) |
 | `invoice_labor_cents` | invoiced labor subtotal (set by reconcile) |
-| `status` | `visits_accruing` → `reconciled` / `mismatch` / `missed` |
+| `status` | reconcile verdict: `visits_accruing` → `reconciled` / `mismatch` / `missed` (a gate input to the pipeline, NOT the pipeline state) |
 | `labor_ok`, `consumables_ok` | reconcile indicators (see below) |
-| `locked_at` | finalized month; the builder skips it (never recomputes or deletes) |
+| `processing_status` | the STORED pipeline state: `pending` → `ion_matched` → `needs_review` \| `ready_to_process` → `processed` (terminal). Written only by `billing_audit.project_maint_processing_status` + the guarded manual RPC |
+| `ion_invoice_number`, `ion_amt_cents`, `ion_matched_at` | stage-1 ION stamps from `ion_task_transactions` (rep = max-amount txn; amount = SUM over split re-bills) |
+| `needs_review_reason` | `ion_amount_mismatch` \| `subtotal_mismatch` \| `high_flag` \| `reconcile_mismatch` \| `credit_error` |
+| `pre_processed_at`, `credits_applied` | preprocess stamps (customer-scoped credit apply, no email) |
+| `reviewed_at` | manual mark-ready override: passes the data-mismatch gates on re-projection (the HIGH-flag hold is NOT overridable) |
+| `processed_at` | terminal stamp (auto paid+sent, confirmed autopay charge, or manual) |
+| `locked_at` | finalized month; builder, matcher, projection, and preprocess all skip it |
 | `opened_at`, `reconciled_at`, `notes`, timestamps | audit |
 
 ## Reconciliation (the reconcile step, as built)
@@ -86,15 +92,17 @@ Text fallback: a promise is born `visits_accruing`; the reconcile step moves it 
 ## Where it's surfaced
 
 The `/maintenance/billing` UI shows one row per promise for a selected month via
-`public.maint_billing_periods` (billing_audit is not PostgREST-exposed; migration
-`20260702130000`), joined with the customer, `maintenance.v_task_class`, ION's task-invoice
-sum (`ion_task_transactions`, $1 match tolerance), and the QBO mirror (`billing.invoices`).
-The RPC also derives a UI-only **processing status** with a review gate (mirrors the
-work-orders pre-processing framing) — pending (no `qbo_invoice_id`) → held_for_review
-(synced, unreviewed HIGH flag) | ready → processed (confirmed autopay charge OR invoice
-emailed) → paid (mirror balance <= 0) — and the HIGH-flag autopay/send hold from
-`customer_month_audit`. Derived, never stored: this table stays the reconcile ledger, not
-a processing-state store.
+`public.maint_billing_periods` (billing_audit is not PostgREST-exposed; migrations
+`20260702130000` + `20260702180000`), joined with the customer, `maintenance.v_task_class`,
+the stored ION stamps, and the QBO mirror (`billing.invoices`). Since 2026-07-02 the
+**processing status is STORED** on this table (see Shape) and driven by the pipeline in
+[monthly-maintenance-billing](../flows/monthly-maintenance-billing/decision-map.md):
+ION match → QBO link (invoice-cache trigger) → queued preprocess (credits + subtotal
+verification) → needs_review | ready_to_process → processed (auto when the cached invoice
+reads paid + sent — covers invoices processed by hand in QBO). The RPC overlays a derived
+`queued` display state (linked, awaiting preprocess); `paid` stays a derived overlay
+(mirror balance <= 0). Pre-2026-06 months were backfilled from the old derivation and
+locked.
 
 ## Flows this entity participates in
 

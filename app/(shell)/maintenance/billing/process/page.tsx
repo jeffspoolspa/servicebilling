@@ -60,9 +60,11 @@ export default async function ProcessPage({
 
   // One row per customer: autopay charges sweep the customer, and the invoice
   // email goes per invoice — group the customer's ready periods together.
-  const ready = periods.filter((p) => p.processing_status === "ready")
-  const held = periods.filter((p) => p.processing_status === "held_for_review")
-  const pending = periods.filter((p) => p.processing_status === "pending")
+  const ready = periods.filter((p) => p.processing_status === "ready_to_process")
+  const held = periods.filter((p) => p.processing_status === "needs_review")
+  const pending = periods.filter((p) =>
+    ["pending", "ion_matched", "queued"].includes(p.processing_status),
+  )
 
   const byCustomer = new Map<string, BillingPeriodRow[]>()
   for (const r of ready) {

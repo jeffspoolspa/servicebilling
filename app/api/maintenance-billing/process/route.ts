@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
 
   const readyAutopay = new Set(
     periods
-      .filter((p) => p.processing_status === "ready" && p.on_autopay)
+      .filter((p) => p.processing_status === "ready_to_process" && p.on_autopay)
       .map((p) => p.qbo_customer_id as string),
   )
   const selectedAutopay = ids.filter((id) => readyAutopay.has(id))

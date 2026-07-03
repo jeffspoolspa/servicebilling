@@ -1,0 +1,30 @@
+summary: ''
+description: ''
+lock: '!inline f/billing_audit/reconcile_billing_periods.script.lock'
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties:
+    cons_tol:
+      type: number
+      description: ''
+      default: 0.01
+    dry_run:
+      type: boolean
+      description: ''
+      default: true
+    labor_tol_cents:
+      type: integer
+      description: ''
+      default: 100
+    min_coverage:
+      type: number
+      description: ''
+      default: 0.5
+    supabase_connection:
+      type: object
+      description: ''
+      default: null
+  required:
+    - supabase_connection

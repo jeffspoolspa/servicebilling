@@ -29,12 +29,15 @@ sequenceDiagram
   end
 ```
 
-**Steps (text equivalent — see [decision-map](decision-map.md) for the full rules):**
+**Steps (text equivalent — see [decision-map](decision-map.md) for the full rules; steps
+3–6 are the stored `processing_status` pipeline, 2026-07-02):**
 1. **Ingest** (per day) — `list_day_logs` → `get_log_detail` per log → keep if `time_in` + resolves to an `EventID` → upsert `maintenance.visits` (keyed `LogID`) + `consumables_usage`.
-2. **Promise** — `build_task_billing_periods`: one `task_billing_periods` row per `(task, month)` with `expected_labor_cents` + `billable_visit_count`.
-3. **Reconcile** — `reconcile_billing_periods`: per task, aggregate its QBO invoices, compare labor amount ($1 tolerance) + (design) consumable quantity + billed-visit count.
-4. **Gate** — `labor_ok` (+ `consumables_ok`) → Phase B charges; `mismatch`/missed → hold + flag, no charge.
-5. **Phase B** — per reconciled invoice: credits → autopay decision → charge or invoice-only → send → reflect balance ([monthly-autopay](../monthly-autopay.md)).
+2. **Promise** — `build_task_billing_periods`: one `task_billing_periods` row per `(task, month)` with `expected_labor_cents` + `billable_visit_count`. Status `pending`, updated all month.
+3. **ION match** — `match_promises_to_ion` (rides the hourly reconcile schedule): stamp each promise with its ION invoice number + amount from `ion_task_transactions` → `ion_matched` (or `needs_review: ion_amount_mismatch`).
+4. **QBO link** — invoice hits the `billing.invoices` cache (webhook/CDC) → `trg_link_invoice_to_maint_period` matches `doc_number` + customer → sets `qbo_invoice_id` + enqueues the customer-month (`maint_preprocess_queue`).
+5. **Preprocess (queued, serial)** — `drain_maint_preprocess_queue` every 2 min runs `preprocess_maint_customer_month` one at a time: customer-scoped credit apply (no email) → projection evaluates HIGH flag / ION amount / subtotal (ION vs QBO total) / reconcile verdict → `needs_review` | `ready_to_process`.
+6. **Reconcile (verdicts)** — `reconcile_billing_periods` hourly: labor amount ($1 tol) + consumable quantity per customer-month; verdict changes re-project via `trg_reproject_on_gate_change`. No longer writes the FK.
+7. **Phase B** — per `ready_to_process` invoice (report-only gate first cycle, then enforced): autopay decision → charge or invoice-only → send → reflect balance ([monthly-autopay](../monthly-autopay.md)). Paid + sent in the cache → auto-promote to `processed` (also covers invoices processed by hand in QBO).
 
 **Failure modes:**
 | Failure | Where | Recovery |

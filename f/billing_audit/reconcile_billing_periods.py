@@ -18,13 +18,20 @@ Match rule (confirmed with Carter + empirically, 2026-06-02):
     rows (exact 1:1 for the single-task majority; shared for multi-task).
 
 Per (customer, billing_month) we set, on every matching task_billing_period row:
-  qbo_invoice_id        representative month-end maintenance invoice (max labor)
   invoice_labor_cents   SUM of maintenance-labor line amounts (customer-month)
   labor_ok              |invoiced_labor - expected_labor| <= labor_tol_cents
   consumables_ok        no item we recorded was under-billed beyond cons_tol
   status                reconciled (labor_ok & consumables_ok) | mismatch | missed
   reconciled_at         now()
   notes                 short diff summary; flags partial_coverage + multi_invoice
+
+NOTE (2026-07 pipeline): this script NO LONGER writes qbo_invoice_id — the
+billing.invoices link trigger (trg_link_invoice_to_maint_period, DocNumber ->
+ion_invoice_number) is the single FK writer. This script is the detailed
+VERDICT writer; its status/labor_ok/consumables_ok writes re-project
+processing_status via trg_reproject_on_gate_change. It also calls
+billing_audit.match_promises_to_ion + project_maint_processing_status per
+month (stage 1 of the pipeline) so ION stamping rides the same schedule.
 
 COVERAGE CAVEAT: maintenance.visits currently starts 2026-04-06, so APRIL is a
 PARTIAL month (week 1 missing) -> per_visit April promises undercount by ~1 visit
@@ -93,7 +100,6 @@ WHERE qbo_customer_id IS NOT NULL
 
 UPDATE = """
 UPDATE billing_audit.task_billing_periods SET
-  qbo_invoice_id      = %(qbo_invoice_id)s,
   invoice_labor_cents = %(invoice_labor_cents)s,
   labor_ok            = %(labor_ok)s,
   consumables_ok      = %(consumables_ok)s,
@@ -184,6 +190,20 @@ def main(supabase_connection, dry_run=True, labor_tol_cents=100, cons_tol=0.01,
                 for k, v in (cons or {}).items():
                     g["cons"][k] = g["cons"].get(k, 0) + float(v)
 
+        # ---- stage 1: stamp ION invoice numbers + amounts on each month's
+        #      promises (billing_audit.match_promises_to_ion), then project
+        #      processing_status (pending -> ion_matched | needs_review).
+        #      Same transaction: a dry_run rolls these back too. ----
+        ion_stamped = {}
+        with conn.cursor() as cur:
+            for month in sorted({m for (_, m) in groups}):
+                cur.execute("SELECT billing_audit.match_promises_to_ion(%s)", (month,))
+                n = cur.fetchone()[0]
+                cur.execute(
+                    "SELECT billing_audit.project_maint_processing_status(%s)", (month,))
+                if n:
+                    ion_stamped[month.strftime("%Y-%m")] = n
+
         # ---- billing-coverage gate: only reconcile months whose monthly billing
         #      run has actually fired. A closed month with almost no month-end
         #      maintenance invoices isn't "missed" -- it just hasn't been billed
@@ -227,10 +247,9 @@ def main(supabase_connection, dry_run=True, labor_tol_cents=100, cons_tol=0.01,
 
             if not iv:
                 status, labor_ok, cons_ok = "missed", False, None
-                qbo_id, invoiced = None, None
+                invoiced = None
             else:
                 invoiced = iv["labor"]
-                qbo_id = max(iv["ids"])[1]  # invoice with the largest labor
                 if offcycle:
                     note_bits.append("offcycle_fallback")
                 if len(iv["ids"]) > 1:
@@ -254,7 +273,7 @@ def main(supabase_connection, dry_run=True, labor_tol_cents=100, cons_tol=0.01,
             note = "; ".join(note_bits)[:500] or None
             for rid in g["ids"]:
                 updates.append({
-                    "id": rid, "qbo_invoice_id": qbo_id,
+                    "id": rid,
                     "invoice_labor_cents": invoiced, "labor_ok": labor_ok,
                     "consumables_ok": cons_ok, "status": status, "notes": note,
                 })
@@ -285,6 +304,7 @@ def main(supabase_connection, dry_run=True, labor_tol_cents=100, cons_tol=0.01,
             "by_month_status": by_month,
             "month_coverage": coverage,
             "skipped_unbilled_months": skipped_months,
+            "ion_stamped": ion_stamped,
         }
     except Exception:
         conn.rollback()

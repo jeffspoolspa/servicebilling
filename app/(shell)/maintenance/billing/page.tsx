@@ -16,10 +16,11 @@ export const dynamic = "force-dynamic"
 
 const STATUSES: ProcessingStatus[] = [
   "pending",
-  "held_for_review",
-  "ready",
+  "ion_matched",
+  "queued",
+  "needs_review",
+  "ready_to_process",
   "processed",
-  "paid",
 ]
 
 function cents(v: number | null | undefined): string {
@@ -133,6 +134,7 @@ export default async function MaintenanceBillingPage({
         ion_match: r.ion_match,
         reconcile_status: r.reconcile_status,
         status: r.processing_status,
+        needs_review_reason: r.needs_review_reason,
       })),
     }))
 

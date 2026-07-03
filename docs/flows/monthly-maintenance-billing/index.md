@@ -2,10 +2,10 @@
 
 > Status: [active]
 > Kind: [orchestration]
-> Verification: [verified] for log-based ingestion + per-task LABOR reconcile (May 2026, 473/475 tasks exact); [design] for the canonical service-type/consumable tables, the consumables-quantity reconcile, and the full historical re-ingest
-> Last verified: 2026-06-03
-> Trigger: monthly (after the month closes); ingestion can run daily
-> Code location: `f/ION/ingest_day_logs`, `f/ION/api/{list_day_logs,get_log_detail}`, `f/billing_audit/{build_task_billing_periods,reconcile_billing_periods}`, charging via `f/billing/monthly_autopay`; UI at `app/(shell)/maintenance/billing/` (billing-months view + flag review + autopay/send orchestration, reading via the `public.maint_billing_*` RPCs)
+> Verification: [verified] for log-based ingestion + per-task LABOR reconcile (May 2026, 473/475 tasks exact) + the stored processing-status pipeline through preprocess-dry-run (June 2026: 547 ION-matched, 8 link-trigger catch-ups queued); [pending-live] first drained queue cycle + autopay report-only cycle; [design] for the canonical service-type/consumable tables and the full historical re-ingest
+> Last verified: 2026-07-02
+> Trigger: ingestion daily; ION match + reconcile hourly (schedule `f/billing_audit/reconcile_billing_periods_hourly`); link + preprocess event-driven off the invoice cache (queue drained every 2 min); charging monthly
+> Code location: `f/ION/ingest_day_logs`, `f/ION/api/{list_day_logs,get_log_detail}`, `f/billing_audit/{build_task_billing_periods,reconcile_billing_periods}` (hourly; also runs the ION matcher), pipeline `f/billing/{preprocess_maint_customer_month,drain_maint_preprocess_queue}` + DB functions/triggers (migrations `20260702150000`–`180000`), charging via `f/billing/monthly_autopay`; UI at `app/(shell)/maintenance/billing/` (reading via the `public.maint_billing_*` RPCs; `processing_status` is STORED on the promise)
 > Entities: [Visit](../../entities/visit.md), [Task](../../entities/task.md), [Task Billing Period](../../entities/task-billing-period.md), [Invoice](../../entities/invoice.md), [Autopay Transaction](../../entities/autopay-transaction.md)
 
 **One-line purpose:** ION services pools all month and bills one invoice per task; we
