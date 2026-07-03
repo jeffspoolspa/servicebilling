@@ -179,14 +179,9 @@ export default async function NeedsReviewPage({
                       </Pill>
                     ))}
                     {r.chem && (
-                      <span className="text-[11px] text-ink-mute">
-                        chems {formatCurrency(r.chem.total_usd)} vs{" "}
-                        {formatCurrency(r.chem.median_usd)} {r.chem.peer_group.replace(/_/g, " ")}{" "}
-                        median ({r.chem.x_median}x)
-                      </span>
+                      <Pill tone="sun">{r.chem.x_median}x median</Pill>
                     )}
                   </div>
-
                 </td>
                 <td className="px-4 py-2.5 text-right font-mono num text-ink">
                   {formatCurrency(r.expected / 100)}
