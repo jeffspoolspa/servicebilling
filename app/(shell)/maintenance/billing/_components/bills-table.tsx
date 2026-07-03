@@ -16,7 +16,7 @@ import { useRouter } from "next/navigation"
 import { SortableHeader } from "@/components/ui/sortable-header"
 import { formatCurrency } from "@/lib/utils/format"
 import { cn } from "@/lib/utils/cn"
-import { REASON_LABEL, STATUS_LABEL, STATUS_ORDER, STATUS_TONE } from "../_lib/status"
+import { REASON_LABEL, STATUS_LABEL, STATUS_TONE } from "../_lib/status"
 import type { ProcessingStatus } from "../_lib/queries"
 
 export interface TaskLine {
@@ -96,7 +96,6 @@ const COLUMNS: { key: string | null; label: string; align: "left" | "right"; def
   { key: "expected", label: "Expected", align: "right", defaultDir: "desc" },
   { key: "diff", label: "ION diff", align: "right", defaultDir: "desc" },
   { key: null, label: "QBO", align: "left", defaultDir: "asc" },
-  { key: "status", label: "Status", align: "left", defaultDir: "asc" },
 ]
 
 /**
@@ -159,7 +158,7 @@ export function BillsTable({
         <tbody>
           {customers.length === 0 && (
             <tr>
-              <td colSpan={9} className="px-4 py-8 text-center text-ink-mute">
+              <td colSpan={8} className="px-4 py-8 text-center text-ink-mute">
                 No bills match this filter.
               </td>
             </tr>
@@ -190,7 +189,6 @@ function CustomerRows({
   open: boolean
   onToggle: () => void
 }) {
-  const behind = STATUS_ORDER[Math.min(...c.statuses.map((s) => STATUS_ORDER.indexOf(s)))]
   return (
     <>
       <tr
@@ -222,16 +220,10 @@ function CustomerRows({
         </td>
         <DiffCell ion_cents={c.ion_cents} expected_cents={c.expected_cents} />
         <td className="px-4 py-2.5 font-mono text-xs text-ink-dim">{c.qbo_docs || "—"}</td>
-        <td className="px-4 py-2.5">
-          {/* single chip = the most-behind task status (uniform row height) */}
-          <Pill tone={STATUS_TONE[behind]} dot>
-            {STATUS_LABEL[behind]}
-          </Pill>
-        </td>
       </tr>
       {open && (
         <tr className="border-b border-line-soft/40 bg-white/[0.015]">
-          <td colSpan={9} className="px-6 py-4">
+          <td colSpan={8} className="px-6 py-4">
             <BillDetail c={c} month={month} />
           </td>
         </tr>

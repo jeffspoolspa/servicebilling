@@ -31,8 +31,8 @@ const SEGMENTS = ["commercial", "residential"] as const
 const FREQUENCIES = ["weekly", "biweekly", "multi_week", "monthly"] as const
 
 // server-side sort over grouped customer rows (URL-driven, WO pattern)
-type SortKey = "name" | "tasks" | "visits" | "labor" | "chems" | "expected" | "diff" | "status"
-const SORT_KEYS: SortKey[] = ["name", "tasks", "visits", "labor", "chems", "expected", "diff", "status"]
+type SortKey = "name" | "tasks" | "visits" | "labor" | "chems" | "expected" | "diff"
+const SORT_KEYS: SortKey[] = ["name", "tasks", "visits", "labor", "chems", "expected", "diff"]
 function sortValue(c: CustomerBill, key: SortKey): string | number {
   switch (key) {
     case "name":
@@ -50,8 +50,6 @@ function sortValue(c: CustomerBill, key: SortKey): string | number {
     case "diff":
       // biggest ION-vs-expected discrepancy first on desc; unmatched sink
       return c.ion_cents == null ? -1 : Math.abs(c.ion_cents - c.expected_cents)
-    case "status":
-      return Math.min(...c.statuses.map((s) => STATUSES.indexOf(s)))
   }
 }
 
