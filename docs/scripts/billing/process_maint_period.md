@@ -13,7 +13,12 @@ charged). Per period:
 
 1. Route: `period -> autopay_customer_id -> payment_method_id ->
    customer_payment_methods` (the exact card/bank enrolled on the roster).
-   No autopay tag -> invoice email only.
+   If the linked method is gone from the customer's QBO wallet (card
+   replaced in QBO -> the per-invoice PM refresh deactivated the old row),
+   the engine falls back to the customer's CURRENT default active method
+   and re-points the roster (maint_billing_autopay_set_pm) — the switch
+   shows in the run result. No autopay tag / no active method -> invoice
+   email only.
 2. WRITE-AHEAD: insert a `billing.processing_attempts` row (stage `maint`)
    with a fresh `idempotency_key` BEFORE the charge — the same table and
    method as the work-order engine. Retries reuse the persisted key (Intuit
