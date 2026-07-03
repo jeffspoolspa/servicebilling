@@ -87,6 +87,12 @@ export default async function ProcessPage({
           .map((r) => r.qbo_doc_number)
           .filter(Boolean)
           .join(", "),
+        invoice_list: list
+          .filter((r) => r.qbo_invoice_id)
+          .map((r) => ({
+            qbo_invoice_id: r.qbo_invoice_id as string,
+            doc_number: r.qbo_doc_number,
+          })),
         task_count: list.length,
         on_autopay: list[0].on_autopay,
         card,
@@ -131,6 +137,7 @@ export default async function ProcessPage({
           qbo_customer_id: c.qbo_customer_id,
           customer_name: c.customer_name,
           total_cents: c.total_cents,
+          balance_cents: Math.round(c.balance * 100),
           on_autopay: c.on_autopay,
           card: c.card
             ? {
@@ -141,6 +148,7 @@ export default async function ProcessPage({
               }
             : null,
           invoices: c.invoices,
+          invoice_list: c.invoice_list,
           task_count: c.task_count,
         }))}
       />
