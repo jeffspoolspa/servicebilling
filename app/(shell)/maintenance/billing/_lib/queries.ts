@@ -212,6 +212,16 @@ export function listAutopayCustomers(): Promise<AutopayCustomerRow[]> {
   return rpc<AutopayCustomerRow>("maint_billing_autopay_roster")
 }
 
+export interface AutopayCandidate {
+  qbo_customer_id: string
+  display_name: string
+}
+
+/** Maintenance customers (recurring tasks) not currently on the active roster. */
+export function listAutopayCandidates(): Promise<AutopayCandidate[]> {
+  return rpc<AutopayCandidate>("maint_billing_autopay_candidates")
+}
+
 /** Processing attempts = the customer-month's autopay transactions. */
 export interface AttemptRow {
   id: string
