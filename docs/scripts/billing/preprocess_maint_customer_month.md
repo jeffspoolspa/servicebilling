@@ -15,10 +15,17 @@ Pre-processes ONE maintenance customer-month after its QBO invoice links:
    the global 10k-row Payment scan and it does **NOT** send the invoice email when a
    credit fully covers it — sending belongs to the send step; auto-emailing would mark
    `EmailSent` and let the paid+sent auto-promote skip an unreviewed hold.
-2. **Stamp:** `pre_processed_at` + `credits_applied` on the customer-month's
+2. **Enrich the invoice** (sparse update): `ClassRef` = the Maintenance class,
+   `DueDate` = the 15th of the month after the invoice date, and — RECURRING
+   tasks only, job invoices keep their own memos — the memo
+   `'[Month] Pool Maintenance'` written to BOTH memo fields: `CustomerMemo`
+   (the customer-facing message on the invoice) and `PrivateNote` (the
+   internal memo). Applied values write back to the `billing.invoices` cache.
+   An enrichment failure stamps `needs_review_reason = 'enrichment_error'`.
+3. **Stamp:** `pre_processed_at` + `credits_applied` on the customer-month's
    `task_billing_periods` rows; a credit failure stamps `needs_review_reason =
    'credit_error'` (sticky — only a clean re-run clears it).
-3. **Project:** calls `billing_audit.project_maint_processing_status`, which evaluates
+4. **Project:** calls `billing_audit.project_maint_processing_status`, which evaluates
    ALL gates (chem_flag = the 2x rule, ION amount, subtotal ION-vs-QBO, reconcile verdict) and writes
    `needs_review` | `ready_to_process` (or `processed` if the invoice already reads
    paid + sent).

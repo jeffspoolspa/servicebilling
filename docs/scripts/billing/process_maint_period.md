@@ -24,7 +24,9 @@ charged). Per period:
 4. Record the QBO Payment (CCTransId = charge id) — failure here =
    `payment_orphan`, human recovery only.
 5. **Receipt first** (`payment/{id}/send`), **then** the invoice copy
-   (`invoice/{id}/send`).
+   (`invoice/{id}/send`). The QBO Payment's `PrivateNote` mirrors the WO
+   engine's receipt memo with the month label in the WO-number slot:
+   `Auto-charge | June Pool Maintenance | Inv# ... | Charge ID ... | Auth ... | card x1234 | ts`.
 6. Write the `autopay_transactions` reporting row (Processing tab +
    projection's autopay_charged gate), reset roster declines, update the
    invoice cache (balance/email_status -> fires the auto-promote trigger ->
