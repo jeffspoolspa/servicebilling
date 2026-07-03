@@ -7,7 +7,12 @@ import { formatCurrency } from "@/lib/utils/format"
 export interface InvoiceDetailData {
   qbo_invoice_id: string
   doc_number: string | null
+  customer_name: string | null
   txn_date: string | null
+  due_date: string | null
+  memo: string | null
+  statement_memo: string | null
+  qbo_class: string | null
   subtotal: number | null
   total_amt: number | null
   balance: number | null
@@ -45,27 +50,44 @@ export function InvoiceDetail({ qboInvoiceId }: { qboInvoiceId: string }) {
     return <div className="text-[11px] text-coral">Failed to load invoice detail.</div>
 
   const items = (inv.line_items ?? []).filter((li) => li.line_type === "item")
-  const memoLine = (inv.line_items ?? []).find(
+  const descLine = (inv.line_items ?? []).find(
     (li) => li.line_type === "description" && li.description,
   )
   const tax = (inv.total_amt ?? 0) - (inv.subtotal ?? 0)
   return (
     <div className="rounded-lg border border-line-soft overflow-hidden max-w-2xl">
-      <div className="flex items-center justify-between px-4 py-2 bg-white/[0.02] border-b border-line-soft text-[11px]">
-        <div className="text-ink">
-          Invoice <span className="font-mono">#{inv.doc_number}</span>
-          {inv.txn_date && <span className="text-ink-mute ml-2">{inv.txn_date}</span>}
-          {memoLine && <span className="text-ink-mute ml-2">· {memoLine.description}</span>}
+      {/* full header (mirrors the work-order invoice block, kept simple) */}
+      <div className="px-4 py-3 bg-white/[0.02] border-b border-line-soft space-y-2">
+        <div className="flex items-center justify-between text-[12px]">
+          <div className="text-ink">
+            Invoice <span className="font-mono">#{inv.doc_number}</span>
+            {inv.customer_name && (
+              <span className="text-ink-mute ml-2">{inv.customer_name}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-[11px]">
+            {inv.email_status === "EmailSent" && <Pill tone="cyan">sent</Pill>}
+            {(inv.balance ?? 0) <= 0 ? (
+              <Pill tone="grass">paid</Pill>
+            ) : (
+              <span className="text-ink-mute">
+                balance{" "}
+                <span className="font-mono num text-sun">{formatCurrency(inv.balance ?? 0)}</span>
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {inv.email_status === "EmailSent" && <Pill tone="cyan">sent</Pill>}
-          {(inv.balance ?? 0) <= 0 ? (
-            <Pill tone="grass">paid</Pill>
-          ) : (
-            <span className="text-ink-mute">
-              balance <span className="font-mono num text-ink">{formatCurrency(inv.balance ?? 0)}</span>
-            </span>
-          )}
+        <div className="grid grid-cols-4 gap-3 text-[11px]">
+          <HeaderField label="Invoice date" value={inv.txn_date ?? "—"} mono />
+          <HeaderField label="Due date" value={inv.due_date ?? "—"} mono />
+          <HeaderField label="Class" value={inv.qbo_class ?? "—"} />
+          <HeaderField label="Total" value={formatCurrency(inv.total_amt ?? 0)} mono />
+        </div>
+        <div className="text-[11px]">
+          <span className="text-[10px] uppercase tracking-wide text-ink-mute mr-2">Memo</span>
+          <span className="text-ink-dim">
+            {inv.memo ?? descLine?.description ?? "—"}
+          </span>
         </div>
       </div>
       <table className="w-full text-[11px]">
@@ -104,6 +126,15 @@ export function InvoiceDetail({ qboInvoiceId }: { qboInvoiceId: string }) {
           </tr>
         </tfoot>
       </table>
+    </div>
+  )
+}
+
+function HeaderField({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-ink-mute">{label}</div>
+      <div className={mono ? "font-mono num text-ink-dim" : "text-ink-dim"}>{value}</div>
     </div>
   )
 }
