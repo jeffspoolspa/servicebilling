@@ -13,27 +13,19 @@ import {
   Clock,
 } from "lucide-react"
 import { createSupabaseBrowser } from "@/lib/supabase/client"
-import { Button } from "@/components/ui/button"
 
 /**
- * Live batch progress modal for maintenance processing runs — the WO
- * fire-and-forget pattern: the route returns a jobId immediately and this
- * modal tracks the DB rows the engine writes as it works.
+ * Live processing tracker for maintenance charge runs — fire-and-forget (the
+ * route returns a jobId immediately) with progress read from the DB rows the
+ * engine writes. Presented as an activity CHIP + small anchored panel (same
+ * pattern as the preprocess QueueChip), not a screen-takeover: the chip shows
+ * "Processing · resolved/total" while the run lives, click toggles the row
+ * list, and dismissing never aborts anything (the run is server-side).
  *
- * Two feeds, both polled (1.5s) with Realtime riding on top for instant
- * attempt updates:
- *   - billing_processing_attempts view (stage='maint', this run's window):
- *     per-invoice stage detail — charging -> recording payment -> emails ->
- *     succeeded/declined/halted.
- *   - maint_billing_period_statuses RPC: the periods' processing_status +
- *     balance — the authoritative "is this row finished" signal. It also
- *     resolves rows that never create an attempt (already emailed ->
- *     straight to processed).
- *
- * A row is resolved when its period reads processed OR its attempt reaches a
- * halt state (declined without email, uncertain, orphan). The run is done
- * when every row is resolved. Closing never aborts anything — the engine
- * runs server-side regardless — so Close is always available.
+ * Feeds: billing_processing_attempts view (stage='maint', run-scoped) for
+ * per-invoice stage detail, and maint_billing_period_statuses for the
+ * authoritative finished signal (also resolves already-emailed rows that
+ * never create an attempt).
  */
 
 export interface RunItem {
@@ -83,11 +75,7 @@ function deriveState(
           ? { kind: "running", label: "sending emails…" }
           : { kind: "running", label: "recording payment…" }
       case "succeeded":
-        return {
-          kind: "done",
-          label: "succeeded",
-          detail: amt ? `${amt} charged` : undefined,
-        }
+        return { kind: "done", label: "succeeded", detail: amt ? `${amt} charged` : undefined }
       case "charge_declined":
         return processed
           ? {
@@ -117,45 +105,34 @@ function deriveState(
     }
   }
   if (processed) {
-    // no attempt this run — the already-emailed -> processed path (or paid)
     return { kind: "done", label: paid ? "processed · paid" : "processed · invoice out" }
   }
   return running ? { kind: "queued" } : { kind: "warn", label: "not processed" }
 }
 
 function isResolved(st: RowState): boolean {
-  return st.kind === "done" || st.kind === "failed" || (st.kind === "warn" && true)
+  return st.kind === "done" || st.kind === "failed" || st.kind === "warn"
 }
 
-export function MaintProgressModal({
-  open,
-  onClose,
+export function MaintRunTracker({
   items,
   runError,
   fired,
+  onDismiss,
 }: {
-  open: boolean
-  onClose: () => void
   items: RunItem[]
-  /** Trigger call failed — nothing is running. */
   runError: string | null
-  /** True once the Windmill job was accepted (jobId returned). */
   fired: boolean
+  onDismiss: () => void
 }) {
   const router = useRouter()
+  const [open, setOpen] = useState(true)
   const [attempts, setAttempts] = useState<Map<string, AttemptRow>>(new Map())
   const [periods, setPeriods] = useState<Map<string, PeriodStatus>>(new Map())
+  const panelRef = useRef<HTMLDivElement | null>(null)
   const startedAtRef = useRef<string>(new Date().toISOString())
+  const refreshedRef = useRef(false)
 
-  useEffect(() => {
-    if (open) {
-      setAttempts(new Map())
-      setPeriods(new Map())
-      startedAtRef.current = new Date().toISOString()
-    }
-  }, [open])
-
-  // resolved-state computation must precede the polling effect's deps
   const states = useMemo(() => {
     const running = fired && !runError
     return items.map((item) => {
@@ -165,11 +142,20 @@ export function MaintProgressModal({
     })
   }, [items, attempts, periods, fired, runError])
 
-  const allResolved = states.length > 0 && states.every(({ state }) => isResolved(state))
+  const resolved = states.filter(({ state }) => isResolved(state)).length
+  const allResolved = states.length > 0 && resolved === states.length
   const running = fired && !runError && !allResolved
 
+  // refresh the page data once when the run completes
   useEffect(() => {
-    if (!open || !running) return
+    if (allResolved && !refreshedRef.current) {
+      refreshedRef.current = true
+      router.refresh()
+    }
+  }, [allResolved, router])
+
+  useEffect(() => {
+    if (!running) return
     const sb = createSupabaseBrowser()
     const docs = items.map((i) => i.doc_number).filter(Boolean) as string[]
     const periodIds = items.map((i) => i.period_id)
@@ -193,7 +179,9 @@ export function MaintProgressModal({
         docs.length > 0
           ? sb
               .from("billing_processing_attempts")
-              .select("invoice_number, status, charge_amount, qbo_payment_id, error_message, attempted_at")
+              .select(
+                "invoice_number, status, charge_amount, qbo_payment_id, error_message, attempted_at",
+              )
               .in("invoice_number", docs)
               .eq("stage", "maint")
               .eq("dry_run", false)
@@ -231,96 +219,76 @@ export function MaintProgressModal({
       channel.unsubscribe()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, running])
+  }, [running])
 
-  if (!open) return null
-
-  const doneCount = states.filter(({ state }) => isResolved(state)).length
+  if (items.length === 0) return null
 
   return (
-    <div
-      className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm grid place-items-center p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          router.refresh()
-          onClose()
-        }
-      }}
-    >
-      <div className="bg-[#0E1C2A] border border-line rounded-xl shadow-2xl max-w-xl w-full">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-line-soft">
-          <div>
-            <div className="text-sm font-medium text-ink">
-              Processing {items.length} invoice{items.length === 1 ? "" : "s"}
+    <div className="relative" ref={panelRef}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] transition-colors ${
+          runError
+            ? "border-coral/40 bg-coral/10 text-coral hover:bg-coral/20"
+            : running
+              ? "border-cyan/30 bg-cyan/10 text-cyan hover:bg-cyan/20"
+              : "border-grass/30 bg-grass/10 text-grass hover:bg-grass/20"
+        }`}
+      >
+        {runError ? (
+          <AlertTriangle className="w-3 h-3" strokeWidth={2} />
+        ) : running ? (
+          <Loader2 className="w-3 h-3 animate-spin" strokeWidth={2} />
+        ) : (
+          <Check className="w-3 h-3" strokeWidth={2.5} />
+        )}
+        Processing · {resolved}/{items.length}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-2 w-[26rem] z-30 bg-[#0E1C2A] border border-line rounded-lg shadow-2xl">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-line-soft">
+            <div className="text-[11px] text-ink-mute">
+              {resolved} of {items.length} resolved · runs server-side
             </div>
-            <div className="text-[11px] text-ink-mute mt-0.5">
-              {doneCount} of {items.length} resolved · runs server-side — closing does not stop it
-            </div>
+            <button
+              onClick={() => {
+                router.refresh()
+                onDismiss()
+              }}
+              className="text-[11px] text-ink-mute hover:text-ink"
+            >
+              dismiss
+            </button>
           </div>
-          <div className="flex items-center gap-2">
-            {runError ? (
-              <>
-                <AlertTriangle className="w-4 h-4 text-coral" strokeWidth={2} />
-                <span className="text-[11px] text-coral">failed to start</span>
-              </>
-            ) : running ? (
-              <>
-                <Loader2 className="w-4 h-4 text-cyan animate-spin" strokeWidth={2} />
-                <span className="text-[11px] text-cyan">live</span>
-              </>
-            ) : (
-              <>
-                <Check className="w-4 h-4 text-grass" strokeWidth={2.5} />
-                <span className="text-[11px] text-grass">done</span>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="px-5 py-3 max-h-[55vh] overflow-y-auto divide-y divide-line-soft/50">
-          {states.map(({ item, state }) => (
-            <div key={item.period_id} className="flex items-center gap-3 py-2.5">
-              <StateIcon state={state} />
-              <div className="flex-1 min-w-0">
-                <div className="text-[13px] text-ink truncate">
-                  {item.customer_name}
-                  {item.doc_number && (
-                    <span className="text-ink-mute font-mono text-[11px]">
-                      {" "}
-                      #{item.doc_number}
-                    </span>
+          <div className="max-h-72 overflow-y-auto divide-y divide-line-soft/40">
+            {states.map(({ item, state }) => (
+              <div key={item.period_id} className="flex items-center gap-2.5 px-4 py-2">
+                <StateIcon state={state} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12px] text-ink truncate">
+                    {item.customer_name}
+                    {item.doc_number && (
+                      <span className="text-ink-mute font-mono text-[10px]">
+                        {" "}
+                        #{item.doc_number}
+                      </span>
+                    )}
+                  </div>
+                  {"detail" in state && state.detail && (
+                    <div className="text-[10px] text-ink-mute break-words">{state.detail}</div>
                   )}
                 </div>
-                {"detail" in state && state.detail && (
-                  <div className="text-[11px] text-ink-mute break-words">{state.detail}</div>
-                )}
+                <StateLabel state={state} />
               </div>
-              <StateLabel state={state} />
-            </div>
-          ))}
-        </div>
-
-        {runError && (
-          <div className="px-5 py-3 border-t border-line-soft bg-coral/[0.04]">
-            <div className="text-[11px] uppercase tracking-[0.08em] text-coral/80 mb-1">
-              run failed to start
-            </div>
-            <div className="text-[12px] text-ink-dim break-words">{runError}</div>
+            ))}
           </div>
-        )}
-
-        <div className="px-5 py-4 border-t border-line-soft flex justify-end">
-          <Button
-            size="sm"
-            onClick={() => {
-              router.refresh()
-              onClose()
-            }}
-          >
-            Close
-          </Button>
+          {runError && (
+            <div className="px-4 py-2.5 border-t border-line-soft bg-coral/[0.04] text-[11px] text-coral break-words">
+              failed to start: {runError}
+            </div>
+          )}
         </div>
-      </div>
+      )}
     </div>
   )
 }
@@ -329,8 +297,8 @@ function StateIcon({ state }: { state: RowState }) {
   switch (state.kind) {
     case "queued":
       return (
-        <div className="w-7 h-7 rounded-full border border-line bg-bg-elev flex items-center justify-center">
-          <Clock className="w-3.5 h-3.5 text-ink-mute/60" strokeWidth={1.8} />
+        <div className="w-6 h-6 rounded-full border border-line bg-bg-elev flex items-center justify-center shrink-0">
+          <Clock className="w-3 h-3 text-ink-mute/60" strokeWidth={1.8} />
         </div>
       )
     case "running": {
@@ -340,27 +308,27 @@ function StateIcon({ state }: { state: RowState }) {
           ? Receipt
           : Mail
       return (
-        <div className="w-7 h-7 rounded-full border border-cyan/50 bg-cyan/15 ring-2 ring-cyan/30 animate-pulse flex items-center justify-center">
-          <Icon className="w-3.5 h-3.5 text-cyan" strokeWidth={1.8} />
+        <div className="w-6 h-6 rounded-full border border-cyan/50 bg-cyan/15 animate-pulse flex items-center justify-center shrink-0">
+          <Icon className="w-3 h-3 text-cyan" strokeWidth={1.8} />
         </div>
       )
     }
     case "done":
       return (
-        <div className="w-7 h-7 rounded-full border border-grass/40 bg-grass/15 flex items-center justify-center">
-          <Check className="w-4 h-4 text-grass" strokeWidth={2.5} />
+        <div className="w-6 h-6 rounded-full border border-grass/40 bg-grass/15 flex items-center justify-center shrink-0">
+          <Check className="w-3.5 h-3.5 text-grass" strokeWidth={2.5} />
         </div>
       )
     case "warn":
       return (
-        <div className="w-7 h-7 rounded-full border border-sun/40 bg-sun/15 flex items-center justify-center">
-          <AlertTriangle className="w-3.5 h-3.5 text-sun" strokeWidth={2} />
+        <div className="w-6 h-6 rounded-full border border-sun/40 bg-sun/15 flex items-center justify-center shrink-0">
+          <AlertTriangle className="w-3 h-3 text-sun" strokeWidth={2} />
         </div>
       )
     case "failed":
       return (
-        <div className="w-7 h-7 rounded-full border border-coral/50 bg-coral/15 flex items-center justify-center">
-          <X className="w-4 h-4 text-coral" strokeWidth={2.5} />
+        <div className="w-6 h-6 rounded-full border border-coral/50 bg-coral/15 flex items-center justify-center shrink-0">
+          <X className="w-3.5 h-3.5 text-coral" strokeWidth={2.5} />
         </div>
       )
   }
@@ -378,5 +346,5 @@ function StateLabel({ state }: { state: RowState }) {
             ? "text-coral"
             : "text-ink-mute/60"
   const label = state.kind === "queued" ? "queued" : state.label
-  return <span className={`text-[11px] shrink-0 ${tone}`}>{label}</span>
+  return <span className={`text-[10px] shrink-0 ${tone}`}>{label}</span>
 }

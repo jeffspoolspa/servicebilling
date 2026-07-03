@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { SortableHeader } from "@/components/ui/sortable-header"
 import { formatCurrency } from "@/lib/utils/format"
-import { MaintProgressModal, type RunItem } from "./maint-progress-modal"
+import { MaintRunTracker, type RunItem } from "./maint-progress-modal"
 
 interface ProcessCustomer {
   qbo_customer_id: string
@@ -55,7 +55,6 @@ export function ProcessActions({
   const [dryRun, setDryRun] = useState(true)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<string | null>(null)
-  const [modalOpen, setModalOpen] = useState(false)
   const [runItems, setRunItems] = useState<RunItem[]>([])
   const [runFired, setRunFired] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
@@ -103,7 +102,6 @@ export function ProcessActions({
       )
       setRunFired(false)
       setRunError(null)
-      setModalOpen(true)
     }
     try {
       const resp = await fetch("/api/maintenance-billing/process", {
@@ -174,13 +172,7 @@ export function ProcessActions({
 
   return (
     <div className="space-y-3">
-      <MaintProgressModal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        items={runItems}
-        runError={runError}
-        fired={runFired}
-      />
+
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="text-[12px] text-ink-mute">
           {selected.size} of {customers.length} selected ·{" "}
@@ -191,6 +183,12 @@ export function ProcessActions({
           )}
         </div>
         <div className="flex items-center gap-3">
+          <MaintRunTracker
+            items={runItems}
+            runError={runError}
+            fired={runFired}
+            onDismiss={() => setRunItems([])}
+          />
           <label className="flex items-center gap-1.5 text-[12px] text-ink-mute cursor-pointer">
             <input
               type="checkbox"
