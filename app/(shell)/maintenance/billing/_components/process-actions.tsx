@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { SortableHeader } from "@/components/ui/sortable-header"
 import { formatCurrency } from "@/lib/utils/format"
-import { MaintProgressModal, type RunItem, type RunResult } from "./maint-progress-modal"
+import { MaintProgressModal, type RunItem } from "./maint-progress-modal"
 
 interface ProcessCustomer {
   qbo_customer_id: string
@@ -57,7 +57,7 @@ export function ProcessActions({
   const [result, setResult] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [runItems, setRunItems] = useState<RunItem[]>([])
-  const [runResults, setRunResults] = useState<RunResult[] | null>(null)
+  const [runFired, setRunFired] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
 
   const allIds = customers.map((c) => c.qbo_customer_id)
@@ -88,8 +88,8 @@ export function ProcessActions({
     setBusy(true)
     setResult(null)
     if (!dryRun) {
-      // live run -> batch progress modal (rows advance via Realtime/polling
-      // on the attempt WAL; the sync response is the authoritative finish)
+      // fire-and-forget (WO pattern): the route returns a jobId immediately;
+      // the modal tracks progress from the DB rows the engine writes
       setRunItems(
         customers
           .filter((c) => selected.has(c.qbo_customer_id))
@@ -101,7 +101,7 @@ export function ProcessActions({
             })),
           ),
       )
-      setRunResults(null)
+      setRunFired(false)
       setRunError(null)
       setModalOpen(true)
     }
@@ -114,8 +114,7 @@ export function ProcessActions({
       const json = await resp.json()
       if (!resp.ok) throw new Error(json.error ?? `HTTP ${resp.status}`)
       setResult(json.message ?? "Processing started.")
-      if (!dryRun) setRunResults((json.results ?? []) as RunResult[])
-      router.refresh()
+      if (!dryRun) setRunFired(true)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setResult(`Failed: ${msg}`)
@@ -154,9 +153,8 @@ export function ProcessActions({
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         items={runItems}
-        results={runResults}
         runError={runError}
-        running={busy}
+        fired={runFired}
       />
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="text-[12px] text-ink-mute">

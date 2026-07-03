@@ -1,19 +1,22 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { guardApi } from "@/lib/auth/api"
-import { triggerScriptSync } from "@/lib/windmill"
+import { triggerScript } from "@/lib/windmill"
 
 /**
  * POST /api/maintenance-billing/process
  * Body: { billing_month: 'YYYY-MM', qbo_customer_ids: string[], dry_run?: boolean }
  *
- * Runs the maintenance charge engine (f/billing/process_maint_period) for the
- * selected customers' READY periods that month. The engine is the gate:
- * only processing_status='ready_to_process' periods are chargeable (a flagged
- * customer structurally cannot be charged), the charge goes through the
- * autopay roster row's linked payment method with a persisted idempotency key
- * (billing.processing_attempts WAL — same table + method as work orders),
- * receipt email first, then the invoice copy. Non-autopay ready periods get
- * the invoice email only.
+ * Fire-and-forget (the WO pattern): triggers the maintenance charge engine
+ * (f/billing/process_maint_period) and returns the Windmill jobId
+ * immediately. Progress is tracked from the DB rows the engine writes as it
+ * goes — billing.processing_attempts (the WAL, one row per invoice, states
+ * pending -> charge_succeeded -> succeeded/declined/...) and the periods'
+ * processing_status — which is what the batch progress modal watches. The
+ * engine is the gate: only ready_to_process periods are chargeable, and the
+ * persisted idempotency keys make interrupted runs safe to re-fire.
+ *
+ * Dry runs stay synchronous via ?wait=1 semantics: the caller passes
+ * dry_run=true and we wait for the plan (no DB rows to watch on a dry run).
  */
 export async function POST(req: NextRequest) {
   const guard = await guardApi("maintenance", { write: true })
@@ -42,36 +45,46 @@ export async function POST(req: NextRequest) {
   const dryRun = body.dry_run !== false
 
   try {
-    const result = await triggerScriptSync<{
-      dry_run: boolean
-      periods: number
-      by_status: Record<string, number>
-      results: unknown[]
-      status?: string
-      error?: string
-    }>(
-      "f/billing/process_maint_period",
-      {
-        qbo_customer_ids: ids,
-        billing_month: month,
-        dry_run: dryRun,
-      },
-      // money movement serializes through qbo_writer; ~10s/invoice
-      { timeoutMs: 300000 },
-    )
-    if (result.status === "error" || result.status === "noop") {
-      return NextResponse.json(
-        { error: result.error ?? "nothing to process" },
-        { status: 422 },
+    if (dryRun) {
+      // dry runs return the per-period plan synchronously — nothing lands in
+      // the DB to watch, and plans are fast (no external calls)
+      const { triggerScriptSync } = await import("@/lib/windmill")
+      const result = await triggerScriptSync<{
+        periods: number
+        by_status: Record<string, number>
+        results: unknown[]
+        status?: string
+        error?: string
+      }>(
+        "f/billing/process_maint_period",
+        { qbo_customer_ids: ids, billing_month: month, dry_run: true },
+        { timeoutMs: 120000 },
       )
+      if (result.status === "error" || result.status === "noop") {
+        return NextResponse.json(
+          { error: result.error ?? "nothing to process" },
+          { status: 422 },
+        )
+      }
+      const summary = Object.entries(result.by_status ?? {})
+        .map(([k, v]) => `${v} ${k}`)
+        .join(", ")
+      return NextResponse.json({
+        status: "ok",
+        message: `Dry run: ${result.periods} period(s) — ${summary}.`,
+        ...result,
+      })
     }
-    const summary = Object.entries(result.by_status ?? {})
-      .map(([k, v]) => `${v} ${k}`)
-      .join(", ")
+
+    const { jobId } = await triggerScript("f/billing/process_maint_period", {
+      qbo_customer_ids: ids,
+      billing_month: month,
+      dry_run: false,
+    })
     return NextResponse.json({
-      status: "ok",
-      message: `${dryRun ? "Dry run" : "Processed"}: ${result.periods} period(s) — ${summary}.`,
-      ...result,
+      status: "started",
+      jobId,
+      message: `Processing started for ${ids.length} customer(s).`,
     })
   } catch (e) {
     return NextResponse.json(
