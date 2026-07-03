@@ -1,4 +1,3 @@
-import Link from "next/link"
 import { Card } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { formatCurrency } from "@/lib/utils/format"
@@ -218,21 +217,6 @@ export default async function ProcessPage({
           },
         ]}
       />
-
-      {held.length > 0 && (
-        <Card className="px-4 py-3 border-coral/30 bg-coral/5 flex items-center justify-between">
-          <div className="text-[13px] text-coral">
-            {held.length} invoice{held.length === 1 ? "" : "s"} held for review — excluded
-            from processing until reviewed.
-          </div>
-          <Link
-            href={`/maintenance/billing/review?month=${selected}` as never}
-            className="text-[12px] text-coral underline underline-offset-2 shrink-0"
-          >
-            Review
-          </Link>
-        </Card>
-      )}
 
       <ProcessActions
         month={selected}
