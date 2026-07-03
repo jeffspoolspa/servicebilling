@@ -11,7 +11,7 @@ import {
 } from "../_lib/queries"
 import { REASON_LABEL } from "../_lib/status"
 import { MonthSelect } from "../_components/month-select"
-import { ReviewQueueActions } from "../_components/review-queue-actions"
+import { ReviewQueueActions, RetryPreprocess } from "../_components/review-queue-actions"
 
 export const metadata = { title: "Maintenance · Needs review" }
 export const dynamic = "force-dynamic"
@@ -79,8 +79,10 @@ export default async function NeedsReviewPage({
         name,
         chem,
         customer_id: list[0].customer_id,
+        qbo_customer_id: list[0].qbo_customer_id,
         ids: list.map((p) => p.id),
         reasons,
+        opError: reasons.some((x) => x === "enrichment_error" || x === "credit_error"),
         chemFlagged: reasons.includes("chem_flag"),
         expected: list.reduce((s, p) => s + (p.expected_total_cents ?? 0), 0),
         ion: list.some((p) => p.ion_amt_cents != null)
@@ -191,6 +193,11 @@ export default async function NeedsReviewPage({
                     >
                       Review chems →
                     </Link>
+                  ) : r.opError && r.qbo_customer_id ? (
+                    <span className="inline-flex items-center gap-2">
+                      <RetryPreprocess qboCustomerId={r.qbo_customer_id} month={selected} />
+                      <ReviewQueueActions ids={r.ids} />
+                    </span>
                   ) : (
                     <ReviewQueueActions ids={r.ids} />
                   )}

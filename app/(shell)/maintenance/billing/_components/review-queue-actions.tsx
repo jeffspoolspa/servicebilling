@@ -38,3 +38,44 @@ export function ReviewQueueActions({ ids }: { ids: string[] }) {
     </button>
   )
 }
+
+/** Immediate preprocess retry for sticky op errors (enrichment/credit):
+ *  enqueues the customer-month now — the drainer's next 2-minute tick
+ *  re-runs it, instead of waiting out the 30-minute self-heal spacing. */
+export function RetryPreprocess({
+  qboCustomerId,
+  month,
+}: {
+  qboCustomerId: string
+  month: string
+}) {
+  const router = useRouter()
+  const [state, setState] = useState<"idle" | "busy" | "queued">("idle")
+
+  async function retry() {
+    setState("busy")
+    try {
+      const r = await fetch("/api/maintenance-billing/preprocess", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ qbo_customer_id: qboCustomerId, billing_month: month }),
+      })
+      setState(r.ok ? "queued" : "idle")
+      if (r.ok) router.refresh()
+    } catch {
+      setState("idle")
+    }
+  }
+
+  if (state === "queued")
+    return <span className="text-[11px] text-cyan">queued — drainer picks it up ≤2 min</span>
+  return (
+    <button
+      disabled={state === "busy"}
+      onClick={retry}
+      className="text-[11px] px-2.5 py-1 rounded border border-cyan/30 text-cyan hover:bg-cyan/10 disabled:opacity-50"
+    >
+      {state === "busy" ? "…" : "Retry preprocessing"}
+    </button>
+  )
+}
