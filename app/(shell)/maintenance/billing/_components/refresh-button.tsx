@@ -29,7 +29,8 @@ export function RefreshButton({ month }: { month: string }) {
       if (!resp.ok) throw new Error(json.error ?? `HTTP ${resp.status}`)
       setResult(
         `Rebuilt ${json.promises ?? "?"} promises. ION report pull started ` +
-          `(job ${json.report_job_id}) — invoice numbers land in a few minutes.`,
+          `(job ${json.report_job_id}) — invoice numbers stamp and statuses move ` +
+          `to "ion matched" when it lands (a few minutes).`,
       )
       startTransition(() => router.refresh())
     } catch (e) {

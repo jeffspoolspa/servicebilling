@@ -10,8 +10,11 @@ import { triggerScript, triggerScriptSync } from "@/lib/windmill"
  *   1. f/billing_audit/build_task_billing_periods (sync) — rebuilds the invoice
  *      promises from visits + priced consumables. Locked months are skipped.
  *   2. f/ION/transactions_report (async, browser scrape) — replaces the month's
- *      billing_audit.ion_task_transactions, bringing in ION invoice numbers +
- *      amounts. Slow (minutes); the page shows the numbers on a later reload.
+ *      billing_audit.ion_task_transactions, then stamps the promises
+ *      (match_promises_to_ion) + projects processing_status. Slow (minutes);
+ *      statuses read "ion matched" on a later reload. This button is the
+ *      DELIBERATE manual trigger for pipeline stage 1 — no schedule, so the
+ *      report can be pulled mid-month to check billing as it accrues.
  */
 export async function POST(req: NextRequest) {
   const guard = await guardApi("maintenance", { write: true })
