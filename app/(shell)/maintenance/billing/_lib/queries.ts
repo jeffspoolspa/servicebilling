@@ -62,6 +62,7 @@ export interface BillingPeriodRow {
   reviewed_at: string | null
   office: string | null
   segment: "commercial" | "residential" | null
+  reconcile_notes: string | null
   credits_applied:
     | {
         kind: "payment" | "credit_memo"

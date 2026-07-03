@@ -78,6 +78,8 @@ export default async function NeedsReviewPage({
       return {
         name,
         chem,
+        notes: [...new Set(list.map((p) => p.reconcile_notes).filter(Boolean))] as string[],
+        held_usd: list.reduce((s, p) => s + (p.qbo_total ?? 0), 0),
         customer_id: list[0].customer_id,
         qbo_customer_id: list[0].qbo_customer_id,
         ids: list.map((p) => p.id),
@@ -104,9 +106,13 @@ export default async function NeedsReviewPage({
           <div>
             <h2 className="font-display text-[16px]">Needs review</h2>
             <div className="text-ink-mute text-[12px] mt-0.5">
-              {rows.length} customer{rows.length === 1 ? "" : "s"} held — linked, preprocessed
-              invoices whose gates failed. Chem flags: apply a discount on the QBO invoice
-              (what was sold stays intact) or bless as-is, then release.
+              {rows.length} customer{rows.length === 1 ? "" : "s"} ·{" "}
+              <span className="text-sun font-medium">
+                {formatCurrency(rows.reduce((s, r) => s + r.held_usd, 0))} held
+              </span>{" "}
+              — linked, preprocessed invoices whose gates failed. Chem flags: apply a
+              discount on the QBO invoice (what was sold stays intact) or bless as-is,
+              then release.
             </div>
           </div>
           <MonthSelect
@@ -172,6 +178,11 @@ export default async function NeedsReviewPage({
                       </span>
                     )}
                   </div>
+                  {r.reasons.includes("reconcile_mismatch") && r.notes.length > 0 && (
+                    <div className="mt-1 text-[10px] text-ink-mute font-mono break-words">
+                      {r.notes.join(" · ")}
+                    </div>
+                  )}
                 </td>
                 <td className="px-4 py-2.5 text-right font-mono num text-ink">
                   {formatCurrency(r.expected / 100)}
