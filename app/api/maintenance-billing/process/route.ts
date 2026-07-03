@@ -1,22 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { guardApi } from "@/lib/auth/api"
-import { triggerScript } from "@/lib/windmill"
+import { triggerScript, getJobResultMaybe } from "@/lib/windmill"
 
 /**
- * POST /api/maintenance-billing/process
- * Body: { billing_month: 'YYYY-MM', qbo_customer_ids: string[], dry_run?: boolean }
+ * Maintenance processing — fully async (the WO pattern), for BOTH live and
+ * dry runs: every run can queue behind the shared qbo_writer lock (the
+ * preprocess drainer holds it for minutes during month-end bursts), so no
+ * HTTP request ever waits on job completion.
  *
- * Fire-and-forget (the WO pattern): triggers the maintenance charge engine
- * (f/billing/process_maint_period) and returns the Windmill jobId
- * immediately. Progress is tracked from the DB rows the engine writes as it
- * goes — billing.processing_attempts (the WAL, one row per invoice, states
- * pending -> charge_succeeded -> succeeded/declined/...) and the periods'
- * processing_status — which is what the batch progress modal watches. The
- * engine is the gate: only ready_to_process periods are chargeable, and the
- * persisted idempotency keys make interrupted runs safe to re-fire.
- *
- * Dry runs stay synchronous via ?wait=1 semantics: the caller passes
- * dry_run=true and we wait for the plan (no DB rows to watch on a dry run).
+ * POST { billing_month, qbo_customer_ids, dry_run? } -> { jobId } immediately.
+ * GET  ?job=<id>                                     -> { completed, result }
+ *      (the UI polls this for dry-run plans; live runs are tracked from the
+ *       DB rows the engine writes — the processing chip.)
  */
 export async function POST(req: NextRequest) {
   const guard = await guardApi("maintenance", { write: true })
@@ -45,47 +40,35 @@ export async function POST(req: NextRequest) {
   const dryRun = body.dry_run !== false
 
   try {
-    if (dryRun) {
-      // dry runs return the per-period plan synchronously — nothing lands in
-      // the DB to watch, and plans are fast (no external calls)
-      const { triggerScriptSync } = await import("@/lib/windmill")
-      const result = await triggerScriptSync<{
-        periods: number
-        by_status: Record<string, number>
-        results: unknown[]
-        status?: string
-        error?: string
-      }>(
-        "f/billing/process_maint_period",
-        { qbo_customer_ids: ids, billing_month: month, dry_run: true },
-        { timeoutMs: 120000 },
-      )
-      if (result.status === "error" || result.status === "noop") {
-        return NextResponse.json(
-          { error: result.error ?? "nothing to process" },
-          { status: 422 },
-        )
-      }
-      const summary = Object.entries(result.by_status ?? {})
-        .map(([k, v]) => `${v} ${k}`)
-        .join(", ")
-      return NextResponse.json({
-        status: "ok",
-        message: `Dry run: ${result.periods} period(s) — ${summary}.`,
-        ...result,
-      })
-    }
-
     const { jobId } = await triggerScript("f/billing/process_maint_period", {
       qbo_customer_ids: ids,
       billing_month: month,
-      dry_run: false,
+      dry_run: dryRun,
     })
     return NextResponse.json({
       status: "started",
       jobId,
-      message: `Processing started for ${ids.length} customer(s).`,
+      dry_run: dryRun,
+      message: `${dryRun ? "Dry run" : "Processing"} started for ${ids.length} customer(s).`,
     })
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : String(e) },
+      { status: 502 },
+    )
+  }
+}
+
+export async function GET(req: NextRequest) {
+  const guard = await guardApi("maintenance")
+  if (guard instanceof NextResponse) return guard
+  const jobId = req.nextUrl.searchParams.get("job") ?? ""
+  if (!/^[0-9a-f-]{36}$/.test(jobId)) {
+    return NextResponse.json({ error: "job (uuid) required" }, { status: 400 })
+  }
+  try {
+    const out = await getJobResultMaybe(jobId)
+    return NextResponse.json(out)
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },

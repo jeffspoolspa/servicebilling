@@ -84,6 +84,10 @@ export function ProcessActions({
     setBusy(true)
     setResult(null)
     try {
+      // async both ways: the job can queue behind the shared qbo_writer lock
+      // (the preprocess drainer holds it for minutes mid-burst) — no HTTP
+      // request waits on the job. Live runs are tracked by the Processing
+      // chip; dry runs poll the job result for the plan.
       const resp = await fetch("/api/maintenance-billing/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -91,13 +95,48 @@ export function ProcessActions({
       })
       const json = await resp.json()
       if (!resp.ok) throw new Error(json.error ?? `HTTP ${resp.status}`)
-      setResult(json.message ?? "Processing started.")
+      if (!dryRun) {
+        setResult("Processing started — follow the Processing chip above.")
+        return
+      }
+      setResult("Dry run queued (waits for the QBO writer lock)…")
+      pollDryRun(json.jobId)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      setResult(`Failed: ${msg}`)
+      setResult(`Failed: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setBusy(false)
     }
+  }
+
+  async function pollDryRun(jobId: string) {
+    for (let i = 0; i < 200; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      try {
+        const resp = await fetch(`/api/maintenance-billing/process?job=${jobId}`)
+        const json = await resp.json()
+        if (!resp.ok) throw new Error(json.error ?? `HTTP ${resp.status}`)
+        if (json.completed) {
+          const r = json.result ?? {}
+          const summary = Object.entries(r.by_status ?? {})
+            .map(([k, v]) => `${v} ${k}`)
+            .join(", ")
+          const plans = (r.results ?? [])
+            .map((x: { customer?: string; plan?: string }) =>
+              x.plan ? `${x.customer}: ${x.plan}` : null,
+            )
+            .filter(Boolean)
+            .slice(0, 12)
+          setResult(
+            `Dry run: ${r.periods ?? 0} period(s) — ${summary || "nothing to do"}.` +
+              (plans.length ? `\n${plans.join("\n")}` : ""),
+          )
+          return
+        }
+      } catch {
+        // transient poll failure — keep going
+      }
+    }
+    setResult("Dry run still queued/running — check back or re-run.")
   }
 
   async function holdSelected() {
@@ -193,7 +232,7 @@ export function ProcessActions({
           </button>
         </div>
       </div>
-      {result && <div className="text-[11px] text-ink-mute">{result}</div>}
+      {result && <div className="text-[11px] text-ink-mute whitespace-pre-line">{result}</div>}
 
       <Card>
         <table className="w-full text-[12px]">

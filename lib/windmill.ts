@@ -132,3 +132,25 @@ export async function getJobStatus(jobId: string): Promise<{
     result: job.result,
   }
 }
+
+/**
+ * Non-blocking job result check: returns { completed, result } — completed
+ * false while the job is queued (e.g. behind a concurrency key) or running.
+ * Poll this instead of run_wait_result when the job may sit in queue longer
+ * than an HTTP request should live.
+ */
+export async function getJobResultMaybe<T = unknown>(
+  jobId: string,
+): Promise<{ completed: boolean; result?: T }> {
+  if (!WINDMILL_TOKEN) throw new Error("WINDMILL_TOKEN env var is missing")
+  const resp = await fetch(
+    `${WINDMILL_BASE}/w/${WINDMILL_WORKSPACE}/jobs_u/completed/get_result_maybe/${jobId}`,
+    { headers: { Authorization: `Bearer ${WINDMILL_TOKEN}` } },
+  )
+  if (!resp.ok) {
+    const text = await resp.text()
+    throw new Error(`Windmill ${resp.status}: ${text.slice(0, 200)}`)
+  }
+  const body = (await resp.json()) as { completed: boolean; result?: T }
+  return body
+}
