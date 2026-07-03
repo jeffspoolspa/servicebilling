@@ -192,8 +192,7 @@ export function ProcessActions({
 
 /** One selectable customer row. Doc numbers link to the billing-period
  *  detail page (invoice + visit calendar + processing attempts); the back
- *  button there returns to this exact filtered view. Balance < Amount =
- *  credits applied (cache-reflected). */
+ *  button there returns to this exact filtered view. */
 function CustomerRow({
   c,
   month,
@@ -205,7 +204,6 @@ function CustomerRow({
   checked: boolean
   onToggle: () => void
 }) {
-  const credited = c.balance_cents < c.total_cents
   return (
     <tr
       className="border-b border-line-soft/40 last:border-0 hover:bg-white/[0.02] cursor-pointer"
@@ -240,15 +238,8 @@ function CustomerRow({
       <td className="px-4 py-2.5 text-right font-mono num text-ink">
         {formatCurrency(c.total_cents / 100)}
       </td>
-      <td className="px-4 py-2.5 text-right font-mono num">
-        <span className={credited ? "text-grass" : "text-ink-dim"}>
-          {formatCurrency(c.balance_cents / 100)}
-        </span>
-        {credited && (
-          <div className="text-[10px] text-grass/80">
-            −{formatCurrency((c.total_cents - c.balance_cents) / 100)} credited
-          </div>
-        )}
+      <td className="px-4 py-2.5 text-right font-mono num text-sun">
+        {formatCurrency(c.balance_cents / 100)}
       </td>
       <td className="px-4 py-2.5">
         {c.on_autopay && c.card ? (

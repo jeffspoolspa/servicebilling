@@ -7,7 +7,9 @@ import { formatCurrency } from "@/lib/utils/format"
 import { cn } from "@/lib/utils/cn"
 import { InvoiceDetail } from "./invoice-detail"
 import { VisitCalendar } from "./visit-calendar"
-import type { AttemptRow } from "../_lib/queries"
+import type { AttemptRow, BillingPeriodRow } from "../_lib/queries"
+
+type CreditsApplied = BillingPeriodRow["credits_applied"]
 
 /**
  * The billing-period detail tabs: the linked QBO invoice (line items), the
@@ -19,11 +21,13 @@ export function PeriodTabs({
   customerId,
   month,
   attempts,
+  creditsApplied,
 }: {
   qboInvoiceId: string | null
   customerId: number | null
   month: string
   attempts: AttemptRow[]
+  creditsApplied: CreditsApplied
 }) {
   const [tab, setTab] = useState<"invoice" | "visits" | "processing">("invoice")
 
@@ -52,14 +56,18 @@ export function PeriodTabs({
         ))}
       </div>
 
-      {tab === "invoice" &&
-        (qboInvoiceId ? (
-          <InvoiceDetail qboInvoiceId={qboInvoiceId} />
-        ) : (
-          <div className="text-[12px] text-ink-mute">
-            No QBO invoice linked yet — it appears here when the ION sync lands in the cache.
-          </div>
-        ))}
+      {tab === "invoice" && (
+        <div className="space-y-4">
+          {qboInvoiceId ? (
+            <InvoiceDetail qboInvoiceId={qboInvoiceId} />
+          ) : (
+            <div className="text-[12px] text-ink-mute">
+              No QBO invoice linked yet — it appears here when the ION sync lands in the cache.
+            </div>
+          )}
+          <CreditsTable credits={creditsApplied} />
+        </div>
+      )}
 
       {tab === "visits" &&
         (customerId != null ? (
@@ -70,6 +78,57 @@ export function PeriodTabs({
 
       {tab === "processing" && <Attempts attempts={attempts} />}
     </div>
+  )
+}
+
+/** Credits the preprocessing step applied to this customer-month's invoices
+ *  (unapplied maint prepayments + credit memos from the payments cache). */
+function CreditsTable({ credits }: { credits: CreditsApplied }) {
+  const rows = (credits ?? []).flatMap((c) =>
+    c.applied_to.map((a) => ({
+      kind: c.kind,
+      source:
+        c.kind === "credit_memo"
+          ? `credit memo #${c.credit_memo_doc ?? c.credit_memo_id}`
+          : `payment ${c.payment_id}`,
+      doc: a.doc_number,
+      amount: a.amount,
+    })),
+  )
+  if (rows.length === 0) return null
+  return (
+    <Card className="max-w-2xl">
+      <div className="px-4 py-2 bg-white/[0.02] border-b border-line-soft text-[11px] text-ink">
+        Credits applied at preprocessing
+      </div>
+      <table className="w-full text-[11px]">
+        <thead>
+          <tr className="text-left text-ink-mute border-b border-line-soft/60">
+            <th className="px-4 py-1.5 font-medium">Source</th>
+            <th className="px-4 py-1.5 font-medium">Applied to</th>
+            <th className="px-4 py-1.5 font-medium text-right">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} className="border-b border-line-soft/30 last:border-0 text-ink-dim">
+              <td className="px-4 py-1.5">
+                <span className="inline-flex items-center gap-1.5">
+                  <Pill tone={r.kind === "credit_memo" ? "indigo" : "teal"}>
+                    {r.kind === "credit_memo" ? "memo" : "payment"}
+                  </Pill>
+                  <span className="font-mono">{r.source}</span>
+                </span>
+              </td>
+              <td className="px-4 py-1.5 font-mono">#{r.doc ?? "?"}</td>
+              <td className="px-4 py-1.5 text-right font-mono num text-grass">
+                −{formatCurrency(r.amount)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
   )
 }
 

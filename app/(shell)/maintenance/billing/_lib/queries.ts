@@ -62,6 +62,16 @@ export interface BillingPeriodRow {
   reviewed_at: string | null
   office: string | null
   segment: "commercial" | "residential" | null
+  credits_applied:
+    | {
+        kind: "payment" | "credit_memo"
+        payment_id?: string
+        credit_memo_id?: string
+        credit_memo_doc?: string
+        unapplied_before?: number
+        applied_to: { amount: number; doc_number?: string | null; invoice_id?: string }[]
+      }[]
+    | null
 }
 
 export interface BillingFlagRow {

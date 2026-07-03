@@ -91,6 +91,7 @@ export default async function BillingPeriodPage({
         customerId={p.customer_id}
         month={month}
         attempts={attempts}
+        creditsApplied={p.credits_applied}
       />
     </div>
   )
