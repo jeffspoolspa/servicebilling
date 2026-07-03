@@ -43,11 +43,21 @@
 - Every completed, performed log → exactly one visit linked to a task.
 - Every active task-month → one promise; reconciled `labor_ok` (+ `consumables_ok` when the quantity check lands) before Phase B charges it.
 
-## Phase B — processing (unchanged; mirrors per-WO [work-order-to-payment](../work-order-to-payment/index.md))
+## Phase B — processing (2026-07-03: status-driven engine, mirrors the WO WAL)
 
-Per reconciled invoice: apply credits → autopay decision → charge (card/ACH) or invoice-only → send →
-reflect balance. Engine: [monthly-autopay](../monthly-autopay.md). Autopay roster is per-customer;
-processing is per-invoice (per task).
+Engine: [process_maint_period](../../scripts/billing/process_maint_period.md). ONLY
+`ready_to_process` periods are chargeable. Charge route: period ->
+`autopay_customer_id` -> roster `payment_method_id` -> the exact
+`customer_payment_methods` row. Same `billing.processing_attempts` table +
+write-ahead idempotency-key method as work orders (persisted key, Intuit
+Request-Id dedupe — retry never double-charges). RECEIPT first
+(`payment/send`), then the invoice copy. Declines bump the roster's
+consecutive_declines/payment_status; the paid+sent cache reflection
+auto-promotes the period to `processed`. Non-autopay ready periods get the
+invoice email only. Roster management (enroll with a chosen active payment
+method / change / soft-remove) lives on `/maintenance/billing/autopay`.
+The legacy roster-driven [monthly-autopay](../monthly-autopay.md) flow is
+superseded for maintenance charging.
 
 **HIGH-flag hold (hard rule):** a customer-month with an unreviewed HIGH flag in
 `billing_audit.customer_month_audit` (`flag_level='HIGH'`, `audit_status='flagged'`) is excluded
