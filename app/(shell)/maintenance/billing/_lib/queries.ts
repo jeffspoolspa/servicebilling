@@ -15,12 +15,10 @@ export interface BillingMonthRow {
   high_hold_customers: number
 }
 
-// Stored pipeline status (billing_audit.task_billing_periods.processing_status);
-// 'queued' is a display overlay the RPC derives (linked, awaiting preprocessing).
+// Stored pipeline status (billing_audit.task_billing_periods.processing_status).
 export type ProcessingStatus =
   | "pending"
   | "ion_matched"
-  | "queued"
   | "needs_review"
   | "ready_to_process"
   | "processed"
@@ -62,6 +60,8 @@ export interface BillingPeriodRow {
   processing_status: ProcessingStatus
   needs_review_reason: string | null
   reviewed_at: string | null
+  office: string | null
+  segment: "commercial" | "residential" | null
 }
 
 export interface BillingFlagRow {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import {
@@ -13,9 +13,10 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useRouter } from "next/navigation"
+import { SortableHeader } from "@/components/ui/sortable-header"
 import { formatCurrency } from "@/lib/utils/format"
 import { cn } from "@/lib/utils/cn"
-import { REASON_LABEL, STATUS_LABEL, STATUS_TONE } from "../_lib/status"
+import { REASON_LABEL, STATUS_LABEL, STATUS_ORDER, STATUS_TONE } from "../_lib/status"
 import type { ProcessingStatus } from "../_lib/queries"
 
 export interface TaskLine {
@@ -47,7 +48,6 @@ export interface CustomerBill {
   chem_cents: number
   expected_cents: number
   ion_cents: number | null
-  ion_chips: { number: string; match: "match" | "mismatch" | "missing" }[]
   qbo_docs: string
   statuses: ProcessingStatus[]
   tasks: TaskLine[]
@@ -85,67 +85,41 @@ function cents(v: number | null | undefined): string {
   return v == null ? "—" : formatCurrency(v / 100)
 }
 
-// Sortable columns for the Bills table (replaces the old status-filter chips).
-type SortKey = "name" | "tasks" | "visits" | "labor" | "chems" | "expected" | "status"
-const STATUS_ORDER: ProcessingStatus[] = [
-  "pending",
-  "ion_matched",
-  "queued",
-  "needs_review",
-  "ready_to_process",
-  "processed",
+// Column layout; sorting is URL-driven (SortableHeader), sorted + paginated
+// server-side in page.tsx — the work-orders pattern.
+const COLUMNS: { key: string | null; label: string; align: "left" | "right"; defaultDir: "asc" | "desc" }[] = [
+  { key: "name", label: "Customer", align: "left", defaultDir: "asc" },
+  { key: "tasks", label: "Tasks", align: "right", defaultDir: "desc" },
+  { key: "visits", label: "Visits", align: "right", defaultDir: "desc" },
+  { key: "labor", label: "Labor", align: "right", defaultDir: "desc" },
+  { key: "chems", label: "Chems", align: "right", defaultDir: "desc" },
+  { key: "expected", label: "Expected", align: "right", defaultDir: "desc" },
+  { key: "diff", label: "ION diff", align: "right", defaultDir: "desc" },
+  { key: null, label: "QBO", align: "left", defaultDir: "asc" },
+  { key: "status", label: "Status", align: "left", defaultDir: "asc" },
 ]
-const COLUMNS: { key: SortKey | null; label: string; align: "left" | "right" }[] = [
-  { key: "name", label: "Customer", align: "left" },
-  { key: "tasks", label: "Tasks", align: "right" },
-  { key: "visits", label: "Visits", align: "right" },
-  { key: "labor", label: "Labor", align: "right" },
-  { key: "chems", label: "Chems", align: "right" },
-  { key: "expected", label: "Expected", align: "right" },
-  { key: null, label: "QBO", align: "left" },
-  { key: "status", label: "Status", align: "left" },
-]
-// first click: name/status ascend, money/counts descend (largest first)
-const DEFAULT_DIR: Record<SortKey, "asc" | "desc"> = {
-  name: "asc",
-  status: "asc",
-  tasks: "desc",
-  visits: "desc",
-  labor: "desc",
-  chems: "desc",
-  expected: "desc",
-}
-function sortValue(c: CustomerBill, key: SortKey): string | number {
-  switch (key) {
-    case "name":
-      return c.name.toLowerCase()
-    case "tasks":
-      return c.tasks.length
-    case "visits":
-      return c.visits
-    case "labor":
-      return c.labor_cents
-    case "chems":
-      return c.chem_cents
-    case "expected":
-      return c.expected_cents
-    case "status":
-      return Math.min(...c.statuses.map((s) => STATUS_ORDER.indexOf(s)))
-  }
-}
 
 /**
  * The Bills table: one collapsible row per customer. Click a row to reveal the
- * task list (a QC task shows here — and as a second ION invoice chip on the
- * row) and the visit calendar: dates as columns, readings grouped above the
- * chemicals sold per visit, with totals.
+ * task list and the visit calendar: dates as columns, readings grouped above
+ * the chemicals sold per visit, with totals. Sorting/paging live in the URL.
  */
-export function BillsTable({ customers, month }: { customers: CustomerBill[]; month: string }) {
+export function BillsTable({
+  customers,
+  month,
+  sort,
+  dir,
+  basePath,
+  preserve,
+}: {
+  customers: CustomerBill[]
+  month: string
+  sort: string
+  dir: "asc" | "desc"
+  basePath: string
+  preserve: Record<string, string | undefined>
+}) {
   const [open, setOpen] = useState<Set<string>>(new Set())
-  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
-    key: "name",
-    dir: "asc",
-  })
 
   function toggle(key: string) {
     const next = new Set(open)
@@ -154,62 +128,43 @@ export function BillsTable({ customers, month }: { customers: CustomerBill[]; mo
     setOpen(next)
   }
 
-  function sortBy(key: SortKey) {
-    setSort((s) =>
-      s.key === key
-        ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: DEFAULT_DIR[key] },
-    )
-  }
-
-  const sorted = useMemo(() => {
-    const arr = [...customers]
-    arr.sort((a, b) => {
-      const av = sortValue(a, sort.key)
-      const bv = sortValue(b, sort.key)
-      const cmp =
-        typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number)
-      return sort.dir === "asc" ? cmp : -cmp
-    })
-    return arr
-  }, [customers, sort])
-
   return (
     <Card>
       <table className="w-full text-[12px]">
         <thead>
           <tr className="text-left text-ink-mute border-b border-line-soft">
-            {COLUMNS.map((col) => {
-              const active = col.key != null && sort.key === col.key
-              return (
-                <th
-                  key={col.label}
-                  className={cn(
-                    "px-4 py-2 font-medium",
-                    col.align === "right" && "text-right",
-                    col.key && "cursor-pointer select-none hover:text-ink",
-                    active && "text-ink",
-                  )}
-                  onClick={col.key ? () => sortBy(col.key!) : undefined}
-                >
-                  {col.label}
-                  {active && (
-                    <span className="ml-1 text-ink-mute">{sort.dir === "asc" ? "▲" : "▼"}</span>
-                  )}
-                </th>
-              )
-            })}
+            {COLUMNS.map((col) => (
+              <th
+                key={col.label}
+                className={cn("px-4 py-2 font-medium", col.align === "right" && "text-right")}
+              >
+                {col.key ? (
+                  <SortableHeader
+                    label={col.label}
+                    column={col.key}
+                    currentSort={sort}
+                    currentDir={dir}
+                    basePath={basePath}
+                    preserve={preserve}
+                    defaultDir={col.defaultDir}
+                    align={col.align}
+                  />
+                ) : (
+                  col.label
+                )}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {sorted.length === 0 && (
+          {customers.length === 0 && (
             <tr>
-              <td colSpan={8} className="px-4 py-8 text-center text-ink-mute">
-                No bills this month.
+              <td colSpan={9} className="px-4 py-8 text-center text-ink-mute">
+                No bills match this filter.
               </td>
             </tr>
           )}
-          {sorted.map((c) => (
+          {customers.map((c) => (
             <CustomerRows
               key={c.key}
               c={c}
@@ -235,7 +190,7 @@ function CustomerRows({
   open: boolean
   onToggle: () => void
 }) {
-  const statuses = [...new Set(c.statuses)]
+  const behind = STATUS_ORDER[Math.min(...c.statuses.map((s) => STATUS_ORDER.indexOf(s)))]
   return (
     <>
       <tr
@@ -265,25 +220,52 @@ function CustomerRows({
         <td className="px-4 py-2.5 text-right font-mono num text-ink">
           {cents(c.expected_cents)}
         </td>
+        <DiffCell ion_cents={c.ion_cents} expected_cents={c.expected_cents} />
         <td className="px-4 py-2.5 font-mono text-xs text-ink-dim">{c.qbo_docs || "—"}</td>
         <td className="px-4 py-2.5">
-          <div className="flex flex-col items-start gap-1">
-            {statuses.map((s) => (
-              <Pill key={s} tone={STATUS_TONE[s]} dot>
-                {STATUS_LABEL[s]}
-              </Pill>
-            ))}
-          </div>
+          {/* single chip = the most-behind task status (uniform row height) */}
+          <Pill tone={STATUS_TONE[behind]} dot>
+            {STATUS_LABEL[behind]}
+          </Pill>
         </td>
       </tr>
       {open && (
         <tr className="border-b border-line-soft/40 bg-white/[0.015]">
-          <td colSpan={8} className="px-6 py-4">
+          <td colSpan={9} className="px-6 py-4">
             <BillDetail c={c} month={month} />
           </td>
         </tr>
       )}
     </>
+  )
+}
+
+/** ION total minus our expected total, one line: a check mark when they net
+ *  to zero (within the $1 pipeline tolerance), the signed difference in coral
+ *  when off, an em dash before the ION report has matched. */
+function DiffCell({
+  ion_cents,
+  expected_cents,
+}: {
+  ion_cents: number | null
+  expected_cents: number
+}) {
+  if (ion_cents == null) {
+    return <td className="px-4 py-2.5 text-right text-ink-mute">—</td>
+  }
+  const diff = ion_cents - expected_cents
+  if (Math.abs(diff) <= 100) {
+    return (
+      <td className="px-4 py-2.5 text-right">
+        <span className="text-grass">✓</span>
+      </td>
+    )
+  }
+  return (
+    <td className="px-4 py-2.5 text-right font-mono num text-coral">
+      {diff > 0 ? "+" : "−"}
+      {formatCurrency(Math.abs(diff) / 100)}
+    </td>
   )
 }
 
