@@ -83,8 +83,12 @@ pending -> ion_matched -> [QBO link -> serial preprocess queue] -> needs_review 
    `credits_applied`, then projects.
 4. **Projection owns every transition — and every review gate evaluates AT PREPROCESS
    (`pre_processed_at` set), never earlier:** `billing_audit.project_maint_processing_status`
-   checks — `chem_flag` (the simple rule: month's net consumable bill trips
-   `v_billing_review_flags`, > 2x the peer group's clean median AND >= $150, unreviewed;
+   checks — `chem_flag` (the simple rule: month's net consumable bill > 2x the peer group's
+   PLAIN median AND >= $150, unreviewed; provides-chems customers INCLUDED in the median
+   per Carter 2026-07-03. Computed from the snapshot chain, refreshed once per drain
+   tick / hourly reconcile / Refresh-bills: `customer_month_cpv_snapshot` (materialized
+   `v_customer_month_cpv` rollup) -> `chem_flag_medians` (one row per month+peer_group —
+   THE median query) -> `chem_flag_snapshot` (the flag set the projection reads);
    remediation = apply a DISCOUNT on the QBO invoice, leaving ION's record of what was sold
    intact), ion amount vs expected, subtotal (per-row: ION amount vs the linked invoice's
    QBO SUBTOTAL — pre-tax, pre-discount, so tax and QBO-side discounts never trip it;
