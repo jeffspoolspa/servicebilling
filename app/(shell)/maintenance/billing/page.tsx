@@ -1,8 +1,5 @@
-import Link from "next/link"
 import { Card } from "@/components/ui/card"
-import { Pill } from "@/components/ui/pill"
 import { Pagination } from "@/components/ui/pagination"
-import { cn } from "@/lib/utils/cn"
 import { formatCurrency } from "@/lib/utils/format"
 import {
   listBillingMonths,
@@ -14,6 +11,7 @@ import {
 import { MonthSelect } from "./_components/month-select"
 import { RefreshButton } from "./_components/refresh-button"
 import { BillsTable, type CustomerBill } from "./_components/bills-table"
+import { BillingFilterBar } from "./_components/billing-filter-bar"
 
 export const metadata = { title: "Maintenance · Billing" }
 export const dynamic = "force-dynamic"
@@ -138,20 +136,6 @@ export default async function MaintenanceBillingPage({
       (!office || r.office === office),
   )
 
-  // Tab counts: distinct customers per dimension, within the OTHER active filters
-  const custCount = (pred: (r: BillingPeriodRow) => boolean) =>
-    new Set(
-      all
-        .filter(
-          (r) =>
-            pred(r) &&
-            (!statusFilter || r.processing_status === statusFilter) &&
-            (!holdOnly || r.high_flag_hold) &&
-            (!q || (r.customer_name ?? "").toLowerCase().includes(q)),
-        )
-        .map((r) => r.customer_name ?? r.qbo_customer_id),
-    ).size
-
   // One row per customer; tasks + calendar live in the expansion
   const byCustomer = new Map<string, BillingPeriodRow[]>()
   for (const r of rows) {
@@ -208,7 +192,7 @@ export default async function MaintenanceBillingPage({
   const total = customers.length
   const paged = customers.slice((page - 1) * PER_PAGE, page * PER_PAGE)
 
-  // URL helpers: filters reset the page; everything else is preserved
+  // preserved across sort/page links (filters reset the page themselves)
   const preserve = {
     month: selected,
     status: sp.status,
@@ -219,11 +203,6 @@ export default async function MaintenanceBillingPage({
     office,
     sort: sort === "name" && dir === "asc" ? undefined : sort,
     dir: sort === "name" && dir === "asc" ? undefined : dir,
-  }
-  const href = (over: Record<string, string | undefined>) => {
-    const p = new URLSearchParams()
-    for (const [k, v] of Object.entries({ ...preserve, ...over })) if (v) p.set(k, v)
-    return `${BASE}?${p.toString()}` as never
   }
 
   return (
@@ -244,42 +223,25 @@ export default async function MaintenanceBillingPage({
         <RefreshButton month={selected} />
       </div>
 
-      {/* Segment tabs + frequency / office pills (URL-driven, WO pattern) */}
-      <div className="space-y-2">
-        <div className="flex gap-1 border-b border-line-soft">
-          {[undefined, ...SEGMENTS].map((s) => (
-            <Link
-              key={s ?? "all"}
-              href={href({ segment: s, page: undefined })}
-              className={cn(
-                "px-3.5 py-2 text-[12.5px] -mb-px border-b-2 capitalize",
-                segment === s || (!segment && !s)
-                  ? "text-ink border-cyan font-medium"
-                  : "text-ink-mute border-transparent hover:text-ink",
-              )}
-            >
-              {s ?? "All"} {custCount((r) => !s || r.segment === s)}
-            </Link>
-          ))}
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {FREQUENCIES.map((f) => (
-            <Link key={f} href={href({ frequency: frequency === f ? undefined : f, page: undefined })}>
-              <Pill tone={frequency === f ? "cyan" : "neutral"}>
-                {f.replace("_", " ")} {custCount((r) => r.frequency === f)}
-              </Pill>
-            </Link>
-          ))}
-          <span className="text-line-soft">|</span>
-          {offices.map((o) => (
-            <Link key={o} href={href({ office: office === o ? undefined : o, page: undefined })}>
-              <Pill tone={office === o ? "teal" : "neutral"}>
-                {o.replace(", GA", "")} {custCount((r) => r.office === o)}
-              </Pill>
-            </Link>
-          ))}
-        </div>
-      </div>
+      <BillingFilterBar
+        filters={[
+          {
+            key: "segment",
+            label: "Type",
+            options: SEGMENTS.map((v) => ({ value: v, label: v })),
+          },
+          {
+            key: "frequency",
+            label: "Frequency",
+            options: FREQUENCIES.map((v) => ({ value: v, label: v.replace("_", " ") })),
+          },
+          {
+            key: "office",
+            label: "Office",
+            options: offices.map((o) => ({ value: o, label: o.replace(", GA", "") })),
+          },
+        ]}
+      />
 
       <div>
         <BillsTable

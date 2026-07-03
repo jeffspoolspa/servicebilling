@@ -11,6 +11,7 @@ import {
 } from "../_lib/queries"
 import { MonthSelect } from "../_components/month-select"
 import { ProcessActions } from "../_components/process-actions"
+import { BillingFilterBar } from "../_components/billing-filter-bar"
 
 export const metadata = { title: "Maintenance · Billing · Process" }
 export const dynamic = "force-dynamic"
@@ -92,20 +93,6 @@ export default async function ProcessPage({
     ["pending", "ion_matched"].includes(p.processing_status),
   )
 
-  const href = (over: Record<string, string | undefined>) => {
-    const q = new URLSearchParams()
-    const merged = {
-      month: selected,
-      segment,
-      autopay: sp.autopay,
-      office,
-      frequency,
-      ...over,
-    }
-    for (const [k, v] of Object.entries(merged)) if (v) q.set(k, v)
-    return `/maintenance/billing/process?${q.toString()}` as never
-  }
-
   const byCustomer = new Map<string, BillingPeriodRow[]>()
   for (const r of ready) {
     const key = r.qbo_customer_id ?? `?${r.customer_name}`
@@ -153,33 +140,33 @@ export default async function ProcessPage({
         </div>
       </div>
 
-      {/* filters: segment | autopay | office | frequency (URL-driven) */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {SEGMENTS.map((s) => (
-          <Link key={s} href={href({ segment: segment === s ? undefined : s })}>
-            <Pill tone={segment === s ? "cyan" : "neutral"}>{s}</Pill>
-          </Link>
-        ))}
-        <span className="text-line-soft">|</span>
-        <Link href={href({ autopay: autopay === true ? undefined : "1" })}>
-          <Pill tone={autopay === true ? "teal" : "neutral"}>autopay</Pill>
-        </Link>
-        <Link href={href({ autopay: autopay === false ? undefined : "0" })}>
-          <Pill tone={autopay === false ? "sun" : "neutral"}>invoice email</Pill>
-        </Link>
-        <span className="text-line-soft">|</span>
-        {offices.map((o) => (
-          <Link key={o} href={href({ office: office === o ? undefined : o })}>
-            <Pill tone={office === o ? "teal" : "neutral"}>{o.replace(", GA", "")}</Pill>
-          </Link>
-        ))}
-        <span className="text-line-soft">|</span>
-        {FREQUENCIES.map((f) => (
-          <Link key={f} href={href({ frequency: frequency === f ? undefined : f })}>
-            <Pill tone={frequency === f ? "cyan" : "neutral"}>{f.replace("_", " ")}</Pill>
-          </Link>
-        ))}
-      </div>
+      <BillingFilterBar
+        filters={[
+          {
+            key: "segment",
+            label: "Type",
+            options: SEGMENTS.map((v) => ({ value: v, label: v })),
+          },
+          {
+            key: "autopay",
+            label: "Payment",
+            options: [
+              { value: "1", label: "autopay" },
+              { value: "0", label: "invoice email" },
+            ],
+          },
+          {
+            key: "office",
+            label: "Office",
+            options: offices.map((o) => ({ value: o, label: o.replace(", GA", "") })),
+          },
+          {
+            key: "frequency",
+            label: "Frequency",
+            options: FREQUENCIES.map((v) => ({ value: v, label: v.replace("_", " ") })),
+          },
+        ]}
+      />
 
       {held.length > 0 && (
         <Card className="px-4 py-3 border-coral/30 bg-coral/5 flex items-center justify-between">
