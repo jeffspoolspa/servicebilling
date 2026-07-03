@@ -61,7 +61,7 @@ route ALSO re-checks holds server-side before triggering the engine (defense in 
 per-period state machine, mirroring the work-order pipeline:
 
 ```
-pending -> ion_matched -> [QBO link -> queued (derived)] -> needs_review | ready_to_process -> processed
+pending -> ion_matched -> [QBO link -> serial preprocess queue] -> needs_review | ready_to_process -> processed
 ```
 
 1. **ION match (stage 1):** `billing_audit.match_promises_to_ion(month)` stamps each promise

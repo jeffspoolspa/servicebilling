@@ -99,10 +99,10 @@ the stored ION stamps, and the QBO mirror (`billing.invoices`). Since 2026-07-02
 [monthly-maintenance-billing](../flows/monthly-maintenance-billing/decision-map.md):
 ION match → QBO link (invoice-cache trigger) → queued preprocess (credits + subtotal
 verification) → needs_review | ready_to_process → processed (auto when the cached invoice
-reads paid + sent — covers invoices processed by hand in QBO). The RPC overlays a derived
-`queued` display state (linked, awaiting preprocess); `paid` stays a derived overlay
-(mirror balance <= 0). Pre-2026-06 months were backfilled from the old derivation and
-locked.
+reads paid + sent — covers invoices processed by hand in QBO). No display overlays: a
+linked-but-unpreprocessed period reads `ion_matched` (the preprocess queue is internal
+plumbing); `paid` stays a derived overlay (mirror balance <= 0). Pre-2026-06 months were
+backfilled from the old derivation and locked.
 
 ## Flows this entity participates in
 
