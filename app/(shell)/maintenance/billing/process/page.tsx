@@ -12,6 +12,7 @@ import {
 import { MonthSelect } from "../_components/month-select"
 import { ProcessActions } from "../_components/process-actions"
 import { BillingFilterBar } from "../_components/billing-filter-bar"
+import { MonthSummary } from "../_components/month-summary"
 
 export const metadata = { title: "Maintenance · Billing · Process" }
 export const dynamic = "force-dynamic"
@@ -143,6 +144,8 @@ export default async function ProcessPage({
           <MonthSelect months={monthOptions} value={selected} />
         </div>
       </div>
+
+      <MonthSummary all={periods} />
 
       <BillingFilterBar
         filters={[
