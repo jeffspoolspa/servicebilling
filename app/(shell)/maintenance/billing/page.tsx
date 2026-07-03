@@ -104,17 +104,16 @@ function summarizeInvoices(all: BillingPeriodRow[]): SummaryBucket[] {
     }
     buckets.set(label, b)
   }
+  // pivot: one row per office × segment combo, under the total row
   for (const inv of seen.values()) {
     add("All invoices", inv)
-    add(inv.segment, inv)
-    add(inv.office, inv)
+    add(`${inv.office} · ${inv.segment}`, inv)
   }
-  // fixed order: total, segments, then offices alphabetically
-  const order = (l: string) =>
-    l === "All invoices" ? 0 : l === "commercial" || l === "residential" ? 1 : 2
-  return [...buckets.values()].sort(
-    (a, b) => order(a.label) - order(b.label) || a.label.localeCompare(b.label),
-  )
+  return [...buckets.values()].sort((a, b) => {
+    if (a.label === "All invoices") return -1
+    if (b.label === "All invoices") return 1
+    return a.label.localeCompare(b.label)
+  })
 }
 
 function MonthSummary({ all }: { all: BillingPeriodRow[] }) {
