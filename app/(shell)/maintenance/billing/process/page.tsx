@@ -37,6 +37,8 @@ export default async function ProcessPage({
     autopay?: string
     office?: string
     frequency?: string
+    sort?: string
+    dir?: string
   }>
 }) {
   const sp = await searchParams
@@ -130,6 +132,45 @@ export default async function ProcessPage({
     })
     .sort((a, b) => a.customer_name.localeCompare(b.customer_name))
 
+  // URL-driven sort (SortableHeader in the table header)
+  const SORT_KEYS = ["name", "tasks", "amount", "balance", "payment"] as const
+  type SortKey = (typeof SORT_KEYS)[number]
+  const sort: SortKey = SORT_KEYS.includes(sp.sort as SortKey) ? (sp.sort as SortKey) : "name"
+  const dir: "asc" | "desc" = sp.dir === "desc" ? "desc" : "asc"
+  const sortValue = (c: (typeof customerRows)[number]) => {
+    switch (sort) {
+      case "name":
+        return c.customer_name.toLowerCase()
+      case "tasks":
+        return c.task_count
+      case "amount":
+        return c.total_cents
+      case "balance":
+        return c.balance
+      case "payment":
+        return c.on_autopay
+          ? `autopay ${c.card?.card_type ?? ""} ${c.card?.last_four ?? ""}`
+          : "invoice email"
+    }
+  }
+  if (sort !== "name" || dir !== "asc") {
+    customerRows.sort((a, b) => {
+      const av = sortValue(a)
+      const bv = sortValue(b)
+      const cmp =
+        typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number)
+      return dir === "asc" ? cmp : -cmp
+    })
+  }
+  const preserve = {
+    month: selected,
+    q: sp.q,
+    segment,
+    autopay: sp.autopay,
+    office,
+    frequency,
+  }
+
   return (
     <div className="px-7 pt-5 pb-10 space-y-4">
       <div className="flex items-end justify-between gap-4 flex-wrap">
@@ -193,6 +234,9 @@ export default async function ProcessPage({
       <ProcessActions
         month={selected}
         monthLabel={formatMonth(monthDate)}
+        sort={sort}
+        dir={dir}
+        preserve={preserve}
         customers={customerRows.map((c) => ({
           qbo_customer_id: c.qbo_customer_id,
           customer_name: c.customer_name,

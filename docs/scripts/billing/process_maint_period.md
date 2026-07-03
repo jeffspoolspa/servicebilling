@@ -26,11 +26,13 @@ charged). Per period:
 5. **Receipt first** (`payment/{id}/send`), **then** the invoice copy
    (`invoice/{id}/send`). The QBO Payment's `PrivateNote` mirrors the WO
    engine's receipt memo with the month label in the WO-number slot:
-   `Auto-charge | June Pool Maintenance | Inv# ... | Charge ID ... | Auth ... | card x1234 | ts`.
-6. Write the `autopay_transactions` reporting row (Processing tab +
-   projection's autopay_charged gate), reset roster declines, update the
-   invoice cache (balance/email_status -> fires the auto-promote trigger ->
-   period reads `processed`).
+   `June Pool Maintenance | Inv# ... | Charge ID ... | Auth ... | card x1234 | ts`.
+6. Reset roster declines and update the invoice cache (balance/email_status
+   -> fires the auto-promote trigger -> period reads `processed`). The
+   attempt row itself IS the reporting record: the Processing tab
+   (maint_billing_period_attempts) and the projection's autopay_charged gate
+   both read `billing.processing_attempts` (stage='maint', charge_id set,
+   live run) — no separate autopay_transactions write.
 
 `dry_run=True` (default) returns the per-period plan with no external calls.
 

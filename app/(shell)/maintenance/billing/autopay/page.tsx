@@ -1,5 +1,6 @@
 import { Card } from "@/components/ui/card"
 import { SearchBar } from "@/components/ui/search-bar"
+import { SortableHeader } from "@/components/ui/sortable-header"
 import { Pill } from "@/components/ui/pill"
 import { listAutopayCandidates, listAutopayCustomers } from "../_lib/queries"
 import { AutopayAdd, RosterRowActions } from "../_components/autopay-manage"
@@ -18,7 +19,7 @@ const STATUS_TONE: Record<string, "grass" | "coral" | "sun" | "neutral"> = {
 export default async function AutopayRosterPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>
+  searchParams: Promise<{ q?: string; sort?: string; dir?: string }>
 }) {
   const sp = await searchParams
   const [roster, candidates] = await Promise.all([
@@ -31,6 +32,36 @@ export default async function AutopayRosterPage({
   const shown = q
     ? active.filter((r) => (r.customer_name ?? "").toLowerCase().includes(q))
     : active
+
+  // URL-driven sort, WO pattern
+  const SORT_KEYS = ["customer", "method", "email", "status", "declines"] as const
+  type SortKey = (typeof SORT_KEYS)[number]
+  const sort: SortKey = SORT_KEYS.includes(sp.sort as SortKey)
+    ? (sp.sort as SortKey)
+    : "customer"
+  const dir: "asc" | "desc" = sp.dir === "desc" ? "desc" : "asc"
+  const sortValue = (r: (typeof shown)[number]): string | number => {
+    switch (sort) {
+      case "customer":
+        return (r.customer_name ?? "").toLowerCase()
+      case "method":
+        return `${r.payment_method ?? ""} ${r.card_type ?? ""} ${r.last_four ?? ""}`
+      case "email":
+        return (r.email ?? "").toLowerCase()
+      case "status":
+        return r.payment_status ?? ""
+      case "declines":
+        return r.consecutive_declines ?? 0
+    }
+  }
+  shown.sort((a, b) => {
+    const av = sortValue(a)
+    const bv = sortValue(b)
+    const cmp =
+      typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number)
+    return dir === "asc" ? cmp : -cmp
+  })
+  const preserve = { q: sp.q }
 
   return (
     <div className="px-7 pt-5 pb-10 space-y-4">
@@ -51,11 +82,31 @@ export default async function AutopayRosterPage({
         <table className="w-full text-[12px]">
           <thead>
             <tr className="text-left text-ink-mute border-b border-line-soft">
-              <th className="px-4 py-2 font-medium">Customer</th>
-              <th className="px-4 py-2 font-medium">Payment method</th>
-              <th className="px-4 py-2 font-medium">Email</th>
-              <th className="px-4 py-2 font-medium">Status</th>
-              <th className="px-4 py-2 font-medium text-right">Declines</th>
+              {(
+                [
+                  { key: "customer", label: "Customer", align: "left", defaultDir: "asc" },
+                  { key: "method", label: "Payment method", align: "left", defaultDir: "asc" },
+                  { key: "email", label: "Email", align: "left", defaultDir: "asc" },
+                  { key: "status", label: "Status", align: "left", defaultDir: "asc" },
+                  { key: "declines", label: "Declines", align: "right", defaultDir: "desc" },
+                ] as const
+              ).map((col) => (
+                <th
+                  key={col.key}
+                  className={`px-4 py-2 font-medium${col.align === "right" ? " text-right" : ""}`}
+                >
+                  <SortableHeader
+                    label={col.label}
+                    column={col.key}
+                    currentSort={sort}
+                    currentDir={dir}
+                    basePath="/maintenance/billing/autopay"
+                    preserve={preserve}
+                    defaultDir={col.defaultDir}
+                    align={col.align}
+                  />
+                </th>
+              ))}
               <th className="px-4 py-2 font-medium text-right">Actions</th>
             </tr>
           </thead>

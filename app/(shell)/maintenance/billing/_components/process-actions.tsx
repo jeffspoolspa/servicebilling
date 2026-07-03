@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Card } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
+import { SortableHeader } from "@/components/ui/sortable-header"
 import { formatCurrency } from "@/lib/utils/format"
 
 interface ProcessCustomer {
@@ -26,20 +27,26 @@ interface ProcessCustomer {
 
 
 /**
- * Selectable ready-to-process table + the process action. Processing runs the
- * EXISTING engines (f/billing/monthly_autopay per customer / whole month,
- * f/billing/send_monthly_invoices for the copies) — autopay charges the card
- * and sends the receipt; everyone gets the invoice copy (already paid when
- * autopay ran first).
+ * Selectable ready-to-process table + the process action. Processing runs
+ * f/billing/process_maint_period (WAL + idempotency keys): autopay charges the
+ * roster's linked card/bank then sends receipt-before-invoice; non-autopay
+ * customers get the invoice email. Sorting is URL-driven (SortableHeader),
+ * sorted server-side in page.tsx — the work-orders pattern.
  */
 export function ProcessActions({
   month,
   monthLabel,
   customers,
+  sort,
+  dir,
+  preserve,
 }: {
   month: string
   monthLabel: string
   customers: ProcessCustomer[]
+  sort: string
+  dir: "asc" | "desc"
+  preserve: Record<string, string | undefined>
 }) {
   const router = useRouter()
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -165,12 +172,36 @@ export function ProcessActions({
                   }
                 />
               </th>
-              <th className="px-4 py-2 font-medium">Customer</th>
-              <th className="px-4 py-2 font-medium text-right">Tasks</th>
-              <th className="px-4 py-2 font-medium">Invoices</th>
-              <th className="px-4 py-2 font-medium text-right">Amount</th>
-              <th className="px-4 py-2 font-medium text-right">Balance</th>
-              <th className="px-4 py-2 font-medium">Payment</th>
+              {(
+                [
+                  { key: "name", label: "Customer", align: "left", defaultDir: "asc" },
+                  { key: "tasks", label: "Tasks", align: "right", defaultDir: "desc" },
+                  { key: null, label: "Invoices", align: "left", defaultDir: "desc" },
+                  { key: "amount", label: "Amount", align: "right", defaultDir: "desc" },
+                  { key: "balance", label: "Balance", align: "right", defaultDir: "desc" },
+                  { key: "payment", label: "Payment", align: "left", defaultDir: "asc" },
+                ] as const
+              ).map((col) => (
+                <th
+                  key={col.label}
+                  className={`px-4 py-2 font-medium${col.align === "right" ? " text-right" : ""}`}
+                >
+                  {col.key ? (
+                    <SortableHeader
+                      label={col.label}
+                      column={col.key}
+                      currentSort={sort}
+                      currentDir={dir}
+                      basePath="/maintenance/billing/process"
+                      preserve={preserve}
+                      defaultDir={col.defaultDir}
+                      align={col.align}
+                    />
+                  ) : (
+                    col.label
+                  )}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>

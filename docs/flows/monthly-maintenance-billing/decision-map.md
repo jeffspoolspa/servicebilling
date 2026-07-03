@@ -50,8 +50,10 @@ Engine: [process_maint_period](../../scripts/billing/process_maint_period.md). O
 `autopay_customer_id` -> roster `payment_method_id` -> the exact
 `customer_payment_methods` row. Same `billing.processing_attempts` table +
 write-ahead idempotency-key method as work orders (persisted key, Intuit
-Request-Id dedupe — retry never double-charges). RECEIPT first
-(`payment/send`), then the invoice copy. Declines bump the roster's
+Request-Id dedupe — retry never double-charges; the attempt row doubles as
+the reporting record feeding the Processing tab and the projection's
+autopay_charged gate — autopay_transactions is no longer written). RECEIPT
+first (`payment/send`), then the invoice copy. Declines bump the roster's
 consecutive_declines/payment_status; the paid+sent cache reflection
 auto-promotes the period to `processed`. Non-autopay ready periods get the
 invoice email only. Roster management (enroll with a chosen active payment
