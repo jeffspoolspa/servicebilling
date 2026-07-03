@@ -34,7 +34,12 @@ charged). Per period:
 4. Record the QBO Payment (CCTransId = charge id) — failure here =
    `payment_orphan`, human recovery only.
 5. **Receipt first** (`payment/{id}/send`), **then** the invoice copy
-   (`invoice/{id}/send`). The QBO Payment's `PrivateNote` mirrors the WO
+   (`invoice/{id}/send`) — but an invoice email is NEVER resent by
+   processing: if the cache already reads EmailSent (pre-charge send from
+   the ION sync or an earlier run), only the receipt goes out. The manual
+   "Send invoice copies" button is the only resend path. Same rule on the
+   non-autopay path: already-sent -> the period just moves to processed
+   (like work orders); first send -> email then processed. The QBO Payment's `PrivateNote` mirrors the WO
    engine's receipt memo with the month label in the WO-number slot:
    `June Pool Maintenance | Inv# ... | Charge ID ... | Auth ... | card x1234 | ts`.
 6. Reset roster declines and update the invoice cache (balance/email_status
