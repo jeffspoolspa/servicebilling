@@ -1,0 +1,12 @@
+summary: 'DISCOVERY: how addLog.cfm loads photos — file_management.js endpoints + page wiring'
+description: Fetch /IPC/js/file_management.js, extract .cfm endpoints + ajax shapes; pull the addLog page's file-management invocation.
+tag: chromium
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties:
+    log_id: { type: string, default: '37313791' }
+    calendar_id: { type: string, default: '53802038' }
+    ion: { type: object, default: null }
+  required: []

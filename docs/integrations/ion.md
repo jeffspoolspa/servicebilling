@@ -145,3 +145,29 @@ appears, moving login back on-platform with zero code change.
 - [ion-visits sync](../flows/sync/ion-visits.md)
 - [work-order-to-payment](../flows/work-order-to-payment/index.md) (invoice origin)
 - [monthly-maintenance-billing](../flows/monthly-maintenance-billing/index.md) (invoice origin, built from visits)
+
+## Service-log photos (discovered 2026-07-06)
+
+Tech-uploaded photos are NOT on addLog.cfm or the day grid. The pipeline:
+
+1. Per-log image list: `GET /mobileImage/uploadList.cfm?RefID=<LogID>&TypeID=2&Source=Customers&IsArchived=0`
+   (ION session cookies; RefID = the ion_log_id). Returns rows with image
+   GUIDs + "Uploaded MM/DD/YYYY by <TECH>". Customer log history
+   (`/customers/logs/loglist.cfm`) shows per-log `Images (N)` links with the
+   same RefIDs; the customer Images tab (`/Customers/Images/images.cfm`)
+   shows all of a customer's images.
+2. Thumbnails are PUBLIC S3 (no auth):
+   `https://ionpoolcare.s3.us-west-2.amazonaws.com/3589/_Attachments/<ion_cust_id>/t_<GUID>.jpg`
+   (3589 = JPS tenant id; `t_` prefix = thumbnail; verified 200 image/jpeg
+   with zero cookies). Stable URLs — safe to store and hot-link in the app.
+3. Full-size via ProEdge signed URL, NO AUTH REQUIRED (verified):
+   `GET https://ipc.proedgesoftware.com/v1/Containers/getSignedUrl?key=3589/_Attachments/<cust>/<GUID>.jpg&server_name=<GUID>.jpg&local_name=image.jpg&redirect=false`
+   returns a time-limited signed S3 URL (verified: 4.5MB original downloads).
+   file_management.js on ION pages is the same call.
+
+Probes: `f/ION/_discover/probe_log_photos`, `probe_file_mgmt`,
+`probe_daygrid_photos`, `probe_customer_files`, `probe_log_images_e2e`.
+Ingest plan: one uploadList GET per visit inside the per-log ingest ->
+`maintenance.visit_photos` (ion_log_id, guid, thumb_url, uploaded_by,
+uploaded_on); UI renders public thumbs, full-size on click via getSignedUrl.
+

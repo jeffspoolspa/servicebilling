@@ -1,0 +1,12 @@
+summary: 'DISCOVERY: does the day grid (customerLogDetails.cfm) carry photo/file markup?'
+description: Sweep the day-grid HTML for openFile calls, imgs, and photo-ish lines.
+tag: chromium
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties:
+    date_us: { type: string, default: '07/06/2026' }
+    officeids: { type: array, items: { type: string }, default: ['1', '2'] }
+    ion: { type: object, default: null }
+  required: []

@@ -1,0 +1,11 @@
+summary: 'DISCOVERY: prove full photo pipeline — per-log list, public S3 thumb, signed full-size'
+description: uploadList.cfm by RefID(=LogID), fetch a thumbnail unauthenticated, request a getSignedUrl and download the full image.
+tag: chromium
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties:
+    log_id: { type: string, default: '37312626' }
+    ion: { type: object, default: null }
+  required: []
