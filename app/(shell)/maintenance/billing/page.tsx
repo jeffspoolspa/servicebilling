@@ -1,5 +1,4 @@
 import { Card } from "@/components/ui/card"
-import { Pagination } from "@/components/ui/pagination"
 import { formatCurrency } from "@/lib/utils/format"
 import {
   listBillingMonths,
@@ -11,14 +10,11 @@ import {
 import { MonthSelect } from "./_components/month-select"
 import { RefreshButton } from "./_components/refresh-button"
 import { BillsTable, type CustomerBill } from "./_components/bills-table"
-import { BillingFilterBar } from "./_components/billing-filter-bar"
 import { MonthSummary } from "./_components/month-summary"
 
 export const metadata = { title: "Maintenance · Billing" }
 export const dynamic = "force-dynamic"
 
-const BASE = "/maintenance/billing"
-const PER_PAGE = 25
 const STATUSES: ProcessingStatus[] = [
   "pending",
   "ion_matched",
@@ -26,52 +22,15 @@ const STATUSES: ProcessingStatus[] = [
   "ready_to_process",
   "processed",
 ]
-const SEGMENTS = ["commercial", "residential"] as const
-const FREQUENCIES = ["weekly", "biweekly", "multi_week", "monthly"] as const
-
-// server-side sort over grouped customer rows (URL-driven, WO pattern)
-type SortKey = "name" | "tasks" | "visits" | "labor" | "chems" | "expected" | "diff"
-const SORT_KEYS: SortKey[] = ["name", "tasks", "visits", "labor", "chems", "expected", "diff"]
-function sortValue(c: CustomerBill, key: SortKey): string | number {
-  switch (key) {
-    case "name":
-      return c.name.toLowerCase()
-    case "tasks":
-      return c.tasks.length
-    case "visits":
-      return c.visits
-    case "labor":
-      return c.labor_cents
-    case "chems":
-      return c.chem_cents
-    case "expected":
-      return c.expected_cents
-    case "diff":
-      // biggest ION-vs-expected discrepancy first on desc; unmatched sink
-      return c.ion_cents == null ? -1 : Math.abs(c.ion_cents - c.expected_cents)
-  }
-}
 
 function cents(v: number | null | undefined): string {
   return v == null ? "—" : formatCurrency(v / 100)
 }
 
-
 export default async function MaintenanceBillingPage({
   searchParams,
 }: {
-  searchParams: Promise<{
-    month?: string
-    status?: string
-    hold?: string
-    q?: string
-    segment?: string
-    frequency?: string
-    office?: string
-    sort?: string
-    dir?: string
-    page?: string
-  }>
+  searchParams: Promise<{ month?: string; status?: string; hold?: string }>
 }) {
   const sp = await searchParams
   let months
@@ -81,8 +40,7 @@ export default async function MaintenanceBillingPage({
     return (
       <div className="px-7 pt-6 pb-10">
         <Card className="p-8 text-center text-ink-mute text-[13px]">
-          Billing data unavailable — apply migration
-          20260702130000_maintenance_billing_module_rpcs.sql.
+          Billing data unavailable.
           <div className="mt-2 text-[11px]">{e instanceof Error ? e.message : String(e)}</div>
         </Card>
       </div>
@@ -115,33 +73,18 @@ export default async function MaintenanceBillingPage({
     ? (sp.status as ProcessingStatus)
     : undefined
   const holdOnly = sp.hold === "1"
-  const q = (sp.q ?? "").trim().toLowerCase()
-  const segment = SEGMENTS.includes(sp.segment as (typeof SEGMENTS)[number])
-    ? sp.segment
-    : undefined
-  const frequency = FREQUENCIES.includes(sp.frequency as (typeof FREQUENCIES)[number])
-    ? sp.frequency
-    : undefined
-  const offices = [...new Set(all.map((r) => r.office).filter(Boolean))].sort() as string[]
-  const office = offices.includes(sp.office ?? "") ? sp.office : undefined
-  const sort: SortKey = SORT_KEYS.includes(sp.sort as SortKey) ? (sp.sort as SortKey) : "name"
-  const dir: "asc" | "desc" = sp.dir === "desc" ? "desc" : sp.dir === "asc" ? "asc" : "asc"
-  const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1)
 
   // Bills is the funnel's FRONT END: by default only periods that haven't
   // preprocessed yet (pending/ion_matched) — rows fall off as the pipeline
   // moves them to Needs Review / Ready to Process / Processed. An explicit
-  // status filter still shows any stage here.
+  // status filter still shows any stage here; type/office/frequency/search
+  // are client-side in the table.
   const rows = all.filter(
     (r) =>
       (statusFilter
         ? r.processing_status === statusFilter
         : ["pending", "ion_matched"].includes(r.processing_status)) &&
-      (!holdOnly || r.high_flag_hold) &&
-      (!q || (r.customer_name ?? "").toLowerCase().includes(q)) &&
-      (!segment || r.segment === segment) &&
-      (!frequency || r.frequency === frequency) &&
-      (!office || r.office === office),
+      (!holdOnly || r.high_flag_hold),
   )
 
   // One row per customer; tasks + calendar live in the expansion
@@ -171,6 +114,9 @@ export default async function MaintenanceBillingPage({
       .map((d) => `#${d}`)
       .join(", "),
     statuses: list.map((r) => r.processing_status),
+    segment: list[0].segment ?? "",
+    office: (list[0].office ?? "").replace(", GA", ""),
+    frequency: list[0].frequency ?? "",
     tasks: list.map((r) => ({
       id: r.id,
       service_name: r.service_name,
@@ -190,29 +136,6 @@ export default async function MaintenanceBillingPage({
     })),
   }))
 
-  customers.sort((a, b) => {
-    const av = sortValue(a, sort)
-    const bv = sortValue(b, sort)
-    const cmp =
-      typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number)
-    return dir === "asc" ? cmp : -cmp
-  })
-  const total = customers.length
-  const paged = customers.slice((page - 1) * PER_PAGE, page * PER_PAGE)
-
-  // preserved across sort/page links (filters reset the page themselves)
-  const preserve = {
-    month: selected,
-    status: sp.status,
-    hold: sp.hold,
-    q: sp.q,
-    segment,
-    frequency,
-    office,
-    sort: sort === "name" && dir === "asc" ? undefined : sort,
-    dir: sort === "name" && dir === "asc" ? undefined : dir,
-  }
-
   return (
     <div className="px-7 pt-5 pb-10 space-y-4">
       <div className="flex items-end justify-between gap-4 flex-wrap">
@@ -220,7 +143,7 @@ export default async function MaintenanceBillingPage({
           <div>
             <h2 className="font-display text-[16px]">Bills</h2>
             <div className="text-ink-mute text-[12px] mt-0.5">
-              {total.toLocaleString()} customers ·{" "}
+              {customers.length.toLocaleString()} customers ·{" "}
               {monthMeta.period_count.toLocaleString()} task bills ·{" "}
               {cents(monthMeta.expected_total_cents)} expected
               {monthMeta.locked && " · month locked"}
@@ -233,43 +156,7 @@ export default async function MaintenanceBillingPage({
 
       <MonthSummary all={all} />
 
-      <BillingFilterBar
-        filters={[
-          {
-            key: "segment",
-            label: "Type",
-            options: SEGMENTS.map((v) => ({ value: v, label: v })),
-          },
-          {
-            key: "frequency",
-            label: "Frequency",
-            options: FREQUENCIES.map((v) => ({ value: v, label: v.replace("_", " ") })),
-          },
-          {
-            key: "office",
-            label: "Office",
-            options: offices.map((o) => ({ value: o, label: o.replace(", GA", "") })),
-          },
-        ]}
-      />
-
-      <div>
-        <BillsTable
-          customers={paged}
-          month={selected}
-          sort={sort}
-          dir={dir}
-          basePath={BASE}
-          preserve={preserve}
-        />
-        <Pagination
-          basePath={BASE}
-          page={page}
-          perPage={PER_PAGE}
-          total={total}
-          preserve={preserve}
-        />
-      </div>
+      <BillsTable customers={customers} month={selected} />
     </div>
   )
 }

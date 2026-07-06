@@ -1,12 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Card } from "@/components/ui/card"
+import { useState } from "react"
 import { Pill } from "@/components/ui/pill"
 import { useRouter } from "next/navigation"
-import { SortableHeader } from "@/components/ui/sortable-header"
+import type { ColumnDef } from "@tanstack/react-table"
+import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { formatCurrency } from "@/lib/utils/format"
-import { cn } from "@/lib/utils/cn"
 import { VisitCalendar } from "./visit-calendar"
 import { REASON_LABEL, STATUS_LABEL, STATUS_TONE } from "../_lib/status"
 import type { ProcessingStatus } from "../_lib/queries"
@@ -43,6 +42,9 @@ export interface CustomerBill {
   qbo_docs: string
   statuses: ProcessingStatus[]
   tasks: TaskLine[]
+  segment: string
+  office: string
+  frequency: string
 }
 
 const ION_TONE = { match: "grass", mismatch: "coral", missing: "neutral" } as const
@@ -50,150 +52,129 @@ function cents(v: number | null | undefined): string {
   return v == null ? "—" : formatCurrency(v / 100)
 }
 
-// Column layout; sorting is URL-driven (SortableHeader), sorted + paginated
-// server-side in page.tsx — the work-orders pattern.
-const COLUMNS: { key: string | null; label: string; align: "left" | "right"; defaultDir: "asc" | "desc" }[] = [
-  { key: "name", label: "Customer", align: "left", defaultDir: "asc" },
-  { key: "tasks", label: "Tasks", align: "right", defaultDir: "desc" },
-  { key: "visits", label: "Visits", align: "right", defaultDir: "desc" },
-  { key: "labor", label: "Labor", align: "right", defaultDir: "desc" },
-  { key: "chems", label: "Chems", align: "right", defaultDir: "desc" },
-  { key: "expected", label: "Expected", align: "right", defaultDir: "desc" },
-  { key: "diff", label: "ION diff", align: "right", defaultDir: "desc" },
-  { key: null, label: "QBO", align: "left", defaultDir: "asc" },
-]
-
-/**
- * The Bills table: one collapsible row per customer. Click a row to reveal the
- * task list and the visit calendar: dates as columns, readings grouped above
- * the chemicals sold per visit, with totals. Sorting/paging live in the URL.
- */
+/** Bills as the app DataTable: one expandable row per customer (click for the
+ *  task breakdown + visit calendar), client-side sort/search/facets. */
 export function BillsTable({
   customers,
   month,
-  sort,
-  dir,
-  basePath,
-  preserve,
 }: {
   customers: CustomerBill[]
   month: string
-  sort: string
-  dir: "asc" | "desc"
-  basePath: string
-  preserve: Record<string, string | undefined>
 }) {
-  const [open, setOpen] = useState<Set<string>>(new Set())
-
-  function toggle(key: string) {
-    const next = new Set(open)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    setOpen(next)
-  }
-
-  return (
-    <Card>
-      <table className="w-full text-[12px]">
-        <thead>
-          <tr className="text-left text-ink-mute border-b border-line-soft">
-            {COLUMNS.map((col) => (
-              <th
-                key={col.label}
-                className={cn("px-4 py-2 font-medium", col.align === "right" && "text-right")}
-              >
-                {col.key ? (
-                  <SortableHeader
-                    label={col.label}
-                    column={col.key}
-                    currentSort={sort}
-                    currentDir={dir}
-                    basePath={basePath}
-                    preserve={preserve}
-                    defaultDir={col.defaultDir}
-                    align={col.align}
-                  />
-                ) : (
-                  col.label
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {customers.length === 0 && (
-            <tr>
-              <td colSpan={8} className="px-4 py-8 text-center text-ink-mute">
-                No bills match this filter.
-              </td>
-            </tr>
-          )}
-          {customers.map((c) => (
-            <CustomerRows
-              key={c.key}
-              c={c}
-              month={month}
-              open={open.has(c.key)}
-              onToggle={() => toggle(c.key)}
-            />
-          ))}
-        </tbody>
-      </table>
-    </Card>
-  )
-}
-
-function CustomerRows({
-  c,
-  month,
-  open,
-  onToggle,
-}: {
-  c: CustomerBill
-  month: string
-  open: boolean
-  onToggle: () => void
-}) {
-  return (
-    <>
-      <tr
-        className="border-b border-line-soft/40 hover:bg-white/[0.02] cursor-pointer align-top"
-        onClick={onToggle}
-      >
-        <td className="px-4 py-2.5 text-ink">
-          <span className="text-ink-mute mr-1.5 inline-block w-3">{open ? "▾" : "▸"}</span>
-          {c.name}
-          {c.on_autopay && (
+  const columns: ColumnDef<CustomerBill>[] = [
+    {
+      id: "name",
+      accessorFn: (r) => r.name,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Customer" />,
+      cell: ({ row }) => (
+        <span className="text-ink">
+          <span className="text-ink-mute mr-1.5 inline-block w-3">
+            {row.getIsExpanded() ? "▾" : "▸"}
+          </span>
+          {row.original.name}
+          {row.original.on_autopay && (
             <span className="ml-2 text-[10px] text-teal uppercase tracking-wide">autopay</span>
           )}
-          {c.hold && (
+          {row.original.hold && (
             <Pill tone="coral" dot className="ml-2">
               hold
             </Pill>
           )}
-        </td>
-        <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">{c.tasks.length}</td>
-        <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">{c.visits}</td>
-        <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">
-          {cents(c.labor_cents)}
-        </td>
-        <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">
-          {cents(c.chem_cents)}
-        </td>
-        <td className="px-4 py-2.5 text-right font-mono num text-ink">
-          {cents(c.expected_cents)}
-        </td>
-        <DiffCell ion_cents={c.ion_cents} expected_cents={c.expected_cents} />
-        <td className="px-4 py-2.5 font-mono text-xs text-ink-dim">{c.qbo_docs || "—"}</td>
-      </tr>
-      {open && (
-        <tr className="border-b border-line-soft/40 bg-white/[0.015]">
-          <td colSpan={8} className="px-6 py-4">
-            <BillDetail c={c} month={month} />
-          </td>
-        </tr>
+        </span>
+      ),
+    },
+    {
+      id: "tasks",
+      accessorFn: (r) => r.tasks.length,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Tasks" />,
+      cell: ({ row }) => (
+        <span className="font-mono num text-ink-dim">{row.original.tasks.length}</span>
+      ),
+      meta: { align: "right" },
+    },
+    {
+      id: "visits",
+      accessorFn: (r) => r.visits,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Visits" />,
+      cell: ({ row }) => <span className="font-mono num text-ink-dim">{row.original.visits}</span>,
+      meta: { align: "right" },
+    },
+    {
+      id: "labor",
+      accessorFn: (r) => r.labor_cents,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Labor" />,
+      cell: ({ row }) => (
+        <span className="font-mono num text-ink-dim">{cents(row.original.labor_cents)}</span>
+      ),
+      meta: { align: "right" },
+    },
+    {
+      id: "chems",
+      accessorFn: (r) => r.chem_cents,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Chems" />,
+      cell: ({ row }) => (
+        <span className="font-mono num text-ink-dim">{cents(row.original.chem_cents)}</span>
+      ),
+      meta: { align: "right" },
+    },
+    {
+      id: "expected",
+      accessorFn: (r) => r.expected_cents,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Expected" />,
+      cell: ({ row }) => (
+        <span className="font-mono num text-ink">{cents(row.original.expected_cents)}</span>
+      ),
+      meta: { align: "right" },
+    },
+    {
+      id: "diff",
+      accessorFn: (r) =>
+        r.ion_cents == null ? -1 : Math.abs(r.ion_cents - r.expected_cents),
+      header: ({ column }) => <DataTableColumnHeader column={column} title="ION diff" />,
+      cell: ({ row }) => (
+        <DiffCell
+          ion_cents={row.original.ion_cents}
+          expected_cents={row.original.expected_cents}
+        />
+      ),
+      meta: { align: "right" },
+    },
+    {
+      id: "docs",
+      accessorFn: (r) => r.qbo_docs,
+      header: () => <span>QBO</span>,
+      cell: ({ row }) => (
+        <span className="font-mono text-xs text-ink-dim">{row.original.qbo_docs || "—"}</span>
+      ),
+      enableSorting: false,
+    },
+    // facet-only columns
+    { id: "segment", accessorFn: (r) => r.segment, header: () => null },
+    { id: "office", accessorFn: (r) => r.office, header: () => null },
+    { id: "frequency", accessorFn: (r) => r.frequency, header: () => null },
+  ]
+
+  return (
+    <DataTable
+      columns={columns}
+      data={customers}
+      searchAccessor={(r) => `${r.name} ${r.qbo_docs}`}
+      searchPlaceholder="Search customer or invoice…"
+      facetFilters={[
+        { columnId: "segment", label: "Type" },
+        { columnId: "office", label: "Office" },
+        { columnId: "frequency", label: "Frequency" },
+      ]}
+      columnVisibility={{ segment: false, office: false, frequency: false }}
+      pageSize={25}
+      initialSorting={[{ id: "name", desc: false }]}
+      emptyText="No bills match this filter."
+      renderSubRow={(row) => (
+        <div className="px-6 py-4 bg-white/[0.015] border-b border-line-soft/40">
+          <BillDetail c={row.original} month={month} />
+        </div>
       )}
-    </>
+    />
   )
 }
 
@@ -208,21 +189,17 @@ function DiffCell({
   expected_cents: number
 }) {
   if (ion_cents == null) {
-    return <td className="px-4 py-2.5 text-right text-ink-mute">—</td>
+    return <span className="text-ink-mute">—</span>
   }
   const diff = ion_cents - expected_cents
   if (Math.abs(diff) <= 100) {
-    return (
-      <td className="px-4 py-2.5 text-right">
-        <span className="text-grass">✓</span>
-      </td>
-    )
+    return <span className="text-grass">✓</span>
   }
   return (
-    <td className="px-4 py-2.5 text-right font-mono num text-coral">
+    <span className="font-mono num text-coral">
       {diff > 0 ? "+" : "−"}
       {formatCurrency(Math.abs(diff) / 100)}
-    </td>
+    </span>
   )
 }
 

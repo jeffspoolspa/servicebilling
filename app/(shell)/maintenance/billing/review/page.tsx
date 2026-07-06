@@ -1,6 +1,4 @@
-import Link from "next/link"
 import { Card } from "@/components/ui/card"
-import { Pill } from "@/components/ui/pill"
 import { formatCurrency } from "@/lib/utils/format"
 import {
   listBillingMonths,
@@ -9,10 +7,8 @@ import {
   formatMonth,
   type BillingPeriodRow,
 } from "../_lib/queries"
-import { REASON_LABEL } from "../_lib/status"
 import { MonthSelect } from "../_components/month-select"
-import { ReviewQueueActions } from "../_components/review-queue-actions"
-import { ReviewSheet } from "../_components/review-sheet"
+import { ReviewTable, type ReviewRow } from "../_components/review-table"
 
 export const metadata = { title: "Maintenance · Needs review" }
 export const dynamic = "force-dynamic"
@@ -71,16 +67,14 @@ export default async function NeedsReviewPage({
     arr.push(p)
     byCustomer.set(key, arr)
   }
-  const rows = [...byCustomer.entries()]
+  const rows: ReviewRow[] = [...byCustomer.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([name, list]) => {
       const reasons = [...new Set(list.map((p) => p.needs_review_reason).filter(Boolean))] as string[]
       const chem = list[0].customer_id != null ? chemByCustomer.get(list[0].customer_id) : undefined
       return {
         name,
-        chem,
         notes: [...new Set(list.map((p) => p.reconcile_notes).filter(Boolean))] as string[],
-        held_usd: list.reduce((s, p) => s + (p.qbo_total ?? 0), 0),
         qbo_balance: list.reduce((s, p) => s + (p.qbo_balance ?? 0) * 100, 0),
         tasks: list.map((p) => ({
           period_id: p.id,
@@ -104,6 +98,15 @@ export default async function NeedsReviewPage({
           .filter(Boolean)
           .map((d) => `#${d}`)
           .join(", "),
+        month: selected,
+        chem: chem
+          ? {
+              total_usd: chem.total_usd ?? 0,
+              median_usd: chem.median_usd ?? 0,
+              x_median: chem.x_median ?? 0,
+              peer_group: chem.peer_group ?? "",
+            }
+          : null,
       }
     })
 
@@ -116,7 +119,7 @@ export default async function NeedsReviewPage({
             <div className="text-ink-mute text-[12px] mt-0.5">
               {rows.length} customer{rows.length === 1 ? "" : "s"} ·{" "}
               <span className="text-sun font-medium">
-                {formatCurrency(rows.reduce((s, r) => s + r.held_usd, 0))} held
+                {formatCurrency(rows.reduce((s, r) => s + r.qbo_total, 0) / 100)} held
               </span>{" "}
               — linked, preprocessed invoices whose gates failed. Chem flags: apply a
               discount on the QBO invoice (what was sold stays intact) or bless as-is,
@@ -132,114 +135,7 @@ export default async function NeedsReviewPage({
         </div>
       </div>
 
-      <Card>
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="text-left text-ink-mute border-b border-line-soft">
-              <th className="px-4 py-2 font-medium">Customer</th>
-              <th className="px-4 py-2 font-medium">Reason</th>
-              <th className="px-4 py-2 font-medium text-right">Expected</th>
-              <th className="px-4 py-2 font-medium text-right">ION</th>
-              <th className="px-4 py-2 font-medium text-right">QBO invoice</th>
-              <th className="px-4 py-2 font-medium">Docs</th>
-              <th className="px-4 py-2 font-medium">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-ink-mute">
-                  Nothing needs review for {formatMonth(monthDate)} — holds appear here as
-                  linked invoices get preprocessed.
-                </td>
-              </tr>
-            )}
-            {rows.map((r) => (
-              <tr
-                key={r.name}
-                className="border-b border-line-soft/40 last:border-0 hover:bg-white/[0.02]"
-              >
-                <td className="px-4 py-2.5 text-ink">
-                  {r.customer_id != null && r.chemFlagged ? (
-                    <Link
-                      href={`/maintenance/billing/review/${r.customer_id}?month=${selected}` as never}
-                      className="hover:text-cyan underline-offset-2 hover:underline"
-                    >
-                      {r.name}
-                    </Link>
-                  ) : (
-                    r.name
-                  )}
-                </td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-1 flex-wrap">
-                    {r.reasons.map((reason) => (
-                      <Pill key={reason} tone="coral">
-                        {REASON_LABEL[reason] ?? reason}
-                      </Pill>
-                    ))}
-                    {r.chem && (
-                      <Pill tone="sun">{r.chem.x_median}x median</Pill>
-                    )}
-                  </div>
-                </td>
-                <td className="px-4 py-2.5 text-right font-mono num text-ink">
-                  {formatCurrency(r.expected / 100)}
-                </td>
-                <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">
-                  {r.ion == null ? "—" : formatCurrency(r.ion / 100)}
-                </td>
-                <td className="px-4 py-2.5 text-right font-mono num text-ink-dim">
-                  {r.qbo_total > 0 ? formatCurrency(r.qbo_total / 100) : "—"}
-                </td>
-                <td className="px-4 py-2.5 font-mono text-xs text-ink-dim">
-                  {r.qbo_docs || "—"}
-                </td>
-                <td className="px-4 py-2.5">
-                  <span className="inline-flex items-center gap-2">
-                    <ReviewSheet
-                      row={{
-                        name: r.name,
-                        month: selected,
-                        customer_id: r.customer_id,
-                        qbo_customer_id: r.qbo_customer_id ?? null,
-                        ids: r.ids,
-                        reasons: r.reasons,
-                        notes: r.notes,
-                        opError: r.opError,
-                        chemFlagged: r.chemFlagged,
-                        chem: r.chem
-                          ? {
-                              total_usd: r.chem.total_usd,
-                              median_usd: r.chem.median_usd,
-                              x_median: r.chem.x_median,
-                              peer_group: r.chem.peer_group,
-                            }
-                          : null,
-                        expected: r.expected,
-                        ion: r.ion,
-                        qbo_total: r.qbo_total,
-                        qbo_balance: r.qbo_balance,
-                        tasks: r.tasks,
-                      }}
-                    />
-                    {r.chemFlagged ? (
-                      <Link
-                        href={`/maintenance/billing/review/${r.customer_id}?month=${selected}` as never}
-                        className="text-[11px] px-2.5 py-1 rounded border border-coral/30 text-coral hover:bg-coral/10"
-                      >
-                        Chems →
-                      </Link>
-                    ) : (
-                      <ReviewQueueActions ids={r.ids} />
-                    )}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+      <ReviewTable rows={rows} />
     </div>
   )
 }
