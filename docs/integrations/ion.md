@@ -68,6 +68,21 @@ consumables)"), verified by re-read; the next recurring sync is the reflection. 
 through `ionFetch` and IS accepted — the form-submit-only restriction above applies to the **reports**
 criteria form, not to `addTask.cfm`.
 
+## Chromium-worker breakage signature (2026-07-06 incident)
+
+The login browser comes from the WORKER environment, not our code: the
+chromium worker group installs the distro `chromium` package, so a worker pod
+restart can silently adopt a new major version. 2026-07-06: last good login
+00:01, broken by afternoon — the pod picked up Chromium 150, which crashes
+(SIGTRAP, exit 133) on ANY page render under the job sandbox (nsjail), with
+every flag combination; `--version` still works. Symptom in jobs: `loginToIon`
+fails with "Target page, context or browser has been closed" or a launch
+timeout, and ALL ION automation stalls once the 15-minute session cache
+expires. Reproduce/verify with `f/ION/_discover/chromium_smoke2` (zero-dep
+spawn probe). Fix is worker-init-side: pin the browser version — ideally
+install playwright's bundled chromium matching the `playwright@1.40.0` pin
+and point `executablePath` at it, so browser and driver move as a pair.
+
 ## Channels in / out
 
 - **In (reflection):** scrape every few hours per sync. No change feed — the full re-scrape IS the reconciliation (no drift detection; known gap).
