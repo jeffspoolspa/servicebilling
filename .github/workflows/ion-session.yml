@@ -1,0 +1,46 @@
+name: ION session mint
+
+# Mints a fresh ION session in a real browser environment (Ubuntu, where
+# playwright chromium just works) and pushes it into Windmill's session_cache,
+# so the ingest runs browser-free. Routes the one browser-dependent step off
+# Windmill's broken chromium worker onto infra we control.
+#
+# Required repo secret:  WINDMILL_TOKEN  (Windmill API token for jps-internal)
+# Optional repo vars:     WINDMILL_WORKSPACE (default jps-internal),
+#                         WINDMILL_BASE      (default https://app.windmill.dev/api)
+
+on:
+  schedule:
+    - cron: "0 */4 * * *" # every 4 hours; keepalive stretches sessions between
+  workflow_dispatch: # manual "Run workflow" button
+    inputs:
+      trigger_ingest:
+        description: "Also run daily_visit_ingest after minting"
+        type: boolean
+        default: true
+
+concurrency:
+  group: ion-session
+  cancel-in-progress: false
+
+jobs:
+  mint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install playwright + chromium
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.58.2 >/dev/null 2>&1
+          npx playwright install --with-deps chromium
+      - name: Mint session and push to Windmill
+        env:
+          WINDMILL_TOKEN: ${{ secrets.WINDMILL_TOKEN }}
+          WINDMILL_WORKSPACE: ${{ vars.WINDMILL_WORKSPACE || 'jps-internal' }}
+          WINDMILL_BASE: ${{ vars.WINDMILL_BASE || 'https://app.windmill.dev/api' }}
+          TRIGGER_INGEST: ${{ (github.event_name == 'schedule' || inputs.trigger_ingest) && '1' || '0' }}
+        run: node scripts/ion-mint-session.mjs
