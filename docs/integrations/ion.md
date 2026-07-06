@@ -114,10 +114,24 @@ and inject it into the worker's `f/ION/session_cache` variable:
      reads the fresh cache (no browser) and runs on pure HTTP.
 CONFIRMED: a session minted from a Mac IP is accepted from the worker IP —
 NO IP binding (`f/ION/_discover/session_http_test`: 200, logged-in page).
-The 178-visit recovery ran browser-free this way. For continuous coverage
-until the worker chromium is fixed, a raw-HTTP keepalive (GET /main.cfm every
-~10 min on the cached cookies) keeps ION's server-side session alive so the
-2-hourly scheduled ingests keep working without a browser.
+The 178-visit recovery ran browser-free this way.
+
+SELF-OWNED SESSION PIPELINE (2026-07-06, independent of the worker fix):
+- MINT (the only browser step) runs OFF Windmill: `.github/workflows/
+  ion-session.yml` + `scripts/ion-mint-session.mjs` — a scheduled GitHub
+  Action (Ubuntu, where playwright chromium just works) logs in every 4h and
+  pushes a fresh IonSession into `f/ION/session_cache` via API. Repo secret
+  `WINDMILL_TOKEN`. No deadlock possible: mint is a fresh login independent
+  of the current session, so it recovers from ANY cache state.
+- KEEPALIVE `f/ION/session_keepalive` (default worker, pure HTTP, every 10m):
+  pings ION on the cached cookies to reset its idle timer + bump expiresAt so
+  getOrRefreshSession never launches the broken chromium. On a DEAD session it
+  self-heals — triggers the GitHub minter via workflow_dispatch (needs
+  `f/ION/GITHUB_TOKEN` var) and raises a deduped `system_alerts` row.
+- INGEST stays on Windmill, browser-free, reading the always-fresh cache.
+The worker chromium fix (init-script pin, superadmin/support) becomes
+OPTIONAL: session.ts still prefers an on-worker pinned browser if one ever
+appears, moving login back on-platform with zero code change.
 
 ## Channels in / out
 
