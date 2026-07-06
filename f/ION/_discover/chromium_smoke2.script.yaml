@@ -1,0 +1,9 @@
+summary: 'DISCOVERY: does playwright 1.49 handshake with the upgraded system chromium?'
+description: Launch matrix on playwright@1.49.1 with 30s timeouts. No ION touch.
+tag: chromium
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties: {}
+  required: []
