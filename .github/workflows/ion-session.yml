@@ -27,6 +27,8 @@ jobs:
   mint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # WINDMILL_TOKEN lives in the Production environment's secrets
+    environment: Production
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
