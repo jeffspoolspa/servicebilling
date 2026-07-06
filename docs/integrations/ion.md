@@ -100,11 +100,24 @@ So the durable fix is the worker init script installing a PINNED browser to
 the roomy image layer (not tmpfs). That config is superadmin/devops-only on
 Windmill Cloud → requires Windmill support or a superadmin.
 
-Chromium-free bridge (recovers ingest without a browser): visit ingest and
-all `get_log_detail` calls are raw HTTP with the session cookies — only
-LOGIN needs chromium. Capture cookies from a human ION browser session and
-write them into the `f/ION/session_cache` variable (shape = IonSession in
-session.ts) and ingest runs browser-free until the 15-min idle TTL lapses.
+Chromium-free bridge (PROVEN 2026-07-06 — recovers ingest with no worker
+browser). Only LOGIN needs chromium; ingest + `get_log_detail` are raw HTTP
+with the session cookies. So mint the session on ANY working-browser machine
+and inject it into the worker's `f/ION/session_cache` variable:
+  1. Run the loginToIon flow locally (a Mac with `npx playwright` + Chrome
+     via `channel:"chrome"` works — the flow is identical to session.ts).
+  2. POST the IonSession JSON to
+     `/api/w/jps-internal/variables/update/f/ION/session_cache`
+     (set `expiresAt = now + 2h` so getOrRefreshSession never tries a browser
+     refresh mid-run).
+  3. Trigger `f/ION/daily_visit_ingest {lookback_days, dry_run:false}` — it
+     reads the fresh cache (no browser) and runs on pure HTTP.
+CONFIRMED: a session minted from a Mac IP is accepted from the worker IP —
+NO IP binding (`f/ION/_discover/session_http_test`: 200, logged-in page).
+The 178-visit recovery ran browser-free this way. For continuous coverage
+until the worker chromium is fixed, a raw-HTTP keepalive (GET /main.cfm every
+~10 min on the cached cookies) keeps ION's server-side session alive so the
+2-hourly scheduled ingests keep working without a browser.
 
 ## Channels in / out
 

@@ -1,0 +1,9 @@
+summary: 'DECISIVE: does an externally-minted ION session work from the worker (IP binding)?'
+description: Read injected session_cache, fetch one ION page with cookies, report logged-in vs bounced.
+tag: chromium
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties: {}
+  required: []
