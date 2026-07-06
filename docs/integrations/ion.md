@@ -83,6 +83,16 @@ spawn probe). Fix is worker-init-side: pin the browser version — ideally
 install playwright's bundled chromium matching the `playwright@1.40.0` pin
 and point `executablePath` at it, so browser and driver move as a pair.
 
+NO self-service workaround exists (proven 2026-07-06,
+`f/ION/_discover/chromium_fetch_probe`): a job CAN download + extract the
+pinned build (valid 383MB ELF, mode 755) but `/tmp` is mounted **noexec**
+in the nsjail sandbox, so `posix_spawn` returns ENOEXEC. The browser must
+live on an exec-mounted system path (`/usr/lib/...`), which only the worker
+group's init script populates — and that init script is superadmin/devops
+only on Windmill Cloud. So the fix REQUIRES Windmill support (or a
+superadmin) to pin the init-script browser; app-side code cannot route
+around it.
+
 ## Channels in / out
 
 - **In (reflection):** scrape every few hours per sync. No change feed — the full re-scrape IS the reconciliation (no drift detection; known gap).
