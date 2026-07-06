@@ -1,0 +1,9 @@
+summary: 'DISCOVERY: free space on writable mounts — is self-hosting a browser possible?'
+description: Clean download cruft, report df -h + du of /tmp.
+tag: chromium
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties: {}
+  required: []

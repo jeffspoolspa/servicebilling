@@ -1,0 +1,9 @@
+summary: 'DISCOVERY: find any writable+executable dir in the job sandbox'
+description: Copies /bin/true into candidate dirs and spawns it — exit 0 = writable+exec.
+tag: chromium
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties: {}
+  required: []

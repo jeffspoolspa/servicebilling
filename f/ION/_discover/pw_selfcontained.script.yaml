@@ -1,0 +1,9 @@
+summary: 'DISCOVERY: obtain arm64 chromium via live CDN + launch via playwright lib, one job'
+description: Install chromium (cdn.playwright.dev) into /tmp, launch multi-process, render.
+tag: chromium
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties: {}
+  required: []

@@ -83,15 +83,28 @@ spawn probe). Fix is worker-init-side: pin the browser version — ideally
 install playwright's bundled chromium matching the `playwright@1.40.0` pin
 and point `executablePath` at it, so browser and driver move as a pair.
 
-NO self-service workaround exists (proven 2026-07-06,
-`f/ION/_discover/chromium_fetch_probe`): a job CAN download + extract the
-pinned build (valid 383MB ELF, mode 755) but `/tmp` is mounted **noexec**
-in the nsjail sandbox, so `posix_spawn` returns ENOEXEC. The browser must
-live on an exec-mounted system path (`/usr/lib/...`), which only the worker
-group's init script populates — and that init script is superadmin/devops
-only on Windmill Cloud. So the fix REQUIRES Windmill support (or a
-superadmin) to pin the init-script browser; app-side code cannot route
-around it.
+Why app-side self-hosting is NOT viable (proven 2026-07-06, the
+`f/ION/_discover/*` probes — earlier "noexec" claim was WRONG):
+- The worker is **arm64** (aarch64). The distro `apt` chromium is the right
+  arch but now v150, which SIGTRAPs (exit 133) on ANY render under nsjail —
+  with and without `--single-process`, via raw spawn AND the playwright
+  library. Not a flag issue; v150 just won't run in this sandbox.
+- `/tmp` IS executable (`/bin/true` runs from it) — but it's a **763 MB
+  tmpfs** and the ONLY writable mount (`/`, the 49 GB overlay, `/home`,
+  `/dev/shm` etc. are all EROFS to jobs). A self-downloaded browser needs
+  ~540 MB peak (160 MB zip + 380 MB extract) which fits on a CLEAN pod but
+  ENOSPCs on a used one — and `bun x playwright install` adds toolchain
+  overhead on top. Too fragile for production (every worker would try it on
+  first login), and it re-downloads per pod (tmpfs is wiped on restart).
+So the durable fix is the worker init script installing a PINNED browser to
+the roomy image layer (not tmpfs). That config is superadmin/devops-only on
+Windmill Cloud → requires Windmill support or a superadmin.
+
+Chromium-free bridge (recovers ingest without a browser): visit ingest and
+all `get_log_detail` calls are raw HTTP with the session cookies — only
+LOGIN needs chromium. Capture cookies from a human ION browser session and
+write them into the `f/ION/session_cache` variable (shape = IonSession in
+session.ts) and ingest runs browser-free until the 15-min idle TTL lapses.
 
 ## Channels in / out
 

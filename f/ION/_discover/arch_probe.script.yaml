@@ -1,0 +1,9 @@
+summary: 'DISCOVERY: worker arch + does the right-arch pinned chromium render from /tmp?'
+description: Detect CPU arch, download the matching playwright build 1091, render-test from /tmp.
+tag: chromium
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties: {}
+  required: []

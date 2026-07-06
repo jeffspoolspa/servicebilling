@@ -1,0 +1,9 @@
+summary: 'DISCOVERY: does system chromium 150 render via playwright lib without --single-process?'
+description: The cheap one-line-fix test — launch /usr/bin/chromium multi vs single process. Frees /tmp.
+tag: chromium
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties: {}
+  required: []
