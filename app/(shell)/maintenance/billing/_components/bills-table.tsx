@@ -61,6 +61,12 @@ export function BillsTable({
   customers: CustomerBill[]
   month: string
 }) {
+  // $0 bills = QC-only task-months with no chemicals sold — nothing bills
+  // out, but the visits still count. Hidden by default behind the banner.
+  const [showZeros, setShowZeros] = useState(false)
+  const zeros = customers.filter((c) => c.expected_cents === 0)
+  const shown = showZeros ? customers : customers.filter((c) => c.expected_cents !== 0)
+
   const columns: ColumnDef<CustomerBill>[] = [
     {
       id: "name",
@@ -155,9 +161,20 @@ export function BillsTable({
   ]
 
   return (
+    <div className="space-y-3">
+      {zeros.length > 0 && (
+        <button
+          onClick={() => setShowZeros((v) => !v)}
+          className="w-full text-left text-[11px] px-3.5 py-2 rounded-md border border-line bg-white/[0.02] text-ink-mute hover:text-ink transition-colors"
+        >
+          {showZeros ? "▾" : "▸"} {zeros.length} $0 bill{zeros.length === 1 ? "" : "s"}{" "}
+          {showZeros ? "shown" : "hidden"} — quality-control visits with no chemicals
+          sold; nothing bills out, visits still captured. Click to {showZeros ? "hide" : "show"}.
+        </button>
+      )}
     <DataTable
       columns={columns}
-      data={customers}
+      data={shown}
       searchAccessor={(r) => `${r.name} ${r.qbo_docs}`}
       searchPlaceholder="Search customer or invoice…"
       facetFilters={[
@@ -175,6 +192,7 @@ export function BillsTable({
         </div>
       )}
     />
+    </div>
   )
 }
 
