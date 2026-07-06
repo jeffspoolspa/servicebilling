@@ -1,0 +1,16 @@
+summary: Ingest service-log photos (uploadList.cfm per log -> visit_photos)
+description: >-
+  For each visit in the window, fetch /mobileImage/uploadList.cfm?RefID=<LogID>&TypeID=2
+  (raw HTTP on the cached session) and upsert maintenance.visit_photos on (ion_log_id, guid).
+  Thumbnails are public S3; s3_key feeds getSignedUrl for full-size. Idempotent; catches late uploads.
+tag: chromium
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties:
+    start_date: { type: string, default: '', description: 'ISO date; default now-3d' }
+    end_date: { type: string, default: '', description: 'ISO date; default today' }
+    dry_run: { type: boolean, default: true }
+    sess: { type: object, default: null }
+  required: []

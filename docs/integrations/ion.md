@@ -167,7 +167,10 @@ Tech-uploaded photos are NOT on addLog.cfm or the day grid. The pipeline:
 
 Probes: `f/ION/_discover/probe_log_photos`, `probe_file_mgmt`,
 `probe_daygrid_photos`, `probe_customer_files`, `probe_log_images_e2e`.
-Ingest plan: one uploadList GET per visit inside the per-log ingest ->
-`maintenance.visit_photos` (ion_log_id, guid, thumb_url, uploaded_by,
-uploaded_on); UI renders public thumbs, full-size on click via getSignedUrl.
+BUILT (2026-07-06): `f/ION/ingest_log_photos` (raw HTTP on the cached
+session, concurrency 6, idempotent upsert on (ion_log_id, guid)) fills
+`maintenance.visit_photos`; scheduled every 2h at :20 (after visit ingest).
+June backfilled: 10,094 photos over 3,747/3,853 logs; July current. The
+bill-review workbench renders public thumbs and full-size on click via
+`/api/maintenance-billing/photo` (server-side getSignedUrl redirect).
 
