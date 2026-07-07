@@ -114,6 +114,7 @@ export function ServiceLog({
   className?: string
 }) {
   const [openVisit, setOpenVisit] = useState<string | null>(null)
+  const [summaryOpen, setSummaryOpen] = useState(true)
   const [activeBody, setActiveBody] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<{ photos: ServiceLogVisit["photos"]; i: number } | null>(null)
   // assumptions for never-recorded chart inputs (editable)
@@ -272,15 +273,31 @@ export function ServiceLog({
             </div>
           )}
         </div>
-        <span className="font-mono text-[10.5px] text-ink-mute flex-none">
-          {shownVisits.length} visit{shownVisits.length === 1 ? "" : "s"}
-          {flaggedVisits > 0 && <> · <span className="text-coral">{flaggedVisits} off-range</span></>}
-          {avgMins != null && <> · avg {avgMins} min</>}
+        <span className="flex items-center gap-2 flex-none">
+          <span className="font-mono text-[10.5px] text-ink-mute">
+            {shownVisits.length} visit{shownVisits.length === 1 ? "" : "s"}
+            {flaggedVisits > 0 && <> · <span className="text-coral">{flaggedVisits} off-range</span></>}
+            {avgMins != null && <> · avg {avgMins} min</>}
+          </span>
+          {chart.n >= 2 && (
+            <button
+              onClick={() => setSummaryOpen(!summaryOpen)}
+              title={summaryOpen ? "Hide summary" : "Show summary"}
+              aria-label={summaryOpen ? "Hide summary" : "Show summary"}
+              className="h-5 w-5 rounded border border-line text-ink-mute hover:text-cyan hover:border-cyan grid place-items-center"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                style={{ transform: summaryOpen ? "rotate(180deg)" : "none", transition: "transform 150ms" }}>
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+          )}
         </span>
       </div>
 
       {/* ── summary: averages + charts ── */}
-      {chart.n >= 2 && (
+      {chart.n >= 2 && summaryOpen && (
         <div className="px-4 pt-2.5 pb-3 border-b border-line-soft flex-none">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-ink-mute mb-2">
             {readingAvgs.length > 0 && (
