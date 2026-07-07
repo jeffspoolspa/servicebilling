@@ -644,8 +644,11 @@ export function ReviewWorkbench({
                   )}
                 </div>
                 {ratio != null && (ratio >= 1.15 || ratio <= 0.85) && (
-                  <div className={`font-mono text-[10px] mt-1 ${ratioColor}`}>
-                    {ratio >= 1 ? "▲" : "▼"} {ratio.toFixed(1)}× qty from average
+                  <div
+                    className={`font-mono text-[10px] mt-1 ${ratioColor}`}
+                    title={`from average ${qtyAvg!.toFixed(1)}`}
+                  >
+                    {ratio >= 1 ? "▲" : "▼"} {Number.isInteger(qtyNow!) ? qtyNow : qtyNow!.toFixed(1)}
                   </div>
                 )}
                 {adj && (
