@@ -86,12 +86,31 @@ const READING_SHORT: Record<string, string> = {
   "Calcium Hardness": "CAL",
 }
 
-// readings shown as chips on every preview row (when recorded); everything
-// else lands in the expanded view
+// readings used for the month averages / science calcs
 const PREVIEW_READINGS = [
   "Free Chlorine", "pH", "Cyanuric Acid", "Total Alkalinity",
   "Calcium Hardness", "Salinity",
 ]
+
+// service-log grid columns, in report order. A column shows only when some
+// visit in the month recorded it — so salt pools surface Salt/Cell/ORP and
+// tablet pools surface Tabs, without needing a stored pool-type flag.
+const CORE_COLS: [name: string, short: string][] = [
+  ["Free Chlorine", "FC"],
+  ["Total Chlorine", "TC"],
+  ["pH", "pH"],
+  ["Total Alkalinity", "Alk"],
+  ["Cyanuric Acid", "CyA"],
+  ["Calcium Hardness", "Cal"],
+  ["Phosphates", "Phos"],
+  ["Salinity", "Salt"],
+  ["Tablets", "Tabs"],
+  ["OXIDATION-REDUCTION POTENTIAL", "ORP"],
+  ["Current Filter PSI", "PSI"],
+  ["FILTER PSI BEFORE", "PSIb"],
+  ["FILTER PSI AFTER", "PSIa"],
+]
+const CORE_NAMES = new Set(CORE_COLS.map(([n]) => n))
 
 function readingWarn(name: string, value: string): boolean {
   const v = parseFloat(value)
@@ -463,6 +482,11 @@ export function ReviewWorkbench({
     }
     return { fc, minFc, fcOk, lsi, assumed }
   })()
+
+  // grid columns present anywhere this month (pool-type-adaptive)
+  const presentCols = CORE_COLS.filter(([name]) =>
+    visits.some((v) => v.readings[name] != null && v.readings[name] !== ""),
+  )
 
   const flaggedVisits = visits.filter((v) =>
     Object.entries(v.readings).some(([k, val]) => readingWarn(k, val)),
@@ -922,10 +946,14 @@ export function ReviewWorkbench({
             </div>
             <div className="overflow-y-auto flex-1 min-h-0">
               {visits.length > 0 && (
-                <div className="flex items-center gap-3 px-4 pt-2.5 pb-1 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">
+                <div className="flex items-center gap-3 px-4 pt-2.5 pb-1 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-mute">
                   <span className="w-[7px] flex-none" />
                   <span className="w-[86px] flex-none">Visit</span>
-                  <span className="w-[300px] flex-none">Core readings</span>
+                  <div className="flex-none flex">
+                    {presentCols.map(([name, short]) => (
+                      <span key={name} className="w-[34px] flex-none text-center normal-case">{short}</span>
+                    ))}
+                  </div>
                   <span className="flex-1 pl-4">Notes</span>
                 </div>
               )}
@@ -933,11 +961,8 @@ export function ReviewWorkbench({
                 const open = openVisit === v.visit_id
                 const warn = Object.entries(v.readings).some(([k, val]) => readingWarn(k, val))
                 const chemCents = v.chems.reduce((s, c) => s + (c.cents ?? 0), 0)
-                const previewReads = PREVIEW_READINGS
-                  .filter((k) => v.readings[k] != null && v.readings[k] !== "")
-                  .map((k) => [k, v.readings[k]] as const)
                 const otherReads = Object.entries(v.readings)
-                  .filter(([k, val]) => !PREVIEW_READINGS.includes(k) && val != null && val !== "")
+                  .filter(([k, val]) => !CORE_NAMES.has(k) && val != null && val !== "")
                 return (
                   <div key={v.visit_id} className="border-b border-line-soft last:border-0">
                     <div
@@ -959,18 +984,20 @@ export function ReviewWorkbench({
                           </div>
                         )}
                       </div>
-                      <div className="w-[300px] flex-none flex items-start gap-1 flex-wrap py-0.5">
-                        {previewReads.map(([k, val]) => {
-                          const w = readingWarn(k, val)
+                      <div className="flex-none flex">
+                        {presentCols.map(([name]) => {
+                          const val = v.readings[name]
+                          const has = val != null && val !== ""
+                          const w = has && readingWarn(name, val)
                           return (
-                            <div key={k}
-                              className={`rounded border px-1.5 py-0.5 text-center flex-none min-w-[34px] ${w ? "border-coral/40 bg-coral/5" : "border-line bg-bg-elev"}`}>
-                              <div className="font-mono text-[8px] uppercase tracking-[0.05em] text-ink-mute leading-none">{READING_SHORT[k]}</div>
-                              <div className={`font-mono text-[11px] leading-tight mt-0.5 ${w ? "text-coral" : "text-ink"}`}>{val}</div>
-                            </div>
+                            <span key={name}
+                              className={`w-[34px] flex-none text-center font-mono text-[11px] ${
+                                w ? "text-coral font-medium" : has ? "text-ink" : "text-ink-mute/40"
+                              }`}>
+                              {has ? val : "·"}
+                            </span>
                           )
                         })}
-                        {previewReads.length === 0 && <span className="text-[10px] text-ink-mute self-center">no readings</span>}
                       </div>
                       <div className="flex-1 min-w-0 pl-4">
                         {v.notes ? (
