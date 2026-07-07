@@ -7,6 +7,7 @@ import {
   type WorkbenchInvoice,
   type WorkbenchVisit,
   type UsualItem,
+  type BillAnalysis,
 } from "../../../_components/review-workbench"
 
 export const metadata = { title: "Maintenance · Bill review" }
@@ -31,10 +32,14 @@ export default async function BillReviewPage({
   const monthDate = `${month}-01`
 
   const supabase = await createSupabaseServer()
-  const [periods, usual, visitsRes] = await Promise.all([
+  const [periods, usual, visitsRes, analysisRes] = await Promise.all([
     listBillingPeriods(monthDate),
     listFlagItems(customerId, monthDate).catch(() => [] as UsualItem[]),
     supabase.rpc("maint_billing_review_visits", {
+      p_customer_id: customerId,
+      p_month: monthDate,
+    }),
+    supabase.rpc("maint_billing_bill_analysis", {
       p_customer_id: customerId,
       p_month: monthDate,
     }),
@@ -87,6 +92,7 @@ export default async function BillReviewPage({
 
       <ReviewWorkbench
         customerId={customerId}
+        qboCustomerId={mine[0].qbo_customer_id ?? ""}
         customerName={name}
         month={month}
         monthLabel={formatMonth(monthDate)}
@@ -96,6 +102,7 @@ export default async function BillReviewPage({
         invoices={invoices}
         visits={(visitsRes.data ?? []) as WorkbenchVisit[]}
         usual={usual as UsualItem[]}
+        initialAnalysis={((analysisRes.data ?? [])[0] ?? null) as BillAnalysis | null}
       />
     </div>
   )

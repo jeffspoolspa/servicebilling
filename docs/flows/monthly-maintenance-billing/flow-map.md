@@ -46,3 +46,22 @@ sequenceDiagram
 | Reconcile mismatch | reconcile | hold the invoice + surface for review (no charge) |
 | Natural-key conflict on visit | ingest upsert | dedupe (`DO NOTHING`), don't error |
 | On-hold invoice (not synced to QBO) | reconcile | skip until synced (not a mismatch) |
+
+## Bill-review workbench (2026-07-06)
+
+`/maintenance/billing/review/[customerId]/bill?month=` (linked from every
+Needs Review row). One screen per held customer-month:
+
+- [read] invoice ledger (`maint_billing_invoice_detail`) with per-line
+  usage-vs-usual bars (`maint_billing_flag_items`); visits + readings +
+  chems + notes + photos via `maint_billing_review_visits`.
+- [write] Adjustments: reviewer drafts $/%/comp per line (reason required);
+  APPROVE writes them to the QBO invoice as negative DISCOUNT lines
+  (`f/billing/apply_maint_adjustments`, item id 72, idempotent, cache
+  refresh) THEN releases the periods to ready_to_process. Original lines
+  stay intact — the sold record and reconcile survive; the subtotal gate
+  ignores QBO-side discounts by construction (pre-discount compare).
+- [external] AI analysis: `f/billing/analyze_maint_bill` (Claude sonnet,
+  full-context prompt cache breakpoint, photo thumbnails as base64) returns
+  {driver, normal, recommend}; stored in `billing_audit.maint_bill_analyses`
+  and shown on load; Analyze/Re-run via /api/maintenance-billing/analyze.

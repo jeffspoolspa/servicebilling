@@ -40,6 +40,12 @@ export interface WorkbenchVisit {
   photos: { guid: string; thumb_url: string; s3_key: string; uploaded_by: string | null }[]
 }
 
+export interface BillAnalysis {
+  result: { driver?: string; normal?: string; recommend?: string }
+  model: string | null
+  created_at: string
+}
+
 export interface UsualItem {
   item_name: string
   month_qty: number | null
@@ -52,6 +58,7 @@ interface Adjustment {
   value: number // dollars off
   label: string
   reason: string
+  item: string
 }
 
 const READING_SHORT: Record<string, string> = {
@@ -75,6 +82,7 @@ function bare(name: string | null | undefined): string {
 
 export function ReviewWorkbench({
   customerId,
+  qboCustomerId,
   customerName,
   month, // 'YYYY-MM'
   monthLabel,
@@ -84,8 +92,10 @@ export function ReviewWorkbench({
   invoices,
   visits,
   usual,
+  initialAnalysis = null,
 }: {
   customerId: number
+  qboCustomerId: string
   customerName: string
   month: string
   monthLabel: string
@@ -95,6 +105,7 @@ export function ReviewWorkbench({
   invoices: WorkbenchInvoice[]
   visits: WorkbenchVisit[]
   usual: UsualItem[]
+  initialAnalysis: BillAnalysis | null
 }) {
   const router = useRouter()
   const [openVisit, setOpenVisit] = useState<string | null>(null)
@@ -105,6 +116,10 @@ export function ReviewWorkbench({
   const [reason, setReason] = useState("")
   const [err, setErr] = useState("")
   const [releasing, setReleasing] = useState(false)
+  const [applyState, setApplyState] = useState("")
+  const [analysis, setAnalysis] = useState<BillAnalysis | null>(initialAnalysis)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analysisErr, setAnalysisErr] = useState("")
   const [lightbox, setLightbox] = useState<{ photos: WorkbenchVisit["photos"]; i: number } | null>(null)
 
   // lightbox keyboard: Escape closes, arrows move between the visit's photos
@@ -164,7 +179,7 @@ export function ReviewWorkbench({
     setEditing(key); setMode("$"); setAmt(""); setReason(""); setErr("")
   }
 
-  function applyAdjustment(line: { key: string; amount: number }) {
+  function applyAdjustment(line: { key: string; amount: number; name: string }) {
     let value = 0
     if (mode === "comp") value = line.amount
     else {
@@ -176,22 +191,82 @@ export function ReviewWorkbench({
     const label = mode === "comp" ? "Comped"
       : mode === "%" ? `−${parseFloat(amt)}% · −${formatCurrency(value)}`
       : `−${formatCurrency(value)}`
-    setAdjustments({ ...adjustments, [line.key]: { value, label, reason: reason.trim() } })
+    setAdjustments({ ...adjustments, [line.key]: { value, label, reason: reason.trim(), item: line.name } })
     setEditing(null)
   }
 
+  async function pollJob(pollUrl: string, timeoutMs = 180000): Promise<any> {
+    const t0 = Date.now()
+    for (;;) {
+      const r = await fetch(pollUrl)
+      const j = await r.json()
+      if (j.completed) {
+        if (j.success === false || j.result?.error) throw new Error(j.result?.error?.message ?? "job failed")
+        return j.result
+      }
+      if (Date.now() - t0 > timeoutMs) throw new Error("timed out waiting for QBO write")
+      await new Promise((res) => setTimeout(res, 2000))
+    }
+  }
+
+  // Approve = write draft adjustments to QBO (one batch per invoice) then
+  // release the held periods. No half-states: a failed write aborts before
+  // any release.
   async function release() {
     setReleasing(true)
+    setApplyState("")
     try {
+      const byInvoice = new Map<string, { item_name: string; amount: number; reason: string }[]>()
+      for (const [key, adj] of Object.entries(adjustments)) {
+        const invoiceId = key.split(":")[0]
+        const arr = byInvoice.get(invoiceId) ?? []
+        arr.push({ item_name: adj.item, amount: Math.round(adj.value * 100) / 100, reason: adj.reason })
+        byInvoice.set(invoiceId, arr)
+      }
+      let n = 0
+      for (const [qbo_invoice_id, adjs] of byInvoice) {
+        n += adjs.length
+        setApplyState(`Applying ${n} adjustment${n === 1 ? "" : "s"} to QBO…`)
+        const r = await fetch("/api/maintenance-billing/adjustments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ qbo_invoice_id, adjustments: adjs }),
+        })
+        const j = await r.json()
+        if (!r.ok) throw new Error(j.error ?? "adjustment trigger failed")
+        await pollJob(`/api/maintenance-billing/adjustments?job=${j.jobId}`)
+      }
+      setApplyState("Releasing…")
       const r = await fetch("/api/maintenance-billing/periods/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: periodIds, status: "ready_to_process" }),
       })
-      if (r.ok) router.push(`/maintenance/billing/review?month=${month}` as never)
-      else setReleasing(false)
-    } catch {
+      if (!r.ok) throw new Error("release failed")
+      router.push(`/maintenance/billing/review?month=${month}` as never)
+    } catch (e) {
+      setApplyState(`Failed: ${e instanceof Error ? e.message : String(e)}`)
       setReleasing(false)
+    }
+  }
+
+  async function analyze() {
+    setAnalyzing(true)
+    setAnalysisErr("")
+    try {
+      const r = await fetch("/api/maintenance-billing/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customer_id: customerId, qbo_customer_id: qboCustomerId, month }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error ?? "analysis trigger failed")
+      const result = await pollJob(`/api/maintenance-billing/analyze?job=${j.jobId}`, 120000)
+      setAnalysis({ result: result.result, model: null, created_at: new Date().toISOString() })
+    } catch (e) {
+      setAnalysisErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAnalyzing(false)
     }
   }
 
@@ -238,8 +313,15 @@ export function ReviewWorkbench({
           disabled={releasing}
           className="h-8 px-3.5 rounded-lg bg-gradient-to-b from-cyan to-cyan-deep text-bg text-[12px] font-semibold hover:brightness-110 disabled:opacity-50"
         >
-          {releasing ? "Releasing…" : "Approve → ready"}
+          {releasing
+            ? applyState || "Working…"
+            : Object.keys(adjustments).length > 0
+              ? `Apply ${Object.keys(adjustments).length} + approve`
+              : "Approve → ready"}
         </button>
+        {!releasing && applyState.startsWith("Failed") && (
+          <span className="text-[11px] text-coral max-w-[260px]">{applyState}</span>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[430px_1fr] lg:h-[680px]">
@@ -394,8 +476,7 @@ export function ReviewWorkbench({
             </div>
             {discTotal > 0 && (
               <div className="text-[10.5px] text-ink-mute">
-                Draft adjustments are not written to QBO yet — apply the discount on the
-                invoice in QBO, then release.
+                Drafts are written to the QBO invoice as DISCOUNT lines when you approve.
               </div>
             )}
           </div>
@@ -403,22 +484,59 @@ export function ReviewWorkbench({
 
         {/* RIGHT: analysis + visit log */}
         <div className="p-4 lg:p-5 bg-bg-elev/40 flex flex-col gap-3.5 min-h-0">
-          {/* hold-reason / analysis card */}
+          {/* AI bill analysis */}
           <div className="bg-bg border border-line rounded-xl overflow-hidden flex-none">
             <div className="flex items-center gap-2 px-4 py-3 border-b border-line-soft">
-              <span className="font-display text-[15px]">Why it&apos;s held</span>
+              <span className="font-display text-[15px]">Bill analysis</span>
+              <span className="text-[11px] text-ink-mute truncate">
+                {notes.length > 0 ? notes.join(" · ") : reasons.map((r) => r.replaceAll("_", " ")).join(", ")}
+              </span>
               <div className="flex-1" />
-              <span className="font-mono text-[9.5px] text-ink-mute">AI bill analysis — coming soon</span>
-            </div>
-            <div className="px-4 py-3 text-[12px] leading-relaxed text-ink-dim">
-              {notes.length > 0 ? (
-                notes.map((n, i) => <div key={i}>{n}</div>)
-              ) : (
-                <span className="text-ink-mute">
-                  Held by: {reasons.map((r) => r.replaceAll("_", " ")).join(", ") || "—"}.
+              {analysis && !analyzing && (
+                <span className="font-mono text-[9.5px] text-ink-mute">
+                  {new Date(analysis.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
                 </span>
               )}
+              <button
+                onClick={analyze}
+                disabled={analyzing}
+                className={
+                  analysis
+                    ? "h-6 px-2.5 rounded-md border border-line bg-bg-elev text-ink-dim text-[10.5px] hover:border-cyan hover:text-cyan disabled:opacity-50"
+                    : "h-7 px-3 rounded-lg bg-gradient-to-b from-cyan to-cyan-deep text-bg text-[12px] font-semibold hover:brightness-110 disabled:opacity-50"
+                }
+              >
+                {analyzing ? "Analyzing…" : analysis ? "Re-run" : "Analyze this bill"}
+              </button>
             </div>
+            {analyzing && (
+              <div className="px-4 py-3 flex items-center gap-2.5 text-[12px] text-cyan">
+                <span className="inline-block w-3 h-3 rounded-full border-2 border-cyan/25 border-t-cyan animate-spin" />
+                Reading {visits.length} visit logs, history, and photos…
+              </div>
+            )}
+            {analysisErr && !analyzing && (
+              <div className="px-4 py-3 text-[12px] text-coral">{analysisErr}</div>
+            )}
+            {!analysis && !analyzing && !analysisErr && (
+              <div className="px-4 py-3 text-[12px] text-ink-mute leading-relaxed">
+                Sends this bill + {visits.length} visit logs + monthly history + peer stats
+                {" "}+ photos to the model. Returns the likely driver, whether it&apos;s normal
+                for this customer, and a recommended action.
+              </div>
+            )}
+            {analysis && !analyzing && (
+              <div className="px-4 py-3 flex flex-col gap-2.5">
+                {([["Driver", "text-sun", analysis.result.driver],
+                   ["Normal?", "text-teal", analysis.result.normal],
+                   ["Recommend", "text-cyan", analysis.result.recommend]] as const).map(([k, cls, v]) => (
+                  <div key={k} className="grid grid-cols-[86px_1fr] gap-2.5 items-baseline">
+                    <span className={`font-mono text-[9.5px] uppercase tracking-[0.1em] ${cls}`}>{k}</span>
+                    <span className="text-[12.5px] leading-relaxed text-ink">{v ?? "—"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* visit log */}
