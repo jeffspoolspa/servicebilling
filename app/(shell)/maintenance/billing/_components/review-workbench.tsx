@@ -47,6 +47,17 @@ export interface BillAnalysis {
   created_at: string
 }
 
+export interface WatchEntry {
+  id: number
+  reason: string
+  reason_label: string
+  priority: number
+  source: string
+  rule_key: string | null
+  note: string | null
+  opened_at: string
+}
+
 export interface FlagContext {
   peerGroup: string | null
   peerMedian: number | null
@@ -121,6 +132,7 @@ export function ReviewWorkbench({
   initialAnalysis = null,
   queue = [],
   flagContext = null,
+  watchlist = [],
 }: {
   customerId: number
   qboCustomerId: string
@@ -136,6 +148,7 @@ export function ReviewWorkbench({
   initialAnalysis: BillAnalysis | null
   queue: { customerId: number; name: string }[]
   flagContext: FlagContext | null
+  watchlist: WatchEntry[]
 }) {
   const router = useRouter()
   const [openVisit, setOpenVisit] = useState<string | null>(null)
@@ -151,6 +164,47 @@ export function ReviewWorkbench({
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisErr, setAnalysisErr] = useState("")
   const [lightbox, setLightbox] = useState<{ photos: WorkbenchVisit["photos"]; i: number } | null>(null)
+  const [watch, setWatch] = useState<WatchEntry[]>(watchlist)
+  const [watchOpen, setWatchOpen] = useState(false)
+  const [watchReason, setWatchReason] = useState("watch")
+  const [watchPriority, setWatchPriority] = useState(2)
+  const [watchNote, setWatchNote] = useState("")
+  const [watchBusy, setWatchBusy] = useState(false)
+
+  async function addWatch() {
+    setWatchBusy(true)
+    try {
+      const r = await fetch("/api/maintenance-billing/watchlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add", period_ids: periodIds, reason: watchReason,
+          priority: watchPriority, note: watchNote.trim() || null,
+        }),
+      })
+      if (r.ok) {
+        setWatchOpen(false)
+        setWatchNote("")
+        router.refresh()
+      }
+    } finally {
+      setWatchBusy(false)
+    }
+  }
+
+  async function resolveWatch(id: number) {
+    const r = await fetch("/api/maintenance-billing/watchlist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "resolve", id, note: "Resolved from bill review" }),
+    })
+    if (r.ok) {
+      setWatch(watch.filter((w) => w.id !== id))
+      router.refresh()
+    }
+  }
+
+  useEffect(() => setWatch(watchlist), [watchlist])
 
   // lightbox keyboard: Escape closes, arrows move between the visit's photos
   useEffect(() => {
@@ -421,6 +475,24 @@ export function ReviewWorkbench({
           ) : (
             <span className="text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-bg-elev border border-line rounded-full px-2 py-0.5">Not sent</span>
           )}
+          {watch.map((w) => (
+            <span
+              key={w.id}
+              title={`${w.source === "rule" ? `rule: ${w.rule_key} · ` : ""}${w.note ?? ""} · since ${new Date(w.opened_at).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" })}`}
+              className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.08em] rounded-full px-2 py-0.5 border ${
+                w.priority === 1 ? "text-coral bg-coral/10 border-coral/30" : "text-sun bg-sun/10 border-sun/30"
+              }`}
+            >
+              {w.reason_label}{w.priority === 1 && " · P1"}
+              <button
+                onClick={() => resolveWatch(w.id)}
+                title="Resolve — back to good"
+                className="hover:text-grass"
+              >
+                ×
+              </button>
+            </span>
+          ))}
         </div>
         <div className="flex-1" />
         {queueIdx >= 0 && queue.length > 1 && (
@@ -451,6 +523,50 @@ export function ReviewWorkbench({
         <div className="text-right mr-1.5">
           <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">Total due</div>
           <div className="font-display text-[19px] text-sun">{formatCurrency(totalDue)}</div>
+        </div>
+        <div className="relative">
+          <button
+            onClick={() => setWatchOpen(!watchOpen)}
+            className="h-8 px-3 rounded-lg border border-line bg-bg-elev text-ink-dim text-[12px] font-medium hover:border-sun hover:text-sun"
+          >
+            {watchOpen ? "Cancel" : "Watch…"}
+          </button>
+          {watchOpen && (
+            <div className="absolute right-0 top-10 z-20 w-[260px] bg-bg border border-line rounded-xl p-3 shadow-card flex flex-col gap-2">
+              <select
+                value={watchReason}
+                onChange={(e) => setWatchReason(e.target.value)}
+                className="h-8 bg-bg-elev border border-line rounded-lg px-2 text-[12px] text-ink outline-none"
+              >
+                <option value="watch">General watch</option>
+                <option value="green_pool">Green pool</option>
+                <option value="equipment_down">Equipment down</option>
+                <option value="low_chlorine">Chronic low chlorine</option>
+              </select>
+              <select
+                value={watchPriority}
+                onChange={(e) => setWatchPriority(Number(e.target.value))}
+                className="h-8 bg-bg-elev border border-line rounded-lg px-2 text-[12px] text-ink outline-none"
+              >
+                <option value={1}>P1 — act now</option>
+                <option value={2}>P2 — keep an eye on</option>
+                <option value={3}>P3 — note</option>
+              </select>
+              <input
+                value={watchNote}
+                onChange={(e) => setWatchNote(e.target.value)}
+                placeholder="Note (optional)"
+                className="h-8 bg-bg-elev border border-line rounded-lg px-2 text-[12px] text-ink outline-none focus:border-cyan"
+              />
+              <button
+                onClick={addWatch}
+                disabled={watchBusy}
+                className="h-8 rounded-lg bg-gradient-to-b from-sun to-sun/80 text-bg text-[12px] font-semibold hover:brightness-110 disabled:opacity-50"
+              >
+                {watchBusy ? "Adding…" : "Add to watchlist"}
+              </button>
+            </div>
+          )}
         </div>
         <button
           onClick={release}

@@ -50,6 +50,9 @@ export default async function BillReviewPage({
     supabase.rpc("maint_billing_chem_medians", { p_month: monthDate }),
     getCustomerMonth(customerId, monthDate).catch(() => null),
   ])
+  const watchlistRes = await supabase.rpc("maint_watchlist_for_customer", {
+    p_customer_id: customerId,
+  })
   const mine = periods.filter((p) => p.customer_id === customerId)
   if (mine.length === 0) notFound()
   if (visitsRes.error) throw new Error(visitsRes.error.message)
@@ -127,6 +130,7 @@ export default async function BillReviewPage({
         usual={usual as UsualItem[]}
         initialAnalysis={((analysisRes.data ?? [])[0] ?? null) as BillAnalysis | null}
         queue={queue}
+        watchlist={(watchlistRes.data ?? []) as never}
         flagContext={{
           peerGroup: cm?.peer_group ?? null,
           peerMedian:
