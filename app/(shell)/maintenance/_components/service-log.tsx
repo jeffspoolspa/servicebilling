@@ -1,6 +1,24 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  ReferenceArea,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+} from "recharts"
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart"
 import { formatCurrency } from "@/lib/utils/format"
 
 /**
@@ -179,7 +197,13 @@ export function ServiceLog({
     const dates = asc.map((v) =>
       new Date(v.visit_date + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
     )
-    return { fc, minFc, lsi, dates, needsAssume, n: asc.length }
+    const rows = asc.map((_, i) => ({
+      date: dates[i],
+      fc: fc[i],
+      min: minFc[i] != null ? Number(minFc[i]!.toFixed(1)) : null,
+      lsi: lsi[i] != null ? Number(lsi[i]!.toFixed(2)) : null,
+    }))
+    return { rows, needsAssume, n: asc.length }
   }, [shownVisits, assume])
 
   // warm neighbors of the open lightbox photo (originals are public S3)
@@ -307,8 +331,8 @@ export function ServiceLog({
             </span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FcChart dates={chart.dates} fc={chart.fc} minFc={chart.minFc} />
-            <LsiChart dates={chart.dates} lsi={chart.lsi} />
+            <FcChart rows={chart.rows} />
+            <LsiChart rows={chart.rows} />
           </div>
         </div>
       )}
@@ -540,105 +564,113 @@ export function ServiceLog({
   )
 }
 
-// ── charts (hand-rolled SVG, app tokens) ──────────────────────────────────
+// ── charts (shadcn/ui chart primitives over Recharts) ─────────────────────
 
-function FcChart({ dates, fc, minFc }: { dates: string[]; fc: (number | null)[]; minFc: (number | null)[] }) {
-  const W = 300, H = 76, PAD = 6
-  const vals = [...fc, ...minFc].filter((x): x is number => x != null)
-  if (!vals.length) return <ChartShell title="Free chlorine vs min">insufficient data</ChartShell>
-  const max = Math.max(...vals, 1) * 1.15
-  const x = (i: number) => PAD + (i / Math.max(1, dates.length - 1)) * (W - 2 * PAD)
-  const y = (v: number) => H - PAD - (v / max) * (H - 2 * PAD)
-  const path = (series: (number | null)[]) =>
-    series.map((v, i) => (v == null ? null : `${x(i)},${y(v)}`)).filter(Boolean).join(" ")
-  return (
-    <ChartShell
-      title="Free chlorine vs min"
-      legend={
-        <>
-          <span className="text-cyan">— recorded FC</span>
-          <span className="text-coral">- - min FC (7.5% CYA)</span>
-        </>
-      }
-    >
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-[76px]" preserveAspectRatio="none">
-        <polyline points={path(minFc)} fill="none" stroke="rgb(var(--coral))" strokeWidth="1.2" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
-        <polyline points={path(fc)} fill="none" stroke="rgb(var(--cyan))" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
-        {fc.map((v, i) =>
-          v == null ? null : (
-            <circle key={i} cx={x(i)} cy={y(v)} r="2.4"
-              fill={minFc[i] != null && v < minFc[i]! ? "rgb(var(--coral))" : "rgb(var(--cyan))"}>
-              <title>{`${dates[i]} · FC ${v}${minFc[i] != null ? ` · min ${minFc[i]!.toFixed(1)}` : ""}`}</title>
-            </circle>
-          ),
-        )}
-      </svg>
-      <AxisDates dates={dates} />
-    </ChartShell>
-  )
+interface ChartRow {
+  date: string
+  fc: number | null
+  min: number | null
+  lsi: number | null
 }
 
-function LsiChart({ dates, lsi }: { dates: string[]; lsi: (number | null)[] }) {
-  const W = 300, H = 76, PAD = 6
-  const vals = lsi.filter((x): x is number => x != null)
-  if (!vals.length) return <ChartShell title="LSI (balance)">insufficient data</ChartShell>
-  const range = Math.max(0.6, ...vals.map((v) => Math.abs(v))) * 1.15
-  const x = (i: number) => PAD + (i / Math.max(1, dates.length - 1)) * (W - 2 * PAD)
-  const y = (v: number) => H / 2 - (v / range) * (H / 2 - PAD)
-  const bw = Math.min(14, (W - 2 * PAD) / Math.max(1, dates.length) * 0.5)
-  return (
-    <ChartShell
-      title="LSI (balance)"
-      legend={<span className="text-ink-mute">±0.3 balanced · above scaling · below corrosive</span>}
-    >
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-[76px]" preserveAspectRatio="none">
-        {/* balanced band */}
-        <rect x="0" y={y(0.3)} width={W} height={y(-0.3) - y(0.3)} fill="rgb(var(--grass))" opacity="0.07" />
-        <line x1="0" y1={H / 2} x2={W} y2={H / 2} stroke="rgb(var(--ink-mute))" strokeWidth="0.75" opacity="0.5" vectorEffect="non-scaling-stroke" />
-        {lsi.map((v, i) =>
-          v == null ? null : (
-            <rect key={i}
-              x={x(i) - bw / 2}
-              y={v >= 0 ? y(v) : H / 2}
-              width={bw}
-              height={Math.max(1, Math.abs(y(v) - H / 2))}
-              rx="1"
-              fill={Math.abs(v) <= 0.3 ? "rgb(var(--grass))" : v > 0 ? "rgb(var(--sun))" : "rgb(var(--coral))"}
-              opacity="0.85"
-            >
-              <title>{`${dates[i]} · LSI ${v >= 0 ? "+" : ""}${v.toFixed(2)}`}</title>
-            </rect>
-          ),
-        )}
-      </svg>
-      <AxisDates dates={dates} />
-    </ChartShell>
-  )
+const FC_CONFIG: ChartConfig = {
+  fc: { label: "Recorded FC", color: "rgb(56 189 248)" },   // cyan
+  min: { label: "Min FC (7.5% CYA)", color: "rgb(251 113 133)" }, // coral
 }
 
-function ChartShell({ title, legend, children }: { title: string; legend?: React.ReactNode; children: React.ReactNode }) {
+const LSI_CONFIG: ChartConfig = {
+  lsi: { label: "LSI", color: "rgb(251 191 36)" },
+}
+
+function FcChart({ rows }: { rows: ChartRow[] }) {
+  if (!rows.some((r) => r.fc != null)) {
+    return <ChartEmpty title="Free chlorine vs min" />
+  }
   return (
     <div>
-      <div className="flex items-baseline justify-between mb-1">
-        <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">{title}</span>
-        {legend && <span className="font-mono text-[8.5px] flex gap-2">{legend}</span>}
+      <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1">
+        Free chlorine vs min
       </div>
-      {typeof children === "string" ? (
-        <div className="h-[76px] grid place-items-center text-[10px] text-ink-mute border border-dashed border-line rounded">{children}</div>
-      ) : (
-        children
-      )}
+      <ChartContainer config={FC_CONFIG} className="aspect-auto h-[130px] w-full">
+        <LineChart accessibilityLayer data={rows} margin={{ top: 6, right: 8, left: -26, bottom: 0 }}>
+          <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
+          <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={6} fontSize={9} interval="preserveStartEnd" />
+          <YAxis tickLine={false} axisLine={false} fontSize={9} width={34} domain={[0, "auto"]} />
+          <ChartTooltip content={<ChartTooltipContent />} />
+          <Line
+            dataKey="min"
+            type="monotone"
+            stroke="var(--color-min)"
+            strokeWidth={1.5}
+            strokeDasharray="5 4"
+            dot={false}
+            connectNulls
+          />
+          <Line
+            dataKey="fc"
+            type="monotone"
+            stroke="var(--color-fc)"
+            strokeWidth={2}
+            connectNulls
+            dot={(props) => {
+              const { cx, cy, payload, index } = props
+              if (payload.fc == null) return <g key={index} />
+              const below = payload.min != null && payload.fc < payload.min
+              return (
+                <circle key={index} cx={cx} cy={cy} r={3}
+                  fill={below ? "rgb(251 113 133)" : "rgb(56 189 248)"}
+                  stroke="rgb(var(--bg))" strokeWidth={1} />
+              )
+            }}
+          />
+        </LineChart>
+      </ChartContainer>
     </div>
   )
 }
 
-function AxisDates({ dates }: { dates: string[] }) {
-  if (dates.length < 2) return null
+function LsiChart({ rows }: { rows: ChartRow[] }) {
+  if (!rows.some((r) => r.lsi != null)) {
+    return <ChartEmpty title="LSI (balance)" />
+  }
+  const range = Math.max(0.6, ...rows.map((r) => Math.abs(r.lsi ?? 0))) * 1.2
   return (
-    <div className="flex justify-between font-mono text-[8px] text-ink-mute mt-0.5">
-      <span>{dates[0]}</span>
-      {dates.length > 2 && <span>{dates[Math.floor(dates.length / 2)]}</span>}
-      <span>{dates[dates.length - 1]}</span>
+    <div>
+      <div className="flex items-baseline justify-between mb-1">
+        <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">LSI (balance)</span>
+        <span className="font-mono text-[8.5px] text-ink-mute">±0.3 balanced · above scaling · below corrosive</span>
+      </div>
+      <ChartContainer config={LSI_CONFIG} className="aspect-auto h-[130px] w-full">
+        <BarChart accessibilityLayer data={rows} margin={{ top: 6, right: 8, left: -26, bottom: 0 }}>
+          <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
+          <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={6} fontSize={9} interval="preserveStartEnd" />
+          <YAxis tickLine={false} axisLine={false} fontSize={9} width={34} domain={[-range, range]}
+            tickFormatter={(v: number) => v.toFixed(1)} />
+          <ReferenceArea y1={-0.3} y2={0.3} fill="rgb(74 222 128)" fillOpacity={0.06} />
+          <ReferenceLine y={0} stroke="rgb(var(--ink-mute))" strokeOpacity={0.5} />
+          <ChartTooltip content={<ChartTooltipContent />} />
+          <Bar dataKey="lsi" radius={[2, 2, 0, 0]} maxBarSize={16}>
+            {rows.map((r, i) => (
+              <Cell key={i}
+                fill={r.lsi == null ? "transparent"
+                  : Math.abs(r.lsi) <= 0.3 ? "rgb(74 222 128)"
+                  : r.lsi > 0 ? "rgb(251 191 36)" : "rgb(251 113 133)"}
+                fillOpacity={0.85} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ChartContainer>
+    </div>
+  )
+}
+
+function ChartEmpty({ title }: { title: string }) {
+  return (
+    <div>
+      <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1">{title}</div>
+      <div className="h-[130px] grid place-items-center text-[10px] text-ink-mute border border-dashed border-line rounded">
+        insufficient data
+      </div>
     </div>
   )
 }
