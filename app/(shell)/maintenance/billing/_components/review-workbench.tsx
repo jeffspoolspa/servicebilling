@@ -593,13 +593,15 @@ export function ReviewWorkbench({
           {lines.map((ln) => {
             const adj = adjustments[ln.key]
             const u = ln.usual
-            const now = u?.month_usd != null ? Number(u.month_usd) : null
-            const avg = u?.usual_usd != null ? Number(u.usual_usd) : null
-            const delta = now != null && avg != null && avg > 0 ? ((now - avg) / avg) * 100 : null
-            const max = now != null && avg != null ? Math.max(now, avg) : null
-            const deltaColor = delta == null ? "text-ink-mute"
-              : Math.abs(delta) <= 15 ? "text-ink-mute"
-              : Math.abs(delta) <= 60 ? "text-sun" : "text-coral"
+            // quantity vs the customer's usual-month quantity
+            const qtyNow = u?.month_qty != null ? Number(u.month_qty) : null
+            const qtyAvg = u?.usual_qty != null ? Number(u.usual_qty) : null
+            const ratio = qtyNow != null && qtyAvg != null && qtyAvg > 0 ? qtyNow / qtyAvg : null
+            const ratioColor = ratio == null ? "text-ink-mute"
+              : ratio <= 1.2 && ratio >= 0.85 ? "text-ink-mute"
+              : ratio > 1.6 ? "text-coral"
+              : ratio > 1.2 ? "text-sun"
+              : "text-ink-mute"
             return (
               <div key={ln.key} className="border-b border-line-soft px-5 py-2.5 hover:bg-white/[0.015]">
                 <div className="flex items-center gap-2.5">
@@ -641,24 +643,9 @@ export function ReviewWorkbench({
                     </button>
                   )}
                 </div>
-                {max != null && max > 0 && (
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <div className="w-[92px]">
-                      <div className="h-1 bg-line-soft rounded-full overflow-hidden mb-[3px]">
-                        <div className="h-full bg-cyan" style={{ width: `${Math.round(((now ?? 0) / max) * 100)}%` }} />
-                      </div>
-                      <div className="h-1 bg-line-soft rounded-full overflow-hidden">
-                        <div className="h-full bg-ink-mute" style={{ width: `${Math.round(((avg ?? 0) / max) * 100)}%` }} />
-                      </div>
-                    </div>
-                    <span className="font-mono text-[10px] text-ink-mute">
-                      usual {formatCurrency(avg ?? 0)}
-                    </span>
-                    {delta != null && (
-                      <span className={`font-mono text-[10px] ${deltaColor}`}>
-                        {delta >= 0 ? "▲" : "▼"}{Math.abs(Math.round(delta))}%
-                      </span>
-                    )}
+                {ratio != null && (ratio >= 1.15 || ratio <= 0.85) && (
+                  <div className={`font-mono text-[10px] mt-1 ${ratioColor}`}>
+                    {ratio >= 1 ? "▲" : "▼"} {ratio.toFixed(1)}× qty from average
                   </div>
                 )}
                 {adj && (
