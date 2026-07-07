@@ -661,12 +661,7 @@ export function ReviewWorkbench({
                       <span className="font-mono text-[12px] text-ink w-[64px] text-right flex-none">
                         {chemCents > 0 ? formatCurrency(chemCents / 100) : "—"}
                       </span>
-                      <span
-                        className="text-ink-mute text-[10px] flex-none transition-transform duration-150"
-                        style={{ transform: `rotate(${open ? 180 : 0}deg)` }}
-                      >
-                        ▾
-                      </span>
+
                     </div>
                     {open && (
                       otherReads.length === 0 && !v.notes && v.photos.length === 0 ? (
