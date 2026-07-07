@@ -159,6 +159,7 @@ export function ReviewWorkbench({
   const [reason, setReason] = useState("")
   const [err, setErr] = useState("")
   const [releasing, setReleasing] = useState(false)
+  const [applying, setApplying] = useState(false)
   const [applyState, setApplyState] = useState("")
   const [analysis, setAnalysis] = useState<BillAnalysis | null>(initialAnalysis)
   const [analyzing, setAnalyzing] = useState(false)
@@ -279,6 +280,7 @@ export function ReviewWorkbench({
   const nextInQueue = queueIdx >= 0 ? queue[queueIdx + 1] ?? null : null
   const prevInQueue = queueIdx > 0 ? queue[queueIdx - 1] : null
   const billHref = (id: number) => `/maintenance/billing/review/${id}/bill?month=${month}`
+  const draftCount = Object.keys(adjustments).length
 
   function openEditor(key: string) {
     setEditing(key); setMode("$"); setAmt(""); setReason(""); setErr("")
@@ -314,11 +316,11 @@ export function ReviewWorkbench({
     }
   }
 
-  // Approve = write draft adjustments to QBO (one batch per invoice) then
-  // release the held periods. No half-states: a failed write aborts before
-  // any release.
-  async function release() {
-    setReleasing(true)
+  // Apply Discounts = write draft adjustments to QBO (one batch per invoice)
+  // and refresh the cache. SEPARATE from Approve — the refreshed invoice comes
+  // back with the DISCOUNT lines and updated total.
+  async function applyDiscounts() {
+    setApplying(true)
     setApplyState("")
     try {
       const byInvoice = new Map<string, { item_name: string; amount: number; reason: string }[]>()
@@ -331,7 +333,7 @@ export function ReviewWorkbench({
       let n = 0
       for (const [qbo_invoice_id, adjs] of byInvoice) {
         n += adjs.length
-        setApplyState(`Applying ${n} adjustment${n === 1 ? "" : "s"} to QBO…`)
+        setApplyState(`Applying ${n} to QBO…`)
         const r = await fetch("/api/maintenance-billing/adjustments", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -341,7 +343,21 @@ export function ReviewWorkbench({
         if (!r.ok) throw new Error(j.error ?? "adjustment trigger failed")
         await pollJob(`/api/maintenance-billing/adjustments?job=${j.jobId}`)
       }
-      setApplyState("Releasing…")
+      setAdjustments({})
+      setApplyState("")
+      router.refresh()
+    } catch (e) {
+      setApplyState(`Failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  // Approve = release to ready_to_process only. Pending discounts block it
+  // (apply or remove them first) so nothing is lost.
+  async function release() {
+    setReleasing(true)
+    try {
       // a chem_flag hold only releases once the flag itself is marked
       // reviewed (customer_month_audit) — reviewed_at alone gets re-held by
       // the projection. Approve = the review, so record it.
@@ -532,10 +548,11 @@ export function ReviewWorkbench({
         </button>
         <button
           onClick={release}
-          disabled={releasing}
+          disabled={releasing || draftCount > 0}
+          title={draftCount > 0 ? "Apply or remove the pending discounts first" : undefined}
           className="h-8 px-3.5 rounded-lg bg-gradient-to-b from-cyan to-cyan-deep text-bg text-[12px] font-semibold hover:brightness-110 disabled:opacity-50"
         >
-          {releasing ? applyState || "Working…" : "Approve"}
+          {releasing ? "Releasing…" : "Approve"}
         </button>
         {!releasing && applyState.startsWith("Failed") && (
           <span className="text-[11px] text-coral max-w-[260px]">{applyState}</span>
@@ -545,9 +562,29 @@ export function ReviewWorkbench({
       <div className="grid grid-cols-1 lg:grid-cols-[430px_1fr] lg:h-[680px]">
         {/* LEFT: invoice ledger */}
         <div className="border-r border-line-soft pt-2 overflow-y-auto min-h-0">
-          <div className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-mute px-5 py-2">
-            Invoice lines
+          <div className="flex items-center justify-between px-5 py-2">
+            <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-mute">
+              Invoice lines
+            </span>
+            {draftCount > 0 && (
+              <span className="inline-flex items-center gap-2">
+                <span className="font-mono text-[10px] text-coral">
+                  {draftCount} pending · −{formatCurrency(discTotal)}
+                </span>
+                <button
+                  onClick={applyDiscounts}
+                  disabled={applying}
+                  title="Writes DISCOUNT lines to the QBO invoice and refreshes the cache"
+                  className="h-6 px-2.5 rounded-md bg-gradient-to-b from-cyan to-cyan-deep text-bg text-[11px] font-semibold hover:brightness-110 disabled:opacity-50"
+                >
+                  {applying ? applyState || "Applying…" : "Apply Discounts"}
+                </button>
+              </span>
+            )}
           </div>
+          {applyState.startsWith("Failed") && !applying && (
+            <div className="px-5 pb-1 text-[11px] text-coral">{applyState}</div>
+          )}
           {lines.length === 0 && (
             <div className="px-5 py-8 text-center text-[12px] text-ink-mute">
               No line items on the linked invoice{invoices.length === 1 ? "" : "s"}.
@@ -694,7 +731,8 @@ export function ReviewWorkbench({
             </div>
             {discTotal > 0 && (
               <div className="text-[10.5px] text-ink-mute">
-                Drafts are written to the QBO invoice as DISCOUNT lines when you approve.
+                Pending discounts — hit Apply Discounts (top of the ledger) to write them
+                to the QBO invoice.
               </div>
             )}
           </div>
