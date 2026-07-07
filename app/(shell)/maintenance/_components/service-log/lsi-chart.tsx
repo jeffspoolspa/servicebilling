@@ -67,7 +67,7 @@ export function LsiChart({
     <div className="flex flex-col">
       <div className="flex items-baseline justify-between mb-1">
         <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">
-          Water balance (LSI) — one square per day
+          Water balance (LSI)
         </span>
         <span className="flex items-center gap-2 font-mono text-[8.5px] text-ink-mute">
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-coral inline-block" />corrosive</span>
@@ -75,27 +75,22 @@ export function LsiChart({
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-sun inline-block" />scaling</span>
         </span>
       </div>
-      <div
-        className="grid gap-[3px] h-[130px] w-full"
-        style={{
-          gridTemplateColumns: `12px repeat(${weeks.length}, 1fr)`,
-          gridTemplateRows: "repeat(7, 1fr)",
-        }}
-      >
+      {/* real calendar shape: weekday headers across the top, weeks as rows */}
+      <div className="grid grid-cols-7 gap-[3px] mb-[3px]">
         {DAY_LETTERS.map((l, i) => (
-          <span
-            key={`d${i}`}
-            style={{ gridColumn: 1, gridRow: i + 1 }}
-            className="font-mono text-[8px] text-ink-mute self-center"
-          >
+          <span key={i} className="font-mono text-[8px] text-ink-mute text-center">
             {l}
           </span>
         ))}
-        {weeks.map((week, wi) =>
-          week.map((cell, di) => (
+      </div>
+      <div
+        className="grid grid-cols-7 gap-[3px] h-[118px] w-full"
+        style={{ gridTemplateRows: `repeat(${weeks.length}, 1fr)` }}
+      >
+        {weeks.map((week) =>
+          week.map((cell) => (
             <span
               key={cell.iso}
-              style={{ gridColumn: wi + 2, gridRow: di + 1 }}
               title={!cell.inPeriod ? undefined
                 : cell.lsi != null
                   ? `${cell.label} · LSI ${cell.lsi >= 0 ? "+" : ""}${cell.lsi.toFixed(2)} (${zoneOf(cell.lsi)})`
