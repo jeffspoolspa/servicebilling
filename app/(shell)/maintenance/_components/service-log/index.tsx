@@ -420,59 +420,56 @@ export function ServiceLog({
                 </span>
               </div>
               {open && (
-                v.chems.length === 0 && otherReads.length === 0 && v.photos.length === 0 ? (
-                  <div className="px-4 pb-3 pl-9 text-[11px] text-ink-mute">
-                    No consumables, photos, or additional readings.
-                  </div>
-                ) : (
-                <div className="px-4 pt-1 pb-4 pl-9 flex items-stretch gap-6">
-                  <div className="w-1/2 flex-none flex flex-col gap-4">
-                    {otherReads.length > 0 && (
-                      <div>
-                        <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
-                          Other readings
-                        </div>
-                        <div className="flex gap-1.5 flex-wrap">
-                          {otherReads.map(([k, val]) => (
-                            <span key={k}
-                              className="inline-flex items-baseline gap-1.5 rounded border border-line bg-bg-elev px-1.5 py-[1px]">
-                              <span className="font-mono text-[8.5px] uppercase tracking-[0.06em] text-ink-mute">
-                                {READING_SHORT[k] ?? k}
-                              </span>
-                              <span className="font-mono text-[10.5px] text-ink">{val}</span>
+                <div className="px-4 pt-1 pb-4 pl-9 flex items-start gap-5">
+                  {/* reserved 35% — other readings */}
+                  <div className="w-[35%] flex-none">
+                    <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
+                      Other readings
+                    </div>
+                    {otherReads.length > 0 ? (
+                      <div className="flex gap-1.5 flex-wrap">
+                        {otherReads.map(([k, val]) => (
+                          <span key={k}
+                            className="inline-flex items-baseline gap-1.5 rounded border border-line bg-bg-elev px-1.5 py-[1px]">
+                            <span className="font-mono text-[8.5px] uppercase tracking-[0.06em] text-ink-mute">
+                              {READING_SHORT[k] ?? k}
                             </span>
-                          ))}
-                        </div>
+                            <span className="font-mono text-[10.5px] text-ink">{val}</span>
+                          </span>
+                        ))}
                       </div>
-                    )}
-                    {v.chems.length > 0 && (
-                      <div>
-                        <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
-                          Consumables
-                        </div>
-                        <div className="flex gap-1.5 flex-wrap">
-                          {v.chems.map((c, ci) => (
-                            <span key={ci}
-                              className="inline-flex items-baseline gap-1 rounded border border-teal/30 bg-teal/5 px-1.5 py-[1px]">
-                              <span className="font-mono text-[10.5px] text-teal">{c.qty}</span>
-                              <span className="text-[10px] text-ink-dim">{bare(c.item)}</span>
-                              {c.cents ? (
-                                <span className="font-mono text-[9px] text-ink-mute">{formatCurrency(c.cents / 100)}</span>
-                              ) : null}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {otherReads.length === 0 && v.chems.length === 0 && (
-                      <span className="text-[10px] text-ink-mute">No other readings or consumables.</span>
+                    ) : (
+                      <span className="text-[10px] text-ink-mute">none recorded</span>
                     )}
                   </div>
-                  {v.photos.length > 0 && (
-                    <div className="flex-1 min-w-0">
-                      <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
-                        Photos
+                  {/* reserved 35% — consumables */}
+                  <div className="w-[35%] flex-none">
+                    <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
+                      Consumables
+                    </div>
+                    {v.chems.length > 0 ? (
+                      <div className="flex gap-1.5 flex-wrap">
+                        {v.chems.map((c, ci) => (
+                          <span key={ci}
+                            className="inline-flex items-baseline gap-1 rounded border border-teal/30 bg-teal/5 px-1.5 py-[1px]">
+                            <span className="font-mono text-[10.5px] text-teal">{c.qty}</span>
+                            <span className="text-[10px] text-ink-dim">{bare(c.item)}</span>
+                            {c.cents ? (
+                              <span className="font-mono text-[9px] text-ink-mute">{formatCurrency(c.cents / 100)}</span>
+                            ) : null}
+                          </span>
+                        ))}
                       </div>
+                    ) : (
+                      <span className="text-[10px] text-ink-mute">none sold</span>
+                    )}
+                  </div>
+                  {/* remainder — photos */}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
+                      Photos
+                    </div>
+                    {v.photos.length > 0 ? (
                       <div className="flex flex-wrap gap-2">
                         {v.photos.map((p, pi) => (
                           <button
@@ -486,10 +483,11 @@ export function ServiceLog({
                           </button>
                         ))}
                       </div>
-                    </div>
-                  )}
+                    ) : (
+                      <span className="text-[10px] text-ink-mute">no photos</span>
+                    )}
+                  </div>
                 </div>
-                )
               )}
             </div>
           )
