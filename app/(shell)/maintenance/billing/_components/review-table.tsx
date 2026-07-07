@@ -88,14 +88,15 @@ export function ReviewTable({ rows }: { rows: ReviewRow[] }) {
         const r = row.original
         return (
           <span className="inline-flex items-center gap-2">
-            <ReviewSheet row={r} />
-            {r.customer_id != null && (
+            {r.customer_id != null ? (
               <Link
                 href={`/maintenance/billing/review/${r.customer_id}/bill?month=${r.month}` as never}
                 className="text-[11px] px-2.5 py-1 rounded border border-cyan/30 text-cyan hover:bg-cyan/10 whitespace-nowrap"
               >
-                Review bill →
+                Review →
               </Link>
+            ) : (
+              <ReviewSheet row={r} />
             )}
             {r.chemFlagged ? (
               <Link

@@ -93,6 +93,7 @@ export function ReviewWorkbench({
   visits,
   usual,
   initialAnalysis = null,
+  queue = [],
 }: {
   customerId: number
   qboCustomerId: string
@@ -106,6 +107,7 @@ export function ReviewWorkbench({
   visits: WorkbenchVisit[]
   usual: UsualItem[]
   initialAnalysis: BillAnalysis | null
+  queue: { customerId: number; name: string }[]
 }) {
   const router = useRouter()
   const [openVisit, setOpenVisit] = useState<string | null>(null)
@@ -175,6 +177,11 @@ export function ReviewWorkbench({
   const total = subtotal - discTotal
   const totalDue = invoices.reduce((s, i) => s + Number(i.balance ?? 0), 0)
 
+  const queueIdx = queue.findIndex((q) => q.customerId === customerId)
+  const nextInQueue = queueIdx >= 0 ? queue[queueIdx + 1] ?? null : null
+  const prevInQueue = queueIdx > 0 ? queue[queueIdx - 1] : null
+  const billHref = (id: number) => `/maintenance/billing/review/${id}/bill?month=${month}`
+
   function openEditor(key: string) {
     setEditing(key); setMode("$"); setAmt(""); setReason(""); setErr("")
   }
@@ -243,7 +250,9 @@ export function ReviewWorkbench({
         body: JSON.stringify({ ids: periodIds, status: "ready_to_process" }),
       })
       if (!r.ok) throw new Error("release failed")
-      router.push(`/maintenance/billing/review?month=${month}` as never)
+      router.push(
+        (nextInQueue ? billHref(nextInQueue.customerId) : `/maintenance/billing/review?month=${month}`) as never,
+      )
     } catch (e) {
       setApplyState(`Failed: ${e instanceof Error ? e.message : String(e)}`)
       setReleasing(false)
@@ -304,6 +313,31 @@ export function ReviewWorkbench({
           )}
         </div>
         <div className="flex-1" />
+        {queueIdx >= 0 && queue.length > 1 && (
+          <div className="flex items-center gap-1.5 mr-2">
+            <button
+              onClick={() => prevInQueue && router.push(billHref(prevInQueue.customerId) as never)}
+              disabled={!prevInQueue}
+              title={prevInQueue ? `Previous: ${prevInQueue.name}` : undefined}
+              className="h-7 w-7 rounded-lg border border-line bg-bg-elev text-ink-dim text-[13px] hover:border-cyan hover:text-cyan disabled:opacity-30 disabled:hover:border-line disabled:hover:text-ink-dim"
+              aria-label="Previous held bill"
+            >
+              ‹
+            </button>
+            <span className="font-mono text-[10.5px] text-ink-mute whitespace-nowrap">
+              {queueIdx + 1} of {queue.length} held
+            </span>
+            <button
+              onClick={() => nextInQueue && router.push(billHref(nextInQueue.customerId) as never)}
+              disabled={!nextInQueue}
+              title={nextInQueue ? `Next: ${nextInQueue.name}` : undefined}
+              className="h-7 w-7 rounded-lg border border-line bg-bg-elev text-ink-dim text-[13px] hover:border-cyan hover:text-cyan disabled:opacity-30 disabled:hover:border-line disabled:hover:text-ink-dim"
+              aria-label="Next held bill"
+            >
+              ›
+            </button>
+          </div>
+        )}
         <div className="text-right mr-1.5">
           <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">Total due</div>
           <div className="font-display text-[19px] text-sun">{formatCurrency(totalDue)}</div>
@@ -316,8 +350,8 @@ export function ReviewWorkbench({
           {releasing
             ? applyState || "Working…"
             : Object.keys(adjustments).length > 0
-              ? `Apply ${Object.keys(adjustments).length} + approve`
-              : "Approve → ready"}
+              ? `Apply ${Object.keys(adjustments).length} + approve${nextInQueue ? " → next" : ""}`
+              : nextInQueue ? "Approve → next" : "Approve → ready"}
         </button>
         {!releasing && applyState.startsWith("Failed") && (
           <span className="text-[11px] text-coral max-w-[260px]">{applyState}</span>

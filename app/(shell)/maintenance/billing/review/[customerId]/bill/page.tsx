@@ -65,6 +65,23 @@ export default async function BillReviewPage({
   const notes = [...new Set(mine.map((p) => p.reconcile_notes).filter(Boolean))] as string[]
   const held = mine.filter((p) => p.processing_status === "needs_review")
 
+  // the review queue: every held customer this month, same name-sorted order
+  // as the Needs Review table, so prev/next walks the list the reviewer sees
+  const queueMap = new Map<number, string>()
+  for (const p of periods) {
+    if (p.processing_status !== "needs_review" || p.customer_id == null) continue
+    if (!queueMap.has(p.customer_id))
+      queueMap.set(p.customer_id, p.customer_name ?? `#${p.customer_id}`)
+  }
+  const queue = [...queueMap.entries()]
+    .map(([id, nm]) => ({ customerId: id, name: nm }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  // a just-released customer is no longer held but should still resolve its
+  // position (so "approve -> next" works from a stale tab too)
+  if (!queue.some((q) => q.customerId === customerId))
+    queue.push({ customerId, name })
+  queue.sort((a, b) => a.name.localeCompare(b.name))
+
   return (
     <div className="px-7 pt-6 pb-10 space-y-4">
       <div className="flex items-end justify-between gap-4">
@@ -103,6 +120,7 @@ export default async function BillReviewPage({
         visits={(visitsRes.data ?? []) as WorkbenchVisit[]}
         usual={usual as UsualItem[]}
         initialAnalysis={((analysisRes.data ?? [])[0] ?? null) as BillAnalysis | null}
+        queue={queue}
       />
     </div>
   )
