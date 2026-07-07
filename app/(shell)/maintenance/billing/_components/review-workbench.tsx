@@ -171,32 +171,48 @@ export function ReviewWorkbench({
     return m
   }, [usual])
 
-  // flatten invoice lines; key = invoiceId:index
+  // invoice lines GROUPED by product per invoice: ION sometimes emits one
+  // line per dose (3x "MURIATIC ACID 1GAL" qty 1) — the ledger shows the
+  // rollup (qty and $ summed). key = invoiceId:product so adjustments apply
+  // to the group (the discount lands as its own QBO line either way).
   const lines = useMemo(() => {
-    const out: {
+    const out = new Map<string, {
       key: string; invoice: WorkbenchInvoice; name: string; detail: string
       amount: number; usual: UsualItem | undefined
-    }[] = []
+      qty: number | null; rates: Set<number>; lineCount: number
+    }>()
     for (const inv of invoices) {
-      for (const [i, li] of (inv.line_items ?? []).entries()) {
+      for (const li of inv.line_items ?? []) {
         if (li.line_type && li.line_type !== "item") continue
         const amount = Number(li.amount ?? 0)
         const name = bare(li.item_name)
         const qty = li.qty != null ? Number(li.qty) : null
         const rate = li.unit_price != null ? Number(li.unit_price) : null
-        out.push({
-          key: `${inv.qbo_invoice_id}:${i}`,
-          invoice: inv,
-          name,
-          detail: qty != null && rate != null
-            ? `${qty} × ${formatCurrency(rate)}`
-            : (li.description ?? ""),
-          amount,
-          usual: usualByItem.get(name.toUpperCase()),
-        })
+        const key = `${inv.qbo_invoice_id}:${name.toUpperCase()}`
+        const g = out.get(key)
+        if (g) {
+          g.amount += amount
+          g.qty = g.qty != null && qty != null ? g.qty + qty : null
+          if (rate != null) g.rates.add(rate)
+          g.lineCount++
+        } else {
+          out.set(key, {
+            key, invoice: inv, name, amount,
+            qty, rates: new Set(rate != null ? [rate] : []), lineCount: 1,
+            detail: "",
+            usual: usualByItem.get(name.toUpperCase()),
+          })
+        }
       }
     }
-    return out
+    return [...out.values()].map((g) => ({
+      ...g,
+      detail: g.qty != null && g.rates.size === 1
+        ? `${g.qty} × ${formatCurrency([...g.rates][0])}${g.lineCount > 1 ? ` · ${g.lineCount} lines` : ""}`
+        : g.qty != null
+          ? `${g.qty} across ${g.lineCount} lines`
+          : "",
+    }))
   }, [invoices, usualByItem])
 
   const subtotal = lines.reduce((s, l) => s + l.amount, 0)
