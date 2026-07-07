@@ -132,6 +132,14 @@ export function ServiceLog({
   const presentCols = CORE_COLS.filter(([name]) =>
     shownVisits.some((v) => v.readings[name] != null && v.readings[name] !== ""),
   )
+  // size each column to its widest value (e.g. "500ppb") so cells never
+  // overlap a neighbor — the note is the only part of the row that truncates
+  const colWidths = Object.fromEntries(
+    presentCols.map(([name]) => {
+      const chars = Math.max(0, ...shownVisits.map((v) => String(v.readings[name] ?? "").length))
+      return [name, Math.max(34, chars * 7 + 8)]
+    }),
+  )
 
   const flaggedVisits = shownVisits.filter((v) =>
     Object.entries(v.readings).some(([k, val]) => readingWarn(k, val)),
@@ -402,7 +410,7 @@ export function ServiceLog({
             <span className="w-[86px] flex-none">Visit</span>
             <div className="flex-none flex">
               {presentCols.map(([name, short]) => (
-                <span key={name} className="w-[34px] flex-none text-center normal-case">{short}</span>
+                <span key={name} style={{ width: colWidths[name] }} className="flex-none text-center normal-case">{short}</span>
               ))}
             </div>
             <span className="flex-1 min-w-[120px] pl-4">Notes</span>
@@ -437,7 +445,8 @@ export function ServiceLog({
                     const w = has && readingWarn(name, val)
                     return (
                       <span key={name}
-                        className={`w-[34px] flex-none text-center font-mono text-[11px] ${
+                        style={{ width: colWidths[name] }}
+                        className={`flex-none text-center font-mono text-[11px] whitespace-nowrap ${
                           w ? "text-coral font-medium" : has ? "text-ink" : "text-ink-mute/40"
                         }`}>
                         {has ? val : "·"}
