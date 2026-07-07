@@ -421,8 +421,8 @@ export function ServiceLog({
               </div>
               {open && (
                 <div className="px-4 pt-1 pb-4 pl-9 flex items-start gap-5">
-                  {/* reserved 35% — other readings */}
-                  <div className="w-[35%] flex-none">
+                  {/* reserved third — other readings */}
+                  <div className="w-1/3 flex-none">
                     <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
                       Other readings
                     </div>
@@ -442,8 +442,8 @@ export function ServiceLog({
                       <span className="text-[10px] text-ink-mute">none recorded</span>
                     )}
                   </div>
-                  {/* reserved 35% — consumables */}
-                  <div className="w-[35%] flex-none">
+                  {/* reserved third — consumables */}
+                  <div className="w-1/3 flex-none">
                     <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
                       Consumables
                     </div>
@@ -470,16 +470,17 @@ export function ServiceLog({
                       Photos
                     </div>
                     {v.photos.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
+                      /* always ONE row: each photo flexes down to fit the third */
+                      <div className="flex gap-2">
                         {v.photos.map((p, pi) => (
                           <button
                             key={p.guid}
                             onClick={() => setLightbox({ photos: v.photos, i: pi })}
-                            className="block rounded-lg border border-line overflow-hidden hover:border-cyan"
+                            className="flex-1 min-w-0 max-w-[110px] aspect-[3/4] rounded-lg border border-line overflow-hidden hover:border-cyan"
                             title={p.uploaded_by ? `Uploaded by ${p.uploaded_by}` : undefined}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={p.thumb_url} alt="Service log photo" className="h-40 w-auto" />
+                            <img src={p.thumb_url} alt="Service log photo" className="w-full h-full object-cover" />
                           </button>
                         ))}
                       </div>
