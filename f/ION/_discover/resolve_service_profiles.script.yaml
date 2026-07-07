@@ -1,0 +1,9 @@
+summary: 'DISCOVERY: resolve ION ServiceProfile ids to visible names'
+description: One addLog fetch per distinct profile id; scrape the Service Profile cell text.
+tag: chromium
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties: {}
+  required: []
