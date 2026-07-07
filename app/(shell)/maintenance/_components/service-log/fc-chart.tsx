@@ -1,8 +1,10 @@
 "use client"
 
-import { Bar, BarChart, CartesianGrid, LabelList, Rectangle, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -10,17 +12,16 @@ import {
 import { ChartEmpty, type ChartRow } from "./chart-shared"
 
 /**
- * ServiceLog sub-chart: free chlorine as OVERLAID bars per visit — a wide
- * blue bar for recorded FC with a narrow red bar for min FC (7.5% CYA,
- * rounded to the nearest integer) drawn on top of it via a hidden duplicate
- * x-axis. Zeros keep a sliver so their label has a bar to sit on; hover for
- * both values.
+ * ServiceLog sub-chart: free chlorine per visit as a stacked bar (shadcn
+ * stacked-bar pattern) — blue = recorded FC, red stacked on top = how far
+ * short of the min FC (7.5% CYA, rounded) the reading fell. A fully blue
+ * bar met the minimum; the tooltip carries the exact numbers.
  */
 
 const CONFIG: ChartConfig = {
   fc: { label: "Recorded FC", color: "rgb(56 189 248)" },
-  min: { label: "Min FC (7.5% CYA)", color: "rgb(251 113 133)" },
-}
+  deficit: { label: "Below min", color: "rgb(251 113 133)" },
+} satisfies ChartConfig
 
 export function FcChart({ rows }: { rows: ChartRow[] }) {
   const usable = rows.filter((r) => r.fc != null && r.min != null)
@@ -28,30 +29,26 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
     return <ChartEmpty title="Free chlorine vs min" />
   }
 
-  const data = usable.map((r) => ({
-    date: r.date,
-    fc: r.fc!,
-    min: Math.round(r.min!),
-  }))
-  const hi = Math.max(...data.map((d) => Math.max(d.fc, d.min)))
-  const yMax = Math.ceil(hi * 1.25) // headroom for the labels
+  const data = usable.map((r) => {
+    const min = Math.round(r.min!)
+    return {
+      date: r.date,
+      fc: r.fc!,
+      deficit: Math.max(0, min - r.fc!),
+      min,
+    }
+  })
 
   return (
     <div>
-      <div className="flex items-baseline justify-between mb-1">
-        <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">
-          Free chlorine vs min
-        </span>
-        <span className="flex items-center gap-2 font-mono text-[8.5px] text-ink-mute">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-cyan inline-block" />recorded FC</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-coral inline-block" />min FC</span>
-        </span>
+      <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1">
+        Free chlorine vs min
       </div>
       <ChartContainer config={CONFIG} className="aspect-auto h-[130px] w-full">
         <BarChart
           accessibilityLayer
           data={data}
-          margin={{ top: 12, right: 8, left: -6, bottom: 0 }}
+          margin={{ top: 6, right: 8, left: -6, bottom: 0 }}
           barCategoryGap="4%"
         >
           <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
@@ -63,40 +60,36 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
             fontSize={9}
             interval="preserveStartEnd"
           />
-          {/* hidden duplicate axis so the min bar overlays the FC bar */}
-          <XAxis dataKey="date" xAxisId="overlay" hide />
           <YAxis
             tickLine={false}
             axisLine={false}
             fontSize={9}
             width={30}
-            domain={[0, yMax]}
             tickCount={4}
           />
-          <ChartTooltip content={<ChartTooltipContent />} />
+          <ChartTooltip
+            content={
+              <ChartTooltipContent
+                labelFormatter={(label, payload) => {
+                  const p = payload?.[0]?.payload
+                  return p ? `${label} · min FC ${p.min}` : String(label)
+                }}
+              />
+            }
+          />
+          <ChartLegend content={<ChartLegendContent />} />
           <Bar
             dataKey="fc"
-            fill="rgb(56 189 248)"
-            fillOpacity={0.8}
-            radius={[3, 3, 0, 0]}
-            minPointSize={3}
-          >
-            <LabelList dataKey="fc" position="top" fontSize={9} fill="rgb(var(--ink))" />
-          </Bar>
+            stackId="a"
+            fill="var(--color-fc)"
+            radius={[0, 0, 4, 4]}
+          />
           <Bar
-            dataKey="min"
-            xAxisId="overlay"
-            fill="rgb(251 113 133)"
-            fillOpacity={0.9}
-            radius={[2, 2, 0, 0]}
-            minPointSize={2}
-            // auto-sized like the FC bar, then shrunk to 80% and re-centered
-            shape={(props: any) => (
-              <Rectangle {...props} x={props.x + props.width * 0.1} width={props.width * 0.8} />
-            )}
-          >
-            <LabelList dataKey="min" position="top" fontSize={9} fill="rgb(var(--ink))" />
-          </Bar>
+            dataKey="deficit"
+            stackId="a"
+            fill="var(--color-deficit)"
+            radius={[4, 4, 0, 0]}
+          />
         </BarChart>
       </ChartContainer>
     </div>
