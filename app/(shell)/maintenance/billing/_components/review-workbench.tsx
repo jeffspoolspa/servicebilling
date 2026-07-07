@@ -959,8 +959,8 @@ export function ReviewWorkbench({
                           {v.minutes != null && ` · ${v.minutes}m`}
                         </div>
                         {v.body && (
-                          <div className="font-mono text-[8.5px] text-teal truncate mt-px" title={v.body}>
-                            {v.body.replace(/^(RESIDENTIAL|COMMERCIAL|RESIDENTAIL)\s+/i, "")}
+                          <div className="font-mono text-[8.5px] text-teal truncate mt-px" title={`Body: ${v.body}`}>
+                            {v.body}
                           </div>
                         )}
                       </div>

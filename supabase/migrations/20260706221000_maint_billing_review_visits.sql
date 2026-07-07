@@ -26,7 +26,7 @@ as $$
   with v as (
     select v.id, v.visit_date::date as d, v.ion_log_id, v.notes,
            vc.service_name,
-           coalesce(sp.name, nullif(trim(v.service_profile), '')) as body,
+           nullif(trim(substring(v.service_type from '\d+\s+(.+)$')), '') as body,   -- body of water from service_type suffix (SPA / Main Pool); null single-body
            coalesce(nullif(trim(e.first_name || ' ' || e.last_name), ''), v.ion_submitted_by) as tech,
            case when v.started_at is not null and v.ended_at is not null
                 then greatest(1, round(extract(epoch from (v.ended_at - v.started_at)) / 60))::int
@@ -34,7 +34,6 @@ as $$
     from maintenance.visits v
     join maintenance.tasks t on t.id = v.task_id
     left join maintenance.v_task_class vc on vc.task_id = t.id
-    left join maintenance.service_profiles sp on sp.ion_profile_id = trim(v.service_profile)
     left join public.employees e on e.id = v.actual_tech_id
     where t.customer_id = p_customer_id
       and date_trunc('month', v.visit_date)::date = p_month
