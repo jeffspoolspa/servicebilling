@@ -125,7 +125,9 @@ export function ServiceLog({
     () => [...new Set(visits.map((v) => v.body).filter(Boolean))] as string[],
     [visits],
   )
-  const shownVisits = activeBody ? visits.filter((v) => v.body === activeBody) : visits
+  // multi-body customers view ONE body at a time (mixed series are noise)
+  const effectiveBody = bodies.length > 1 ? (activeBody ?? bodies[0]) : null
+  const shownVisits = effectiveBody ? visits.filter((v) => v.body === effectiveBody) : visits
 
   const presentCols = CORE_COLS.filter(([name]) =>
     shownVisits.some((v) => v.readings[name] != null && v.readings[name] !== ""),
@@ -264,11 +266,11 @@ export function ServiceLog({
           )}
           {bodies.length > 1 && (
             <div className="flex items-center gap-1">
-              {[null, ...bodies].map((b) => {
-                const active = activeBody === b
+              {bodies.map((b) => {
+                const active = effectiveBody === b
                 return (
                   <button
-                    key={b ?? "all"}
+                    key={b}
                     onClick={() => setActiveBody(b)}
                     className={`h-6 px-2.5 rounded-md text-[11px] whitespace-nowrap ${
                       active
@@ -276,7 +278,7 @@ export function ServiceLog({
                         : "border border-line text-ink-dim hover:text-ink hover:border-cyan"
                     }`}
                   >
-                    {b ?? "All"}
+                    {b}
                   </button>
                 )
               })}
@@ -427,11 +429,6 @@ export function ServiceLog({
                     {(v.tech ?? "—").split(" ").map((w, i, a) => (i === a.length - 1 && a.length > 1 ? w[0] : w)).join(" ")}
                     {v.minutes != null && ` · ${v.minutes}m`}
                   </div>
-                  {!activeBody && bodies.length > 1 && v.body && (
-                    <div className="font-mono text-[8.5px] text-teal truncate mt-px" title={`Body: ${v.body}`}>
-                      {v.body}
-                    </div>
-                  )}
                 </div>
                 <div className="flex-none flex">
                   {presentCols.map(([name]) => {
