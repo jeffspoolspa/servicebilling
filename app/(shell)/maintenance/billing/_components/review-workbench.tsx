@@ -261,6 +261,23 @@ export function ReviewWorkbench({
         await pollJob(`/api/maintenance-billing/adjustments?job=${j.jobId}`)
       }
       setApplyState("Releasing…")
+      // a chem_flag hold only releases once the flag itself is marked
+      // reviewed (customer_month_audit) — reviewed_at alone gets re-held by
+      // the projection. Approve = the review, so record it.
+      if (reasons.includes("chem_flag")) {
+        const fr = await fetch("/api/maintenance-billing/flags/review", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            customer_id: customerId,
+            month: `${month}-01`,
+            status: "reviewed",
+            note: "Approved via bill review workbench",
+          }),
+        })
+        // 404 = no flag row (already released elsewhere) — fine to continue
+        if (!fr.ok && fr.status !== 404) throw new Error("flag release failed")
+      }
       const r = await fetch("/api/maintenance-billing/periods/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
