@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils/format"
+import { ServiceLog, type ServiceLogVisit } from "../../_components/service-log"
 
 /**
  * Bill-review workbench — first draft of Carter's design 2a ("Remix"):
@@ -27,19 +28,7 @@ export interface WorkbenchInvoice {
     | null
 }
 
-export interface WorkbenchVisit {
-  visit_id: string
-  visit_date: string
-  ion_log_id: string | null
-  service_name: string | null
-  body: string | null
-  tech: string | null
-  minutes: number | null
-  notes: string | null
-  readings: Record<string, string>
-  chems: { item: string; qty: number; cents: number; category: string | null }[]
-  photos: { guid: string; thumb_url: string; s3_key: string; uploaded_by: string | null }[]
-}
+export type WorkbenchVisit = ServiceLogVisit
 
 export interface BillAnalysis {
   result: { driver?: string; normal?: string; recommend?: string }
@@ -80,46 +69,9 @@ interface Adjustment {
   item: string
 }
 
-const READING_SHORT: Record<string, string> = {
-  "Free Chlorine": "FC", pH: "pH", "Total Alkalinity": "TA",
-  "Cyanuric Acid": "CYA", Salinity: "SALT", "Total Chlorine": "TC",
-  "Calcium Hardness": "CAL",
-}
 
-// readings used for the month averages / science calcs
-const PREVIEW_READINGS = [
-  "Free Chlorine", "pH", "Cyanuric Acid", "Total Alkalinity",
-  "Calcium Hardness", "Salinity",
-]
 
-// service-log grid columns, in report order. A column shows only when some
-// visit in the month recorded it — so salt pools surface Salt/Cell/ORP and
-// tablet pools surface Tabs, without needing a stored pool-type flag.
-const CORE_COLS: [name: string, short: string][] = [
-  ["Free Chlorine", "FC"],
-  ["Total Chlorine", "TC"],
-  ["pH", "pH"],
-  ["Total Alkalinity", "Alk"],
-  ["Cyanuric Acid", "CyA"],
-  ["Calcium Hardness", "Cal"],
-  ["Phosphates", "Phos"],
-  ["Salinity", "Salt"],
-  ["Tablets", "Tabs"],
-  ["OXIDATION-REDUCTION POTENTIAL", "ORP"],
-  ["Current Filter PSI", "PSI"],
-  ["FILTER PSI BEFORE", "PSIb"],
-  ["FILTER PSI AFTER", "PSIa"],
-]
-const CORE_NAMES = new Set(CORE_COLS.map(([n]) => n))
 
-function readingWarn(name: string, value: string): boolean {
-  const v = parseFloat(value)
-  if (!isFinite(v)) return false
-  if (name === "Free Chlorine") return v < 1.5
-  if (name === "pH") return v > 7.8 || v < 7.0
-  if (name === "Total Alkalinity") return v < 70 || v > 120
-  return false
-}
 
 // canonical season buckets (matches billing_audit.v_customer_month_cpv):
 // summer May-Aug, shoulder (fall/spring) Mar-Apr + Sep-Oct, winter Nov-Feb
@@ -175,8 +127,6 @@ export function ReviewWorkbench({
   watchlist: WatchEntry[]
 }) {
   const router = useRouter()
-  const [openVisit, setOpenVisit] = useState<string | null>(null)
-  const [activeBody, setActiveBody] = useState<string | null>(null)
   const [adjustments, setAdjustments] = useState<Record<string, Adjustment>>({})
   const [editing, setEditing] = useState<string | null>(null)
   const [mode, setMode] = useState<"$" | "%" | "comp">("$")
@@ -189,7 +139,6 @@ export function ReviewWorkbench({
   const [analysis, setAnalysis] = useState<BillAnalysis | null>(initialAnalysis)
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisErr, setAnalysisErr] = useState("")
-  const [lightbox, setLightbox] = useState<{ photos: WorkbenchVisit["photos"]; i: number } | null>(null)
   const [watch, setWatch] = useState<WatchEntry[]>(watchlist)
   const [watchOpen, setWatchOpen] = useState(false)
   const [watchReason, setWatchReason] = useState("watch")
@@ -232,33 +181,6 @@ export function ReviewWorkbench({
 
   useEffect(() => setWatch(watchlist), [watchlist])
 
-  // warm the browser cache for the open photo's neighbors so next/prev is
-  // instant (full-size originals are public S3 — no signing round-trip)
-  useEffect(() => {
-    if (!lightbox) return
-    const n = lightbox.photos.length
-    for (const j of [lightbox.i + 1, lightbox.i - 1]) {
-      const p = lightbox.photos[((j % n) + n) % n]
-      if (p) {
-        const im = new Image()
-        im.src = p.thumb_url.replace("/t_", "/")
-      }
-    }
-  }, [lightbox])
-
-  // lightbox keyboard: Escape closes, arrows move between the visit's photos
-  useEffect(() => {
-    if (!lightbox) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setLightbox(null)
-      if (e.key === "ArrowRight")
-        setLightbox((lb) => lb && { ...lb, i: (lb.i + 1) % lb.photos.length })
-      if (e.key === "ArrowLeft")
-        setLightbox((lb) => lb && { ...lb, i: (lb.i - 1 + lb.photos.length) % lb.photos.length })
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [lightbox])
 
   const usualByItem = useMemo(() => {
     const m = new Map<string, UsualItem>()
@@ -449,76 +371,8 @@ export function ReviewWorkbench({
     }
   }
 
-  // per-reading averages across the month's visits. A 0 reading on anything
-  // but FC/pH is an unrecorded field in ION, not a measurement — excluded.
-  const avgRaw = new Map<string, number>()
-  for (const k of PREVIEW_READINGS) {
-    const vals = visits
-      .map((v) => parseFloat(v.readings[k]))
-      .filter((x) => isFinite(x) && (x !== 0 || k === "Free Chlorine" || k === "pH"))
-    if (vals.length) avgRaw.set(k, vals.reduce((a, b) => a + b, 0) / vals.length)
-  }
-  const readingAvgs = PREVIEW_READINGS.filter((k) => avgRaw.has(k)).map((k) => ({
-    k,
-    avg: k === "pH" ? avgRaw.get(k)!.toFixed(1) : String(Math.round(avgRaw.get(k)!)),
-  }))
 
-  // water chemistry on the month averages:
-  // - min FC from the chlorine/CYA relationship: 7.5% of CYA, floor 1.0 ppm
-  // - LSI = pH - pHs, pHs = (9.3 + A + B) - (C + D), with the carbonate-alk
-  //   CYA correction (TA - CYA/3). Assumptions where unrecorded: 84 F water,
-  //   Ca 250 ppm, TDS = salinity reading (salt pool) or 1000 ppm.
-  const chem = (() => {
-    const fc = avgRaw.get("Free Chlorine")
-    const ph = avgRaw.get("pH")
-    const cya = avgRaw.get("Cyanuric Acid")
-    const ta = avgRaw.get("Total Alkalinity")
-    const cal = avgRaw.get("Calcium Hardness")
-    const salt = avgRaw.get("Salinity")
 
-    const minFc = cya != null ? Math.max(1, 0.075 * cya) : null
-    const fcOk = fc != null && minFc != null ? fc >= minFc : null
-
-    let lsi: number | null = null
-    const assumed: string[] = []
-    if (ph != null && ta != null) {
-      const tempC = (84 - 32) * (5 / 9) // assumed summer water temp
-      assumed.push("84°F water")
-      const ca = cal ?? 250
-      if (cal == null) assumed.push("Ca 250")
-      const tds = salt ?? 1000
-      if (salt == null) assumed.push("TDS 1000")
-      const carbAlk = Math.max(20, ta - (cya ?? 0) / 3)
-      const A = (Math.log10(tds) - 1) / 10
-      const B = -13.12 * Math.log10(tempC + 273) + 34.55
-      const C = Math.log10(ca) - 0.4
-      const D = Math.log10(carbAlk)
-      lsi = ph - ((9.3 + A + B) - (C + D))
-    }
-    return { fc, minFc, fcOk, lsi, assumed }
-  })()
-
-  // service bodies (spa / main pool / …). Tabs when >1 so you can flip
-  // between each body's visits; null = All.
-  const bodies = useMemo(
-    () => [...new Set(visits.map((v) => v.body).filter(Boolean))] as string[],
-    [visits],
-  )
-  const shownVisits = activeBody ? visits.filter((v) => v.body === activeBody) : visits
-
-  // grid columns present in the shown visits (pool-type-adaptive)
-  const presentCols = CORE_COLS.filter(([name]) =>
-    shownVisits.some((v) => v.readings[name] != null && v.readings[name] !== ""),
-  )
-
-  const flaggedVisits = shownVisits.filter((v) =>
-    Object.entries(v.readings).some(([k, val]) => readingWarn(k, val)),
-  ).length
-  const avgMins = (() => {
-    const withMins = shownVisits.filter((v) => v.minutes != null)
-    if (!withMins.length) return null
-    return Math.round(withMins.reduce((s, v) => s + (v.minutes ?? 0), 0) / withMins.length)
-  })()
 
   const seg = (on: boolean) =>
     on ? "bg-cyan text-bg" : "bg-transparent text-ink-dim"
@@ -929,235 +783,9 @@ export function ReviewWorkbench({
             )}
           </div>
 
-          {/* visit log */}
-          <div className="bg-bg border border-line rounded-xl overflow-hidden flex flex-col flex-1 min-h-0">
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-line-soft flex-none gap-3">
-              <div className="flex items-center gap-2 flex-none">
-                <span className="font-display text-[15px]">Service log — {monthLabel}</span>
-                {bodies.length === 1 && (
-                  <span className="font-mono text-[10px] text-teal">{bodies[0]}</span>
-                )}
-                {bodies.length > 1 && (
-                  <div className="flex items-center gap-1">
-                    {[null, ...bodies].map((b) => {
-                      const active = activeBody === b
-                      return (
-                        <button
-                          key={b ?? "all"}
-                          onClick={() => setActiveBody(b)}
-                          className={`h-6 px-2.5 rounded-md text-[11px] whitespace-nowrap ${
-                            active
-                              ? "bg-cyan text-bg font-semibold"
-                              : "border border-line text-ink-dim hover:text-ink hover:border-cyan"
-                          }`}
-                        >
-                          {b ?? "All"}
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-              <span className="flex-1 min-w-0 text-center font-mono text-[10px] text-ink-mute truncate px-3">
-                {readingAvgs.length > 0 && (
-                  <>avg{" "}
-                    {readingAvgs.map((r, i) => (
-                      <span key={r.k}>
-                        {i > 0 && " · "}
-                        {READING_SHORT[r.k]} <span className="text-ink-dim">{r.avg}</span>
-                      </span>
-                    ))}
-                    {chem.minFc != null && chem.fcOk != null && (
-                      <span
-                        className={chem.fcOk ? "text-grass" : "text-coral"}
-                        title={`min FC = 7.5% of avg CYA (floor 1.0); avg FC ${chem.fc?.toFixed(1)} is ${chem.fcOk ? "above" : "BELOW"}`}
-                      >
-                        {" "}· min FC {chem.minFc.toFixed(1)} {chem.fcOk ? "✓" : "✕"}
-                      </span>
-                    )}
-                    {chem.lsi != null && (
-                      <span
-                        className={Math.abs(chem.lsi) <= 0.3 ? "text-ink-dim" : chem.lsi > 0 ? "text-sun" : "text-coral"}
-                        title={`LSI on month averages (carbonate alk = TA − CYA/3${chem.assumed.length ? "; assumed " + chem.assumed.join(", ") : ""}). ±0.3 = balanced; below = corrosive, above = scaling`}
-                      >
-                        {" "}· LSI {chem.lsi >= 0 ? "+" : ""}{chem.lsi.toFixed(2)}
-                      </span>
-                    )}
-                  </>
-                )}
-              </span>
-              <span className="font-mono text-[10.5px] text-ink-mute flex-none">
-                {shownVisits.length} visit{shownVisits.length === 1 ? "" : "s"}
-                {flaggedVisits > 0 && <> · <span className="text-coral">{flaggedVisits} off-range</span></>}
-                {avgMins != null && <> · avg {avgMins} min</>}
-              </span>
-            </div>
-            <div className="overflow-y-auto flex-1 min-h-0">
-              {shownVisits.length > 0 && (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-2.5 pb-1 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-mute">
-                  <span className="w-[7px] flex-none" />
-                  <span className="w-[86px] flex-none">Visit</span>
-                  <div className="flex-none flex">
-                    {presentCols.map(([name, short]) => (
-                      <span key={name} className="w-[34px] flex-none text-center normal-case">{short}</span>
-                    ))}
-                  </div>
-                  <span className="flex-1 min-w-[120px] pl-4">Notes</span>
-                </div>
-              )}
-              {shownVisits.map((v) => {
-                const open = openVisit === v.visit_id
-                const warn = Object.entries(v.readings).some(([k, val]) => readingWarn(k, val))
-                const chemCents = v.chems.reduce((s, c) => s + (c.cents ?? 0), 0)
-                const otherReads = Object.entries(v.readings)
-                  .filter(([k, val]) => !CORE_NAMES.has(k) && val != null && val !== "")
-                return (
-                  <div key={v.visit_id} className="border-b border-line-soft last:border-0">
-                    <div
-                      onClick={() => setOpenVisit(open ? null : v.visit_id)}
-                      className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 cursor-pointer hover:bg-white/[0.02]"
-                    >
-                      <span className={`w-[7px] h-[7px] rounded-full flex-none ${warn ? "bg-coral" : "bg-grass"}`} />
-                      <div className="w-[86px] flex-none">
-                        <div className="font-mono text-[11px] text-ink">
-                          {new Date(v.visit_date + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })}
-                        </div>
-                        <div className="font-mono text-[9.5px] text-ink-mute mt-px">
-                          {(v.tech ?? "—").split(" ").map((w, i, a) => (i === a.length - 1 && a.length > 1 ? w[0] : w)).join(" ")}
-                          {v.minutes != null && ` · ${v.minutes}m`}
-                        </div>
-                        {!activeBody && bodies.length > 1 && v.body && (
-                          <div className="font-mono text-[8.5px] text-teal truncate mt-px" title={`Body: ${v.body}`}>
-                            {v.body}
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex-none flex">
-                        {presentCols.map(([name]) => {
-                          const val = v.readings[name]
-                          const has = val != null && val !== ""
-                          const w = has && readingWarn(name, val)
-                          return (
-                            <span key={name}
-                              className={`w-[34px] flex-none text-center font-mono text-[11px] ${
-                                w ? "text-coral font-medium" : has ? "text-ink" : "text-ink-mute/40"
-                              }`}>
-                              {has ? val : "·"}
-                            </span>
-                          )
-                        })}
-                      </div>
-                      <div className="flex-1 min-w-[120px] pl-4 overflow-hidden">
-                        {v.notes ? (
-                          <span className="text-[11.5px] text-ink-dim block truncate" title={v.notes}>{v.notes}</span>
-                        ) : (
-                          <span className="text-[10px] text-ink-mute">no notes</span>
-                        )}
-                      </div>
-                      {v.photos.length > 0 && (
-                        <span className="inline-flex items-center gap-1 font-mono text-[10px] text-ink-mute flex-none">
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-                            <circle cx="12" cy="13" r="3" />
-                          </svg>
-                          {v.photos.length}
-                        </span>
-                      )}
-                      <span className="font-mono text-[12px] text-ink w-[64px] text-right flex-none">
-                        {chemCents > 0 ? formatCurrency(chemCents / 100) : "—"}
-                      </span>
-
-                    </div>
-                    {open && (
-                      v.chems.length === 0 && otherReads.length === 0 && v.photos.length === 0 ? (
-                        <div className="px-4 pb-3 pl-9 text-[11px] text-ink-mute">
-                          No consumables, photos, or additional readings.
-                        </div>
-                      ) : (
-                      <div className="px-4 pt-1 pb-4 pl-9 flex items-stretch gap-6">
-                        {/* left third: other readings over consumables */}
-                        <div className="w-1/3 flex-none flex flex-col gap-4">
-                          {otherReads.length > 0 && (
-                            <div>
-                              <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
-                                Other readings
-                              </div>
-                              <div className="flex gap-1.5 flex-wrap">
-                                {otherReads.map(([k, val]) => (
-                                  <span key={k}
-                                    className="inline-flex items-baseline gap-1.5 rounded border border-line bg-bg-elev px-1.5 py-[1px]">
-                                    <span className="font-mono text-[8.5px] uppercase tracking-[0.06em] text-ink-mute">
-                                      {READING_SHORT[k] ?? k}
-                                    </span>
-                                    <span className="font-mono text-[10.5px] text-ink">{val}</span>
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {v.chems.length > 0 && (
-                            <div>
-                              <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
-                                Consumables
-                              </div>
-                              <div className="flex gap-1.5 flex-wrap">
-                                {v.chems.map((c, ci) => (
-                                  <span key={ci}
-                                    className="inline-flex items-baseline gap-1 rounded border border-teal/30 bg-teal/5 px-1.5 py-[1px]">
-                                    <span className="font-mono text-[10.5px] text-teal">{c.qty}</span>
-                                    <span className="text-[10px] text-ink-dim">{bare(c.item)}</span>
-                                    {c.cents ? (
-                                      <span className="font-mono text-[9px] text-ink-mute">{formatCurrency(c.cents / 100)}</span>
-                                    ) : null}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {otherReads.length === 0 && v.chems.length === 0 && (
-                            <span className="text-[10px] text-ink-mute">No other readings or consumables.</span>
-                          )}
-                        </div>
-                        {/* right two-thirds: photos, filling the height */}
-                        {v.photos.length > 0 && (
-                          <div className="flex-1 min-w-0">
-                            <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
-                              Photos
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {v.photos.map((p, pi) => (
-                                <button
-                                  key={p.guid}
-                                  onClick={() => setLightbox({ photos: v.photos, i: pi })}
-                                  className="block rounded-lg border border-line overflow-hidden hover:border-cyan"
-                                  title={p.uploaded_by ? `Uploaded by ${p.uploaded_by}` : undefined}
-                                >
-                                  {/* fixed height, natural width — the tile takes the
-                                      photo's own aspect (portrait stays portrait) */}
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={p.thumb_url}
-                                    alt="Service log photo"
-                                    className="h-40 w-auto"
-                                  />
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      )
-                    )}
-                  </div>
-                )
-              })}
-              {shownVisits.length === 0 && (
-                <div className="px-4 py-8 text-center text-[12px] text-ink-mute">
-                  No visits recorded for this customer-month.
-                </div>
-              )}
-            </div>
-          </div>
+          {/* visit log — the reusable ServiceLog component (period locked to
+              the invoice month in this context) */}
+          <ServiceLog visits={visits} period={{ label: monthLabel }} />
         </div>
       </div>
 
@@ -1231,78 +859,6 @@ export function ReviewWorkbench({
         </div>
       )}
 
-      {/* photo lightbox — click anywhere / Escape to close, arrows to browse */}
-      {lightbox && (() => {
-        const p = lightbox.photos[lightbox.i]
-        return (
-          <div
-            className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center cursor-zoom-out"
-            onClick={() => setLightbox(null)}
-          >
-            {/* full-size loads via the signed-URL redirect; the public thumb
-                shows instantly underneath so there's no blank flash */}
-            <div className="relative max-w-[92vw] max-h-[90vh]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={p.thumb_url}
-                alt=""
-                aria-hidden
-                className="absolute inset-0 w-full h-full object-contain blur-[2px] opacity-60"
-              />
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                key={p.guid}
-                src={p.thumb_url.replace("/t_", "/")}
-                onError={(e) => {
-                  // rare non-public original: fall back to the signed-URL route
-                  const el = e.currentTarget
-                  if (!el.dataset.fallback) {
-                    el.dataset.fallback = "1"
-                    el.src = `/api/maintenance-billing/photo?key=${encodeURIComponent(p.s3_key)}`
-                  }
-                }}
-                alt="Service log photo"
-                className="relative max-w-[92vw] max-h-[90vh] object-contain rounded-lg"
-              />
-            </div>
-            {lightbox.photos.length > 1 && (
-              <>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setLightbox({ ...lightbox, i: (lightbox.i - 1 + lightbox.photos.length) % lightbox.photos.length })
-                  }}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-[18px]"
-                  aria-label="Previous photo"
-                >
-                  ‹
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setLightbox({ ...lightbox, i: (lightbox.i + 1) % lightbox.photos.length })
-                  }}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-[18px]"
-                  aria-label="Next photo"
-                >
-                  ›
-                </button>
-              </>
-            )}
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 font-mono text-[11px] text-white/70">
-              {lightbox.photos.length > 1 && `${lightbox.i + 1} / ${lightbox.photos.length} · `}
-              {p.uploaded_by && `by ${p.uploaded_by} · `}click anywhere to close
-            </div>
-            <button
-              onClick={() => setLightbox(null)}
-              className="absolute top-4 right-4 h-9 w-9 rounded-full bg-white/10 hover:bg-white/20 text-white text-[16px]"
-              aria-label="Close"
-            >
-              ×
-            </button>
-          </div>
-        )
-      })()}
     </div>
   )
 }
