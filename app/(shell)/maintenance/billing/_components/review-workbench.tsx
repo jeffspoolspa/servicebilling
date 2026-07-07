@@ -117,6 +117,11 @@ function bare(name: string | null | undefined): string {
   return name.split(":").pop()!.trim()
 }
 
+// quantities: integer when whole, else one decimal (2 -> "2", 2.5 -> "2.5")
+function fmtQty(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1)
+}
+
 export function ReviewWorkbench({
   customerId,
   qboCustomerId,
@@ -609,11 +614,11 @@ export function ReviewWorkbench({
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-[12.5px] font-medium text-ink">{ln.name}</span>
                       {ratio != null && (ratio >= 1.15 || ratio <= 0.85) && (
-                        <span
-                          className={`font-mono text-[10px] ${ratioColor}`}
-                          title={`from average ${qtyAvg!.toFixed(1)}`}
-                        >
-                          {ratio >= 1 ? "▲" : "▼"} {Number.isInteger(qtyNow!) ? qtyNow : qtyNow!.toFixed(1)}
+                        <span className={`group relative font-mono text-[10px] cursor-default ${ratioColor}`}>
+                          {ratio >= 1 ? "▲" : "▼"} {fmtQty(Math.abs(qtyNow! - qtyAvg!))} vs avg
+                          <span className="pointer-events-none absolute left-0 top-full mt-1 z-10 hidden group-hover:block whitespace-nowrap rounded-md border border-line bg-bg px-2 py-1 text-[10px] text-ink-dim shadow-card">
+                            {fmtQty(qtyNow!)} this month · avg {qtyAvg!.toFixed(1)}
+                          </span>
                         </span>
                       )}
                     </div>
