@@ -34,6 +34,10 @@ export interface ServiceLogVisit {
 
 export interface ServiceLogPeriod {
   label: string
+  /** ISO bounds of the period (YYYY-MM-DD); the LSI heatmap draws one square
+   *  per day of this range. Falls back to the visit span when omitted. */
+  start?: string
+  end?: string
   onChange?: (direction: -1 | 1) => void
 }
 
@@ -317,7 +321,7 @@ export function ServiceLog({
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FcChart rows={chart.rows} />
-            <LsiChart rows={chart.rows} />
+            <LsiChart rows={chart.rows} start={period.start} end={period.end} />
           </div>
         </div>
       )}

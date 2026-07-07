@@ -23,29 +23,39 @@ function zoneOf(lsi: number): keyof typeof ZONE {
 
 const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"]
 
-export function LsiChart({ rows }: { rows: ChartRow[] }) {
+export function LsiChart({
+  rows,
+  start: periodStart,
+  end: periodEnd,
+}: {
+  rows: ChartRow[]
+  start?: string
+  end?: string
+}) {
   const dated = rows.filter((r) => r.lsi != null && r.iso)
   if (!dated.length) return <ChartEmpty title="Water balance (LSI)" />
 
   const byIso = new Map(dated.map((r) => [r.iso, r.lsi as number]))
-  const first = new Date(dated[0].iso + "T12:00:00Z")
-  const last = new Date(dated[dated.length - 1].iso + "T12:00:00Z")
-  // pad to full weeks (Sun..Sat)
-  const start = new Date(first)
+  // one square per day of the PERIOD (fallback: the visit span)
+  const firstIso = periodStart ?? dated[0].iso
+  const lastIso = periodEnd ?? dated[dated.length - 1].iso
+  // align the grid to full weeks (Sun..Sat); out-of-period cells render blank
+  const start = new Date(firstIso + "T12:00:00Z")
   start.setUTCDate(start.getUTCDate() - start.getUTCDay())
-  const end = new Date(last)
+  const end = new Date(lastIso + "T12:00:00Z")
   end.setUTCDate(end.getUTCDate() + (6 - end.getUTCDay()))
 
-  const weeks: { iso: string; label: string; lsi: number | null }[][] = []
+  const weeks: { iso: string; label: string; lsi: number | null; inPeriod: boolean }[][] = []
   const d = new Date(start)
   while (d <= end) {
-    const week: { iso: string; label: string; lsi: number | null }[] = []
+    const week: { iso: string; label: string; lsi: number | null; inPeriod: boolean }[] = []
     for (let i = 0; i < 7; i++) {
       const iso = d.toISOString().slice(0, 10)
       week.push({
         iso,
         label: d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
         lsi: byIso.get(iso) ?? null,
+        inPeriod: iso >= firstIso && iso <= lastIso,
       })
       d.setUTCDate(d.getUTCDate() + 1)
     }
@@ -78,9 +88,13 @@ export function LsiChart({ rows }: { rows: ChartRow[] }) {
               {week.map((cell) => (
                 <span
                   key={cell.iso}
-                  title={cell.lsi != null ? `${cell.label} · LSI ${cell.lsi >= 0 ? "+" : ""}${cell.lsi.toFixed(2)} (${zoneOf(cell.lsi)})` : cell.label}
+                  title={!cell.inPeriod ? undefined
+                    : cell.lsi != null
+                      ? `${cell.label} · LSI ${cell.lsi >= 0 ? "+" : ""}${cell.lsi.toFixed(2)} (${zoneOf(cell.lsi)})`
+                      : cell.label}
                   className={`w-[14px] h-[14px] rounded-[3px] ${
-                    cell.lsi != null ? ZONE[zoneOf(cell.lsi)] : "bg-bg-elev"
+                    !cell.inPeriod ? "opacity-0"
+                    : cell.lsi != null ? ZONE[zoneOf(cell.lsi)] : "bg-bg-elev"
                   }`}
                 />
               ))}

@@ -809,7 +809,15 @@ export function ReviewWorkbench({
 
           {/* visit log — the reusable ServiceLog component (period locked to
               the invoice month in this context) */}
-          <ServiceLog visits={visits} period={{ label: monthLabel }} />
+          <ServiceLog
+            visits={visits}
+            period={{
+              label: monthLabel,
+              start: `${month}-01`,
+              end: new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7), 0))
+                .toISOString().slice(0, 10),
+            }}
+          />
         </div>
       </div>
 
