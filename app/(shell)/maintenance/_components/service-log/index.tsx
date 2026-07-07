@@ -470,13 +470,16 @@ export function ServiceLog({
                       Photos
                     </div>
                     {v.photos.length > 0 ? (
-                      /* always ONE row: each photo flexes down to fit the third */
-                      <div className="flex gap-2">
+                      /* always ONE row filling the third: each photo gets an
+                         explicit equal share (aspect-ratio + flex stretch
+                         otherwise refuses to shrink and overflows) */
+                      <div className="flex gap-1.5 items-start">
                         {v.photos.map((p, pi) => (
                           <button
                             key={p.guid}
                             onClick={() => setLightbox({ photos: v.photos, i: pi })}
-                            className="flex-1 min-w-0 max-w-[110px] aspect-[3/4] rounded-lg border border-line overflow-hidden hover:border-cyan"
+                            style={{ width: `calc(${(100 / v.photos.length).toFixed(3)}% - ${((v.photos.length - 1) * 6 / v.photos.length).toFixed(1)}px)` }}
+                            className="aspect-[3/4] max-h-44 rounded-lg border border-line overflow-hidden hover:border-cyan"
                             title={p.uploaded_by ? `Uploaded by ${p.uploaded_by}` : undefined}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
