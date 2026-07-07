@@ -662,47 +662,62 @@ export function ReviewWorkbench({
                       </span>
                     </div>
                     {open && (
-                      <div className="px-4 pb-3.5 pl-9 flex flex-col gap-2.5">
-                        {otherReads.length > 0 && (
-                          <div className="flex gap-1.5 flex-wrap">
-                            {otherReads.map(([k, val]) => (
-                              <div key={k} className="bg-bg-elev border border-line rounded-md px-2 py-1 text-center">
-                                <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-mute">
-                                  {READING_SHORT[k] ?? k}
-                                </div>
-                                <div className="font-mono text-[12px] text-ink">{val}</div>
+                      otherReads.length === 0 && !v.notes && v.photos.length === 0 ? (
+                        <div className="px-4 pb-3 pl-9 text-[11px] text-ink-mute">
+                          No notes, photos, or additional readings.
+                        </div>
+                      ) : (
+                      /* mirrors the preview row's sections: extra readings under
+                         the readings column | notes | photos */
+                      <div className="px-4 pb-3.5 flex items-start gap-3">
+                        <span className="w-[7px] flex-none" />
+                        <span className="w-[86px] flex-none" />
+                        <div className="w-[300px] flex-none flex gap-1.5 flex-wrap content-start">
+                          {otherReads.map(([k, val]) => (
+                            <div key={k} className="bg-bg-elev border border-line rounded-md px-2 py-1 text-center">
+                              <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-mute">
+                                {READING_SHORT[k] ?? k}
                               </div>
-                            ))}
-                          </div>
-                        )}
-                        {v.notes && (
-                          <div className="text-[11.5px] leading-relaxed text-ink-dim border-l-2 border-line pl-2.5">
-                            {v.notes}
-                          </div>
-                        )}
-                        {otherReads.length === 0 && !v.notes && v.photos.length === 0 && (
-                          <div className="text-[11px] text-ink-mute">No notes, photos, or additional readings.</div>
-                        )}
-                        {v.photos.length > 0 && (
-                          <div className="flex gap-2 flex-wrap">
-                            {v.photos.map((p, pi) => (
-                              <button
-                                key={p.guid}
-                                onClick={() => setLightbox({ photos: v.photos, i: pi })}
-                                className="block w-[104px] group"
-                                title={p.uploaded_by ? `Uploaded by ${p.uploaded_by}` : undefined}
-                              >
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={p.thumb_url}
-                                  alt="Service log photo"
-                                  className="h-16 w-full object-cover rounded-lg border border-line group-hover:border-cyan"
-                                />
-                              </button>
-                            ))}
-                          </div>
-                        )}
+                              <div className="font-mono text-[12px] text-ink">{val}</div>
+                            </div>
+                          ))}
+                          {otherReads.length === 0 && (
+                            <span className="text-[10px] text-ink-mute">no other readings</span>
+                          )}
+                        </div>
+                        <span className="w-px self-stretch bg-line-soft flex-none" />
+                        <div className="flex-1 min-w-0">
+                          {v.notes ? (
+                            <div className="text-[11.5px] leading-relaxed text-ink-dim border-l-2 border-line pl-2.5">
+                              {v.notes}
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-ink-mute">no notes</span>
+                          )}
+                        </div>
+                        <span className="w-px self-stretch bg-line-soft flex-none" />
+                        <div className="flex-none max-w-[360px] flex gap-2 flex-wrap justify-end">
+                          {v.photos.map((p, pi) => (
+                            <button
+                              key={p.guid}
+                              onClick={() => setLightbox({ photos: v.photos, i: pi })}
+                              className="block w-[104px] group"
+                              title={p.uploaded_by ? `Uploaded by ${p.uploaded_by}` : undefined}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={p.thumb_url}
+                                alt="Service log photo"
+                                className="h-16 w-full object-cover rounded-lg border border-line group-hover:border-cyan"
+                              />
+                            </button>
+                          ))}
+                          {v.photos.length === 0 && (
+                            <span className="text-[10px] text-ink-mute">no photos</span>
+                          )}
+                        </div>
                       </div>
+                      )
                     )}
                   </div>
                 )
