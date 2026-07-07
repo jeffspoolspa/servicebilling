@@ -662,11 +662,11 @@ export function ReviewWorkbench({
                     </div>
                     {open && (
                       otherReads.length === 0 && !v.notes && v.photos.length === 0 ? (
-                        <div className="px-4 pb-3 pl-[117px] text-[11px] text-ink-mute">
+                        <div className="px-4 pb-3 pl-9 text-[11px] text-ink-mute">
                           No notes, photos, or additional readings.
                         </div>
                       ) : (
-                      <div className="px-4 pt-1 pb-4 pl-[117px] flex items-start gap-10 flex-wrap">
+                      <div className="px-4 pt-1 pb-4 pl-9 flex items-start gap-10 flex-wrap">
                         {otherReads.length > 0 && (
                           <div>
                             <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
