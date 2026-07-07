@@ -176,6 +176,7 @@ export function ReviewWorkbench({
 }) {
   const router = useRouter()
   const [openVisit, setOpenVisit] = useState<string | null>(null)
+  const [activeBody, setActiveBody] = useState<string | null>(null)
   const [adjustments, setAdjustments] = useState<Record<string, Adjustment>>({})
   const [editing, setEditing] = useState<string | null>(null)
   const [mode, setMode] = useState<"$" | "%" | "comp">("$")
@@ -483,16 +484,24 @@ export function ReviewWorkbench({
     return { fc, minFc, fcOk, lsi, assumed }
   })()
 
-  // grid columns present anywhere this month (pool-type-adaptive)
+  // service bodies (spa / main pool / …). Tabs when >1 so you can flip
+  // between each body's visits; null = All.
+  const bodies = useMemo(
+    () => [...new Set(visits.map((v) => v.body).filter(Boolean))] as string[],
+    [visits],
+  )
+  const shownVisits = activeBody ? visits.filter((v) => v.body === activeBody) : visits
+
+  // grid columns present in the shown visits (pool-type-adaptive)
   const presentCols = CORE_COLS.filter(([name]) =>
-    visits.some((v) => v.readings[name] != null && v.readings[name] !== ""),
+    shownVisits.some((v) => v.readings[name] != null && v.readings[name] !== ""),
   )
 
-  const flaggedVisits = visits.filter((v) =>
+  const flaggedVisits = shownVisits.filter((v) =>
     Object.entries(v.readings).some(([k, val]) => readingWarn(k, val)),
   ).length
   const avgMins = (() => {
-    const withMins = visits.filter((v) => v.minutes != null)
+    const withMins = shownVisits.filter((v) => v.minutes != null)
     if (!withMins.length) return null
     return Math.round(withMins.reduce((s, v) => s + (v.minutes ?? 0), 0) / withMins.length)
   })()
@@ -908,9 +917,34 @@ export function ReviewWorkbench({
 
           {/* visit log */}
           <div className="bg-bg border border-line rounded-xl overflow-hidden flex flex-col flex-1 min-h-0">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-line-soft flex-none">
-              <span className="font-display text-[15px] flex-none">Service log — {monthLabel}</span>
-              <span className="flex-1 text-center font-mono text-[10px] text-ink-mute truncate px-3">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-line-soft flex-none gap-3">
+              <div className="flex items-center gap-2 flex-none">
+                <span className="font-display text-[15px]">Service log — {monthLabel}</span>
+                {bodies.length === 1 && (
+                  <span className="font-mono text-[10px] text-teal">{bodies[0]}</span>
+                )}
+                {bodies.length > 1 && (
+                  <div className="flex items-center gap-1">
+                    {[null, ...bodies].map((b) => {
+                      const active = activeBody === b
+                      return (
+                        <button
+                          key={b ?? "all"}
+                          onClick={() => setActiveBody(b)}
+                          className={`h-6 px-2.5 rounded-md text-[11px] whitespace-nowrap ${
+                            active
+                              ? "bg-cyan text-bg font-semibold"
+                              : "border border-line text-ink-dim hover:text-ink hover:border-cyan"
+                          }`}
+                        >
+                          {b ?? "All"}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+              <span className="flex-1 min-w-0 text-center font-mono text-[10px] text-ink-mute truncate px-3">
                 {readingAvgs.length > 0 && (
                   <>avg{" "}
                     {readingAvgs.map((r, i) => (
@@ -939,14 +973,14 @@ export function ReviewWorkbench({
                 )}
               </span>
               <span className="font-mono text-[10.5px] text-ink-mute flex-none">
-                {visits.length} visit{visits.length === 1 ? "" : "s"}
+                {shownVisits.length} visit{shownVisits.length === 1 ? "" : "s"}
                 {flaggedVisits > 0 && <> · <span className="text-coral">{flaggedVisits} off-range</span></>}
                 {avgMins != null && <> · avg {avgMins} min</>}
               </span>
             </div>
             <div className="overflow-y-auto flex-1 min-h-0">
-              {visits.length > 0 && (
-                <div className="flex items-center gap-3 px-4 pt-2.5 pb-1 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-mute">
+              {shownVisits.length > 0 && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-2.5 pb-1 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-mute">
                   <span className="w-[7px] flex-none" />
                   <span className="w-[86px] flex-none">Visit</span>
                   <div className="flex-none flex">
@@ -954,10 +988,10 @@ export function ReviewWorkbench({
                       <span key={name} className="w-[34px] flex-none text-center normal-case">{short}</span>
                     ))}
                   </div>
-                  <span className="flex-1 pl-4">Notes</span>
+                  <span className="flex-1 min-w-[120px] pl-4">Notes</span>
                 </div>
               )}
-              {visits.map((v) => {
+              {shownVisits.map((v) => {
                 const open = openVisit === v.visit_id
                 const warn = Object.entries(v.readings).some(([k, val]) => readingWarn(k, val))
                 const chemCents = v.chems.reduce((s, c) => s + (c.cents ?? 0), 0)
@@ -967,7 +1001,7 @@ export function ReviewWorkbench({
                   <div key={v.visit_id} className="border-b border-line-soft last:border-0">
                     <div
                       onClick={() => setOpenVisit(open ? null : v.visit_id)}
-                      className="flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-white/[0.02]"
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 cursor-pointer hover:bg-white/[0.02]"
                     >
                       <span className={`w-[7px] h-[7px] rounded-full flex-none ${warn ? "bg-coral" : "bg-grass"}`} />
                       <div className="w-[86px] flex-none">
@@ -978,7 +1012,7 @@ export function ReviewWorkbench({
                           {(v.tech ?? "—").split(" ").map((w, i, a) => (i === a.length - 1 && a.length > 1 ? w[0] : w)).join(" ")}
                           {v.minutes != null && ` · ${v.minutes}m`}
                         </div>
-                        {v.body && (
+                        {!activeBody && bodies.length > 1 && v.body && (
                           <div className="font-mono text-[8.5px] text-teal truncate mt-px" title={`Body: ${v.body}`}>
                             {v.body}
                           </div>
@@ -999,7 +1033,7 @@ export function ReviewWorkbench({
                           )
                         })}
                       </div>
-                      <div className="flex-1 min-w-0 pl-4">
+                      <div className="flex-1 min-w-[120px] pl-4 overflow-hidden">
                         {v.notes ? (
                           <span className="text-[11.5px] text-ink-dim block truncate" title={v.notes}>{v.notes}</span>
                         ) : (
@@ -1026,63 +1060,69 @@ export function ReviewWorkbench({
                           No consumables, photos, or additional readings.
                         </div>
                       ) : (
-                      <div className="px-4 pt-1 pb-4 pl-9 flex items-start gap-8 flex-wrap">
-                        {/* consumables sold — moved here from the row */}
-                        {v.chems.length > 0 && (
-                          <div>
-                            <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
-                              Consumables
-                            </div>
-                            <div className="flex gap-1.5 flex-wrap max-w-[440px]">
-                              {v.chems.map((c, ci) => (
-                                <span key={ci}
-                                  className="inline-flex items-baseline gap-1 rounded border border-teal/30 bg-teal/5 px-1.5 py-[1px]">
-                                  <span className="font-mono text-[10.5px] text-teal">{c.qty}</span>
-                                  <span className="text-[10px] text-ink-dim">{bare(c.item)}</span>
-                                  {c.cents ? (
-                                    <span className="font-mono text-[9px] text-ink-mute">{formatCurrency(c.cents / 100)}</span>
-                                  ) : null}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {otherReads.length > 0 && (
-                          <div>
-                            <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
-                              Other readings
-                            </div>
-                            <div className="flex gap-1.5 flex-wrap">
-                              {otherReads.map(([k, val]) => (
-                                <span key={k}
-                                  className="inline-flex items-baseline gap-1.5 rounded border border-line bg-bg-elev px-1.5 py-[1px]">
-                                  <span className="font-mono text-[8.5px] uppercase tracking-[0.06em] text-ink-mute">
-                                    {READING_SHORT[k] ?? k}
+                      <div className="px-4 pt-1 pb-4 pl-9 flex items-stretch gap-6">
+                        {/* left third: other readings over consumables */}
+                        <div className="w-1/3 flex-none flex flex-col gap-4">
+                          {otherReads.length > 0 && (
+                            <div>
+                              <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
+                                Other readings
+                              </div>
+                              <div className="flex gap-1.5 flex-wrap">
+                                {otherReads.map(([k, val]) => (
+                                  <span key={k}
+                                    className="inline-flex items-baseline gap-1.5 rounded border border-line bg-bg-elev px-1.5 py-[1px]">
+                                    <span className="font-mono text-[8.5px] uppercase tracking-[0.06em] text-ink-mute">
+                                      {READING_SHORT[k] ?? k}
+                                    </span>
+                                    <span className="font-mono text-[10.5px] text-ink">{val}</span>
                                   </span>
-                                  <span className="font-mono text-[10.5px] text-ink">{val}</span>
-                                </span>
-                              ))}
+                                ))}
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          )}
+                          {v.chems.length > 0 && (
+                            <div>
+                              <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
+                                Consumables
+                              </div>
+                              <div className="flex gap-1.5 flex-wrap">
+                                {v.chems.map((c, ci) => (
+                                  <span key={ci}
+                                    className="inline-flex items-baseline gap-1 rounded border border-teal/30 bg-teal/5 px-1.5 py-[1px]">
+                                    <span className="font-mono text-[10.5px] text-teal">{c.qty}</span>
+                                    <span className="text-[10px] text-ink-dim">{bare(c.item)}</span>
+                                    {c.cents ? (
+                                      <span className="font-mono text-[9px] text-ink-mute">{formatCurrency(c.cents / 100)}</span>
+                                    ) : null}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {otherReads.length === 0 && v.chems.length === 0 && (
+                            <span className="text-[10px] text-ink-mute">No other readings or consumables.</span>
+                          )}
+                        </div>
+                        {/* right two-thirds: photos, filling the height */}
                         {v.photos.length > 0 && (
-                          <div>
+                          <div className="flex-1 min-w-0">
                             <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
                               Photos
                             </div>
-                            <div className="flex gap-2 flex-wrap">
+                            <div className="grid grid-cols-3 gap-2">
                               {v.photos.map((p, pi) => (
                                 <button
                                   key={p.guid}
                                   onClick={() => setLightbox({ photos: v.photos, i: pi })}
-                                  className="block w-[104px] group"
+                                  className="block group"
                                   title={p.uploaded_by ? `Uploaded by ${p.uploaded_by}` : undefined}
                                 >
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src={p.thumb_url}
                                     alt="Service log photo"
-                                    className="h-16 w-full object-cover rounded-lg border border-line group-hover:border-cyan"
+                                    className="h-32 w-full object-cover rounded-lg border border-line group-hover:border-cyan"
                                   />
                                 </button>
                               ))}
@@ -1095,7 +1135,7 @@ export function ReviewWorkbench({
                   </div>
                 )
               })}
-              {visits.length === 0 && (
+              {shownVisits.length === 0 && (
                 <div className="px-4 py-8 text-center text-[12px] text-ink-mute">
                   No visits recorded for this customer-month.
                 </div>
