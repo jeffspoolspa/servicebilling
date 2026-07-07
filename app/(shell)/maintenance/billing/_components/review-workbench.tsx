@@ -592,6 +592,14 @@ export function ReviewWorkbench({
               </span>
             </div>
             <div className="overflow-y-auto flex-1 min-h-0">
+              {visits.length > 0 && (
+                <div className="flex items-center gap-3 px-4 pt-2.5 pb-1 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">
+                  <span className="w-[7px] flex-none" />
+                  <span className="w-[86px] flex-none">Visit</span>
+                  <span className="w-[300px] flex-none">Core readings</span>
+                  <span className="flex-1 pl-4">Consumables</span>
+                </div>
+              )}
               {visits.map((v) => {
                 const open = openVisit === v.visit_id
                 const warn = Object.entries(v.readings).some(([k, val]) => readingWarn(k, val))
@@ -666,13 +674,13 @@ export function ReviewWorkbench({
                           No notes, photos, or additional readings.
                         </div>
                       ) : (
-                      <div className="px-4 pt-1 pb-4 pl-9 flex items-start gap-10 flex-wrap">
+                      <div className="px-4 pt-1 pb-4 pl-9 flex flex-col gap-3">
                         {otherReads.length > 0 && (
                           <div>
                             <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
                               Other readings
                             </div>
-                            <div className="flex gap-1.5 flex-wrap max-w-[420px]">
+                            <div className="flex gap-1.5 flex-wrap">
                               {otherReads.map(([k, val]) => (
                                 <span key={k}
                                   className="inline-flex items-baseline gap-1.5 rounded border border-line bg-bg-elev px-1.5 py-[1px]">
@@ -686,11 +694,11 @@ export function ReviewWorkbench({
                           </div>
                         )}
                         {v.notes && (
-                          <div className="flex-1 min-w-[220px] max-w-[460px]">
+                          <div>
                             <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
                               Notes
                             </div>
-                            <div className="text-[11.5px] leading-relaxed text-ink-dim">{v.notes}</div>
+                            <div className="text-[11.5px] leading-relaxed text-ink-dim max-w-[640px]">{v.notes}</div>
                           </div>
                         )}
                         {v.photos.length > 0 && (
@@ -698,7 +706,7 @@ export function ReviewWorkbench({
                             <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
                               Photos
                             </div>
-                            <div className="flex gap-2 flex-wrap max-w-[360px]">
+                            <div className="flex gap-2 flex-wrap">
                               {v.photos.map((p, pi) => (
                                 <button
                                   key={p.guid}
