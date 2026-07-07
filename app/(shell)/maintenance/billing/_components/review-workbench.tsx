@@ -674,9 +674,10 @@ export function ReviewWorkbench({
                           No notes, photos, or additional readings.
                         </div>
                       ) : (
-                      <div className="px-4 pt-1 pb-4 pl-9 flex flex-col gap-3">
+                      <div className="px-4 pt-1 pb-4 pl-9 flex items-start gap-4">
+                        {/* left: other readings, under the core-readings column */}
                         {otherReads.length > 0 && (
-                          <div>
+                          <div className="w-[386px] flex-none">
                             <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
                               Other readings
                             </div>
@@ -693,38 +694,41 @@ export function ReviewWorkbench({
                             </div>
                           </div>
                         )}
-                        {v.notes && (
-                          <div>
-                            <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
-                              Notes
+                        {/* right: notes above photos */}
+                        <div className="flex-1 min-w-0 flex flex-col gap-3">
+                          {v.notes && (
+                            <div>
+                              <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
+                                Notes
+                              </div>
+                              <div className="text-[11.5px] leading-relaxed text-ink-dim max-w-[640px]">{v.notes}</div>
                             </div>
-                            <div className="text-[11.5px] leading-relaxed text-ink-dim max-w-[640px]">{v.notes}</div>
-                          </div>
-                        )}
-                        {v.photos.length > 0 && (
-                          <div>
-                            <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
-                              Photos
+                          )}
+                          {v.photos.length > 0 && (
+                            <div>
+                              <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
+                                Photos
+                              </div>
+                              <div className="flex gap-2 flex-wrap">
+                                {v.photos.map((p, pi) => (
+                                  <button
+                                    key={p.guid}
+                                    onClick={() => setLightbox({ photos: v.photos, i: pi })}
+                                    className="block w-[104px] group"
+                                    title={p.uploaded_by ? `Uploaded by ${p.uploaded_by}` : undefined}
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={p.thumb_url}
+                                      alt="Service log photo"
+                                      className="h-16 w-full object-cover rounded-lg border border-line group-hover:border-cyan"
+                                    />
+                                  </button>
+                                ))}
+                              </div>
                             </div>
-                            <div className="flex gap-2 flex-wrap">
-                              {v.photos.map((p, pi) => (
-                                <button
-                                  key={p.guid}
-                                  onClick={() => setLightbox({ photos: v.photos, i: pi })}
-                                  className="block w-[104px] group"
-                                  title={p.uploaded_by ? `Uploaded by ${p.uploaded_by}` : undefined}
-                                >
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={p.thumb_url}
-                                    alt="Service log photo"
-                                    className="h-16 w-full object-cover rounded-lg border border-line group-hover:border-cyan"
-                                  />
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </div>
                       )
                     )}
