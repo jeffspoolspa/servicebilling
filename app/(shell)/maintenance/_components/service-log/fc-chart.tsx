@@ -1,7 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import { Bar, BarChart, CartesianGrid, LabelList, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, CartesianGrid, LabelList, Rectangle, XAxis, YAxis } from "recharts"
 import {
   ChartContainer,
   ChartTooltip,
@@ -24,26 +23,10 @@ const CONFIG: ChartConfig = {
 }
 
 export function FcChart({ rows }: { rows: ChartRow[] }) {
-  const wrapRef = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(0)
-  useEffect(() => {
-    const el = wrapRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth))
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-
   const usable = rows.filter((r) => r.fc != null && r.min != null)
   if (usable.length < 1) {
     return <ChartEmpty title="Free chlorine vs min" />
   }
-
-  // recharts barSize only takes pixels, so size the bars from the measured
-  // container: fill ~92% of each visit's slot, min bar at 80% of the FC bar
-  const slot = width > 0 ? (width - 32) / usable.length : 0
-  const fcSize = Math.max(8, Math.floor(slot * 0.92))
-  const minSize = Math.max(6, Math.floor(fcSize * 0.8))
 
   const data = usable.map((r) => ({
     date: r.date,
@@ -54,7 +37,7 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
   const yMax = Math.ceil(hi * 1.25) // headroom for the labels
 
   return (
-    <div ref={wrapRef}>
+    <div>
       <div className="flex items-baseline justify-between mb-1">
         <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">
           Free chlorine vs min
@@ -93,7 +76,6 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
           <ChartTooltip content={<ChartTooltipContent />} />
           <Bar
             dataKey="fc"
-            barSize={fcSize}
             fill="rgb(56 189 248)"
             fillOpacity={0.8}
             radius={[3, 3, 0, 0]}
@@ -104,11 +86,14 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
           <Bar
             dataKey="min"
             xAxisId="overlay"
-            barSize={minSize}
             fill="rgb(251 113 133)"
             fillOpacity={0.9}
             radius={[2, 2, 0, 0]}
             minPointSize={2}
+            // auto-sized like the FC bar, then shrunk to 80% and re-centered
+            shape={(props: any) => (
+              <Rectangle {...props} x={props.x + props.width * 0.1} width={props.width * 0.8} />
+            )}
           >
             <LabelList dataKey="min" position="top" fontSize={9} fill="rgb(var(--ink))" />
           </Bar>
