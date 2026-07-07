@@ -58,7 +58,10 @@ Needs Review row). One screen per held customer-month:
 - [write] Adjustments: reviewer drafts $/%/comp per line (reason required);
   APPROVE writes them to the QBO invoice as negative DISCOUNT lines
   (`f/billing/apply_maint_adjustments`, item id 72, idempotent, cache
-  refresh) THEN releases the periods to ready_to_process. Original lines
+  refresh) + records each in the `billing_audit.invoice_adjustments`
+  ledger (reason + applied_at; unique key mirrors the QBO-line identity)
+  THEN releases the periods to ready_to_process (chem_flag holds get the
+  flag review recorded first — reviewed_at alone re-holds). Original lines
   stay intact — the sold record and reconcile survive; the subtotal gate
   ignores QBO-side discounts by construction (pre-discount compare).
 - [external] AI analysis: `f/billing/analyze_maint_bill` (Claude sonnet,
