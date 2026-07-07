@@ -232,6 +232,20 @@ export function ReviewWorkbench({
 
   useEffect(() => setWatch(watchlist), [watchlist])
 
+  // warm the browser cache for the open photo's neighbors so next/prev is
+  // instant (full-size originals are public S3 — no signing round-trip)
+  useEffect(() => {
+    if (!lightbox) return
+    const n = lightbox.photos.length
+    for (const j of [lightbox.i + 1, lightbox.i - 1]) {
+      const p = lightbox.photos[((j % n) + n) % n]
+      if (p) {
+        const im = new Image()
+        im.src = p.thumb_url.replace("/t_", "/")
+      }
+    }
+  }, [lightbox])
+
   // lightbox keyboard: Escape closes, arrows move between the visit's photos
   useEffect(() => {
     if (!lightbox) return
@@ -1110,21 +1124,21 @@ export function ReviewWorkbench({
                             <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
                               Photos
                             </div>
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className="flex flex-wrap gap-2">
                               {v.photos.map((p, pi) => (
                                 <button
                                   key={p.guid}
                                   onClick={() => setLightbox({ photos: v.photos, i: pi })}
-                                  className="block group rounded-lg border border-line bg-bg overflow-hidden group-hover:border-cyan hover:border-cyan"
+                                  className="block rounded-lg border border-line overflow-hidden hover:border-cyan"
                                   title={p.uploaded_by ? `Uploaded by ${p.uploaded_by}` : undefined}
                                 >
-                                  {/* thumb is 150×200; object-contain shows the whole
-                                      frame (no crop) and downscales, so it stays crisp */}
+                                  {/* fixed height, natural width — the tile takes the
+                                      photo's own aspect (portrait stays portrait) */}
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src={p.thumb_url}
                                     alt="Service log photo"
-                                    className="h-40 w-full object-contain"
+                                    className="h-40 w-auto"
                                   />
                                 </button>
                               ))}
@@ -1238,7 +1252,15 @@ export function ReviewWorkbench({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 key={p.guid}
-                src={`/api/maintenance-billing/photo?key=${encodeURIComponent(p.s3_key)}`}
+                src={p.thumb_url.replace("/t_", "/")}
+                onError={(e) => {
+                  // rare non-public original: fall back to the signed-URL route
+                  const el = e.currentTarget
+                  if (!el.dataset.fallback) {
+                    el.dataset.fallback = "1"
+                    el.src = `/api/maintenance-billing/photo?key=${encodeURIComponent(p.s3_key)}`
+                  }
+                }}
                 alt="Service log photo"
                 className="relative max-w-[92vw] max-h-[90vh] object-contain rounded-lg"
               />
