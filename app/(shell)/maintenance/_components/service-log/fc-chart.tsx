@@ -82,12 +82,12 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
             radius={[3, 3, 0, 0]}
             minPointSize={3}
           >
-            <LabelList dataKey="fc" position="top" fontSize={9} fill="rgb(56 189 248)" />
+            <LabelList dataKey="fc" position="top" fontSize={9} fill="rgb(var(--ink))" />
           </Bar>
           <Bar
             dataKey="min"
             xAxisId="overlay"
-            barSize={20}
+            barSize={18}
             fill="rgb(251 113 133)"
             fillOpacity={0.9}
             radius={[2, 2, 0, 0]}
