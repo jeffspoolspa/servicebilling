@@ -2,12 +2,17 @@ import Link from "next/link"
 import { Card, CardBody } from "@/components/ui/card"
 import { formatCurrency } from "@/lib/utils/format"
 import { getMaintenanceDashboardKpis } from "../_lib/views"
+import { createSupabaseServer } from "@/lib/supabase/server"
+import { WatchlistTable, type WatchlistRow } from "../_components/watchlist-table"
 
 export const metadata = { title: "Maintenance · Dashboard" }
 export const dynamic = "force-dynamic"
 
 export default async function MaintenanceDashboardPage() {
   const kpis = await getMaintenanceDashboardKpis()
+  const supabase = await createSupabaseServer()
+  const { data: watchRows } = await supabase.rpc("maint_watchlist_open")
+  const watchlist = (watchRows ?? []) as WatchlistRow[]
 
   return (
     <div className="px-7 pt-6 pb-10 space-y-6">
@@ -40,6 +45,20 @@ export default async function MaintenanceDashboardPage() {
           tone="grass"
           href="/maintenance/techs"
         />
+      </section>
+
+      <section className="space-y-2.5">
+        <div className="flex items-end justify-between">
+          <div>
+            <h2 className="font-display text-[16px]">Pool watchlist</h2>
+            <div className="text-ink-mute text-[12px] mt-0.5">
+              {watchlist.length === 0
+                ? "All pools good — nothing being watched."
+                : `${watchlist.length} open concern${watchlist.length === 1 ? "" : "s"} · resolve returns a pool to good`}
+            </div>
+          </div>
+        </div>
+        {watchlist.length > 0 && <WatchlistTable rows={watchlist} />}
       </section>
 
       <Card>

@@ -524,50 +524,12 @@ export function ReviewWorkbench({
           <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">Total due</div>
           <div className="font-display text-[19px] text-sun">{formatCurrency(totalDue)}</div>
         </div>
-        <div className="relative">
-          <button
-            onClick={() => setWatchOpen(!watchOpen)}
-            className="h-8 px-3 rounded-lg border border-line bg-bg-elev text-ink-dim text-[12px] font-medium hover:border-sun hover:text-sun"
-          >
-            {watchOpen ? "Cancel" : "Watch…"}
-          </button>
-          {watchOpen && (
-            <div className="absolute right-0 top-10 z-20 w-[260px] bg-bg border border-line rounded-xl p-3 shadow-card flex flex-col gap-2">
-              <select
-                value={watchReason}
-                onChange={(e) => setWatchReason(e.target.value)}
-                className="h-8 bg-bg-elev border border-line rounded-lg px-2 text-[12px] text-ink outline-none"
-              >
-                <option value="watch">General watch</option>
-                <option value="green_pool">Green pool</option>
-                <option value="equipment_down">Equipment down</option>
-                <option value="low_chlorine">Chronic low chlorine</option>
-              </select>
-              <select
-                value={watchPriority}
-                onChange={(e) => setWatchPriority(Number(e.target.value))}
-                className="h-8 bg-bg-elev border border-line rounded-lg px-2 text-[12px] text-ink outline-none"
-              >
-                <option value={1}>P1 — act now</option>
-                <option value={2}>P2 — keep an eye on</option>
-                <option value={3}>P3 — note</option>
-              </select>
-              <input
-                value={watchNote}
-                onChange={(e) => setWatchNote(e.target.value)}
-                placeholder="Note (optional)"
-                className="h-8 bg-bg-elev border border-line rounded-lg px-2 text-[12px] text-ink outline-none focus:border-cyan"
-              />
-              <button
-                onClick={addWatch}
-                disabled={watchBusy}
-                className="h-8 rounded-lg bg-gradient-to-b from-sun to-sun/80 text-bg text-[12px] font-semibold hover:brightness-110 disabled:opacity-50"
-              >
-                {watchBusy ? "Adding…" : "Add to watchlist"}
-              </button>
-            </div>
-          )}
-        </div>
+        <button
+          onClick={() => setWatchOpen(true)}
+          className="h-8 px-3 rounded-lg border border-line bg-bg-elev text-ink-dim text-[12px] font-medium hover:border-sun hover:text-sun"
+        >
+          Add To Watchlist
+        </button>
         <button
           onClick={release}
           disabled={releasing}
@@ -1082,6 +1044,75 @@ export function ReviewWorkbench({
           </div>
         </div>
       </div>
+
+      {/* add-to-watchlist modal */}
+      {watchOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center"
+          onClick={() => setWatchOpen(false)}
+        >
+          <div
+            className="w-[340px] bg-bg-surface border border-line rounded-xl p-5 shadow-card flex flex-col gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <div className="font-display text-[15px]">Add to watchlist</div>
+              <div className="text-[11.5px] text-ink-mute mt-0.5">
+                {customerName} — flags the pool for follow-up; resolve returns it to good.
+              </div>
+            </div>
+            <div>
+              <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1">Reason</div>
+              <select
+                value={watchReason}
+                onChange={(e) => setWatchReason(e.target.value)}
+                className="w-full h-9 bg-bg-elev border border-line rounded-lg px-2.5 text-[12.5px] text-ink outline-none focus:border-cyan"
+              >
+                <option value="watch">General watch</option>
+                <option value="green_pool">Green pool</option>
+                <option value="equipment_down">Equipment down</option>
+                <option value="low_chlorine">Chronic low chlorine</option>
+              </select>
+            </div>
+            <div>
+              <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1">Priority</div>
+              <select
+                value={watchPriority}
+                onChange={(e) => setWatchPriority(Number(e.target.value))}
+                className="w-full h-9 bg-bg-elev border border-line rounded-lg px-2.5 text-[12.5px] text-ink outline-none focus:border-cyan"
+              >
+                <option value={1}>P1 — act now</option>
+                <option value={2}>P2 — keep an eye on</option>
+                <option value={3}>P3 — note</option>
+              </select>
+            </div>
+            <div>
+              <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1">Note</div>
+              <input
+                value={watchNote}
+                onChange={(e) => setWatchNote(e.target.value)}
+                placeholder="Optional — what to look for"
+                className="w-full h-9 bg-bg-elev border border-line rounded-lg px-2.5 text-[12.5px] text-ink outline-none focus:border-cyan"
+              />
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <button
+                onClick={addWatch}
+                disabled={watchBusy}
+                className="h-9 px-4 rounded-lg bg-gradient-to-b from-sun to-sun/80 text-bg text-[12.5px] font-semibold hover:brightness-110 disabled:opacity-50"
+              >
+                {watchBusy ? "Adding…" : "Add to watchlist"}
+              </button>
+              <button
+                onClick={() => setWatchOpen(false)}
+                className="h-9 px-3 rounded-lg text-[12.5px] text-ink-dim hover:text-ink"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* photo lightbox — click anywhere / Escape to close, arrows to browse */}
       {lightbox && (() => {

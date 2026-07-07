@@ -92,3 +92,25 @@ revoke all on function public.maint_watchlist_for_customer(bigint) from public, 
 grant execute on function public.maint_watchlist_add(uuid[], text, int, text) to authenticated, service_role;
 grant execute on function public.maint_watchlist_resolve(bigint, text) to authenticated, service_role;
 grant execute on function public.maint_watchlist_for_customer(bigint) to authenticated, service_role;
+
+-- fleet-wide open entries (maintenance dashboard watchlist table)
+create or replace function public.maint_watchlist_open()
+returns table (id bigint, customer_id bigint, customer_name text,
+               service_name text, reason text, reason_label text,
+               priority int, source text, rule_key text, note text,
+               opened_at timestamptz)
+language sql stable security definer
+set search_path = maintenance, public
+as $$
+  select w.id, t.customer_id, c.display_name, vc.service_name,
+         w.reason, r.label, w.priority::int, w.source, w.rule_key, w.note, w.opened_at
+  from maintenance.task_watchlist w
+  join maintenance.tasks t on t.id = w.task_id
+  join maintenance.watch_reasons r on r.key = w.reason
+  left join public."Customers" c on c.id = t.customer_id
+  left join maintenance.v_task_class vc on vc.task_id = t.id
+  where w.resolved_at is null
+  order by w.priority, w.opened_at;
+$$;
+revoke all on function public.maint_watchlist_open() from public, anon;
+grant execute on function public.maint_watchlist_open() to authenticated, service_role;
