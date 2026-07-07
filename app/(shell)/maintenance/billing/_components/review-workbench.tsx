@@ -617,7 +617,7 @@ export function ReviewWorkbench({
                           {v.minutes != null && ` · ${v.minutes}m`}
                         </div>
                       </div>
-                      <div className="flex-1 min-w-0 flex items-center gap-1 flex-wrap py-0.5">
+                      <div className="w-[300px] flex-none flex items-center gap-1 flex-wrap py-0.5">
                         {previewReads.map(([k, val]) => {
                           const w = readingWarn(k, val)
                           return (
@@ -628,6 +628,10 @@ export function ReviewWorkbench({
                             </span>
                           )
                         })}
+                        {previewReads.length === 0 && <span className="text-[10px] text-ink-mute">no readings</span>}
+                      </div>
+                      <span className="w-px self-stretch bg-line-soft flex-none" />
+                      <div className="flex-1 min-w-0 flex items-center gap-1 flex-wrap py-0.5">
                         {v.chems.map((c, ci) => (
                           <span key={ci}
                             title={c.cents ? formatCurrency(c.cents / 100) : undefined}
@@ -636,6 +640,7 @@ export function ReviewWorkbench({
                             <span className="text-[10px] text-ink-dim">{bare(c.item)}</span>
                           </span>
                         ))}
+                        {v.chems.length === 0 && <span className="text-[10px] text-ink-mute">no chems sold</span>}
                       </div>
                       {v.photos.length > 0 && (
                         <span className="inline-flex items-center gap-1 font-mono text-[10px] text-ink-mute flex-none">
