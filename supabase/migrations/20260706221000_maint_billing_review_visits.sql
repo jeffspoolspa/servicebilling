@@ -12,6 +12,7 @@ returns table (
   visit_date    date,
   ion_log_id    text,
   service_name  text,
+  body          text,   -- ION ServiceProfile: the body of water
   tech          text,
   minutes       int,
   notes         text,
@@ -25,6 +26,7 @@ as $$
   with v as (
     select v.id, v.visit_date::date as d, v.ion_log_id, v.notes,
            vc.service_name,
+           nullif(trim(v.service_profile), '') as body,
            coalesce(nullif(trim(e.first_name || ' ' || e.last_name), ''), v.ion_submitted_by) as tech,
            case when v.started_at is not null and v.ended_at is not null
                 then greatest(1, round(extract(epoch from (v.ended_at - v.started_at)) / 60))::int
@@ -64,7 +66,7 @@ as $$
     from maintenance.visit_photos vp
     group by vp.ion_log_id
   )
-  select v.id, v.d, v.ion_log_id, v.service_name, v.tech, v.minutes, v.notes,
+  select v.id, v.d, v.ion_log_id, v.service_name, v.body, v.tech, v.minutes, v.notes,
          coalesce(r.readings, '{}'::jsonb),
          coalesce(c.chems, '[]'::jsonb),
          coalesce(p.photos, '[]'::jsonb)

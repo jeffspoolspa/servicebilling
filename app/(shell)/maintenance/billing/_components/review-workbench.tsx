@@ -32,6 +32,7 @@ export interface WorkbenchVisit {
   visit_date: string
   ion_log_id: string | null
   service_name: string | null
+  body: string | null
   tech: string | null
   minutes: number | null
   notes: string | null
@@ -845,6 +846,11 @@ export function ReviewWorkbench({
                           {(v.tech ?? "—").split(" ").map((w, i, a) => (i === a.length - 1 && a.length > 1 ? w[0] : w)).join(" ")}
                           {v.minutes != null && ` · ${v.minutes}m`}
                         </div>
+                        {v.body && (
+                          <div className="font-mono text-[8.5px] text-teal truncate mt-px" title={v.body}>
+                            {v.body}
+                          </div>
+                        )}
                       </div>
                       <div className="w-[300px] flex-none flex items-center gap-1 flex-wrap py-0.5">
                         {previewReads.map(([k, val]) => {
