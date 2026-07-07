@@ -672,14 +672,15 @@ export function ReviewWorkbench({
                             <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
                               Other readings
                             </div>
-                            <div className="flex gap-1.5 flex-wrap max-w-[340px]">
+                            <div className="flex gap-1.5 flex-wrap max-w-[420px]">
                               {otherReads.map(([k, val]) => (
-                                <div key={k} className="bg-bg-elev border border-line rounded-md px-2 py-1 text-center">
-                                  <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-mute">
+                                <span key={k}
+                                  className="inline-flex items-baseline gap-1.5 rounded border border-line bg-bg-elev px-1.5 py-[1px]">
+                                  <span className="font-mono text-[8.5px] uppercase tracking-[0.06em] text-ink-mute">
                                     {READING_SHORT[k] ?? k}
-                                  </div>
-                                  <div className="font-mono text-[12px] text-ink">{val}</div>
-                                </div>
+                                  </span>
+                                  <span className="font-mono text-[10.5px] text-ink">{val}</span>
+                                </span>
                               ))}
                             </div>
                           </div>
