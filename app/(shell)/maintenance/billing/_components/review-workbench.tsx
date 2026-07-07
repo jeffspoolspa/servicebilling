@@ -606,7 +606,17 @@ export function ReviewWorkbench({
               <div key={ln.key} className="border-b border-line-soft px-5 py-2.5 hover:bg-white/[0.015]">
                 <div className="flex items-center gap-2.5">
                   <div className="flex-1 min-w-0">
-                    <div className="text-[12.5px] font-medium text-ink">{ln.name}</div>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-[12.5px] font-medium text-ink">{ln.name}</span>
+                      {ratio != null && (ratio >= 1.15 || ratio <= 0.85) && (
+                        <span
+                          className={`font-mono text-[10px] ${ratioColor}`}
+                          title={`from average ${qtyAvg!.toFixed(1)}`}
+                        >
+                          {ratio >= 1 ? "▲" : "▼"} {Number.isInteger(qtyNow!) ? qtyNow : qtyNow!.toFixed(1)}
+                        </span>
+                      )}
+                    </div>
                     <div className="font-mono text-[10.5px] text-ink-mute mt-0.5">
                       {ln.detail}
                       {invoices.length > 1 && (
@@ -643,14 +653,6 @@ export function ReviewWorkbench({
                     </button>
                   )}
                 </div>
-                {ratio != null && (ratio >= 1.15 || ratio <= 0.85) && (
-                  <div
-                    className={`font-mono text-[10px] mt-1 ${ratioColor}`}
-                    title={`from average ${qtyAvg!.toFixed(1)}`}
-                  >
-                    {ratio >= 1 ? "▲" : "▼"} {Number.isInteger(qtyNow!) ? qtyNow : qtyNow!.toFixed(1)}
-                  </div>
-                )}
                 {adj && (
                   <div className="inline-flex items-center gap-1.5 mt-1.5 font-mono text-[10px] text-coral bg-coral/10 border border-coral/30 rounded-md px-2 py-[3px]">
                     {adj.label} · {adj.reason}
