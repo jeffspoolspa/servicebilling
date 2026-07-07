@@ -1115,14 +1115,16 @@ export function ReviewWorkbench({
                                 <button
                                   key={p.guid}
                                   onClick={() => setLightbox({ photos: v.photos, i: pi })}
-                                  className="block group"
+                                  className="block group rounded-lg border border-line bg-bg overflow-hidden group-hover:border-cyan hover:border-cyan"
                                   title={p.uploaded_by ? `Uploaded by ${p.uploaded_by}` : undefined}
                                 >
+                                  {/* thumb is 150×200; object-contain shows the whole
+                                      frame (no crop) and downscales, so it stays crisp */}
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src={p.thumb_url}
                                     alt="Service log photo"
-                                    className="h-32 w-full object-cover rounded-lg border border-line group-hover:border-cyan"
+                                    className="h-40 w-full object-contain"
                                   />
                                 </button>
                               ))}
