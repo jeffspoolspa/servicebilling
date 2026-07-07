@@ -926,7 +926,7 @@ export function ReviewWorkbench({
                   <span className="w-[7px] flex-none" />
                   <span className="w-[86px] flex-none">Visit</span>
                   <span className="w-[300px] flex-none">Core readings</span>
-                  <span className="flex-1 pl-4">Consumables</span>
+                  <span className="flex-1 pl-4">Notes</span>
                 </div>
               )}
               {visits.map((v) => {
@@ -959,29 +959,25 @@ export function ReviewWorkbench({
                           </div>
                         )}
                       </div>
-                      <div className="w-[300px] flex-none flex items-center gap-1 flex-wrap py-0.5">
+                      <div className="w-[300px] flex-none flex items-start gap-1 flex-wrap py-0.5">
                         {previewReads.map(([k, val]) => {
                           const w = readingWarn(k, val)
                           return (
-                            <span key={k}
-                              className={`inline-flex items-baseline gap-1 rounded border px-1.5 py-[1px] flex-none ${w ? "border-coral/40 bg-coral/5" : "border-line bg-bg-elev"}`}>
-                              <span className="font-mono text-[8.5px] uppercase tracking-[0.06em] text-ink-mute">{READING_SHORT[k]}</span>
-                              <span className={`font-mono text-[10.5px] ${w ? "text-coral" : "text-ink"}`}>{val}</span>
-                            </span>
+                            <div key={k}
+                              className={`rounded border px-1.5 py-0.5 text-center flex-none min-w-[34px] ${w ? "border-coral/40 bg-coral/5" : "border-line bg-bg-elev"}`}>
+                              <div className="font-mono text-[8px] uppercase tracking-[0.05em] text-ink-mute leading-none">{READING_SHORT[k]}</div>
+                              <div className={`font-mono text-[11px] leading-tight mt-0.5 ${w ? "text-coral" : "text-ink"}`}>{val}</div>
+                            </div>
                           )
                         })}
-                        {previewReads.length === 0 && <span className="text-[10px] text-ink-mute">no readings</span>}
+                        {previewReads.length === 0 && <span className="text-[10px] text-ink-mute self-center">no readings</span>}
                       </div>
-                      <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap py-0.5 pl-4">
-                        {v.chems.map((c, ci) => (
-                          <span key={ci}
-                            title={c.cents ? formatCurrency(c.cents / 100) : undefined}
-                            className="inline-flex items-baseline gap-1 rounded border border-teal/30 bg-teal/5 px-1.5 py-[1px] flex-none">
-                            <span className="font-mono text-[10.5px] text-teal">{c.qty}</span>
-                            <span className="text-[10px] text-ink-dim">{bare(c.item)}</span>
-                          </span>
-                        ))}
-                        {v.chems.length === 0 && <span className="text-[10px] text-ink-mute">no chems sold</span>}
+                      <div className="flex-1 min-w-0 pl-4">
+                        {v.notes ? (
+                          <span className="text-[11.5px] text-ink-dim block truncate" title={v.notes}>{v.notes}</span>
+                        ) : (
+                          <span className="text-[10px] text-ink-mute">no notes</span>
+                        )}
                       </div>
                       {v.photos.length > 0 && (
                         <span className="inline-flex items-center gap-1 font-mono text-[10px] text-ink-mute flex-none">
@@ -998,15 +994,34 @@ export function ReviewWorkbench({
 
                     </div>
                     {open && (
-                      otherReads.length === 0 && !v.notes && v.photos.length === 0 ? (
+                      v.chems.length === 0 && otherReads.length === 0 && v.photos.length === 0 ? (
                         <div className="px-4 pb-3 pl-9 text-[11px] text-ink-mute">
-                          No notes, photos, or additional readings.
+                          No consumables, photos, or additional readings.
                         </div>
                       ) : (
-                      <div className="px-4 pt-1 pb-4 pl-9 flex items-start gap-4">
-                        {/* left: other readings, under the core-readings column */}
+                      <div className="px-4 pt-1 pb-4 pl-9 flex items-start gap-8 flex-wrap">
+                        {/* consumables sold — moved here from the row */}
+                        {v.chems.length > 0 && (
+                          <div>
+                            <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
+                              Consumables
+                            </div>
+                            <div className="flex gap-1.5 flex-wrap max-w-[440px]">
+                              {v.chems.map((c, ci) => (
+                                <span key={ci}
+                                  className="inline-flex items-baseline gap-1 rounded border border-teal/30 bg-teal/5 px-1.5 py-[1px]">
+                                  <span className="font-mono text-[10.5px] text-teal">{c.qty}</span>
+                                  <span className="text-[10px] text-ink-dim">{bare(c.item)}</span>
+                                  {c.cents ? (
+                                    <span className="font-mono text-[9px] text-ink-mute">{formatCurrency(c.cents / 100)}</span>
+                                  ) : null}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         {otherReads.length > 0 && (
-                          <div className="w-[386px] flex-none">
+                          <div>
                             <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
                               Other readings
                             </div>
@@ -1023,41 +1038,30 @@ export function ReviewWorkbench({
                             </div>
                           </div>
                         )}
-                        {/* right: notes above photos */}
-                        <div className="flex-1 min-w-0 flex flex-col gap-3">
-                          {v.notes && (
-                            <div>
-                              <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
-                                Notes
-                              </div>
-                              <div className="text-[11.5px] leading-relaxed text-ink-dim max-w-[640px]">{v.notes}</div>
+                        {v.photos.length > 0 && (
+                          <div>
+                            <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
+                              Photos
                             </div>
-                          )}
-                          {v.photos.length > 0 && (
-                            <div>
-                              <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">
-                                Photos
-                              </div>
-                              <div className="flex gap-2 flex-wrap">
-                                {v.photos.map((p, pi) => (
-                                  <button
-                                    key={p.guid}
-                                    onClick={() => setLightbox({ photos: v.photos, i: pi })}
-                                    className="block w-[104px] group"
-                                    title={p.uploaded_by ? `Uploaded by ${p.uploaded_by}` : undefined}
-                                  >
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img
-                                      src={p.thumb_url}
-                                      alt="Service log photo"
-                                      className="h-16 w-full object-cover rounded-lg border border-line group-hover:border-cyan"
-                                    />
-                                  </button>
-                                ))}
-                              </div>
+                            <div className="flex gap-2 flex-wrap">
+                              {v.photos.map((p, pi) => (
+                                <button
+                                  key={p.guid}
+                                  onClick={() => setLightbox({ photos: v.photos, i: pi })}
+                                  className="block w-[104px] group"
+                                  title={p.uploaded_by ? `Uploaded by ${p.uploaded_by}` : undefined}
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={p.thumb_url}
+                                    alt="Service log photo"
+                                    className="h-16 w-full object-cover rounded-lg border border-line group-hover:border-cyan"
+                                  />
+                                </button>
+                              ))}
                             </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
                       )
                     )}
