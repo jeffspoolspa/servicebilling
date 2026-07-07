@@ -26,9 +26,10 @@ export interface WatchlistRow {
 }
 
 const PRIORITY = {
-  1: { label: "P1 — act now", tone: "coral" as const },
-  2: { label: "P2 — watching", tone: "sun" as const },
-  3: { label: "P3 — note", tone: "neutral" as const },
+  1: { label: "Critical", tone: "coral" as const },
+  2: { label: "High", tone: "sun" as const },
+  3: { label: "Medium", tone: "teal" as const },
+  4: { label: "Low", tone: "neutral" as const },
 }
 
 const REASON_TONE: Record<string, "coral" | "sun" | "teal" | "neutral"> = {
@@ -42,13 +43,17 @@ export function WatchlistTable({ rows }: { rows: WatchlistRow[] }) {
   const router = useRouter()
   const [busy, setBusy] = useState<number | null>(null)
 
-  async function resolve(id: number) {
+  async function act(id: number, action: "resolve" | "delete") {
     setBusy(id)
     try {
       const r = await fetch("/api/maintenance-billing/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "resolve", id, note: "Resolved from dashboard" }),
+        body: JSON.stringify(
+          action === "resolve"
+            ? { action, id, note: "Resolved from dashboard" }
+            : { action, id },
+        ),
       })
       if (r.ok) router.refresh()
     } finally {
@@ -97,7 +102,7 @@ export function WatchlistTable({ rows }: { rows: WatchlistRow[] }) {
       accessorFn: (r) => r.priority,
       header: ({ column }) => <DataTableColumnHeader column={column} title="Priority" />,
       cell: ({ row }) => {
-        const p = PRIORITY[row.original.priority as 1 | 2 | 3] ?? PRIORITY[2]
+        const p = PRIORITY[row.original.priority as 1 | 2 | 3 | 4] ?? PRIORITY[3]
         return <Pill tone={p.tone}>{p.label}</Pill>
       },
     },
@@ -138,13 +143,24 @@ export function WatchlistTable({ rows }: { rows: WatchlistRow[] }) {
       id: "actions",
       header: () => <span />,
       cell: ({ row }) => (
-        <button
-          onClick={() => resolve(row.original.id)}
-          disabled={busy === row.original.id}
-          className="text-[11px] px-2.5 py-1 rounded border border-grass/30 text-grass hover:bg-grass/10 disabled:opacity-50 whitespace-nowrap"
-        >
-          {busy === row.original.id ? "…" : "Resolve → good"}
-        </button>
+        <span className="inline-flex items-center gap-1.5">
+          <button
+            onClick={() => act(row.original.id, "resolve")}
+            disabled={busy === row.original.id}
+            title="Concern handled — pool returns to good (kept in history)"
+            className="text-[11px] px-2.5 py-1 rounded border border-grass/30 text-grass hover:bg-grass/10 disabled:opacity-50 whitespace-nowrap"
+          >
+            {busy === row.original.id ? "…" : "Resolved"}
+          </button>
+          <button
+            onClick={() => act(row.original.id, "delete")}
+            disabled={busy === row.original.id}
+            title="Added by mistake — remove without keeping history"
+            className="text-[11px] px-2.5 py-1 rounded border border-line text-ink-mute hover:border-coral hover:text-coral disabled:opacity-50"
+          >
+            Delete
+          </button>
+        </span>
       ),
       enableSorting: false,
     },

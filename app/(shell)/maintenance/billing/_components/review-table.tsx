@@ -93,7 +93,7 @@ export function ReviewTable({ rows }: { rows: ReviewRow[] }) {
                 href={`/maintenance/billing/review/${r.customer_id}/bill?month=${r.month}` as never}
                 className="text-[11px] px-2.5 py-1 rounded border border-cyan/30 text-cyan hover:bg-cyan/10 whitespace-nowrap"
               >
-                Review →
+                Review
               </Link>
             ) : (
               <ReviewSheet row={r} />
@@ -103,7 +103,7 @@ export function ReviewTable({ rows }: { rows: ReviewRow[] }) {
                 href={`/maintenance/billing/review/${r.customer_id}?month=${r.month}` as never}
                 className="text-[11px] px-2.5 py-1 rounded border border-coral/30 text-coral hover:bg-coral/10 whitespace-nowrap"
               >
-                Chems →
+                Chems
               </Link>
             ) : (
               <ReviewQueueActions ids={r.ids} />

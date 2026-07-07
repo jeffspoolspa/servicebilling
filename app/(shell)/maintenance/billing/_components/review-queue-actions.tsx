@@ -34,7 +34,7 @@ export function ReviewQueueActions({ ids }: { ids: string[] }) {
       onClick={markReady}
       className="text-[11px] px-2.5 py-1 rounded border border-teal/30 text-teal hover:bg-teal/10 disabled:opacity-50"
     >
-      {busy ? "…" : "Mark reviewed → ready"}
+      {busy ? "…" : "Mark Reviewed"}
     </button>
   )
 }

@@ -6,6 +6,7 @@ import { guardApi } from "@/lib/auth/api"
  * Pool watchlist (maintenance.task_watchlist).
  * POST { action: "add", period_ids, reason, priority?, note? } -> { added }
  * POST { action: "resolve", id, note? }                        -> { resolved }
+ * POST { action: "delete", id }                                -> { deleted }
  */
 export async function POST(req: NextRequest) {
   const guard = await guardApi("maintenance", { write: true })
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest) {
     const ids = Array.isArray(body.period_ids)
       ? body.period_ids.filter((x: unknown): x is string => typeof x === "string")
       : []
-    const priority = [1, 2, 3].includes(body.priority) ? body.priority : 2
+    const priority = [1, 2, 3, 4].includes(body.priority) ? body.priority : 3
     if (ids.length === 0 || typeof body.reason !== "string") {
       return NextResponse.json({ error: "period_ids and reason required" }, { status: 400 })
     }
@@ -43,5 +44,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ resolved: data === true })
   }
 
-  return NextResponse.json({ error: "action must be add|resolve" }, { status: 400 })
+  if (body.action === "delete") {
+    const id = Number(body.id)
+    if (!id) return NextResponse.json({ error: "id required" }, { status: 400 })
+    const { data, error } = await sb.rpc("maint_watchlist_delete", { p_id: id })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ deleted: data === true })
+  }
+
+  return NextResponse.json({ error: "action must be add|resolve|delete" }, { status: 400 })
 }

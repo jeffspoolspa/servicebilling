@@ -114,3 +114,20 @@ as $$
 $$;
 revoke all on function public.maint_watchlist_open() from public, anon;
 grant execute on function public.maint_watchlist_open() to authenticated, service_role;
+
+-- 2026-07-07b: priorities 1=critical 2=high 3=medium 4=low (default medium);
+-- hard delete RPC for mistaken entries (resolve stays the normal off-ramp)
+ALTER TABLE maintenance.task_watchlist DROP CONSTRAINT task_watchlist_priority_check;
+ALTER TABLE maintenance.task_watchlist ADD CONSTRAINT task_watchlist_priority_check CHECK (priority BETWEEN 1 AND 4);
+ALTER TABLE maintenance.task_watchlist ALTER COLUMN priority SET DEFAULT 3;
+create or replace function public.maint_watchlist_delete(p_id bigint)
+returns boolean
+language sql security definer
+set search_path = maintenance, public
+as $$
+  with del as (
+    delete from maintenance.task_watchlist where id = p_id returning 1
+  ) select exists(select 1 from del);
+$$;
+revoke all on function public.maint_watchlist_delete(bigint) from public, anon;
+grant execute on function public.maint_watchlist_delete(bigint) to authenticated, service_role;

@@ -167,7 +167,7 @@ export function ReviewWorkbench({
   const [watch, setWatch] = useState<WatchEntry[]>(watchlist)
   const [watchOpen, setWatchOpen] = useState(false)
   const [watchReason, setWatchReason] = useState("watch")
-  const [watchPriority, setWatchPriority] = useState(2)
+  const [watchPriority, setWatchPriority] = useState(3)
   const [watchNote, setWatchNote] = useState("")
   const [watchBusy, setWatchBusy] = useState(false)
 
@@ -483,10 +483,10 @@ export function ReviewWorkbench({
                 w.priority === 1 ? "text-coral bg-coral/10 border-coral/30" : "text-sun bg-sun/10 border-sun/30"
               }`}
             >
-              {w.reason_label}{w.priority === 1 && " · P1"}
+              {w.reason_label}{w.priority === 1 && " · critical"}
               <button
                 onClick={() => resolveWatch(w.id)}
-                title="Resolve — back to good"
+                title="Concern handled — back to good"
                 className="hover:text-grass"
               >
                 ×
@@ -535,11 +535,7 @@ export function ReviewWorkbench({
           disabled={releasing}
           className="h-8 px-3.5 rounded-lg bg-gradient-to-b from-cyan to-cyan-deep text-bg text-[12px] font-semibold hover:brightness-110 disabled:opacity-50"
         >
-          {releasing
-            ? applyState || "Working…"
-            : Object.keys(adjustments).length > 0
-              ? `Apply ${Object.keys(adjustments).length} + approve${nextInQueue ? " → next" : ""}`
-              : nextInQueue ? "Approve → next" : "Approve → ready"}
+          {releasing ? applyState || "Working…" : "Approve"}
         </button>
         {!releasing && applyState.startsWith("Failed") && (
           <span className="text-[11px] text-coral max-w-[260px]">{applyState}</span>
@@ -1081,9 +1077,10 @@ export function ReviewWorkbench({
                 onChange={(e) => setWatchPriority(Number(e.target.value))}
                 className="w-full h-9 bg-bg-elev border border-line rounded-lg px-2.5 text-[12.5px] text-ink outline-none focus:border-cyan"
               >
-                <option value={1}>P1 — act now</option>
-                <option value={2}>P2 — keep an eye on</option>
-                <option value={3}>P3 — note</option>
+                <option value={1}>Critical</option>
+                <option value={2}>High</option>
+                <option value={3}>Medium</option>
+                <option value={4}>Low</option>
               </select>
             </div>
             <div>
