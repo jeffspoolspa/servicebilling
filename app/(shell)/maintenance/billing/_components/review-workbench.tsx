@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils/format"
 
@@ -105,6 +105,21 @@ export function ReviewWorkbench({
   const [reason, setReason] = useState("")
   const [err, setErr] = useState("")
   const [releasing, setReleasing] = useState(false)
+  const [lightbox, setLightbox] = useState<{ photos: WorkbenchVisit["photos"]; i: number } | null>(null)
+
+  // lightbox keyboard: Escape closes, arrows move between the visit's photos
+  useEffect(() => {
+    if (!lightbox) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightbox(null)
+      if (e.key === "ArrowRight")
+        setLightbox((lb) => lb && { ...lb, i: (lb.i + 1) % lb.photos.length })
+      if (e.key === "ArrowLeft")
+        setLightbox((lb) => lb && { ...lb, i: (lb.i - 1 + lb.photos.length) % lb.photos.length })
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [lightbox])
 
   const usualByItem = useMemo(() => {
     const m = new Map<string, UsualItem>()
@@ -494,12 +509,10 @@ export function ReviewWorkbench({
                         )}
                         {v.photos.length > 0 && (
                           <div className="flex gap-2 flex-wrap">
-                            {v.photos.map((p) => (
-                              <a
+                            {v.photos.map((p, pi) => (
+                              <button
                                 key={p.guid}
-                                href={`/api/maintenance-billing/photo?key=${encodeURIComponent(p.s3_key)}`}
-                                target="_blank"
-                                rel="noreferrer"
+                                onClick={() => setLightbox({ photos: v.photos, i: pi })}
                                 className="block w-[104px] group"
                                 title={p.uploaded_by ? `Uploaded by ${p.uploaded_by}` : undefined}
                               >
@@ -509,7 +522,7 @@ export function ReviewWorkbench({
                                   alt="Service log photo"
                                   className="h-16 w-full object-cover rounded-lg border border-line group-hover:border-cyan"
                                 />
-                              </a>
+                              </button>
                             ))}
                           </div>
                         )}
@@ -527,6 +540,71 @@ export function ReviewWorkbench({
           </div>
         </div>
       </div>
+
+      {/* photo lightbox — click anywhere / Escape to close, arrows to browse */}
+      {lightbox && (() => {
+        const p = lightbox.photos[lightbox.i]
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center cursor-zoom-out"
+            onClick={() => setLightbox(null)}
+          >
+            {/* full-size loads via the signed-URL redirect; the public thumb
+                shows instantly underneath so there's no blank flash */}
+            <div className="relative max-w-[92vw] max-h-[90vh]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={p.thumb_url}
+                alt=""
+                aria-hidden
+                className="absolute inset-0 w-full h-full object-contain blur-[2px] opacity-60"
+              />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                key={p.guid}
+                src={`/api/maintenance-billing/photo?key=${encodeURIComponent(p.s3_key)}`}
+                alt="Service log photo"
+                className="relative max-w-[92vw] max-h-[90vh] object-contain rounded-lg"
+              />
+            </div>
+            {lightbox.photos.length > 1 && (
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setLightbox({ ...lightbox, i: (lightbox.i - 1 + lightbox.photos.length) % lightbox.photos.length })
+                  }}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-[18px]"
+                  aria-label="Previous photo"
+                >
+                  ‹
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setLightbox({ ...lightbox, i: (lightbox.i + 1) % lightbox.photos.length })
+                  }}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-[18px]"
+                  aria-label="Next photo"
+                >
+                  ›
+                </button>
+              </>
+            )}
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 font-mono text-[11px] text-white/70">
+              {lightbox.photos.length > 1 && `${lightbox.i + 1} / ${lightbox.photos.length} · `}
+              {p.uploaded_by && `by ${p.uploaded_by} · `}click anywhere to close
+            </div>
+            <button
+              onClick={() => setLightbox(null)}
+              className="absolute top-4 right-4 h-9 w-9 rounded-full bg-white/10 hover:bg-white/20 text-white text-[16px]"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+        )
+      })()}
     </div>
   )
 }
