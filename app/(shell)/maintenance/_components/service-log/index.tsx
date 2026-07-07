@@ -94,7 +94,8 @@ function num(v: string | undefined): number | null {
 }
 
 // LSI = pH - pHs; pHs = (9.3 + A + B) - (C + D), carbonate alk = TA - CYA/3
-function lsiOf(ph: number, ta: number, cya: number, ca: number, tds: number, tempF: number): number {
+function lsiOf(ph: number, ta: number, cya: number, ca: number, tds: number, tempF: number): number | null {
+  if (ph <= 0 || ta <= 0 || ca <= 0 || tds <= 0 || tempF <= 32) return null
   const tempC = (tempF - 32) * (5 / 9)
   const carbAlk = Math.max(20, ta - cya / 3)
   const A = (Math.log10(tds) - 1) / 10
@@ -114,7 +115,7 @@ export function ServiceLog({
   className?: string
 }) {
   const [openVisit, setOpenVisit] = useState<string | null>(null)
-  const [summaryOpen, setSummaryOpen] = useState(true)
+  const [summaryOpen, setSummaryOpen] = useState(false)
   const [activeBody, setActiveBody] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<{ photos: ServiceLogVisit["photos"]; i: number } | null>(null)
   // assumptions for never-recorded chart inputs (editable)
@@ -147,7 +148,8 @@ export function ServiceLog({
       .filter((x) => isFinite(x) && (x !== 0 || k === "Free Chlorine" || k === "pH"))
     if (vals.length) avgRaw.set(k, vals.reduce((a, b) => a + b, 0) / vals.length)
   }
-  const readingAvgs = AVG_READINGS.filter((k) => avgRaw.has(k)).map((k) => ({
+  const HEADER_AVGS = ["Free Chlorine", "pH", "Cyanuric Acid", "Total Alkalinity", "Calcium Hardness"]
+  const readingAvgs = HEADER_AVGS.filter((k) => avgRaw.has(k)).map((k) => ({
     k,
     avg: k === "pH" ? avgRaw.get(k)!.toFixed(1) : String(Math.round(avgRaw.get(k)!)),
   }))
@@ -156,12 +158,12 @@ export function ServiceLog({
   //    never-recorded inputs ─────────────────────────────────────────────
   const chart = useMemo(() => {
     const asc = [...shownVisits].sort((a, b) => a.visit_date.localeCompare(b.visit_date))
-    const everRecorded = (name: string) => asc.some((v) => num(v.readings[name]) != null)
+    const everRecorded = (name: string) => asc.some((v) => (num(v.readings[name]) ?? 0) > 0)
     const carry = (name: string, fallback: number | null) => {
       let last: number | null = null
       return asc.map((v) => {
         const x = num(v.readings[name])
-        if (x != null) last = x
+        if (x != null && x > 0) last = x // 0 = unrecorded ION field
         return last ?? fallback
       })
     }
@@ -195,6 +197,14 @@ export function ServiceLog({
     }))
     return { rows, needsAssume, n: asc.length }
   }, [shownVisits, assume])
+
+  // derived header stats: avg LSI over the period + min FC from avg CYA
+  const lsiVals = chart.rows.map((r) => r.lsi).filter((x): x is number => x != null)
+  const avgLsi = lsiVals.length ? lsiVals.reduce((a, b) => a + b, 0) / lsiVals.length : null
+  const cyaForMin = avgRaw.get("Cyanuric Acid") ?? assume.cya
+  const minFc = Math.max(1, 0.075 * cyaForMin)
+  const avgFc = avgRaw.get("Free Chlorine") ?? null
+  const fcOk = avgFc != null ? avgFc >= minFc : null
 
   // warm neighbors of the open lightbox photo (originals are public S3)
   useEffect(() => {
@@ -273,6 +283,39 @@ export function ServiceLog({
             </div>
           )}
         </div>
+        <span className="flex items-center gap-3 flex-1 min-w-0 justify-center font-mono text-[10px]">
+          {readingAvgs.length > 0 && (
+            <span className="text-ink-mute truncate">
+              avg{" "}
+              {readingAvgs.map((r, i) => (
+                <span key={r.k}>
+                  {i > 0 && " · "}
+                  {READING_SHORT[r.k]} <span className="text-ink-dim">{r.avg}</span>
+                </span>
+              ))}
+            </span>
+          )}
+          {(avgLsi != null || avgFc != null) && (
+            <span className="flex items-center gap-2 border-l border-line pl-3 whitespace-nowrap">
+              {avgLsi != null && (
+                <span
+                  className={Math.abs(avgLsi) <= 0.3 ? "text-grass" : avgLsi > 0 ? "text-sun" : "text-coral"}
+                  title="Average LSI over the period (±0.3 = balanced)"
+                >
+                  LSI {avgLsi >= 0 ? "+" : ""}{avgLsi.toFixed(2)}
+                </span>
+              )}
+              {fcOk != null && (
+                <span
+                  className={fcOk ? "text-grass" : "text-coral"}
+                  title={`min FC = 7.5% of avg CYA (${Math.round(cyaForMin)}); avg FC ${avgFc?.toFixed(1)} is ${fcOk ? "above" : "BELOW"}`}
+                >
+                  min FC {minFc.toFixed(1)} {fcOk ? "✓" : "✕"}
+                </span>
+              )}
+            </span>
+          )}
+        </span>
         <span className="flex items-center gap-2 flex-none">
           <span className="font-mono text-[10.5px] text-ink-mute">
             {shownVisits.length} visit{shownVisits.length === 1 ? "" : "s"}
@@ -299,46 +342,52 @@ export function ServiceLog({
       {/* ── summary: averages + charts ── */}
       {chart.n >= 2 && summaryOpen && (
         <div className="px-4 pt-2.5 pb-3 border-b border-line-soft flex-none">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-ink-mute mb-2">
-            {readingAvgs.length > 0 && (
-              <span>
-                avg{" "}
-                {readingAvgs.map((r, i) => (
-                  <span key={r.k}>
-                    {i > 0 && " · "}
-                    {READING_SHORT[r.k]} <span className="text-ink-dim">{r.avg}</span>
-                  </span>
-                ))}
-              </span>
-            )}
-            {/* assumptions for never-recorded chart inputs */}
-            {(["cya", "ca", "tds"] as const).filter((k) => chart.needsAssume[k]).map((k) => (
-              <span key={k} className="inline-flex items-center gap-1 text-sun">
-                assuming {k === "cya" ? "CYA" : k === "ca" ? "Ca" : "TDS"}
-                <input
-                  type="number"
-                  value={assume[k]}
-                  onChange={(e) => setAssume({ ...assume, [k]: Number(e.target.value) || 0 })}
-                  className="w-[52px] h-5 bg-bg-elev border border-sun/30 rounded px-1 text-[10px] font-mono text-sun outline-none focus:border-sun"
-                  title="Never recorded this period — charts use this assumed value"
-                />
-              </span>
-            ))}
-            <span className="inline-flex items-center gap-1">
-              temp
-              <input
-                type="number"
-                value={assume.temp}
-                onChange={(e) => setAssume({ ...assume, temp: Number(e.target.value) || 0 })}
-                className="w-[44px] h-5 bg-bg-elev border border-line rounded px-1 text-[10px] font-mono text-ink-dim outline-none focus:border-cyan"
-                title="Water temperature is not recorded — LSI uses this assumed °F"
-              />
-              °F
-            </span>
-          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FcChart rows={chart.rows} />
-            <LsiChart rows={chart.rows} start={period.start} end={period.end} />
+            <LsiChart
+              rows={chart.rows}
+              start={period.start}
+              end={period.end}
+              controls={
+                <span className="flex items-center gap-2 font-mono text-[8.5px]">
+                  {(["cya", "ca"] as const).filter((k) => chart.needsAssume[k]).map((k) => (
+                    <span key={k} className="inline-flex items-center gap-1 text-sun">
+                      assuming {k === "cya" ? "CYA" : "Ca"}
+                      <input
+                        type="number"
+                        value={assume[k]}
+                        onChange={(e) => setAssume({ ...assume, [k]: Number(e.target.value) || 0 })}
+                        className="w-[46px] h-4.5 bg-bg-elev border border-sun/30 rounded px-1 text-[9px] font-mono text-sun outline-none focus:border-sun"
+                        title="Never recorded this period — calcs use this assumed value"
+                      />
+                    </span>
+                  ))}
+                  {chart.needsAssume.tds && (
+                    <span className="inline-flex items-center gap-1 text-sun">
+                      TDS
+                      <input
+                        type="number"
+                        value={assume.tds}
+                        onChange={(e) => setAssume({ ...assume, tds: Number(e.target.value) || 0 })}
+                        className="w-[46px] h-4.5 bg-bg-elev border border-sun/30 rounded px-1 text-[9px] font-mono text-sun outline-none focus:border-sun"
+                        title="No salinity recorded — LSI uses this assumed TDS"
+                      />
+                    </span>
+                  )}
+                  <span className="inline-flex items-center gap-1 text-ink-mute">
+                    temp
+                    <input
+                      type="number"
+                      value={assume.temp}
+                      onChange={(e) => setAssume({ ...assume, temp: Number(e.target.value) || 0 })}
+                      className="w-[40px] h-4.5 bg-bg-elev border border-line rounded px-1 text-[9px] font-mono text-ink-dim outline-none focus:border-cyan"
+                      title="Water temperature is not recorded — LSI uses this assumed °F"
+                    />
+                    °F
+                  </span>
+                </span>
+              }
+            />
           </div>
         </div>
       )}

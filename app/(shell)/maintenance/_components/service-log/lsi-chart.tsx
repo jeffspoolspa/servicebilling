@@ -27,10 +27,13 @@ export function LsiChart({
   rows,
   start: periodStart,
   end: periodEnd,
+  controls,
 }: {
   rows: ChartRow[]
   start?: string
   end?: string
+  /** assumption inputs etc., rendered inline in the chart header */
+  controls?: React.ReactNode
 }) {
   const dated = rows.filter((r) => r.lsi != null && r.iso)
   if (!dated.length) return <ChartEmpty title="Water balance (LSI)" />
@@ -69,10 +72,13 @@ export function LsiChart({
         <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">
           Water balance (LSI)
         </span>
-        <span className="flex items-center gap-2 font-mono text-[8.5px] text-ink-mute">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-coral inline-block" />corrosive</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-grass inline-block" />balanced</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-sun inline-block" />scaling</span>
+        <span className="flex items-center gap-3">
+          {controls}
+          <span className="flex items-center gap-2 font-mono text-[8.5px] text-ink-mute">
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-coral inline-block" />corrosive</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-grass inline-block" />balanced</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-sun inline-block" />scaling</span>
+          </span>
         </span>
       </div>
       {/* real calendar shape: weekday headers across the top, weeks as rows */}
