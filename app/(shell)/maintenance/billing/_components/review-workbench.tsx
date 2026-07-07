@@ -90,6 +90,16 @@ function readingWarn(name: string, value: string): boolean {
   return false
 }
 
+// canonical season buckets (matches billing_audit.v_customer_month_cpv):
+// summer May-Aug, shoulder (fall/spring) Mar-Apr + Sep-Oct, winter Nov-Feb
+function seasonOf(month: string): "summer" | "shoulder" | "winter" {
+  const m = parseInt(month.slice(5, 7), 10)
+  if (m >= 5 && m <= 8) return "summer"
+  if (m === 3 || m === 4 || m === 9 || m === 10) return "shoulder"
+  return "winter"
+}
+const SEASON_LABEL = { summer: "summer", shoulder: "fall/spring", winter: "winter" } as const
+
 function bare(name: string | null | undefined): string {
   if (!name) return "—"
   return name.split(":").pop()!.trim()
@@ -602,12 +612,22 @@ export function ReviewWorkbench({
           {flagContext && flagContext.history.length > 0 && (() => {
             const hist = flagContext.history
             const thisMonth = hist[hist.length - 1]
-            const prior = hist.slice(0, -1).map((h) => Number(h.chem_usd)).sort((a, b) => a - b)
-            const selfMedian = prior.length
-              ? prior.length % 2
-                ? prior[(prior.length - 1) / 2]
-                : (prior[prior.length / 2 - 1] + prior[prior.length / 2]) / 2
-              : null
+            const season = seasonOf(String(thisMonth.month))
+            const median = (xs: number[]) => {
+              if (!xs.length) return null
+              const a = [...xs].sort((x, y) => x - y)
+              return a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2
+            }
+            // self median compares like months: same season only (chem usage
+            // swings seasonally); fall back to all prior months when the
+            // season has no history yet
+            const sameSeason = hist.slice(0, -1)
+              .filter((h) => seasonOf(String(h.month)) === season)
+              .map((h) => Number(h.chem_usd))
+            const allPrior = hist.slice(0, -1).map((h) => Number(h.chem_usd))
+            const seasonal = sameSeason.length > 0
+            const selfBasis = seasonal ? sameSeason : allPrior
+            const selfMedian = median(selfBasis)
             const peerMedian = flagContext.peerMedian != null ? Number(flagContext.peerMedian) : null
             const max = Math.max(...hist.map((h) => Number(h.chem_usd)), peerMedian ?? 0, 1)
             return (
@@ -632,7 +652,10 @@ export function ReviewWorkbench({
                         title={`${String(h.month).slice(0, 7)} · ${formatCurrency(Number(h.chem_usd))} · ${h.visits} visits`}
                       >
                         <div
-                          className={`w-full rounded-t ${last ? "bg-sun" : "bg-cyan/40"}`}
+                          className={`w-full rounded-t ${
+                            last ? "bg-sun"
+                            : seasonOf(String(h.month)) === season ? "bg-cyan/50" : "bg-cyan/15"
+                          }`}
                           style={{ height: `${Math.max(2, (Number(h.chem_usd) / max) * 64)}px` }}
                         />
                         <span className="font-mono text-[8px] text-ink-mute">
@@ -649,7 +672,10 @@ export function ReviewWorkbench({
                   </div>
                   <div>
                     <div className="font-mono text-[8.5px] uppercase tracking-[0.06em] text-ink-mute">
-                      Self median <span className="normal-case">({prior.length} mo)</span>
+                      Self median{" "}
+                      <span className="normal-case">
+                        ({seasonal ? `${SEASON_LABEL[season]}, ${selfBasis.length} mo` : `all ${selfBasis.length} mo`})
+                      </span>
                     </div>
                     <div className="font-mono text-[13px] text-ink">
                       {selfMedian != null ? formatCurrency(selfMedian) : "—"}
@@ -657,7 +683,10 @@ export function ReviewWorkbench({
                   </div>
                   <div>
                     <div className="font-mono text-[8.5px] uppercase tracking-[0.06em] text-ink-mute">
-                      Peer median <span className="normal-case">{flagContext.peerN != null ? `(n=${flagContext.peerN})` : ""}</span>
+                      Peer median{" "}
+                      <span className="normal-case">
+                        (this month{flagContext.peerN != null ? `, n=${flagContext.peerN}` : ""})
+                      </span>
                     </div>
                     <div className="font-mono text-[13px] text-ink">
                       {peerMedian != null ? formatCurrency(peerMedian) : "—"}
