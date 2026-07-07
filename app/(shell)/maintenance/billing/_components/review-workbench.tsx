@@ -296,6 +296,16 @@ export function ReviewWorkbench({
     }
   }
 
+  // per-reading averages across the month's visits (numeric values only)
+  const readingAvgs = PREVIEW_READINGS.map((k) => {
+    const vals = visits
+      .map((v) => parseFloat(v.readings[k]))
+      .filter((x) => isFinite(x))
+    if (!vals.length) return null
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length
+    return { k, avg: k === "pH" ? avg.toFixed(1) : String(Math.round(avg)) }
+  }).filter(Boolean) as { k: string; avg: string }[]
+
   const flaggedVisits = visits.filter((v) =>
     Object.entries(v.readings).some(([k, val]) => readingWarn(k, val)),
   ).length
@@ -666,8 +676,20 @@ export function ReviewWorkbench({
           {/* visit log */}
           <div className="bg-bg border border-line rounded-xl overflow-hidden flex flex-col flex-1 min-h-0">
             <div className="flex items-center justify-between px-4 py-3 border-b border-line-soft flex-none">
-              <span className="font-display text-[15px]">Service log — {monthLabel}</span>
-              <span className="font-mono text-[10.5px] text-ink-mute">
+              <span className="font-display text-[15px] flex-none">Service log — {monthLabel}</span>
+              <span className="flex-1 text-center font-mono text-[10px] text-ink-mute truncate px-3">
+                {readingAvgs.length > 0 && (
+                  <>avg{" "}
+                    {readingAvgs.map((r, i) => (
+                      <span key={r.k}>
+                        {i > 0 && " · "}
+                        {READING_SHORT[r.k]} <span className="text-ink-dim">{r.avg}</span>
+                      </span>
+                    ))}
+                  </>
+                )}
+              </span>
+              <span className="font-mono text-[10.5px] text-ink-mute flex-none">
                 {visits.length} visit{visits.length === 1 ? "" : "s"}
                 {flaggedVisits > 0 && <> · <span className="text-coral">{flaggedVisits} off-range</span></>}
                 {avgMins != null && <> · avg {avgMins} min</>}
