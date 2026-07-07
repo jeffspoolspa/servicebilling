@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { createSupabaseServer } from "@/lib/supabase/server"
-import { listBillingPeriods, listFlagItems, formatMonth } from "../../../_lib/queries"
+import { getCustomerMonth, listBillingPeriods, listFlagItems, formatMonth } from "../../../_lib/queries"
 import {
   ReviewWorkbench,
   type WorkbenchInvoice,
@@ -32,7 +32,7 @@ export default async function BillReviewPage({
   const monthDate = `${month}-01`
 
   const supabase = await createSupabaseServer()
-  const [periods, usual, visitsRes, analysisRes] = await Promise.all([
+  const [periods, usual, visitsRes, analysisRes, historyRes, mediansRes, cm] = await Promise.all([
     listBillingPeriods(monthDate),
     listFlagItems(customerId, monthDate).catch(() => [] as UsualItem[]),
     supabase.rpc("maint_billing_review_visits", {
@@ -43,6 +43,12 @@ export default async function BillReviewPage({
       p_customer_id: customerId,
       p_month: monthDate,
     }),
+    supabase.rpc("maint_billing_customer_chem_history", {
+      p_customer_id: customerId,
+      p_through: monthDate,
+    }),
+    supabase.rpc("maint_billing_chem_medians", { p_month: monthDate }),
+    getCustomerMonth(customerId, monthDate).catch(() => null),
   ])
   const mine = periods.filter((p) => p.customer_id === customerId)
   if (mine.length === 0) notFound()
@@ -121,6 +127,18 @@ export default async function BillReviewPage({
         usual={usual as UsualItem[]}
         initialAnalysis={((analysisRes.data ?? [])[0] ?? null) as BillAnalysis | null}
         queue={queue}
+        flagContext={{
+          peerGroup: cm?.peer_group ?? null,
+          peerMedian:
+            (mediansRes.data ?? []).find(
+              (m: { peer_group: string }) => m.peer_group === cm?.peer_group,
+            )?.median_usd ?? null,
+          peerN:
+            (mediansRes.data ?? []).find(
+              (m: { peer_group: string }) => m.peer_group === cm?.peer_group,
+            )?.n_customers ?? null,
+          history: (historyRes.data ?? []) as { month: string; chem_usd: number; visits: number }[],
+        }}
       />
     </div>
   )
