@@ -611,21 +611,19 @@ export function ReviewWorkbench({
               <div key={ln.key} className="border-b border-line-soft px-5 py-2.5 hover:bg-white/[0.015]">
                 <div className="flex items-center gap-2.5">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="text-[12.5px] font-medium text-ink">{ln.name}</span>
+                    <div className="text-[12.5px] font-medium text-ink">{ln.name}</div>
+                    <div className="font-mono text-[10.5px] text-ink-mute mt-0.5 flex items-baseline gap-2">
+                      <span>
+                        {ln.detail}
+                        {invoices.length > 1 && <span> · #{ln.invoice.doc_number}</span>}
+                      </span>
                       {ratio != null && (ratio >= 1.15 || ratio <= 0.85) && (
-                        <span className={`group relative font-mono text-[10px] cursor-default ${ratioColor}`}>
+                        <span className={`group relative whitespace-nowrap cursor-default ${ratioColor}`}>
                           {ratio >= 1 ? "▲" : "▼"} {fmtQty(Math.abs(qtyNow! - qtyAvg!))} vs avg
                           <span className="pointer-events-none absolute left-0 top-full mt-1 z-10 hidden group-hover:block whitespace-nowrap rounded-md border border-line bg-bg px-2 py-1 text-[10px] text-ink-dim shadow-card">
                             {fmtQty(qtyNow!)} this month · avg {qtyAvg!.toFixed(1)}
                           </span>
                         </span>
-                      )}
-                    </div>
-                    <div className="font-mono text-[10.5px] text-ink-mute mt-0.5">
-                      {ln.detail}
-                      {invoices.length > 1 && (
-                        <span> · #{ln.invoice.doc_number}</span>
                       )}
                     </div>
                   </div>
