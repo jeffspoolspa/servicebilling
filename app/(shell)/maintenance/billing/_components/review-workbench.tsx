@@ -296,15 +296,54 @@ export function ReviewWorkbench({
     }
   }
 
-  // per-reading averages across the month's visits (numeric values only)
-  const readingAvgs = PREVIEW_READINGS.map((k) => {
+  // per-reading averages across the month's visits. A 0 reading on anything
+  // but FC/pH is an unrecorded field in ION, not a measurement — excluded.
+  const avgRaw = new Map<string, number>()
+  for (const k of PREVIEW_READINGS) {
     const vals = visits
       .map((v) => parseFloat(v.readings[k]))
-      .filter((x) => isFinite(x))
-    if (!vals.length) return null
-    const avg = vals.reduce((a, b) => a + b, 0) / vals.length
-    return { k, avg: k === "pH" ? avg.toFixed(1) : String(Math.round(avg)) }
-  }).filter(Boolean) as { k: string; avg: string }[]
+      .filter((x) => isFinite(x) && (x !== 0 || k === "Free Chlorine" || k === "pH"))
+    if (vals.length) avgRaw.set(k, vals.reduce((a, b) => a + b, 0) / vals.length)
+  }
+  const readingAvgs = PREVIEW_READINGS.filter((k) => avgRaw.has(k)).map((k) => ({
+    k,
+    avg: k === "pH" ? avgRaw.get(k)!.toFixed(1) : String(Math.round(avgRaw.get(k)!)),
+  }))
+
+  // water chemistry on the month averages:
+  // - min FC from the chlorine/CYA relationship: 7.5% of CYA, floor 1.0 ppm
+  // - LSI = pH - pHs, pHs = (9.3 + A + B) - (C + D), with the carbonate-alk
+  //   CYA correction (TA - CYA/3). Assumptions where unrecorded: 84 F water,
+  //   Ca 250 ppm, TDS = salinity reading (salt pool) or 1000 ppm.
+  const chem = (() => {
+    const fc = avgRaw.get("Free Chlorine")
+    const ph = avgRaw.get("pH")
+    const cya = avgRaw.get("Cyanuric Acid")
+    const ta = avgRaw.get("Total Alkalinity")
+    const cal = avgRaw.get("Calcium Hardness")
+    const salt = avgRaw.get("Salinity")
+
+    const minFc = cya != null ? Math.max(1, 0.075 * cya) : null
+    const fcOk = fc != null && minFc != null ? fc >= minFc : null
+
+    let lsi: number | null = null
+    const assumed: string[] = []
+    if (ph != null && ta != null) {
+      const tempC = (84 - 32) * (5 / 9) // assumed summer water temp
+      assumed.push("84°F water")
+      const ca = cal ?? 250
+      if (cal == null) assumed.push("Ca 250")
+      const tds = salt ?? 1000
+      if (salt == null) assumed.push("TDS 1000")
+      const carbAlk = Math.max(20, ta - (cya ?? 0) / 3)
+      const A = (Math.log10(tds) - 1) / 10
+      const B = -13.12 * Math.log10(tempC + 273) + 34.55
+      const C = Math.log10(ca) - 0.4
+      const D = Math.log10(carbAlk)
+      lsi = ph - ((9.3 + A + B) - (C + D))
+    }
+    return { fc, minFc, fcOk, lsi, assumed }
+  })()
 
   const flaggedVisits = visits.filter((v) =>
     Object.entries(v.readings).some(([k, val]) => readingWarn(k, val)),
@@ -686,6 +725,22 @@ export function ReviewWorkbench({
                         {READING_SHORT[r.k]} <span className="text-ink-dim">{r.avg}</span>
                       </span>
                     ))}
+                    {chem.minFc != null && chem.fcOk != null && (
+                      <span
+                        className={chem.fcOk ? "text-grass" : "text-coral"}
+                        title={`min FC = 7.5% of avg CYA (floor 1.0); avg FC ${chem.fc?.toFixed(1)} is ${chem.fcOk ? "above" : "BELOW"}`}
+                      >
+                        {" "}· min FC {chem.minFc.toFixed(1)} {chem.fcOk ? "✓" : "✕"}
+                      </span>
+                    )}
+                    {chem.lsi != null && (
+                      <span
+                        className={Math.abs(chem.lsi) <= 0.3 ? "text-ink-dim" : chem.lsi > 0 ? "text-sun" : "text-coral"}
+                        title={`LSI on month averages (carbonate alk = TA − CYA/3${chem.assumed.length ? "; assumed " + chem.assumed.join(", ") : ""}). ±0.3 = balanced; below = corrosive, above = scaling`}
+                      >
+                        {" "}· LSI {chem.lsi >= 0 ? "+" : ""}{chem.lsi.toFixed(2)}
+                      </span>
+                    )}
                   </>
                 )}
               </span>
