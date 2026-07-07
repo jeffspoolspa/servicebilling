@@ -87,7 +87,7 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
           <Bar
             dataKey="min"
             xAxisId="overlay"
-            barSize={8}
+            barSize={20}
             fill="rgb(251 113 133)"
             fillOpacity={0.9}
             radius={[2, 2, 0, 0]}
