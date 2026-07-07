@@ -132,11 +132,17 @@ export function ServiceLog({
   const presentCols = CORE_COLS.filter(([name]) =>
     shownVisits.some((v) => v.readings[name] != null && v.readings[name] !== ""),
   )
-  // size each column to its widest value (e.g. "500ppb") so cells never
-  // overlap a neighbor — the note is the only part of the row that truncates
+  // grid shows numbers only — ION values sometimes carry units ("500ppb")
+  const displayReading = (val: unknown) => {
+    const s = String(val ?? "")
+    const num = s.replace(/[^\d.\-]/g, "")
+    return num !== "" ? num : s
+  }
+  // size each column to its widest value so cells never overlap a
+  // neighbor — the note is the only part of the row that truncates
   const colWidths = Object.fromEntries(
     presentCols.map(([name]) => {
-      const chars = Math.max(0, ...shownVisits.map((v) => String(v.readings[name] ?? "").length))
+      const chars = Math.max(0, ...shownVisits.map((v) => displayReading(v.readings[name]).length))
       return [name, Math.max(34, chars * 7 + 8)]
     }),
   )
@@ -449,7 +455,7 @@ export function ServiceLog({
                         className={`flex-none text-center font-mono text-[11px] whitespace-nowrap ${
                           w ? "text-coral font-medium" : has ? "text-ink" : "text-ink-mute/40"
                         }`}>
-                        {has ? val : "·"}
+                        {has ? displayReading(val) : "·"}
                       </span>
                     )
                   })}
