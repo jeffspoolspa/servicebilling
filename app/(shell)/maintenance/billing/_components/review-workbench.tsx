@@ -604,9 +604,9 @@ export function ReviewWorkbench({
             const ratio = qtyNow != null && qtyAvg != null && qtyAvg > 0 ? qtyNow / qtyAvg : null
             const ratioColor = ratio == null ? "text-ink-mute"
               : ratio <= 1.2 && ratio >= 0.85 ? "text-ink-mute"
-              : ratio > 1.6 ? "text-coral"
-              : ratio > 1.2 ? "text-sun"
-              : "text-ink-mute"
+              : ratio > 1.6 ? "text-coral"   // well over usual
+              : ratio > 1.2 ? "text-sun"     // over usual
+              : "text-cyan"                   // under usual
             return (
               <div key={ln.key} className="border-b border-line-soft px-5 py-2.5 hover:bg-white/[0.015]">
                 <div className="flex items-center gap-2.5">
