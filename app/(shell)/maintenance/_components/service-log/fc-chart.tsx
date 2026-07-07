@@ -13,14 +13,13 @@ import { ChartEmpty, type ChartRow } from "./chart-shared"
 
 /**
  * ServiceLog sub-chart: free chlorine per visit as a stacked bar (shadcn
- * stacked-bar pattern) — blue = recorded FC, red stacked on top = how far
- * short of the min FC (7.5% CYA, rounded) the reading fell. A fully blue
- * bar met the minimum; the tooltip carries the exact numbers.
+ * stacked-bar pattern) — every bar has both segments: red = min FC
+ * (7.5% CYA, rounded) on the bottom, blue = recorded FC stacked on top.
  */
 
 const CONFIG: ChartConfig = {
+  min: { label: "Min FC", color: "rgb(251 113 133)" },
   fc: { label: "Recorded FC", color: "rgb(56 189 248)" },
-  deficit: { label: "Below min", color: "rgb(251 113 133)" },
 } satisfies ChartConfig
 
 export function FcChart({ rows }: { rows: ChartRow[] }) {
@@ -29,15 +28,11 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
     return <ChartEmpty title="Free chlorine vs min" />
   }
 
-  const data = usable.map((r) => {
-    const min = Math.round(r.min!)
-    return {
-      date: r.date,
-      fc: r.fc!,
-      deficit: Math.max(0, min - r.fc!),
-      min,
-    }
-  })
+  const data = usable.map((r) => ({
+    date: r.date,
+    fc: r.fc!,
+    min: Math.round(r.min!),
+  }))
 
   return (
     <div>
@@ -67,27 +62,18 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
             width={30}
             tickCount={4}
           />
-          <ChartTooltip
-            content={
-              <ChartTooltipContent
-                labelFormatter={(label, payload) => {
-                  const p = payload?.[0]?.payload
-                  return p ? `${label} · min FC ${p.min}` : String(label)
-                }}
-              />
-            }
-          />
+          <ChartTooltip content={<ChartTooltipContent />} />
           <ChartLegend content={<ChartLegendContent />} />
+          <Bar
+            dataKey="min"
+            stackId="a"
+            fill="var(--color-min)"
+            radius={[0, 0, 4, 4]}
+          />
           <Bar
             dataKey="fc"
             stackId="a"
             fill="var(--color-fc)"
-            radius={[0, 0, 4, 4]}
-          />
-          <Bar
-            dataKey="deficit"
-            stackId="a"
-            fill="var(--color-deficit)"
             radius={[4, 4, 0, 0]}
           />
         </BarChart>
