@@ -3,17 +3,17 @@
 import { ChartEmpty, type ChartRow } from "./chart-shared"
 
 /**
- * ServiceLog sub-chart: water balance as a contribution-style heatmap.
- * One cell per day (weeks as columns, Sun–Sat rows); visit days are colored
- * by the LSI zone — grass = balanced (|LSI| ≤ 0.3), amber = scaling,
- * coral = corrosive — and non-visit days stay faint. Hover a cell for the
- * date and exact LSI.
+ * ServiceLog sub-chart: water balance as a day calendar — one cell per day
+ * of the period (weeks as columns, Sun–Sat rows), each visit day colored by
+ * its LSI zone: grass = balanced (|LSI| ≤ 0.3), amber = scaling, coral =
+ * corrosive. Cells carry their day-of-month number; hover for the exact LSI.
+ * The grid stretches to fill the component (same height as the FC chart).
  */
 
 const ZONE = {
-  balanced: "bg-grass",
-  scaling: "bg-sun",
-  corrosive: "bg-coral",
+  balanced: "bg-grass text-bg",
+  scaling: "bg-sun text-bg",
+  corrosive: "bg-coral text-bg",
 } as const
 
 function zoneOf(lsi: number): keyof typeof ZONE {
@@ -36,24 +36,25 @@ export function LsiChart({
   if (!dated.length) return <ChartEmpty title="Water balance (LSI)" />
 
   const byIso = new Map(dated.map((r) => [r.iso, r.lsi as number]))
-  // one square per day of the PERIOD (fallback: the visit span)
+  // one cell per day of the PERIOD (fallback: the visit span)
   const firstIso = periodStart ?? dated[0].iso
   const lastIso = periodEnd ?? dated[dated.length - 1].iso
-  // align the grid to full weeks (Sun..Sat); out-of-period cells render blank
   const start = new Date(firstIso + "T12:00:00Z")
   start.setUTCDate(start.getUTCDate() - start.getUTCDay())
   const end = new Date(lastIso + "T12:00:00Z")
   end.setUTCDate(end.getUTCDate() + (6 - end.getUTCDay()))
 
-  const weeks: { iso: string; label: string; lsi: number | null; inPeriod: boolean }[][] = []
+  type Cell = { iso: string; label: string; day: number; lsi: number | null; inPeriod: boolean }
+  const weeks: Cell[][] = []
   const d = new Date(start)
   while (d <= end) {
-    const week: { iso: string; label: string; lsi: number | null; inPeriod: boolean }[] = []
+    const week: Cell[] = []
     for (let i = 0; i < 7; i++) {
       const iso = d.toISOString().slice(0, 10)
       week.push({
         iso,
         label: d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
+        day: d.getUTCDate(),
         lsi: byIso.get(iso) ?? null,
         inPeriod: iso >= firstIso && iso <= lastIso,
       })
@@ -63,10 +64,10 @@ export function LsiChart({
   }
 
   return (
-    <div>
-      <div className="flex items-baseline justify-between mb-1.5">
+    <div className="flex flex-col">
+      <div className="flex items-baseline justify-between mb-1">
         <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">
-          Water balance (LSI)
+          Water balance (LSI) — one square per day
         </span>
         <span className="flex items-center gap-2 font-mono text-[8.5px] text-ink-mute">
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-coral inline-block" />corrosive</span>
@@ -74,33 +75,41 @@ export function LsiChart({
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-sun inline-block" />scaling</span>
         </span>
       </div>
-      <div className="flex gap-1.5">
-        <div className="flex flex-col gap-[3px] pt-px">
-          {DAY_LETTERS.map((l, i) => (
-            <span key={i} className="h-[14px] leading-[14px] font-mono text-[8px] text-ink-mute w-2 text-center">
-              {i % 2 === 1 ? l : ""}
+      <div
+        className="grid gap-[3px] h-[130px] w-full"
+        style={{
+          gridTemplateColumns: `12px repeat(${weeks.length}, 1fr)`,
+          gridTemplateRows: "repeat(7, 1fr)",
+        }}
+      >
+        {DAY_LETTERS.map((l, i) => (
+          <span
+            key={`d${i}`}
+            style={{ gridColumn: 1, gridRow: i + 1 }}
+            className="font-mono text-[8px] text-ink-mute self-center"
+          >
+            {l}
+          </span>
+        ))}
+        {weeks.map((week, wi) =>
+          week.map((cell, di) => (
+            <span
+              key={cell.iso}
+              style={{ gridColumn: wi + 2, gridRow: di + 1 }}
+              title={!cell.inPeriod ? undefined
+                : cell.lsi != null
+                  ? `${cell.label} · LSI ${cell.lsi >= 0 ? "+" : ""}${cell.lsi.toFixed(2)} (${zoneOf(cell.lsi)})`
+                  : `${cell.label} — no visit`}
+              className={`rounded-[3px] flex items-center justify-center font-mono text-[9px] ${
+                !cell.inPeriod ? "opacity-0"
+                : cell.lsi != null ? `${ZONE[zoneOf(cell.lsi)]} font-semibold`
+                : "bg-bg-elev text-ink-mute/50"
+              }`}
+            >
+              {cell.inPeriod ? cell.day : ""}
             </span>
-          ))}
-        </div>
-        <div className="flex gap-[3px]">
-          {weeks.map((week, wi) => (
-            <div key={wi} className="flex flex-col gap-[3px]">
-              {week.map((cell) => (
-                <span
-                  key={cell.iso}
-                  title={!cell.inPeriod ? undefined
-                    : cell.lsi != null
-                      ? `${cell.label} · LSI ${cell.lsi >= 0 ? "+" : ""}${cell.lsi.toFixed(2)} (${zoneOf(cell.lsi)})`
-                      : cell.label}
-                  className={`w-[14px] h-[14px] rounded-[3px] ${
-                    !cell.inPeriod ? "opacity-0"
-                    : cell.lsi != null ? ZONE[zoneOf(cell.lsi)] : "bg-bg-elev"
-                  }`}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
+          )),
+        )}
       </div>
     </div>
   )
