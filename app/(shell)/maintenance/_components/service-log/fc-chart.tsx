@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef, useState } from "react"
 import { Bar, BarChart, CartesianGrid, LabelList, XAxis, YAxis } from "recharts"
 import {
   ChartContainer,
@@ -23,10 +24,26 @@ const CONFIG: ChartConfig = {
 }
 
 export function FcChart({ rows }: { rows: ChartRow[] }) {
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(0)
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   const usable = rows.filter((r) => r.fc != null && r.min != null)
   if (usable.length < 1) {
     return <ChartEmpty title="Free chlorine vs min" />
   }
+
+  // recharts barSize only takes pixels, so size the bars from the measured
+  // container: fill ~92% of each visit's slot, min bar at 80% of the FC bar
+  const slot = width > 0 ? (width - 32) / usable.length : 0
+  const fcSize = Math.max(8, Math.floor(slot * 0.92))
+  const minSize = Math.max(6, Math.floor(fcSize * 0.8))
 
   const data = usable.map((r) => ({
     date: r.date,
@@ -37,7 +54,7 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
   const yMax = Math.ceil(hi * 1.25) // headroom for the labels
 
   return (
-    <div>
+    <div ref={wrapRef}>
       <div className="flex items-baseline justify-between mb-1">
         <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">
           Free chlorine vs min
@@ -52,7 +69,7 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
           accessibilityLayer
           data={data}
           margin={{ top: 12, right: 8, left: -6, bottom: 0 }}
-          barCategoryGap="12%"
+          barCategoryGap="4%"
         >
           <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
           <XAxis
@@ -76,7 +93,7 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
           <ChartTooltip content={<ChartTooltipContent />} />
           <Bar
             dataKey="fc"
-            barSize={22}
+            barSize={fcSize}
             fill="rgb(56 189 248)"
             fillOpacity={0.8}
             radius={[3, 3, 0, 0]}
@@ -87,12 +104,14 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
           <Bar
             dataKey="min"
             xAxisId="overlay"
-            barSize={18}
+            barSize={minSize}
             fill="rgb(251 113 133)"
             fillOpacity={0.9}
             radius={[2, 2, 0, 0]}
             minPointSize={2}
-          />
+          >
+            <LabelList dataKey="min" position="top" fontSize={9} fill="rgb(var(--ink))" />
+          </Bar>
         </BarChart>
       </ChartContainer>
     </div>
