@@ -10,9 +10,9 @@ import {
 import { ChartEmpty, type ChartRow } from "./chart-shared"
 
 /**
- * ServiceLog sub-chart: recorded free chlorine (gradient-filled area, dots
- * coral when a visit dipped below min) against the min-FC line (7.5% of
- * CYA, dashed coral).
+ * ServiceLog sub-chart: recorded free chlorine against the min-FC line
+ * (7.5% of CYA, dashed). The band between the two is the story: green
+ * where FC sits above min (buffer), red where it fell below (deficiency).
  */
 
 const CONFIG: ChartConfig = {
@@ -24,23 +24,54 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
   if (!rows.some((r) => r.fc != null)) {
     return <ChartEmpty title="Free chlorine vs min" />
   }
+
+  // range bands between min and fc: buffer (above min) / deficiency (below)
+  const data = rows.map((r) => {
+    const both = r.fc != null && r.min != null
+    return {
+      ...r,
+      buffer: both ? [r.min!, Math.max(r.fc!, r.min!)] : null,
+      deficiency: both ? [Math.min(r.fc!, r.min!), r.min!] : null,
+    }
+  })
+
   return (
     <div>
-      <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1">
-        Free chlorine vs min
+      <div className="flex items-baseline justify-between mb-1">
+        <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">
+          Free chlorine vs min
+        </span>
+        <span className="flex items-center gap-2 font-mono text-[8.5px] text-ink-mute">
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-grass/50 inline-block" />buffer</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-[2px] bg-coral/60 inline-block" />deficiency</span>
+        </span>
       </div>
       <ChartContainer config={CONFIG} className="aspect-auto h-[130px] w-full">
-        <AreaChart accessibilityLayer data={rows} margin={{ top: 6, right: 8, left: -26, bottom: 0 }}>
-          <defs>
-            <linearGradient id="fcFill" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="rgb(56 189 248)" stopOpacity={0.3} />
-              <stop offset="100%" stopColor="rgb(56 189 248)" stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
+        <AreaChart accessibilityLayer data={data} margin={{ top: 6, right: 8, left: -26, bottom: 0 }}>
           <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
           <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={6} fontSize={9} interval="preserveStartEnd" />
           <YAxis tickLine={false} axisLine={false} fontSize={9} width={34} domain={[0, "auto"]} />
           <ChartTooltip content={<ChartTooltipContent />} />
+          <Area
+            dataKey="buffer"
+            type="monotone"
+            stroke="none"
+            fill="rgb(74 222 128)"
+            fillOpacity={0.18}
+            connectNulls
+            tooltipType="none"
+            activeDot={false}
+          />
+          <Area
+            dataKey="deficiency"
+            type="monotone"
+            stroke="none"
+            fill="rgb(251 113 133)"
+            fillOpacity={0.3}
+            connectNulls
+            tooltipType="none"
+            activeDot={false}
+          />
           <Line
             dataKey="min"
             type="monotone"
@@ -50,12 +81,11 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
             dot={false}
             connectNulls
           />
-          <Area
+          <Line
             dataKey="fc"
             type="monotone"
             stroke="var(--color-fc)"
             strokeWidth={2}
-            fill="url(#fcFill)"
             connectNulls
             dot={(props) => {
               const { cx, cy, payload, index } = props
