@@ -64,7 +64,15 @@ interface Adjustment {
 const READING_SHORT: Record<string, string> = {
   "Free Chlorine": "FC", pH: "pH", "Total Alkalinity": "TA",
   "Cyanuric Acid": "CYA", Salinity: "SALT", "Total Chlorine": "TC",
+  "Calcium Hardness": "CAL",
 }
+
+// readings shown as chips on every preview row (when recorded); everything
+// else lands in the expanded view
+const PREVIEW_READINGS = [
+  "Free Chlorine", "pH", "Cyanuric Acid", "Total Alkalinity",
+  "Calcium Hardness", "Salinity",
+]
 
 function readingWarn(name: string, value: string): boolean {
   const v = parseFloat(value)
@@ -587,15 +595,17 @@ export function ReviewWorkbench({
               {visits.map((v) => {
                 const open = openVisit === v.visit_id
                 const warn = Object.entries(v.readings).some(([k, val]) => readingWarn(k, val))
-                const fc = v.readings["Free Chlorine"]
-                const ph = v.readings["pH"]
                 const chemCents = v.chems.reduce((s, c) => s + (c.cents ?? 0), 0)
-                const doseShort = v.chems.map((c) => `${c.qty} ${bare(c.item)}`).join(" + ")
+                const previewReads = PREVIEW_READINGS
+                  .filter((k) => v.readings[k] != null && v.readings[k] !== "")
+                  .map((k) => [k, v.readings[k]] as const)
+                const otherReads = Object.entries(v.readings)
+                  .filter(([k, val]) => !PREVIEW_READINGS.includes(k) && val != null && val !== "")
                 return (
                   <div key={v.visit_id} className="border-b border-line-soft last:border-0">
                     <div
                       onClick={() => setOpenVisit(open ? null : v.visit_id)}
-                      className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-white/[0.02]"
+                      className="flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-white/[0.02]"
                     >
                       <span className={`w-[7px] h-[7px] rounded-full flex-none ${warn ? "bg-coral" : "bg-grass"}`} />
                       <div className="w-[86px] flex-none">
@@ -607,11 +617,25 @@ export function ReviewWorkbench({
                           {v.minutes != null && ` · ${v.minutes}m`}
                         </div>
                       </div>
-                      <div className="w-[130px] flex-none font-mono text-[10.5px] text-ink-dim">
-                        {fc != null && `FC ${fc}`}{fc != null && ph != null && " · "}{ph != null && `pH ${ph}`}
-                      </div>
-                      <div className="flex-1 min-w-0 text-[11.5px] text-ink-dim whitespace-nowrap overflow-hidden text-ellipsis">
-                        {doseShort || v.notes || "—"}
+                      <div className="flex-1 min-w-0 flex items-center gap-1 flex-wrap py-0.5">
+                        {previewReads.map(([k, val]) => {
+                          const w = readingWarn(k, val)
+                          return (
+                            <span key={k}
+                              className={`inline-flex items-baseline gap-1 rounded border px-1.5 py-[1px] flex-none ${w ? "border-coral/40 bg-coral/5" : "border-line bg-bg-elev"}`}>
+                              <span className="font-mono text-[8.5px] uppercase tracking-[0.06em] text-ink-mute">{READING_SHORT[k]}</span>
+                              <span className={`font-mono text-[10.5px] ${w ? "text-coral" : "text-ink"}`}>{val}</span>
+                            </span>
+                          )
+                        })}
+                        {v.chems.map((c, ci) => (
+                          <span key={ci}
+                            title={c.cents ? formatCurrency(c.cents / 100) : undefined}
+                            className="inline-flex items-baseline gap-1 rounded border border-teal/30 bg-teal/5 px-1.5 py-[1px] flex-none">
+                            <span className="font-mono text-[10.5px] text-teal">{c.qty}</span>
+                            <span className="text-[10px] text-ink-dim">{bare(c.item)}</span>
+                          </span>
+                        ))}
                       </div>
                       {v.photos.length > 0 && (
                         <span className="inline-flex items-center gap-1 font-mono text-[10px] text-ink-mute flex-none">
@@ -634,30 +658,25 @@ export function ReviewWorkbench({
                     </div>
                     {open && (
                       <div className="px-4 pb-3.5 pl-9 flex flex-col gap-2.5">
-                        <div className="flex gap-1.5 flex-wrap">
-                          {Object.entries(v.readings).map(([k, val]) => {
-                            const w = readingWarn(k, val)
-                            return (
-                              <div key={k}
-                                className={`bg-bg-elev border rounded-md px-2 py-1 text-center ${w ? "border-coral/40" : "border-line"}`}>
+                        {otherReads.length > 0 && (
+                          <div className="flex gap-1.5 flex-wrap">
+                            {otherReads.map(([k, val]) => (
+                              <div key={k} className="bg-bg-elev border border-line rounded-md px-2 py-1 text-center">
                                 <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-mute">
                                   {READING_SHORT[k] ?? k}
                                 </div>
-                                <div className={`font-mono text-[12px] ${w ? "text-coral" : "text-ink"}`}>{val}</div>
+                                <div className="font-mono text-[12px] text-ink">{val}</div>
                               </div>
-                            )
-                          })}
-                        </div>
-                        {v.chems.length > 0 && (
-                          <div className="text-[11.5px] text-ink-dim">
-                            <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute mr-1.5">Sold</span>
-                            {v.chems.map((c) => `${c.qty} ${bare(c.item)}${c.cents ? ` (${formatCurrency(c.cents / 100)})` : ""}`).join(" · ")}
+                            ))}
                           </div>
                         )}
                         {v.notes && (
                           <div className="text-[11.5px] leading-relaxed text-ink-dim border-l-2 border-line pl-2.5">
                             {v.notes}
                           </div>
+                        )}
+                        {otherReads.length === 0 && !v.notes && v.photos.length === 0 && (
+                          <div className="text-[11px] text-ink-mute">No notes, photos, or additional readings.</div>
                         )}
                         {v.photos.length > 0 && (
                           <div className="flex gap-2 flex-wrap">
