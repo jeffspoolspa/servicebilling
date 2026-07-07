@@ -396,7 +396,7 @@ export function ServiceLog({
                   </div>
                 ) : (
                 <div className="px-4 pt-1 pb-4 pl-9 flex items-stretch gap-6">
-                  <div className="w-1/3 flex-none flex flex-col gap-4">
+                  <div className="w-1/2 flex-none flex flex-col gap-4">
                     {otherReads.length > 0 && (
                       <div>
                         <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1.5">

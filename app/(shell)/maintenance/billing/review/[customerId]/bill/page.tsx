@@ -53,6 +53,7 @@ export default async function BillReviewPage({
   const watchlistRes = await supabase.rpc("maint_watchlist_for_customer", {
     p_customer_id: customerId,
   })
+  const reasonsRes = await supabase.rpc("maint_watchlist_reasons")
   const mine = periods.filter((p) => p.customer_id === customerId)
   if (mine.length === 0) notFound()
   if (visitsRes.error) throw new Error(visitsRes.error.message)
@@ -131,6 +132,7 @@ export default async function BillReviewPage({
         initialAnalysis={((analysisRes.data ?? [])[0] ?? null) as BillAnalysis | null}
         queue={queue}
         watchlist={(watchlistRes.data ?? []) as never}
+        watchReasons={(reasonsRes.data ?? []) as never}
         flagContext={{
           peerGroup: cm?.peer_group ?? null,
           peerMedian:

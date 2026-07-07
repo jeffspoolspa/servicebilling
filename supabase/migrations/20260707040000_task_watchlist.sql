@@ -131,3 +131,26 @@ as $$
 $$;
 revoke all on function public.maint_watchlist_delete(bigint) from public, anon;
 grant execute on function public.maint_watchlist_delete(bigint) to authenticated, service_role;
+
+-- 2026-07-07c: reason list read + create (developable from the UI)
+create or replace function public.maint_watchlist_reasons()
+returns table (key text, label text)
+language sql stable security definer
+set search_path = maintenance, public
+as $$
+  select r.key, r.label from maintenance.watch_reasons r order by r.label;
+$$;
+create or replace function public.maint_watchlist_create_reason(p_label text)
+returns table (key text, label text)
+language sql security definer
+set search_path = maintenance, public
+as $$
+  insert into maintenance.watch_reasons (key, label)
+  values (regexp_replace(lower(trim(p_label)), '[^a-z0-9]+', '_', 'g'), trim(p_label))
+  on conflict (key) do update set label = excluded.label
+  returning watch_reasons.key, watch_reasons.label;
+$$;
+revoke all on function public.maint_watchlist_reasons() from public, anon;
+revoke all on function public.maint_watchlist_create_reason(text) from public, anon;
+grant execute on function public.maint_watchlist_reasons() to authenticated, service_role;
+grant execute on function public.maint_watchlist_create_reason(text) to authenticated, service_role;

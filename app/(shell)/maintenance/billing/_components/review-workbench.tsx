@@ -109,6 +109,7 @@ export function ReviewWorkbench({
   queue = [],
   flagContext = null,
   watchlist = [],
+  watchReasons = [],
 }: {
   customerId: number
   qboCustomerId: string
@@ -125,6 +126,7 @@ export function ReviewWorkbench({
   queue: { customerId: number; name: string }[]
   flagContext: FlagContext | null
   watchlist: WatchEntry[]
+  watchReasons: { key: string; label: string }[]
 }) {
   const router = useRouter()
   const [adjustments, setAdjustments] = useState<Record<string, Adjustment>>({})
@@ -145,6 +147,28 @@ export function ReviewWorkbench({
   const [watchPriority, setWatchPriority] = useState(3)
   const [watchNote, setWatchNote] = useState("")
   const [watchBusy, setWatchBusy] = useState(false)
+  const [reasonList, setReasonList] = useState(watchReasons)
+  const [newReason, setNewReason] = useState("")
+
+  useEffect(() => setReasonList(watchReasons), [watchReasons])
+
+  async function createReason() {
+    const label = newReason.trim()
+    if (label.length < 2) return
+    const r = await fetch("/api/maintenance-billing/watchlist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "add_reason", label }),
+    })
+    const j = await r.json()
+    if (r.ok && j.key) {
+      setReasonList((prev) =>
+        prev.some((x) => x.key === j.key) ? prev : [...prev, j].sort((a, b) => a.label.localeCompare(b.label)),
+      )
+      setWatchReason(j.key)
+      setNewReason("")
+    }
+  }
 
   async function addWatch() {
     setWatchBusy(true)
@@ -812,11 +836,26 @@ export function ReviewWorkbench({
                 onChange={(e) => setWatchReason(e.target.value)}
                 className="w-full h-9 bg-bg-elev border border-line rounded-lg px-2.5 text-[12.5px] text-ink outline-none focus:border-cyan"
               >
-                <option value="watch">General watch</option>
-                <option value="green_pool">Green pool</option>
-                <option value="equipment_down">Equipment down</option>
-                <option value="low_chlorine">Chronic low chlorine</option>
+                {reasonList.map((r) => (
+                  <option key={r.key} value={r.key}>{r.label}</option>
+                ))}
               </select>
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <input
+                  value={newReason}
+                  onChange={(e) => setNewReason(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") createReason() }}
+                  placeholder="New reason…"
+                  className="flex-1 h-7 bg-bg-elev border border-line rounded-lg px-2 text-[11.5px] text-ink outline-none focus:border-cyan"
+                />
+                <button
+                  onClick={createReason}
+                  disabled={newReason.trim().length < 2}
+                  className="h-7 px-2.5 rounded-lg border border-line text-[11px] text-ink-dim hover:border-cyan hover:text-cyan disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
             </div>
             <div>
               <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute mb-1">Priority</div>

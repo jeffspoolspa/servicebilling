@@ -7,6 +7,7 @@ import { guardApi } from "@/lib/auth/api"
  * POST { action: "add", period_ids, reason, priority?, note? } -> { added }
  * POST { action: "resolve", id, note? }                        -> { resolved }
  * POST { action: "delete", id }                                -> { deleted }
+ * POST { action: "add_reason", label }                         -> { key, label }
  */
 export async function POST(req: NextRequest) {
   const guard = await guardApi("maintenance", { write: true })
@@ -52,5 +53,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ deleted: data === true })
   }
 
-  return NextResponse.json({ error: "action must be add|resolve|delete" }, { status: 400 })
+  if (body.action === "add_reason") {
+    const label = String(body.label ?? "").trim()
+    if (label.length < 2) return NextResponse.json({ error: "label required" }, { status: 400 })
+    const { data, error } = await sb.rpc("maint_watchlist_create_reason", { p_label: label })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const row = (data ?? [])[0]
+    return NextResponse.json(row ?? { error: "create failed" })
+  }
+
+  return NextResponse.json({ error: "action must be add|resolve|delete|add_reason" }, { status: 400 })
 }
