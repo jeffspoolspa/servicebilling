@@ -69,7 +69,7 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
   const ticks = base.map((p) => p.x)
 
   return (
-    <div>
+    <div className="flex flex-col h-full">
       <div className="flex items-baseline justify-between mb-1">
         <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">
           Free chlorine vs min
@@ -85,7 +85,8 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
           </span>
         </span>
       </div>
-      <ChartContainer config={CONFIG} className="aspect-auto h-[130px] w-full">
+      {/* fill the summary row so it matches the water-balance calendar */}
+      <ChartContainer config={CONFIG} className="aspect-auto flex-1 min-h-[130px] w-full">
         <ComposedChart
           accessibilityLayer
           data={data}
