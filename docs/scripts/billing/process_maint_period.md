@@ -51,6 +51,27 @@ charged). Per period:
 
 `dry_run=True` (default) returns the per-period plan with no external calls.
 
+## Grouped charging (multi-invoice customers)
+
+`main()` buckets the batch by customer. A customer with ONE ready invoice
+takes the per-invoice path above, unchanged. A customer with SEVERAL ready,
+unpaid, autopay-routed invoices gets `process_customer_group`: ONE Intuit
+charge for the summed balances and ONE QBO Payment with a line per invoice
+(receipt emailed once for the combined payment; invoice copies still per
+unsent invoice; declines bump the roster once and every invoice still goes
+out pay-it-yourself). The WAL anchor is the lowest doc number — its attempt
+row carries the real idempotency key, `charge_amount` = the total, and a
+`group_lines` marker in `raw_result`; sibling invoices get their attempt
+rows AFTER the outcome (never `pending`; their keys are never charged) so
+per-invoice reporting (Processing tab, queue sheet, projection) keeps
+working. Resume rules: an interrupted grouped charge is finished from its
+STORED membership/amounts (re-charge same key on `pending`/`charge_uncertain`,
+skip to payment-recording on `charge_succeeded`, never re-record a payment);
+`process_one` refuses to single-resume a group anchor (it would misapply the
+combined total to one invoice), and newly-ready invoices are deferred until
+the interrupted group resolves. Paid, gated, email-only, or single-mid-flight
+members always fall through to `process_one`.
+
 ## Queue visibility (live runs)
 
 Before the per-period loop, a live run seeds one
