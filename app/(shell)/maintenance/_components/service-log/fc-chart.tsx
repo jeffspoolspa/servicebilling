@@ -41,6 +41,11 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
     }
   })
 
+  // daily-visit pools pack ~30 bars in — per-bar labels collide into noise,
+  // so past ~14 bars they drop (tooltip keeps the numbers) and corners tighten
+  const dense = data.length > 14
+  const radius = dense ? 2 : 4
+
   return (
     <div>
       <div className="flex items-baseline justify-between mb-1">
@@ -106,23 +111,25 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
               )
             }}
           />
-          <Bar dataKey="base" stackId="a" radius={[0, 0, 4, 4]} minPointSize={1}>
+          <Bar dataKey="base" stackId="a" radius={[0, 0, radius, radius]} minPointSize={1}>
             {data.map((d, i) => (
               <Cell key={i} fill={d.topIsFc ? MIN_COLOR : FC_COLOR} />
             ))}
           </Bar>
-          <Bar dataKey="extra" stackId="a" radius={[4, 4, 0, 0]} minPointSize={1}>
+          <Bar dataKey="extra" stackId="a" radius={[radius, radius, 0, 0]} minPointSize={1}>
             {data.map((d, i) => (
               <Cell key={i} fill={d.topIsFc ? FC_COLOR : MIN_COLOR} />
             ))}
-            {/* buffer = recorded − min, always printed above the bar */}
-            <LabelList
-              dataKey="bufferLabel"
-              position="top"
-              fontSize={9}
-              fontWeight={700}
-              fill="rgb(var(--ink))"
-            />
+            {/* buffer = recorded − min, printed above the bar when it fits */}
+            {!dense && (
+              <LabelList
+                dataKey="bufferLabel"
+                position="top"
+                fontSize={9}
+                fontWeight={700}
+                fill="rgb(var(--ink))"
+              />
+            )}
           </Bar>
         </BarChart>
       </ChartContainer>
