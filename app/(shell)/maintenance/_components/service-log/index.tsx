@@ -411,7 +411,7 @@ export function ServiceLog({
       {/* ── readings grid ── */}
       <div className="overflow-y-auto flex-1 min-h-0">
         {shownVisits.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-2.5 pb-1 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-mute">
+          <div className="flex flex-nowrap items-center gap-x-3 px-4 pt-2.5 pb-1 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-mute">
             <span className="w-[7px] flex-none" />
             <span className="w-[86px] flex-none">Visit</span>
             <div className="flex-none flex">
@@ -419,7 +419,7 @@ export function ServiceLog({
                 <span key={name} style={{ width: colWidths[name] }} className="flex-none text-center normal-case">{short}</span>
               ))}
             </div>
-            <span className="flex-1 min-w-[120px] pl-4">Notes</span>
+            <span className="flex-1 min-w-0 pl-4">Notes</span>
           </div>
         )}
         {shownVisits.map((v) => {
@@ -432,7 +432,7 @@ export function ServiceLog({
             <div key={v.visit_id} className="border-b border-line-soft last:border-0">
               <div
                 onClick={() => setOpenVisit(open ? null : v.visit_id)}
-                className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 cursor-pointer hover:bg-white/[0.02]"
+                className="flex flex-nowrap items-center gap-x-3 px-4 py-2 cursor-pointer hover:bg-white/[0.02]"
               >
                 <span className={`w-[7px] h-[7px] rounded-full flex-none ${warn ? "bg-coral" : "bg-grass"}`} />
                 <div className="w-[86px] flex-none">
@@ -460,7 +460,7 @@ export function ServiceLog({
                     )
                   })}
                 </div>
-                <div className="flex-1 min-w-[120px] pl-4 overflow-hidden">
+                <div className="flex-1 min-w-0 pl-4 overflow-hidden">
                   {v.notes ? (
                     <span className="text-[11.5px] text-ink-dim block truncate" title={v.notes}>{v.notes}</span>
                   ) : (

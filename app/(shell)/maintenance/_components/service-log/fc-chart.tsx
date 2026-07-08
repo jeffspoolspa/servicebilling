@@ -29,6 +29,7 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
   const data = usable.map((r) => {
     const fc = r.fc!
     const min = Math.round(r.min!)
+    const buffer = +(fc - min).toFixed(1)
     return {
       date: r.date,
       fc,
@@ -36,27 +37,9 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
       base: Math.min(fc, min),
       extra: Math.abs(fc - min),
       topIsFc: fc >= min,
+      bufferLabel: buffer > 0 ? `+${buffer}` : `${buffer}`,
     }
   })
-
-  // the fc value sits just above the TOP OF THE RECORDED SEGMENT (at the
-  // baseline when fc is 0), so it renders from whichever series' top is fc
-  const fcLabel = (onTopSegment: boolean) =>
-    function FcLabel({ x, y, width, index }: any) {
-      const d = data[index]
-      if (!d || d.topIsFc !== onTopSegment) return null
-      return (
-        <text
-          x={x + width / 2}
-          y={y - 4}
-          textAnchor="middle"
-          fontSize={9}
-          fill="rgb(var(--ink))"
-        >
-          {d.fc}
-        </text>
-      )
-    }
 
   return (
     <div>
@@ -127,15 +110,19 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
             {data.map((d, i) => (
               <Cell key={i} fill={d.topIsFc ? MIN_COLOR : FC_COLOR} />
             ))}
-            {/* min > fc: the base IS the recorded segment — label its top */}
-            <LabelList dataKey="fc" content={fcLabel(false)} />
           </Bar>
           <Bar dataKey="extra" stackId="a" radius={[4, 4, 0, 0]} minPointSize={1}>
             {data.map((d, i) => (
               <Cell key={i} fill={d.topIsFc ? FC_COLOR : MIN_COLOR} />
             ))}
-            {/* fc >= min: the top segment ends at the recorded value */}
-            <LabelList dataKey="fc" content={fcLabel(true)} />
+            {/* buffer = recorded − min, always printed above the bar */}
+            <LabelList
+              dataKey="bufferLabel"
+              position="top"
+              fontSize={9}
+              fontWeight={700}
+              fill="rgb(var(--ink))"
+            />
           </Bar>
         </BarChart>
       </ChartContainer>
