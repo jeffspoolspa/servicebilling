@@ -489,7 +489,9 @@ export function ReviewWorkbench({
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[430px_1fr] lg:h-[680px]">
+      {/* minmax(0,1fr): a bare 1fr can't shrink below the content's
+          min-width, so wide service logs used to overflow and get clipped */}
+      <div className="grid grid-cols-1 lg:grid-cols-[430px_minmax(0,1fr)] lg:h-[680px]">
         {/* LEFT: invoice ledger */}
         <div className="border-r border-line-soft pt-2 overflow-y-auto min-h-0">
           <div className="flex items-center justify-between px-5 py-2">
