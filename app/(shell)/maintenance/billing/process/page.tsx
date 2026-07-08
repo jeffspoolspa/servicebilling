@@ -3,6 +3,7 @@ import {
   listAutopayCustomers,
   listBillingMonths,
   listBillingPeriods,
+  listInFlightPeriodIds,
   formatMonth,
   type BillingPeriodRow,
 } from "../_lib/queries"
@@ -50,13 +51,18 @@ export default async function ProcessPage({
     new Date().toISOString().slice(0, 7)
   const monthDate = `${selected}-01`
 
-  const [periods, roster] = await Promise.all([
+  const [periods, roster, inFlight] = await Promise.all([
     listBillingPeriods(monthDate),
     listAutopayCustomers(),
+    listInFlightPeriodIds(),
   ])
   const cardByCustomer = new Map(roster.map((r) => [r.qbo_customer_id, r]))
 
-  const ready = periods.filter((p) => p.processing_status === "ready_to_process")
+  // a running batch's periods leave Ready immediately (the queue sheet
+  // tracks them) even though their stored status hasn't flipped yet
+  const ready = periods.filter(
+    (p) => p.processing_status === "ready_to_process" && !inFlight.has(p.id),
+  )
   const held = periods.filter((p) => p.processing_status === "needs_review")
   const pending = periods.filter((p) =>
     ["pending", "ion_matched"].includes(p.processing_status),

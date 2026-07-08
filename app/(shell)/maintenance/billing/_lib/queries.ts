@@ -160,6 +160,19 @@ export function listBillingPeriods(month: string): Promise<BillingPeriodRow[]> {
   return rpc<BillingPeriodRow>("maint_billing_periods", { p_month: month })
 }
 
+/** Period ids currently in flight in a processing run (seeded queue rows or
+ *  unresolved attempts) — the Ready table hides these so a running batch
+ *  disappears immediately and stays gone across reloads. */
+export async function listInFlightPeriodIds(): Promise<Set<string>> {
+  const rows = await rpc<{ period_id: string; attempt_status: string | null }>(
+    "maint_billing_recent_processing",
+  )
+  const active = new Set(["queued", "pending", "charge_succeeded"])
+  return new Set(
+    rows.filter((r) => active.has(r.attempt_status ?? "")).map((r) => r.period_id),
+  )
+}
+
 export function listBillingFlags(
   month: string,
   includeWatch: boolean,

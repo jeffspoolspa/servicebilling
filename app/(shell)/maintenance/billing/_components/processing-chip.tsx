@@ -2,16 +2,19 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Check, X, Loader2, AlertTriangle, CreditCard, Mail, Receipt } from "lucide-react"
+import { Check, X, Loader2, AlertTriangle, Clock } from "lucide-react"
 import { createSupabaseBrowser } from "@/lib/supabase/client"
+import { Sheet } from "@/components/ui/sheet"
 
 /**
- * DB-driven processing chip — the QueueChip's sibling for charge runs.
- * Appears (on every billing tab, any browser, surviving reloads) whenever
- * recent maintenance attempts exist: unresolved from the last 2 hours, or
- * anything from the last 10 minutes. Polls maint_billing_recent_processing
- * every 2s; click toggles a small anchored panel with per-invoice state.
- * Purely a viewer — the run is server-side and owns itself.
+ * DB-driven processing queue pill — the QueueChip's sibling for charge runs.
+ * Appears (on every billing tab, any browser, surviving reloads) whenever a
+ * seeded queue row or recent attempt exists: process_maint_period seeds
+ * billing_audit.maint_process_queue at run start, so the pill knows the FULL
+ * batch from the first second. Polls maint_billing_recent_processing every
+ * 2s; click opens a Sheet with the whole queue in processing order — queued,
+ * the one in flight (loading), and each outcome, labeled charged (autopay)
+ * vs sent (email). Purely a viewer — the run is server-side and owns itself.
  */
 
 interface Row {
@@ -19,31 +22,44 @@ interface Row {
   customer_name: string | null
   doc_number: string | null
   attempt_status: string | null
+  channel: string | null
+  email_sent: boolean | null
   charge_amount: number | null
   qbo_payment_id: string | null
   error_message: string | null
   attempted_at: string
   processing_status: string | null
   qbo_balance: number | null
+  queue_order: number | null
 }
 
-type Kind = "running" | "done" | "warn" | "failed"
+type Kind = "queued" | "running" | "done" | "warn" | "failed"
 
 function derive(r: Row): { kind: Kind; label: string; detail?: string } {
   const processed = r.processing_status === "processed"
   const amt = r.charge_amount != null ? `$${Number(r.charge_amount).toFixed(2)}` : null
   switch (r.attempt_status) {
+    case "queued":
+      return { kind: "queued", label: "queued" }
     case "pending":
-      return { kind: "running", label: "charging…" }
+      return r.channel === "email"
+        ? { kind: "running", label: "sending invoice…" }
+        : { kind: "running", label: "charging…" }
     case "charge_succeeded":
       return r.qbo_payment_id
         ? { kind: "running", label: "sending emails…" }
         : { kind: "running", label: "recording payment…" }
     case "succeeded":
-      return { kind: "done", label: "succeeded", detail: amt ? `${amt} charged` : undefined }
+      return r.channel === "email"
+        ? { kind: "done", label: "sent", detail: "invoice emailed (no autopay)" }
+        : {
+            kind: "done",
+            label: "charged",
+            detail: `${amt ?? "?"} · autopay (${r.channel ?? "card"})${r.email_sent ? " · receipt sent" : ""}`,
+          }
     case "charge_declined":
       return processed
-        ? { kind: "warn", label: "declined → invoiced → processed", detail: r.error_message ?? undefined }
+        ? { kind: "warn", label: "declined · invoiced", detail: r.error_message ?? undefined }
         : { kind: "warn", label: "declined", detail: r.error_message ?? undefined }
     case "email_failed":
       return { kind: "warn", label: "email failed", detail: r.error_message ?? undefined }
@@ -60,7 +76,6 @@ export function ProcessingChip() {
   const router = useRouter()
   const [rows, setRows] = useState<Row[]>([])
   const [open, setOpen] = useState(false)
-  const panelRef = useRef<HTMLDivElement | null>(null)
   const prevResolvedRef = useRef(0)
   const lastRefreshRef = useRef(0)
 
@@ -79,22 +94,18 @@ export function ProcessingChip() {
     }
   }, [])
 
-  useEffect(() => {
-    if (!open) return
-    function onClick(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", onClick)
-    return () => document.removeEventListener("mousedown", onClick)
-  }, [open])
-
-  const derived = rows.map((r) => ({ r, d: derive(r) }))
-  const active = derived.filter(({ d }) => d.kind === "running").length
+  // queue order = the order the run works through; resolved rows keep their
+  // slot so the sheet reads top-to-bottom like a checklist
+  const derived = rows
+    .map((r) => ({ r, d: derive(r) }))
+    .sort((a, b) => (a.r.queue_order ?? Infinity) - (b.r.queue_order ?? Infinity))
+  const queued = derived.filter(({ d }) => d.kind === "queued").length
+  const running = derived.filter(({ d }) => d.kind === "running").length
+  const active = queued + running
   const resolved = derived.length - active
 
   // rows fall off Ready / land in Processed AS the run works: refresh the
-  // page data when new rows resolve (throttled), and once more when the
-  // last one lands
+  // page data when new rows resolve (throttled), and once more at the end
   useEffect(() => {
     if (resolved === prevResolvedRef.current) return
     prevResolvedRef.current = resolved
@@ -108,10 +119,10 @@ export function ProcessingChip() {
   if (rows.length === 0) return null
 
   return (
-    <div className="relative self-center" ref={panelRef}>
+    <>
       <button
-        onClick={() => setOpen((v) => !v)}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] transition-colors ${
+        onClick={() => setOpen(true)}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] transition-colors self-center ${
           active > 0
             ? "border-teal/30 bg-teal/10 text-teal hover:bg-teal/20"
             : "border-grass/30 bg-grass/10 text-grass hover:bg-grass/20"
@@ -124,62 +135,77 @@ export function ProcessingChip() {
         )}
         Processing · {resolved}/{derived.length}
       </button>
-      {open && (
-        <div className="absolute right-0 top-full mt-2 w-[26rem] z-30 bg-[#0E1C2A] border border-line rounded-lg shadow-2xl">
-          <div className="px-4 py-2.5 border-b border-line-soft text-[11px] text-ink-mute">
-            {active} in flight · {resolved} resolved · finishes linger 10 min
-          </div>
-          <div className="max-h-72 overflow-y-auto divide-y divide-line-soft/40">
-            {derived.map(({ r, d }) => (
-              <div key={r.period_id} className="flex items-center gap-2.5 px-4 py-2">
-                <StateIcon kind={d.kind} label={d.label} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-[12px] text-ink truncate">
-                    {r.customer_name ?? "?"}
-                    {r.doc_number && (
-                      <span className="text-ink-mute font-mono text-[10px]"> #{r.doc_number}</span>
-                    )}
-                  </div>
-                  {d.detail && (
-                    <div className="text-[10px] text-ink-mute break-words">{d.detail}</div>
+
+      <Sheet
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Processing queue"
+        description={
+          active > 0
+            ? `${resolved} of ${derived.length} resolved · ${running} in flight · ${queued} waiting`
+            : `${derived.length} resolved · finishes linger 10 min`
+        }
+      >
+        <div className="divide-y divide-line-soft/40 -mx-1">
+          {derived.map(({ r, d }) => (
+            <div
+              key={r.period_id}
+              className={`flex items-center gap-3 px-1 py-2.5 ${d.kind === "queued" ? "opacity-55" : ""}`}
+            >
+              <StateIcon kind={d.kind} label={d.label} />
+              <div className="flex-1 min-w-0">
+                <div className="text-[12.5px] text-ink truncate">
+                  {r.customer_name ?? "?"}
+                  {r.doc_number && (
+                    <span className="text-ink-mute font-mono text-[10px]"> #{r.doc_number}</span>
                   )}
                 </div>
-                <span
-                  className={`text-[10px] shrink-0 ${
-                    d.kind === "done"
-                      ? "text-grass"
-                      : d.kind === "running"
-                        ? "text-cyan"
+                {d.detail && (
+                  <div className="text-[10.5px] text-ink-mute break-words">{d.detail}</div>
+                )}
+              </div>
+              {r.qbo_balance != null && d.kind === "queued" && (
+                <span className="font-mono text-[11px] text-ink-dim shrink-0">
+                  ${Number(r.qbo_balance).toFixed(2)}
+                </span>
+              )}
+              <span
+                className={`text-[10.5px] shrink-0 ${
+                  d.kind === "done"
+                    ? "text-grass"
+                    : d.kind === "running"
+                      ? "text-cyan"
+                      : d.kind === "queued"
+                        ? "text-ink-mute"
                         : d.kind === "warn"
                           ? "text-sun"
                           : "text-coral"
-                  }`}
-                >
-                  {d.label}
-                </span>
-              </div>
-            ))}
-          </div>
+                }`}
+              >
+                {d.label}
+              </span>
+            </div>
+          ))}
         </div>
-      )}
-    </div>
+      </Sheet>
+    </>
   )
 }
 
 function StateIcon({ kind, label }: { kind: Kind; label: string }) {
   switch (kind) {
-    case "running": {
-      const Icon = label.startsWith("charging")
-        ? CreditCard
-        : label.startsWith("recording")
-          ? Receipt
-          : Mail
+    case "queued":
       return (
-        <div className="w-6 h-6 rounded-full border border-cyan/50 bg-cyan/15 animate-pulse flex items-center justify-center shrink-0">
-          <Icon className="w-3 h-3 text-cyan" strokeWidth={1.8} />
+        <div className="w-6 h-6 rounded-full border border-line bg-bg-elev flex items-center justify-center shrink-0">
+          <Clock className="w-3 h-3 text-ink-mute" strokeWidth={1.8} />
         </div>
       )
-    }
+    case "running":
+      return (
+        <div className="w-6 h-6 rounded-full border border-cyan/50 bg-cyan/15 flex items-center justify-center shrink-0">
+          <Loader2 className="w-3.5 h-3.5 text-cyan animate-spin" strokeWidth={2} />
+        </div>
+      )
     case "done":
       return (
         <div className="w-6 h-6 rounded-full border border-grass/40 bg-grass/15 flex items-center justify-center shrink-0">

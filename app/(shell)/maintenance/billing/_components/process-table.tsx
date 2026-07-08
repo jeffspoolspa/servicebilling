@@ -50,6 +50,12 @@ export function ProcessTable({
   const [dryRun, setDryRun] = useState(true)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<string | null>(null)
+  // customers optimistically removed when a live run starts (the server
+  // excludes queued periods on the next refresh); bumping runSeq remounts
+  // the DataTable so stale index-keyed selection can't survive the removal
+  const [hidden, setHidden] = useState<Set<string>>(new Set())
+  const [runSeq, setRunSeq] = useState(0)
+  const visible = customers.filter((c) => !hidden.has(c.qbo_customer_id))
 
   async function process() {
     const ids = selected.map((c) => c.qbo_customer_id)
@@ -75,7 +81,11 @@ export function ProcessTable({
       const json = await resp.json()
       if (!resp.ok) throw new Error(json.error ?? `HTTP ${resp.status}`)
       if (!dryRun) {
-        setResult("Processing started — follow the Processing chip above.")
+        // rows leave Ready immediately — the queue pill tracks them from here
+        setHidden((prev) => new Set([...prev, ...ids]))
+        setSelected([])
+        setRunSeq((s) => s + 1)
+        setResult(`Processing ${ids.length} customer(s) — follow the queue pill above.`)
         return
       }
       setResult("Dry run queued (waits for the QBO writer lock)…")
@@ -165,12 +175,12 @@ export function ProcessTable({
       header: ({ table }) => (
         <input
           type="checkbox"
-          checked={table.getIsAllPageRowsSelected()}
+          checked={table.getIsAllRowsSelected()}
           ref={(el) => {
-            if (el) el.indeterminate = table.getIsSomePageRowsSelected()
+            if (el) el.indeterminate = table.getIsSomeRowsSelected()
           }}
-          onChange={(e) => table.toggleAllPageRowsSelected(e.target.checked)}
-          aria-label="Select page"
+          onChange={(e) => table.toggleAllRowsSelected(e.target.checked)}
+          aria-label="Select all"
         />
       ),
       cell: ({ row }) => (
@@ -287,8 +297,9 @@ export function ProcessTable({
   return (
     <div className="space-y-3">
       <DataTable
+        key={runSeq}
         columns={columns}
-        data={customers}
+        data={visible}
         searchAccessor={(r) =>
           `${r.customer_name} ${r.invoice_list.map((i) => i.doc_number).join(" ")}`
         }

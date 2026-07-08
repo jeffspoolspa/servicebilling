@@ -51,6 +51,21 @@ charged). Per period:
 
 `dry_run=True` (default) returns the per-period plan with no external calls.
 
+## Queue visibility (live runs)
+
+Before the per-period loop, a live run seeds one
+`billing_audit.maint_process_queue` row per period and stamps
+`started_at`/`finished_at` around each `process_one` (migration
+`20260708 maint_process_queue`). Attempts rows only exist once the run
+REACHES an invoice, so this seeded queue is what lets the UI show the whole
+batch up front: `public.maint_billing_recent_processing` unions unfinished
+queue rows in as `attempt_status='queued'` (plus `channel` + `email_sent`
+for charged-vs-sent labeling), the Processing pill counts them, and the
+Ready table hides in-flight periods server-side. Dry runs never touch the
+queue. The stamping wraps the money path in try/finally (with a rollback
+first, so an aborted transaction never blocks the stamp) and does not alter
+charge logic.
+
 ## Trigger
 
 The Ready to Process tab's "Process selected" button via
