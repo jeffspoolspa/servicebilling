@@ -359,11 +359,20 @@ def process_one(conn, wo_number, access_token, realm_id, dry_run=False):
             log_processing_attempt(conn, wo_number, result); return result
 
         # ── SUCCESS ──────────────────────────────────────────────
-        live_check = lookup_invoice(invoice_number, access_token, realm_id)
-        final_balance = live_check.get("balance", qbo_balance) if live_check.get("found") else qbo_balance
         result["status"] = "success"
         release_lock(conn, wo_number, "processed")
-        update_invoice_cache(conn, invoice_number, final_balance, "EmailSent")
+        # VERIFIED ECHO: write the balance QBO actually reports post-charge. On
+        # a failed read-back do NOT fall back to the pre-charge balance (that
+        # fabricates cache truth); reflect only the email we sent and let the
+        # CDC reconciler converge the balance.
+        live_check = lookup_invoice(invoice_number, access_token, realm_id)
+        if live_check.get("found"):
+            update_invoice_cache(conn, invoice_number, live_check["balance"], "EmailSent")
+        else:
+            cur = conn.cursor()
+            cur.execute("UPDATE billing.invoices SET email_status='EmailSent', fetched_at=now() WHERE doc_number=%s",
+                        (invoice_number,))
+            conn.commit(); cur.close()
         log_processing_attempt(conn, wo_number, result)
         return result
 
