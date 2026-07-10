@@ -141,7 +141,7 @@ The QBO invoice processing pipeline. Pulls invoices from QBO, enriches them (mem
 **Windmill scripts** (`f/service_billing/*` — 16 scripts in this repo's domain):
 - `dispatch_pre_processing` — every-60s outbox worker
 - `pre_process_invoice` — enrich invoice (memo, PM, class)
-- `process_work_order` — apply credits, charge card, send email
+- `process_work_order` [retired 2026-07] — dead (0 runs since Mar, no trigger); superseded by `process_invoice`. See [runbooks/service-billing-cleanup.md](runbooks/service-billing-cleanup.md)
 - `process_invoice`, `push_invoice_edits` — push UI edits back to QBO
 - `classify_work_orders`, `classify_work_orders_ai` — WO classification
 - `pull_qbo_invoices`, `refresh_open_invoices`, `pull_qbo_credits` — bulk syncs
@@ -203,13 +203,13 @@ Pool maintenance: scheduled visits, technician routes, chemistry readings, consu
 - `/billing` — the monthly-maintenance-billing surface, structured as STAGE TABS (mirrors service-billing; module nav lives only in the top ModuleHeader strip — no duplicated in-page module tabs):
   - **Bills** (`/billing`) — ONE COLLAPSIBLE ROW PER CUSTOMER (the aggregated bill): visits/labor/chems/expected, ION total + one invoice-number chip per ION invoice (a QC task's separate invoice shows as a second chip), QBO link, derived status pending → held_for_review | ready → processed → paid. Click to expand: the task list (where a QC task is visible) + a visit calendar (dates as columns with QC markers; readings FC/pH/CYA/TA/TC/Salt grouped above the chemicals sold per visit, per-item and per-visit totals; lazy-loaded via `maint_billing_customer_visits`). Refreshable all month: the Refresh button reruns `f/billing_audit/build_task_billing_periods` (sync) + `f/ION/transactions_report` (async) so ION invoice numbers/amounts flow in.
   - **Needs Review** (`/billing/review`, `/billing/review/[customerId]`) — two lists: the primary 2x-clean-median queue (`billing_audit.v_billing_review_flags`) and the CPV z-score audit (`customer_month_audit`). Drill-down: category breakdown, avg FC/pH/CYA readings, per-item usage vs usual month + peer avg; mark reviewed/resolved (review state for both lists lives in `customer_month_audit`; 2x-only customers get a `REVIEW_2X` row). An unreviewed HIGH z-flag holds the customer-month from autopay + sending.
-  - **Ready to Process** (`/billing/process`) — ready invoices grouped per customer, cross-referenced against the autopay roster (shows the card/ACH the charge will hit), select/select-all → process via the existing `f/billing/monthly_autopay` engine (single customer = test_mode; all = full-month run; partial batch unlocks when the flow's `only_qbo_customer_ids` filter deploys) + "Send invoice copies" via `f/billing/send_monthly_invoices`.
+  - **Ready to Process** (`/billing/process`) — ready invoices grouped per customer, cross-referenced against the autopay roster (shows the card/ACH the charge will hit), select/select-all → process via `f/billing/process_maint_period` (dry-run first; per-period charge + send, WAL on `billing.processing_attempts`) + "Send invoice copies" via `f/billing/send_monthly_invoices`.
   - **Autopay** (`/billing/autopay`) — the enrollment roster (`billing.autopay_customers`: method, card, status, declines).
   Reads via the `public.maint_billing_*` SECURITY DEFINER RPCs (billing_audit is not PostgREST-exposed). See [monthly-maintenance-billing](flows/monthly-maintenance-billing/index.md).
 - `/inventory` — maintenance inventory snapshot
 
 **API endpoints**:
-- `app/api/maintenance-billing/*` — `refresh` (rebuild promises + pull ION transactions), `process` (charge selected ready customers via the autopay flow; server-side hold re-check), `send` (invoice email run), `flags/review` (review-state RPC). All dry-run by default where money moves. Everything else queries Supabase directly via `lib/queries/`.
+- `app/api/maintenance-billing/*` — `refresh` (rebuild promises + pull ION transactions), `process` (charge selected ready customers via `f/billing/process_maint_period`; server-side hold re-check), `send` (invoice email run), `flags/review` (review-state RPC). All dry-run by default where money moves. Everything else queries Supabase directly via `lib/queries/`.
 
 **Windmill scripts**:
 - ION flows: `f/ION/visits`, `f/ION/work_orders`, `f/ION/consumables_usage`, `f/ION/refresh_stale_work_orders`
@@ -306,37 +306,56 @@ The shared "customer record" and "work order" entities used by every other domai
 
 ---
 
-### 3.4 Domain: Maintenance Billing (Monthly Autopay)
+### 3.4 Domain: Maintenance Billing (monthly)
 
-Monthly autopay processing for pool maintenance customers. Distinct from the service-billing pipeline (which handles per-WO invoices).
+Monthly maintenance billing for pool customers. Distinct from the service-billing
+pipeline (which handles per-WO invoices). Pipeline: visits ->
+`build_task_billing_periods` (write-ahead task-billing-period, 1:1
+task-month<->invoice) -> reconcile -> per-period processing (charge / autopay /
+send). Run manually from the `/billing` stage tabs.
 
-**UI routes**: integrated into the `/customers/[id]/billing` view; standalone admin tooling lives outside the UI for now.
+**UI routes**: the `/billing` stage tabs (Bills / Needs Review / Ready to Process
+/ Autopay) — see the maintenance `/billing` UI above and
+[monthly-maintenance-billing](flows/monthly-maintenance-billing/index.md).
 
-**API endpoints**: none directly (the flow is Windmill-driven).
+**API endpoints**: `app/api/maintenance-billing/*` — `refresh`, `process`
+(triggers `f/billing/process_maint_period`), `send`. Dry-run by default where
+money moves.
 
-**Windmill scripts** (`f/billing/*` — visible in Windmill workspace, NOT mirrored in local repo):
-- `f/billing/monthly_autopay` (flow) — runs the monthly cycle
-- `f/billing/apply_maint_credits` — apply unapplied maint payments
-- `f/billing/send_monthly_invoices` — send via QBO email
-- `f/billing/stamp_invoice_memos` — set memo on the month's invoices
+**Windmill scripts** (`f/billing/*`, mirrored in this repo):
+- `f/billing/preprocess_maint_customer_month` [active] — Phase 1: generate the
+  month's QBO invoices for a customer (no charges)
+- `f/billing/drain_maint_preprocess_queue` [active] — worker draining the
+  preprocess queue
+- `f/billing/process_maint_period` [active] — Phase 2: charge card/ACH + send
+  receipt/invoice for periods in `processing_status = 'ready_to_process'`;
+  WAL + idempotency key on `billing.processing_attempts`
+- `f/billing/send_monthly_invoices` — email unsent invoices
 - `f/billing/send_decline_email` — notify customers on autopay decline
-- `f/billing/sync_invoice_balances` — refresh from QBO
-- `f/billing/switch_to_weekly_campaign` — one-off campaign batch send
+- `f/billing/apply_maint_credits`, `apply_maint_adjustments`,
+  `stamp_invoice_memos`, `sync_invoice_balances` — support scripts
 - `f/billing_audit/compute_chemical_estimates` (monthly), `load_month` — audit reports
 
 **Database tables**:
-- `billing.autopay_customers` — roster (replaces old Airtable)
-- `billing.autopay_transactions` — one row per customer per billing month; UNIQUE (qbo_customer_id, billing_month) prevents double-charge
-- `billing.autopay_events` — immutable event log
-- `billing.billing_runs` — master record per monthly cycle
-- `billing_audit.maintenance_invoices` — monthly audit table
-- `billing_audit.maintenance_invoice_line_items` — line items
+- `billing_audit.task_billing_periods` — the per-customer-month billing unit +
+  `processing_status` gate (HARD gate: only `ready_to_process` charges)
+- `billing.processing_attempts` — the charge WAL (pending ->
+  charge_uncertain|declined|succeeded -> payment_orphan|succeeded); SHARED with
+  service billing
+- `billing.autopay_customers` — enrollment roster (method, card, status, declines)
+- `billing_audit.maintenance_invoices` / `maintenance_invoice_line_items` — monthly audit tables
 - `billing_audit.chemical_cost_estimates` — chemical percentiles
 - `billing_audit.consumable_items` — whitelisted SKUs
 
 **Schedules**:
-- Monthly autopay is run manually (not on a cron)
+- Maintenance billing is run manually (not on a cron)
 - `f/billing_audit/monthly_chem_estimates` — 1st of month, 2am
+
+**Retired (2026-06)**: `f/billing/monthly_autopay` (flow) + its
+`billing.autopay_transactions` / `billing.autopay_events` / `billing.billing_runs`
+tables were the pre-rework autopay path; last run 2026-06-02, superseded by
+`process_maint_period`. The tables are KEPT as the historical charge record
+(Mar–Jun 2026) but are no longer written. See [ADR 009](adrs/009-shared-qbo-primitives-lib.md).
 
 **External integrations**:
 - QBO (charges, payment, email)
@@ -596,22 +615,25 @@ projects it onto `leads.lifecycle_state` (open/closed). `public.leads` has no `s
 5. Customer enters service-billing pipeline from here on (already a QBO customer)
 ```
 
-### 4.3 Monthly autopay run
+### 4.3 Monthly maintenance charge run
+
+(Run manually from /billing -> Ready to Process. The pre-rework
+f/billing/monthly_autopay flow is retired — see §3.4.)
 
 ```
-1. Manual kickoff of f/billing/monthly_autopay (flow)
-2. Single QBO token refresh
-3. Apply unapplied maint payment credits (f/billing/apply_maint_credits)
-4. Fetch roster from billing.autopay_customers
-5. Pre-create billing.autopay_transactions rows (UNIQUE constraint guards double-charge)
-6. Per customer:
- - find maint invoices for the month
+1. UI selects ready customers; /api/maintenance-billing/process triggers
+   f/billing/process_maint_period (dry_run first)
+2. Per ready period (billing_audit.task_billing_periods.processing_status =
+   'ready_to_process'):
+ - FRESH QBO invoice read decides the charge (ADR 008 read-then-act; a failed
+   read HALTS — no stale-cache fallback; balance <= 0 skips as paid-upstream)
+ - create billing.processing_attempts row (WAL) BEFORE the charge; the
+   idempotency key is persisted and reused on retry (Intuit dedupes)
  - charge card/ACH via QBO
- - INSERT billing.customer_payments
- - email receipt
- - update billing.autopay_transactions.status
- - INSERT billing.autopay_events
-7. Summary stats written to billing.billing_runs
+ - record the QBO Payment
+ - send receipt + invoice (skip if already sent)
+ - verified-echo write of balance/email_status to billing.invoices; the
+   auto-promote trigger flips task_billing_periods -> processed on paid + sent
 ```
 
 ### 4.4 ION visit sync
