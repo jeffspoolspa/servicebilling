@@ -40,7 +40,9 @@ export async function POST(req: NextRequest) {
   const dryRun = body.dry_run !== false
 
   try {
-    const { jobId } = await triggerScript("f/billing/process_maint_period", {
+    // Charge-stage queue worker (WORKFLOW_EXECUTION.md): live runs enqueue
+    // the selected customer-months then drain the queue; dry runs plan only.
+    const { jobId } = await triggerScript("f/billing/process_maint_charges", {
       qbo_customer_ids: ids,
       billing_month: month,
       dry_run: dryRun,
