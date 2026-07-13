@@ -75,7 +75,7 @@ export function CustomerSelectSheet({
       {/* Sheet */}
       <div
         className={cn(
-          "absolute bottom-0 left-0 right-0 h-[85vh] flex flex-col",
+          "absolute bottom-0 left-0 right-0 h-[85dvh] flex flex-col",
           "bg-bg-elev border-t border-line rounded-t-2xl shadow-[0_-12px_40px_-12px_rgba(0,0,0,0.5)]",
           "transition-transform ease-[cubic-bezier(0.165,0.84,0.44,1)]",
           closing
@@ -105,7 +105,6 @@ export function CustomerSelectSheet({
         <div className="px-4 pb-2">
           <input
             type="search"
-            autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search name or address…"
