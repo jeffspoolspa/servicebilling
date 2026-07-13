@@ -55,6 +55,15 @@ When you write a new script that touches an external API, find the key here firs
 - **Recommended limits**: `concurrent_limit: 5`, `concurrency_time_window_s: 10`
 - **Why**: OpenAI rate limits per API key; 5 concurrent stays well under the limit. Bursting beyond 5 mostly delays without benefit since OpenAI throttles individual calls anyway
 
+### `airtable_api`
+
+- **Used by**: `f/maintenance/sync_follow_ups_to_airtable`
+- **Recommended limits**: `concurrent_limit: 1`, `concurrency_time_window_s: 5`
+- **Why**: Airtable allows 5 req/s per base; more importantly the follow-up
+  sync is a single-writer drainer (ADR 008), so serializing to 1 makes
+  wake-on-insert bursts race-free. Any future script hitting Airtable joins
+  this key.
+
 ### `intuit_payments`
 
 - **Used by**: process_work_order's charge/echeck calls (currently called inline; would be split out if we ever isolate the charge step)
