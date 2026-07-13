@@ -41,6 +41,13 @@ export default async function OpenArPage({ searchParams }: PageProps) {
         <CardHeader>
           <CardTitle>Open AR</CardTitle>
           <SearchBar className="ml-auto" placeholder="Search WO, customer, or invoice #…" />
+          <a
+            href="/api/billing/open-ar/export"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-line text-[12px] text-ink-dim hover:text-ink hover:border-line/80 transition-colors"
+            title="Download the full open-AR list as CSV"
+          >
+            Download CSV
+          </a>
           <Pill tone="coral">{total}</Pill>
         </CardHeader>
         <div className="overflow-x-auto">
