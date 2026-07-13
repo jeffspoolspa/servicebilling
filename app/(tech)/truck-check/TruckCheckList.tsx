@@ -127,13 +127,38 @@ export function TruckCheckList({ items, storageKey, completedStorageKey }: Props
   }
 
   return (
-    <div className="flex flex-col gap-5 pb-28">
+    <div className="flex flex-col gap-5">
       <SubTabBar
         active={subTab}
         missingCount={missing.length}
         onTruckCount={onTruck.length}
         onChange={setSubTab}
       />
+
+      {pickListVisible && (
+        <div className="flex items-center gap-3 rounded-xl px-4 py-3 bg-bg-elev/60 border border-line-soft">
+          <div className="text-sm text-ink-dim flex items-center gap-1.5">
+            <span className="text-ink font-medium num">
+              <span key={missing.length} className="tick-bump inline-block">
+                {missing.length}
+              </span>
+            </span>
+            {missing.length === 1 ? "item" : "items"} missing
+          </div>
+          <button
+            type="button"
+            onClick={goToPickList}
+            className={cn(
+              "ml-auto h-11 px-5 rounded-lg font-medium text-[#061018] text-sm",
+              "bg-gradient-to-b from-cyan to-cyan-deep",
+              "transition-all duration-150 ease-out",
+              "active:scale-[0.97] active:brightness-95",
+            )}
+          >
+            Create pick list
+          </button>
+        </div>
+      )}
 
       <div className="flex items-center justify-between px-1">
         <div className="text-sm text-ink-dim">
@@ -158,12 +183,6 @@ export function TruckCheckList({ items, storageKey, completedStorageKey }: Props
         items={visibleItems}
         onToggle={toggle}
         hydrated={hydrated}
-      />
-
-      <StickyFooter
-        missingCount={missing.length}
-        visible={pickListVisible}
-        onClick={goToPickList}
       />
     </div>
   )
@@ -396,49 +415,3 @@ function CompletedCard({ onRedo }: { onRedo: () => void }) {
   )
 }
 
-function StickyFooter({
-  missingCount,
-  visible,
-  onClick,
-}: {
-  missingCount: number
-  visible: boolean
-  onClick: () => void
-}) {
-  return (
-    <div
-      className={cn(
-        "fixed bottom-0 left-0 right-0 z-20 pointer-events-none",
-        "transition-transform duration-[220ms] ease-[cubic-bezier(0.165,0.84,0.44,1)]",
-        visible ? "translate-y-0" : "translate-y-full",
-      )}
-    >
-      <div className="pointer-events-auto bg-bg/90 backdrop-blur-md border-t border-line-soft">
-        <div className="max-w-md mx-auto px-5 py-3 flex items-center gap-3">
-          <div className="text-sm text-ink-dim flex items-center gap-1.5">
-            <span className="text-ink font-medium num">
-              <span key={missingCount} className="tick-bump inline-block">
-                {missingCount}
-              </span>
-            </span>
-            {missingCount === 1 ? "item" : "items"} missing
-          </div>
-          <button
-            type="button"
-            onClick={onClick}
-            disabled={!visible}
-            className={cn(
-              "ml-auto h-11 px-5 rounded-lg font-medium text-[#061018] text-sm",
-              "bg-gradient-to-b from-cyan to-cyan-deep",
-              "transition-all duration-150 ease-out",
-              "active:scale-[0.97] active:brightness-95",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
-            )}
-          >
-            Create pick list
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}

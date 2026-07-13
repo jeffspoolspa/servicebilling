@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils/cn"
 import type { SignOutItem } from "@/lib/entities/inventory-signout/types"
 import { submitSignOut, type SubmitState } from "./actions"
 import { ItemPicker } from "./ItemPicker"
+import { useBottomBar } from "../bottom-bar"
 
 interface Row {
   itemId: string
@@ -58,6 +59,7 @@ export function SignOutForm({ employeeName, items, prefillIds = [] }: Props) {
   const [state, formAction, pending] = useActionState(submitSignOut, initial)
   const [showToast, setShowToast] = useState(false)
   const lastResult = useRef(state)
+  const formRef = useRef<HTMLFormElement>(null)
 
   useEffect(() => {
     if (state !== lastResult.current) {
@@ -72,6 +74,24 @@ export function SignOutForm({ employeeName, items, prefillIds = [] }: Props) {
   }, [state])
 
   const valid = rows.length > 0 && rows.every((r) => isRowValid(r, items))
+
+  // Mirror the follow-up form: once at least one item is populated, the bottom
+  // nav morphs into the Submit button (disabled until every row is valid).
+  const engaged = rows.some((r) => r.itemId)
+  const { setAction } = useBottomBar()
+  useEffect(() => {
+    if (!engaged) {
+      setAction(null)
+      return
+    }
+    setAction({
+      label: pending ? "Saving…" : "Submit sign-out",
+      disabled: !valid || pending,
+      pending,
+      onClick: () => formRef.current?.requestSubmit(),
+    })
+    return () => setAction(null)
+  }, [engaged, valid, pending, setAction])
 
   const payload = JSON.stringify({
     rows: rows
@@ -99,7 +119,7 @@ export function SignOutForm({ employeeName, items, prefillIds = [] }: Props) {
         Signing out as <span className="text-ink font-medium">{employeeName}</span>.
       </div>
 
-      <form action={formAction} className="flex flex-col gap-3">
+      <form ref={formRef} action={formAction} className="flex flex-col gap-3">
         <input type="hidden" name="payload" value={payload} />
 
         {rows.map((row, idx) => {
@@ -196,24 +216,14 @@ export function SignOutForm({ employeeName, items, prefillIds = [] }: Props) {
 
         {state.error && <p className="text-coral text-sm">{state.error}</p>}
 
-        <button
-          type="submit"
-          disabled={!valid || pending}
-          className={cn(
-            "mt-1 h-12 rounded-lg text-base font-medium",
-            "transition-[background,color,border-color,transform,filter] duration-150 ease-out",
-            "active:scale-[0.98] active:brightness-95",
-            valid && !pending
-              ? "bg-gradient-to-b from-cyan to-cyan-deep text-[#061018] shadow-[0_6px_20px_-6px_rgba(56,189,248,0.55)]"
-              : "bg-bg-elev border border-line-soft text-ink-mute cursor-not-allowed",
-          )}
-        >
-          {pending ? "Saving…" : "Submit sign-out"}
-        </button>
+        {/* Submit lives in the bottom nav — it morphs into the Submit button
+            once an item is populated (see BottomNav / useBottomBar). A hidden
+            submit input keeps the form's Enter-to-submit behavior. */}
+        <button type="submit" className="sr-only" tabIndex={-1} aria-hidden />
       </form>
 
       {showToast && (
-        <div className="fixed left-1/2 -translate-x-1/2 bottom-6 bg-grass/10 border border-grass/30 text-grass text-sm px-4 py-2.5 rounded-lg shadow-card">
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-28 bg-grass/10 border border-grass/30 text-grass text-sm px-4 py-2.5 rounded-lg shadow-card">
           Sign-out saved.
         </div>
       )}
