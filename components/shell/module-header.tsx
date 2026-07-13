@@ -124,7 +124,7 @@ export function ModuleHeader() {
     /^\/maintenance\/billing\/(review|process|autopay)$/,
     /^\/service$/,
     /^\/service-billing$/,
-    /^\/service-billing\/(awaiting-invoice|queue|needs-attention|sent|audit|triage|activity|payment-methods|past-due|revenue)$/,
+    /^\/service-billing\/(awaiting-invoice|queue|needs-attention|sent|open-ar|audit|triage|activity|payment-methods|revenue)$/,
     /^\/work-orders$/,
     /^\/invoices$/,
     /^\/customers$/,

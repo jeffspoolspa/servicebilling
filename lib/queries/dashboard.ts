@@ -27,6 +27,7 @@ export interface DashboardKpis {
   total_billable_value: number
   audit_billable_zero_subtotal: number
   audit_non_billable_with_charges: number
+  open_ar: number
 }
 
 export async function getDashboardKpis(): Promise<DashboardKpis> {
@@ -112,9 +113,12 @@ export async function getDashboardKpis(): Promise<DashboardKpis> {
   ])
 
   // Audit counts: data-quality issues not caught by pre-processing.
-  const [auditZero, auditNonBillable] = await Promise.all([
+  // Open AR: sent invoices carrying an open balance (billing.v_invoice_status
+  // derivation) — powers the tab badge.
+  const [auditZero, auditNonBillable, openAr] = await Promise.all([
     sb.from("v_billable_zero_subtotal").select("wo_number", { count: "exact", head: true }),
     sb.from("v_non_billable_with_charges").select("wo_number", { count: "exact", head: true }),
+    sb.from("v_open_ar").select("wo_number", { count: "exact", head: true }),
   ])
 
   return {
@@ -133,6 +137,7 @@ export async function getDashboardKpis(): Promise<DashboardKpis> {
     total_billable_value: totalBillableSum,
     audit_billable_zero_subtotal: auditZero.count ?? 0,
     audit_non_billable_with_charges: auditNonBillable.count ?? 0,
+    open_ar: openAr.count ?? 0,
   }
 }
 
@@ -331,6 +336,57 @@ export async function getBillingQueue(opts: {
   }))
 
   return { rows, total: count ?? 0 }
+}
+
+// ─── Open AR (sent invoices carrying an open balance) ────────────────────
+// Backed by public.v_open_ar (wrapper over billing.v_open_ar), which reads
+// billing.v_invoice_status: derived_status = 'open_ar' means the invoice was
+// sent but money is still outstanding. ar_reason distinguishes a declined
+// charge from a plain unpaid invoice.
+
+export interface OpenArRow {
+  wo_number: string
+  customer: string | null
+  qbo_invoice_id: string
+  invoice_number: string | null
+  qbo_balance: number | null
+  total_amt: number | null
+  txn_date: string | null
+  due_date: string | null
+  days_past_due: number
+  last_attempt_status: string | null
+  ar_reason: "declined" | "invoiced"
+  preferred_payment_type: string | null
+}
+
+const OPEN_AR_COLS =
+  "wo_number, customer, qbo_invoice_id, invoice_number, qbo_balance, total_amt, " +
+  "txn_date, due_date, days_past_due, last_attempt_status, ar_reason, preferred_payment_type"
+
+export async function getOpenAr(opts: {
+  offset?: number
+  limit?: number
+  sortBy?: string
+  sortDir?: "asc" | "desc"
+  search?: string
+} = {}): Promise<{ rows: OpenArRow[]; total: number }> {
+  const sb = createAnon("public")
+  const offset = opts.offset ?? 0
+  const limit = opts.limit ?? 25
+  const sortBy = opts.sortBy ?? "days_past_due"
+  const sortDir = opts.sortDir ?? "desc"
+  let q = sb
+    .from("v_open_ar")
+    .select(OPEN_AR_COLS, { count: "exact" })
+    .order(sortBy, { ascending: sortDir === "asc", nullsFirst: false })
+    .range(offset, offset + limit - 1)
+  q = applyAuditSearch(q, opts.search)
+  const { data, count, error } = await q
+  if (error) {
+    console.error("getOpenAr error:", error)
+    return { rows: [], total: 0 }
+  }
+  return { rows: (data ?? []) as unknown as OpenArRow[], total: count ?? 0 }
 }
 
 // ─── Missing invoice alerts (WO side only; no invoice yet) ───────────────
