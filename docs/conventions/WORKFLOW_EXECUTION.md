@@ -81,13 +81,37 @@ PROVENANCE: interactive clicks enqueue at 1 and jump a backfill flood at 3-4.
   the worker uses. One handler, two entry points; the queue is never
   bypassed for bulk.
 
+## Queues ALWAYS self-drain (decided 2026-07-13)
+
+Authorization happens BEFORE enqueue: a queue row means "safe to process".
+The control surface is whatever feeds the trigger — gates, the review queue,
+human releases — never a manual drain button. Consequently every queue gets
+BOTH drain signals, as a pair (never a choice):
+
+- **Wake-on-event** [active]: `AFTER INSERT -> billing.wake_queue_worker()`
+  (pg_net POST to the worker's run endpoint, vault `windmill_token`,
+  best-effort — an enqueue never fails on a wake failure). Priority-blind:
+  any row wakes; priority orders WITHIN the drain. `concurrent_limit 1`
+  makes a mid-drain wake queue behind the running drain, closing the exit
+  race.
+- **Heartbeat** [pending: needs schedules:write scope or UI creation]:
+  15-min schedules (`process_invoice {drain: true}`,
+  `process_maint_charges {dry_run: false}`; preprocess already has its
+  2-min). pg_net is at-most-once (~6% drops seen under burst) — wake gives
+  latency, only the heartbeat guarantees nothing is forgotten.
+
+For money queues this means gates-pass = charged: the Ready tab is a monitor
+and a priority lever, not a launch pad. Interactive "process now" = enqueue
+at priority 1 (under a running drain that beats a direct call, which would
+queue behind the WHOLE drain on the concurrency key).
+
 ## Existing instances
 
 | Stage | Queue | Worker | Handler | Status |
 |---|---|---|---|---|
 | Maintenance preprocess | `billing_audit.maint_preprocess_queue` (trigger-fed on invoice link) | `drain_maint_preprocess_queue` (2 min heartbeat, serial, 3-attempt dead-letter) | `preprocess_maint_customer_month` | [active] — the reference implementation |
-| Maintenance charge/send | `billing_audit.maint_charge_queue` (unit = customer-month; `trg_enqueue_maint_charge` on the `ready_to_process` transition; migration `20260710120000`) | `f/billing/process_maint_charges` — human-kicked (money keeps its human trigger; no schedule), drains until empty | inline `process()` sentence: claim-time resolve -> `send_invoice` or `charge_and_record(lines=invoice_ids)`; stamps no status (the projection derives, incl. the delivered-without-charge rule) | [active] 2026-07-10; supersedes `process_maint_period` (kept deployed as manual fallback until verified) |
-| Service-billing charge/send | `billing.service_charge_queue` (unit = invoice; `trg_enqueue_service_charge` on the `ready_to_process` transition; migration `20260713150000`) | `process_invoice` itself: live batches enqueue (interactive priority 1) + drain until empty; `drain=True` for backfill kicks; force/orphan recovery stay direct | `process_one` (sentence over `_lib`) | [active] 2026-07-13 |
+| Maintenance charge/send | `billing_audit.maint_charge_queue` (unit = customer-month; `trg_enqueue_maint_charge` on the `ready_to_process` transition; migration `20260710120000`) | `f/billing/process_maint_charges` — self-draining (wake trigger + 15-min heartbeat), drains until empty | inline `process()` sentence: claim-time resolve -> `send_invoice` or `charge_and_record(lines=invoice_ids)`; stamps no status (the projection derives, incl. the delivered-without-charge rule) | [active] 2026-07-10; supersedes `process_maint_period` (kept deployed as manual fallback until verified) |
+| Service-billing charge/send | `billing.service_charge_queue` (unit = invoice; `trg_enqueue_service_charge` on the `ready_to_process` transition; migration `20260713150000`) | `process_invoice` itself — self-draining (wake trigger + 15-min heartbeat); live batches enqueue (interactive priority 1); `drain=True` manual kicks; force/orphan recovery stay direct | `process_one` (sentence over `_lib`) | [active] 2026-07-13 |
 
 ## Definition of done (for converting a workflow)
 

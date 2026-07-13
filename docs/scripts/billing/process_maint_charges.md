@@ -3,7 +3,7 @@
 > Status: [active]
 > Path: `f/billing/process_maint_charges` (python3)
 > Concurrency: `qbo_writer` (limit 1) — the write serializer
-> Schedule: none — human-kicked (money movement keeps its human trigger)
+> Schedule: wake-on-event (trg_wake_maint_charge -> pg_net) + 15-min heartbeat [pending schedule creation]; authorization happens BEFORE enqueue (a queue row = safe to process)
 > Flow: [monthly-maintenance-billing](../../flows/monthly-maintenance-billing/index.md), stage 7
 > Pattern: [conventions/WORKFLOW_EXECUTION.md](../../conventions/WORKFLOW_EXECUTION.md)
 
