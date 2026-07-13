@@ -112,3 +112,28 @@ Phase 0 (delete) can land immediately — it's pure removal of dead code. Phases
 1–3 are the ADR 009 §5 sequence and touch the live charge path, so each is
 deploy-then-dry-run-verify. Do the `get_db_conn` swap across live scripts first
 as the warm-up (mechanic already proven).
+
+
+## Phase 4 — pre_process_invoice onto _lib  [DONE 2026-07-13]
+
+928 -> 642 lines (~100 of which are the memo prompt/examples — policy). All
+QBO plumbing deleted -> `_lib/qbo` (`update_invoice_sparse`, cached
+`fetch_qbo_classes`, `apply_credit`); credit APPLY + echoes (unapplied_amt
+decrement, payment_invoice_links upsert) -> `_lib/payments.apply_credits`
+(caller-picked `credits` list); cache write -> `_lib/cache.echo_invoice`.
+Kept as sentences: the WO credit matcher, route resolution, class derivation,
+memo generation (deterministic + LLM + O'Brien guard). New guard: invoices
+whose DERIVED status is processed/open_ar are terminal for enrichment — never
+rewrite a memo the customer already received. Per-caller 429 retry dropped;
+the shared token bucket (ADR 008 §4) is the structural replacement [pending].
+
+## End-state for billing_status (decided 2026-07-13)
+
+The column drops when three criteria hold, audited in order:
+1. every stamped stage is a recorded FACT elsewhere (pre_processed_at,
+   the *_ok indicators, override timestamps, attempts) — done for terminal
+   states, pipeline stages still write the column;
+2. `v_invoice_status` derives every stage and all readers (app views,
+   check_buddy, report SQL, other repos) sit on views — reader audit pending;
+3. writers reach zero (engines done; pre_process + sync + triggers remain).
+Until then the column is the pipeline-stage record, not "the status".
