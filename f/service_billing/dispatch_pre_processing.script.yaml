@@ -1,4 +1,6 @@
-summary: Add subtotal_ok=TRUE gate
+summary: Pre-process queue worker (claim loop over billing.service_preprocess_queue)
+concurrency_time_window_s: 5
+concurrent_limit: 1
 description: Dispatch worker only fires pre_process for invoices with subtotal_ok=TRUE.
 lock: '!inline f/service_billing/dispatch_pre_processing.script.lock'
 kind: script

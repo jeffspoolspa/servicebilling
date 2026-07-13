@@ -31,9 +31,12 @@ Two rules, being migrated toward:
    — declines get ids too), and an attempt can exist with no charge at all.
    Today the attempt row embeds the charge (`charge_id`, `charge_result`
    jsonb) — the same leader-state blur ADR 008 §5 fixed on the cache side.
-   Target: a `billing.charges` reflection table (one row per Intuit charge
-   event, written from the charge response and by reconcile_payments as it
-   discovers state), with `processing_attempts.charge_id` as the reference.
+   Step 1 SHIPPED 2026-07-13 (migration `20260713190000`): `billing.charges`
+   (reflection keyed by Intuit's charge_id, upserted by charge_and_record for
+   success AND declines — which also fixed the same-PM decline gate, since
+   declined attempts now carry their charge id) + `processing_attempts.lines`
+   jsonb stamped on every fresh attempt. Remaining: reconcile_payments as a
+   reflection writer; read models onto lines-joins; legacy columns relax.
    Attempt : charge is 1 : 0..1 (the persisted key means one attempt can
    never produce two charges).
 

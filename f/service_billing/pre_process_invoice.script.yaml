@@ -1,4 +1,7 @@
-summary: Align QBO TxnDate to wo.completed in the enrichment PATCH
+summary: Enrichment event handler over f/billing/_lib
+concurrency_key: qbo_api
+concurrency_time_window_s: 10
+concurrent_limit: 5
 description: ''
 lock: '!inline f/service_billing/pre_process_invoice.script.lock'
 kind: script

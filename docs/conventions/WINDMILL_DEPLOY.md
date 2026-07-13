@@ -82,6 +82,13 @@ curl -s -X POST -H "$AUTH" "$API/w/$WS/scripts/delete/p/<path>"
 
 ## Footguns (carried from prior sessions)
 
+- **`create` silently drops EVERY unspecified setting — concurrency keys
+  included.** A redeploy without `concurrency_key`/`concurrent_limit`/
+  `concurrency_time_window_s` in the body strips the write serializer off a
+  money script (this bit us 2026-07-13: process_invoice lost `qbo_writer`
+  across several updates before a settings audit caught it). ALWAYS read the
+  current settings first and re-pass them; the repo `.script.yaml` records
+  the intent.
 - **`create` silently drops the worker `tag`.** For ION/chromium scripts you MUST
   include `"tag":"chromium"` in the body, or the redeploy runs tag-null on a
   heterogeneous pool and fails intermittently (`chromium ... doesn't exist`).
