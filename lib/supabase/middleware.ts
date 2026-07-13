@@ -4,7 +4,7 @@ import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
 
 type CookieToSet = { name: string; value: string; options?: CookieOptions }
 
-const TECH_ALLOWED_PREFIXES = ["/sign-out", "/truck-check", "/tech-login", "/auth"]
+const TECH_ALLOWED_PREFIXES = ["/sign-out", "/truck-check", "/follow-up", "/tech-login", "/auth"]
 
 // Tech accounts are created with synthetic emails at this domain. Any user
 // whose email ISN'T at this domain CANNOT be a maintenance tech, so we can
@@ -78,7 +78,10 @@ export async function updateSession(request: NextRequest) {
     // Unauthenticated hits to tech URLs bounce to the tech login; everything else
     // bounces to the office login.
     const url = request.nextUrl.clone()
-    const isTechPath = path.startsWith("/sign-out") || path.startsWith("/truck-check")
+    const isTechPath =
+      path.startsWith("/sign-out") ||
+      path.startsWith("/truck-check") ||
+      path.startsWith("/follow-up")
     url.pathname = isTechPath ? "/tech-login" : "/login"
     return NextResponse.redirect(url)
   }

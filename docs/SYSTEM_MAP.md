@@ -456,14 +456,21 @@ Item catalog (Zoho), inventory snapshots, sign-outs, transfers.
 
 Tech-facing mobile UIs for in-field use.
 
-**UI routes** (`app/(tech)/`):
+**UI routes** (`app/(tech)/`): a bottom nav switches the two **modules**
+(Inventory, Follow-Up); top tabs switch **sub-pages** within the active module.
 - `/tech-login` — tech login (separate auth from internal staff)
-- `/truck-check` — truck inspection form
-- `/sign-out` — equipment sign-out
+- Inventory module: `/truck-check` (truck inspection), `/sign-out` (equipment sign-out)
+- Follow-Up module: `/follow-up` (Submit — field follow-up form; entity:
+  [Follow-Up](entities/follow-up.md)), `/follow-up/history` (History — the tech's
+  own submissions). Rows mirror to the Airtable "Maintenance Follow up" table via
+  `f/maintenance/sync_follow_ups_to_airtable` (row-as-outbox, ADR 008). On the
+  Submit page the bottom nav morphs into the Submit button once a customer is
+  chosen.
 
 **Database tables**:
 - `maintenance.truck_check_submissions` — currently empty; truck-check feature may not be in active use
 - `public.inventory_sign_outs` (when tech signs out equipment)
+- `maintenance.follow_ups` — field follow-up tickets (media in storage bucket `follow-ups`)
 
 ---
 
