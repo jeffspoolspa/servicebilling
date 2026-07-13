@@ -120,7 +120,7 @@ The QBO invoice processing pipeline. Pulls invoices from QBO, enriches them (mem
 - `/queue` — current invoice queue
 - `/triage` — invoices needing review
 - `/needs-attention` — flagged
-- `/past-due` — overdue
+- `/open-ar` — sent invoices with an open balance (`public.v_open_ar`; replaced the `/past-due` stub)
 - `/awaiting-invoice` — WOs missing invoice number
 - `/sent` — completed
 - `/activity` — log

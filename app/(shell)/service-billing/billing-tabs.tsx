@@ -17,15 +17,17 @@ const TABS = [
   { href: "/service-billing/queue", label: "Ready to Process" },
   { href: "/service-billing/needs-attention", label: "Needs Review" },
   { href: "/service-billing/sent", label: "Processed" },
+  { href: "/service-billing/open-ar", label: "Open AR" },
   { href: "/service-billing/audit", label: "Audit" },
 ] as const
 
-export function BillingTabs() {
+export function BillingTabs({ openArCount = 0 }: { openArCount?: number }) {
   const path = usePathname()
   return (
     <div className="flex gap-1 px-7 pt-1 border-b border-line-soft">
       {TABS.map((tab) => {
         const active = path === tab.href || path.startsWith(tab.href + "/")
+        const badge = tab.href === "/service-billing/open-ar" && openArCount > 0
         return (
           <Link
             key={tab.href}
@@ -38,6 +40,11 @@ export function BillingTabs() {
             )}
           >
             {tab.label}
+            {badge && (
+              <span className="ml-1.5 inline-flex items-center rounded-full border border-coral/20 bg-coral/10 px-1.5 text-[10px] font-mono text-coral align-[1px]">
+                {openArCount}
+              </span>
+            )}
           </Link>
         )
       })}
