@@ -19,7 +19,7 @@ sequenceDiagram
     W->>DB: invoice -> needs_review (held, not charged)
   else all indicators ok
     DB->>DB: invoice -> ready_to_process; WO -> ready_to_process
-    W->>W: process_work_order acquires lock; WO -> processing
+    W->>W: process_invoice (human-kicked; dry-run first)
     W->>INT: charge card on file
     INT-->>W: CCTransId  (or timeout -> charge_uncertain)
     W->>QBO: record Payment (CCTransId) applied to invoice
@@ -33,8 +33,8 @@ sequenceDiagram
 1. **Invoice cached** — [pull_qbo_invoices](../../scripts/service_billing/pull_qbo_invoices.md). `[reflection <- QBO]`
 2. **Pre-process / enrich** — [pre_process_invoice](../../scripts/service_billing/pre_process_invoice.md). `[write-out -> QBO]`
 3. **Indicator gates** — triggers on `billing.invoices`: [set_subtotal_ok](../../scripts/_triggers/set_subtotal_ok.md), [set_payment_method_ok](../../scripts/_triggers/set_payment_method_ok.md), [set_credits_ok](../../scripts/_triggers/set_credits_ok.md), [set_attempts_ok](../../scripts/_triggers/set_attempts_ok.md). `[internal]`
-4. **Charge** — [process_work_order](../../scripts/service_billing/process_work_order.md) (lock → Intuit → record QBO Payment → receipt). `[write-out -> Intuit Payments]` then `[write-out -> QBO]`
-5. **Reflect to processed** — QBO webhook (`trg_auto_promote_to_processed`); WO follows. `[reflection <- QBO]`
+4. **Charge** — [process_invoice](../../scripts/service_billing/process_invoice.md) (event handler over `f/billing/_lib`: `charge_and_record` = WAL + fresh-read + charge + QBO Payment + receipt; engine keeps route/credit/delivery policy). `[write-out -> Intuit Payments]` then `[write-out -> QBO]`. (`process_work_order` [retired 2026-07].)
+5. **Status derives** — `billing.v_invoice_status` (migration `20260713100000`): processed = paid AND sent; sent + open balance = `open_ar` (watched via `v_open_ar`); engines stamp nothing. `[reflection <- QBO]` keeps the balance/email facts current.
 
 **Failure modes + backstops** (every write-out → reflection edge has a drift window; these scheduled scripts catch what slips):
 

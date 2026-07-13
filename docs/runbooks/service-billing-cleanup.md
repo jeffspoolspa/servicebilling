@@ -89,12 +89,17 @@ Order: get_db_conn swap first (proven, zero-risk) → qbo primitives → wal + s
 → collapse the sentence. Dry-run verify after each deploy; `process_invoice` is the
 live charge path (`/api/billing/process`).
 
-## Phase 3 — derive invoice status
+## Phase 3 — derive invoice status  [DONE 2026-07-13]
 
-Replace `mark_invoice_processed`/`mark_invoice_needs_review` with a read-model:
-`v_invoice_status` over `billing.processing_attempts` + review flags (same pattern
-as autopay declines, ADR 009 §D). Compute-on-read first; materialize/trigger only
-on measured read pressure. Migrate readers of the stamped columns to the view.
+`billing.v_invoice_status` (migration `20260713100000`) is the rules home:
+processed = paid AND sent; sent + open balance = `open_ar` (new bucket — 92
+invoices surfaced on day one that were stamped processed with money
+outstanding); in-flight attempts never reclassify. The tab views
+(`v_billing_queue`/`v_needs_attention`/`v_processed`) + `v_open_ar` read the
+derivation; `process_invoice` dropped `mark_invoice_processed` and gates on
+`derived_status`. `mark_invoice_needs_review` stays (records the halt reason).
+Statuses are CONTEXTUAL by design: other contexts define their own reading
+over the same facts (maintenance: delivered-without-charge = period done).
 
 ## Fix the doc drift while here
 
