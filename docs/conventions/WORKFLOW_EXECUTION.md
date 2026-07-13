@@ -34,6 +34,14 @@ projection over those facts — the handler stamps nothing it could derive.
 
 Each piece, and the rule it enforces:
 
+One structural rule: **one queue table per WORKER** (per drain policy), never
+one global table with a script-router — a generic table softens the natural
+key that coalescing/claiming/UI reads depend on, and re-implements the job
+queue Windmill already is. Every table shares the same envelope columns; the
+union view `v_queue_health` (queued / in_flight / dead_letter / oldest per
+queue) is the one pane of glass. Priority within a single-action queue encodes
+PROVENANCE: interactive clicks enqueue at 1 and jump a backfill flood at 3-4.
+
 | Piece | Shape | Rule it enforces |
 |---|---|---|
 | Trigger | DB trigger / detector / manual action that INSERTs a queue row | Detection is separated from processing (ADR 008: detectors never do the work) |
@@ -51,12 +59,13 @@ Each piece, and the rule it enforces:
   (`qbo_writer`, limit 1). Money movement and leader writes form a single
   file line. This is the primary knob and it is structural, not configured
   per burst.
-- **The read governor** — the per-system token bucket (ADR 008 §4: one row
-  `tokens, cap, refill_per_sec`; every leader API call claims from it).
-  Implemented ONCE in the system's `_lib` so every caller — drainer, probe,
-  sweep, engine, UI fresh-read — shares the same budget. [pending] as of
-  2026-07-10: decided, not yet built; lands in `f/billing/_lib/qbo` so all
-  QBO paths inherit it in one change.
+- **The read governor** — the per-system token bucket (ADR 008 §4:
+  `billing.rate_buckets`, one row per system; `billing.claim_rate_token`
+  refills by elapsed time and grants or returns a wait). [active 2026-07-13]
+  Implemented ONCE in `f/billing/_lib/qbo`: engines arm it per job
+  (`set_rate_limiter(conn)`) and every leader call claims before firing —
+  sleep-on-dry, hard-capped wait, then FAIL OPEN (the bucket governs volume,
+  never availability). QBO budget: 4/s refill, burst cap 200 (§8 rulebook).
 - Demand shedding comes free from the queue: coalescing collapses duplicate
   signals, supersession (`cache newer than signal -> mark done`) drops moot
   work, priority ordering starves analytics before it starves money.
@@ -78,7 +87,7 @@ Each piece, and the rule it enforces:
 |---|---|---|---|---|
 | Maintenance preprocess | `billing_audit.maint_preprocess_queue` (trigger-fed on invoice link) | `drain_maint_preprocess_queue` (2 min heartbeat, serial, 3-attempt dead-letter) | `preprocess_maint_customer_month` | [active] — the reference implementation |
 | Maintenance charge/send | `billing_audit.maint_charge_queue` (unit = customer-month; `trg_enqueue_maint_charge` on the `ready_to_process` transition; migration `20260710120000`) | `f/billing/process_maint_charges` — human-kicked (money keeps its human trigger; no schedule), drains until empty | inline `process()` sentence: claim-time resolve -> `send_invoice` or `charge_and_record(lines=invoice_ids)`; stamps no status (the projection derives, incl. the delivered-without-charge rule) | [active] 2026-07-10; supersedes `process_maint_period` (kept deployed as manual fallback until verified) |
-| Service-billing charge/send | none — `process_invoice bulk_all` batch-loops | none | `process_invoice` (already a sentence over `_lib`) | [pending] same conversion; the WO backfill (~500 at a time) is the forcing function |
+| Service-billing charge/send | `billing.service_charge_queue` (unit = invoice; `trg_enqueue_service_charge` on the `ready_to_process` transition; migration `20260713150000`) | `process_invoice` itself: live batches enqueue (interactive priority 1) + drain until empty; `drain=True` for backfill kicks; force/orphan recovery stay direct | `process_one` (sentence over `_lib`) | [active] 2026-07-13 |
 
 ## Definition of done (for converting a workflow)
 
