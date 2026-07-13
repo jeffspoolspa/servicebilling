@@ -6,7 +6,36 @@
 
 ## What it is
 
-An append-only log of charge attempts. One row each time [process_work_order](../scripts/service_billing/process_work_order.md) tries to charge a card/ACH. This is the durable record that makes the charge `[write-out]` recoverable: when Intuit Payments times out, the row sits at `charge_uncertain` and [reconcile_payments](../scripts/service_billing/reconcile_payments.md) resolves it later without risking a double-charge.
+An append-only log of CHARGE ATTEMPTS — our fact that we tried to collect.
+One row each time `f/billing/_lib/payments.charge_and_record` (the shared
+payment service; both the service and maintenance engines route through it)
+tries to charge a card/ACH. This is the durable record that makes the charge
+`[write-out]` recoverable: the row + its idempotency key COMMIT BEFORE the
+external call; when Intuit times out, the row sits at `charge_uncertain` and
+[reconcile_payments](../scripts/service_billing/reconcile_payments.md)
+resolves it later without risking a double-charge.
+
+## Target model (decided 2026-07-13 — the attempt/charge split)
+
+Two rules, being migrated toward:
+
+1. **Charge attempts ONLY.** No email-send rows, no pre-charge-halt rows, no
+   error stubs — those outcomes live on the work-queue row (retry/dead-letter/
+   error) and the cache echoes (`email_status`). The maintenance worker is
+   already pure; `process_invoice` still writes a few non-charge rows because
+   the WO detail timeline reads them — they narrow when the timeline moves to
+   the queue + facts read-model (planned with the Open AR tab wiring).
+2. **The attempt is OUR fact; the charge is INTUIT's fact — separate
+   entities.** An attempt REFERS to a charge but is not one: Intuit assigns a
+   charge its own identity (charge_id, amount, auth, card, CAPTURED/DECLINED
+   — declines get ids too), and an attempt can exist with no charge at all.
+   Today the attempt row embeds the charge (`charge_id`, `charge_result`
+   jsonb) — the same leader-state blur ADR 008 §5 fixed on the cache side.
+   Target: a `billing.charges` reflection table (one row per Intuit charge
+   event, written from the charge response and by reconcile_payments as it
+   discovers state), with `processing_attempts.charge_id` as the reference.
+   Attempt : charge is 1 : 0..1 (the persisted key means one attempt can
+   never produce two charges).
 
 QBO has no concept of "we tried and don't know if it worked," so this state lives entirely with us. See [Payment](payment.md) for the full attempt lifecycle (the state diagram lives there).
 

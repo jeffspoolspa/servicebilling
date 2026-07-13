@@ -137,3 +137,15 @@ The column drops when three criteria hold, audited in order:
    check_buddy, report SQL, other repos) sit on views — reader audit pending;
 3. writers reach zero (engines done; pre_process + sync + triggers remain).
 Until then the column is the pipeline-stage record, not "the status".
+
+
+## Phase 5 — attempt/charge split  [decided 2026-07-13, not started]
+
+Per [entities/processing-attempt.md](../entities/processing-attempt.md)
+target model: (a) narrow `processing_attempts` to charge attempts only —
+`process_invoice` drops its email/halt/stub rows once the WO timeline reads
+the queue + facts instead (bundle with the Open AR tab wiring); (b) split the
+Intuit charge event into `billing.charges` (reflection of the leader's fact,
+keyed by charge_id) referenced from the attempt row; `reconcile_payments`
+becomes a writer of that reflection. Do (a) before (b) — (b) is a schema
+change reviewed as money code.
