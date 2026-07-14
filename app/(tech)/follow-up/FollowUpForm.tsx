@@ -19,6 +19,7 @@ import {
 } from "@/lib/entities/follow-up/shared"
 import { submitFollowUp, type SubmitState } from "./actions"
 import { CustomerSelectSheet, CustomerTrigger } from "./CustomerPicker"
+import { VoiceNote } from "./VoiceNote"
 import { useBottomBar } from "../bottom-bar"
 
 const initial: SubmitState = {}
@@ -372,6 +373,12 @@ export function FollowUpForm({ techName, authUserId, customers }: Props) {
             "bg-[#0E1C2A] border border-line text-ink placeholder:text-ink-mute",
             "focus:outline-none focus:border-cyan focus-visible:ring-2 focus-visible:ring-cyan/30",
           )}
+        />
+
+        <VoiceNote
+          customer={selected?.customer_name ?? ""}
+          issue={issue}
+          onResult={(t) => setDescription((d) => (d.trim() ? `${d.trim()}\n${t}` : t))}
         />
 
         {/* Equipment off? — only relevant to an equipment issue */}

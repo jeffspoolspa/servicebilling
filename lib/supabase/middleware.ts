@@ -4,7 +4,7 @@ import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
 
 type CookieToSet = { name: string; value: string; options?: CookieOptions }
 
-const TECH_ALLOWED_PREFIXES = ["/sign-out", "/truck-check", "/follow-up", "/tech-login", "/auth"]
+const TECH_ALLOWED_PREFIXES = ["/sign-out", "/truck-check", "/follow-up", "/tech-login", "/auth", "/api/transcribe"]
 
 // Tech accounts are created with synthetic emails at this domain. Any user
 // whose email ISN'T at this domain CANNOT be a maintenance tech, so we can
