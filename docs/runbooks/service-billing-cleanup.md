@@ -157,3 +157,26 @@ change reviewed as money code.
 needs_review_reason='invoice_voided'. Add a void fact check (QBO payload) to
 `v_invoice_status` as its own terminal state in the next view pass; takes the
 hidden needs_review noise from 12 -> 3.
+
+## Write-time echo contract  [DONE 2026-07-14]
+
+Every QBO write's RESPONSE body is a free verified echo — committed to the
+cache synchronously by the writer (ADR 009 §C generalized; Carter 2026-07-14).
+Webhooks/CDC demote to changes-not-made-by-us + delivery telemetry; the
+inbox's supersession check moot-finishes our own writes' webhooks
+automatically (echo bumps fetched_at first — no ours-vs-theirs flag needed).
+
+- cache.echo_payment: OCC-guarded upsert (leader LastUpdatedTime) from the
+  payment-create / credit-apply response; wired into charge_and_record and
+  apply_credits. The payment cache shows a charge at COMMIT time, not
+  webhook time.
+- apply_credits payment-credit path now echoes the response's TRUE
+  UnappliedAmt (was a computed GREATEST() decrement — a write-what-you-can-
+  prove violation, fixed).
+- CROSS-ENTITY RIPPLES stay honest: a write response describes only the
+  entity written. Invoice balance after a charge = one fresh read (kept);
+  credit memo remaining after a CM apply = computed + flagged, converged by
+  pull_qbo_credits/CDC; customer AR = derived (no cache at all). Never
+  compute-and-write.
+- webhook_expectations demote to telemetry (they measured the 97%/100%
+  delivery matrix) — stop paging on 'missing' for echo-confirmed writes.
