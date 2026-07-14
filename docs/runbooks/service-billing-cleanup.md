@@ -149,3 +149,11 @@ Intuit charge event into `billing.charges` (reflection of the leader's fact,
 keyed by charge_id) referenced from the attempt row; `reconcile_payments`
 becomes a writer of that reflection. Do (a) before (b) — (b) is a schema
 change reviewed as money code.
+
+## Derivation gap noted 2026-07-14: voided invoices
+
+`derived_status` has no 'voided' terminal state — a voided $0 invoice reads
+'processed' (balance 0 + sent) and voided unpaid ones lean on the stamped
+needs_review_reason='invoice_voided'. Add a void fact check (QBO payload) to
+`v_invoice_status` as its own terminal state in the next view pass; takes the
+hidden needs_review noise from 12 -> 3.

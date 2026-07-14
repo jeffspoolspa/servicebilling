@@ -82,6 +82,13 @@ curl -s -X POST -H "$AUTH" "$API/w/$WS/scripts/delete/p/<path>"
 
 ## Footguns (carried from prior sessions)
 
+- **Scripts in `f/qbo` receive an EMPTY module for `f.billing._lib.qbo`**
+  (folder-name / module-segment collision in the bundler; probed 2026-07-14 —
+  `dir()` returns zero names, both from-imports and qualified imports fail).
+  Home any script needing the shared lib outside `f/qbo` (the inbox drainer
+  lives in `f/service_billing` for exactly this reason).
+- **Windmill passes `null` for args whose default is a module CONSTANT**
+  (`def main(x: int = SOME_CONST)`) — use literal defaults + an `or` guard.
 - **`create` silently drops EVERY unspecified setting — concurrency keys
   included.** A redeploy without `concurrency_key`/`concurrent_limit`/
   `concurrency_time_window_s` in the body strips the write serializer off a
