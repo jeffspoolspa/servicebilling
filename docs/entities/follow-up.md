@@ -16,33 +16,43 @@ base `apppQeFQh1Mi6Mv3p`).
 Key columns:
 
 - `tech_employee_id` (FK `public.employees`), `customer_id` (FK `public."Customers"`)
-- `issue` — CHECK-constrained to the curated list, mirrored as
-  `FOLLOW_UP_ISSUES` in `lib/entities/follow-up/index.ts` (keep in sync)
-- `description`, `media` (jsonb `[{path, type: image|video}]` — paths in the
-  private `follow-ups` storage bucket, one folder per tech auth uid),
-  `equipment_off`
-- `status` (`open` / `closed`) — **Airtable-led for now**: the sync script maps
-  Airtable Status containing "Done" to `closed`. Becomes locally owned when the
-  app is the primary triage UI.
-- Sync columns (`airtable_record_id`, `airtable_synced_at`, `sync_error`,
-  `sync_attempts`) — written ONLY by `f/maintenance/sync_follow_ups_to_airtable`
+- `issue` — the app validates new submissions against the curated
+  `FOLLOW_UP_ISSUES` (`lib/entities/follow-up/shared.ts`) via zod; the DB CHECK
+  was dropped so historical backfill values import as-is.
+- `description`, `next_steps`, `media` (jsonb `[{path, type: image|video}]` —
+  paths in the private `follow-ups` storage bucket), `equipment_off`
+- `status` (`open` / `closed`) — **Airtable-led for now**: the daily sync closes
+  a ticket when Airtable Status contains **Done or Scheduled**. Locally owned
+  once the app is the primary triage UI.
+- `source` (`app` / `airtable_backfill` / `airtable_ingest`),
+  `source_tech_name` / `source_customer_name` (raw Airtable text kept for rows
+  where tech/customer couldn't be resolved). `tech_employee_id` and
+  `next_steps` are nullable.
+- Sync columns (`airtable_record_id` UNIQUE, `airtable_synced_at`, `sync_error`,
+  `sync_attempts`).
 
-## Lifecycle (row-as-outbox, ADR 008)
+## Lifecycle — one daily reconcile
 
-1. [write] Tech submits the form at `/follow-up` (`app/(tech)/follow-up/`).
-   Media uploads go browser → storage bucket `follow-ups` first; the server
-   action inserts the row. RLS: techs insert own rows only; any authenticated
-   user can read (org-wide history).
-2. [trigger] `follow_ups_wake_sync` (AFTER INSERT) pokes the sync script via
-   pg_net + shared vault `windmill_token`. Latency only — pg_net is
-   at-most-once.
-3. [write] `f/maintenance/sync_follow_ups_to_airtable` (single writer,
-   `airtable_api` concurrency key; pg_cron job `follow-ups-airtable-heartbeat`
-   every 15 min is the delivery guarantee) drains rows with
-   `airtable_record_id IS NULL`, POSTs to Airtable
-   with signed media URLs, and echoes the record id back (verified echo).
-4. [read] Same script reads Airtable Status back for open synced rows and
-   closes them when the office marks Done.
+1. [write] Tech submits at `/follow-up` (`app/(tech)/follow-up/`). Media goes
+   browser → `follow-ups` bucket first; the server action inserts the row
+   (`source='app'`, `airtable_record_id` NULL). RLS: techs insert own rows;
+   any authenticated user reads (org-wide history).
+2. [batch, daily] pg_cron `follow-ups-airtable-daily-sync` (08:00 ET) runs
+   `f/maintenance/backfill_follow_ups_from_airtable` in `mode='daily_sync'`,
+   which loads Airtable once and does three things:
+   - **push** app rows with `airtable_record_id IS NULL` → create the Airtable
+     record (signed media URLs), echo the id back;
+   - **ingest** Airtable records not in our DB (old-form / other sources) via
+     the customer/tech matcher (`source='airtable_ingest'`);
+   - **refresh** open tickets: pull Status + Next Steps, close on Done/Scheduled
+     (open-only — closed tickets are never re-polled).
+   There is **no insert trigger** — the daily job is the only sync path (the
+   trigger flooded the queue on bulk insert and was removed).
+3. Historical import was a one-shot `mode='import_rows'` (4.9k rows, 2023→) plus
+   `mode='rehost_media'` (Airtable attachments downloaded into our bucket).
+
+Retirement: when the app is the triage UI, drop the ingest + refresh legs and
+stop pushing — the `source` column makes app-native rows distinguishable.
 
 ## Reads
 
