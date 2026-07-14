@@ -37,17 +37,17 @@ Key columns:
    browser → `follow-ups` bucket first; the server action inserts the row
    (`source='app'`, `airtable_record_id` NULL). RLS: techs insert own rows;
    any authenticated user reads (org-wide history).
-2. [batch, daily] pg_cron `follow-ups-airtable-daily-sync` (08:00 ET) runs
-   `f/maintenance/backfill_follow_ups_from_airtable` in `mode='daily_sync'`,
-   which loads Airtable once and does three things:
-   - **push** app rows with `airtable_record_id IS NULL` → create the Airtable
-     record (signed media URLs), echo the id back;
-   - **ingest** Airtable records not in our DB (old-form / other sources) via
-     the customer/tech matcher (`source='airtable_ingest'`);
-   - **refresh** open tickets: pull Status + Next Steps, close on Done/Scheduled
-     (open-only — closed tickets are never re-polled).
-   There is **no insert trigger** — the daily job is the only sync path (the
-   trigger flooded the queue on bulk insert and was removed).
+2. [trigger, real-time] `follow_ups_push_on_insert` — **guarded** to fire only
+   for genuine app rows (`airtable_record_id IS NULL AND source='app'`, so
+   backfill/ingest can't flood it) — pokes `mode='push'` via pg_net, which
+   creates the Airtable record immediately (concurrent_limit=1 prevents
+   double-create). The office sees new app tickets right away.
+3. [batch, daily] pg_cron `follow-ups-airtable-daily-sync` (08:00 ET) runs
+   `mode='daily_sync'`: **push** any app rows the trigger missed (backstop),
+   **ingest** Airtable records not in our DB (old-form / other sources) via the
+   matcher (`source='airtable_ingest'`), **refresh** open tickets (Status +
+   Next Steps, close on Done/Scheduled, open-only — closed tickets are never
+   re-polled).
 3. Historical import was a one-shot `mode='import_rows'` (4.9k rows, 2023→) plus
    `mode='rehost_media'` (Airtable attachments downloaded into our bucket).
 
