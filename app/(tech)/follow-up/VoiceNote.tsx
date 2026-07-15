@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Mic, Square, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 
@@ -22,8 +22,20 @@ export function VoiceNote({ customer, issue, onResult }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [secs, setSecs] = useState(0)
   const recRef = useRef<MediaRecorder | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Unmounting mid-recording (form cleared, tab switched) never fires stop()/onstop,
+  // so release the mic + timer directly here. Don't route through rec.stop() — its
+  // onstop would kick off a transcribe()/setState on an unmounted component.
+  useEffect(
+    () => () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop())
+      if (timerRef.current) clearInterval(timerRef.current)
+    },
+    [],
+  )
 
   async function start() {
     setError(null)
@@ -34,6 +46,7 @@ export function VoiceNote({ customer, issue, onResult }: Props) {
       setError("Microphone access denied.")
       return
     }
+    streamRef.current = stream
     chunksRef.current = []
     const rec = new MediaRecorder(stream)
     rec.ondataavailable = (e) => {
