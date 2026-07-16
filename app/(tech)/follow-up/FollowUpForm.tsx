@@ -73,6 +73,17 @@ export function FollowUpForm({ techName, authUserId, customers }: Props) {
   const [files, setFiles] = useState<File[]>([])
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
+  const descRef = useRef<HTMLTextAreaElement>(null)
+
+  // Auto-grow the description to fit its content (the page scrolls once it's
+  // taller than the viewport). Runs whenever the text changes — including
+  // voice-note inserts and the reset-to-empty after submit/clear.
+  useEffect(() => {
+    const el = descRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${el.scrollHeight}px`
+  }, [description])
 
   // Object-URL thumbnails for the attached media; revoked when files change.
   const [previews, setPreviews] = useState<{ url: string; isVideo: boolean }[]>([])
@@ -363,23 +374,55 @@ export function FollowUpForm({ techName, authUserId, customers }: Props) {
           ))}
         </select>
 
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Describe the issue…"
-          rows={4}
+        {/* Description composer: an auto-growing textarea with the voice-note
+            mic and a Clear affordance in its footer, all inside one box. */}
+        <div
           className={cn(
-            "w-full px-3.5 py-2.5 text-base rounded-lg resize-y",
-            "bg-[#0E1C2A] border border-line text-ink placeholder:text-ink-mute",
-            "focus:outline-none focus:border-cyan focus-visible:ring-2 focus-visible:ring-cyan/30",
+            "rounded-lg bg-[#0E1C2A] border border-line",
+            "focus-within:border-cyan focus-within:ring-2 focus-within:ring-cyan/30",
+            "transition-[border-color,box-shadow] duration-150",
           )}
-        />
-
-        <VoiceNote
-          customer={selected?.customer_name ?? ""}
-          issue={issue}
-          onResult={(t) => setDescription((d) => (d.trim() ? `${d.trim()}\n${t}` : t))}
-        />
+        >
+          <textarea
+            ref={descRef}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Describe the issue…"
+            rows={4}
+            className={cn(
+              "block w-full px-3.5 pt-2.5 pb-1 text-base resize-none overflow-hidden bg-transparent",
+              "text-ink placeholder:text-ink-mute focus:outline-none",
+            )}
+          />
+          <div className="flex items-center justify-between px-2 pb-1.5 pt-0.5">
+            {description.trim() ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDescription("")
+                  descRef.current?.focus()
+                }}
+                aria-label="Clear description"
+                className={cn(
+                  "w-7 h-7 grid place-items-center rounded-full text-ink-dim",
+                  "hover:text-ink hover:bg-white/5 active:scale-90",
+                  "transition-[color,background-color,transform] duration-150 ease-out",
+                )}
+              >
+                <X className="w-4 h-4" strokeWidth={2} />
+              </button>
+            ) : (
+              <span />
+            )}
+            <VoiceNote
+              customer={selected?.customer_name ?? ""}
+              issue={issue}
+              onResult={(t) =>
+                setDescription((d) => (d.trim() ? `${d.trim()}\n${t}` : t))
+              }
+            />
+          </div>
+        </div>
 
         {/* Equipment off? — only relevant to an equipment issue */}
         {issue === "Equipment Issue" && (
