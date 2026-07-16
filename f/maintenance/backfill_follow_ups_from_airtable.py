@@ -35,6 +35,7 @@
 # supabase
 
 import re
+import time
 import difflib
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
@@ -48,6 +49,16 @@ TABLE_ID = "tbltojdp1l9k4xmSN"
 AIRTABLE_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_ID}"
 MAINT_DEPT = "757659e3-d73f-48c3-999f-6f071f1e3587"
 BRANCH_CODE = {"BWK": "Brunswick, GA", "CAM": "Saint Marys, GA", "RH": "Richmond Hill, GA"}
+
+# branches.name -> the Airtable "Office" single-select option label. The office's
+# labels are shorter than our branch names; typecast:True auto-creates "Savannah"
+# (the office hadn't added that option yet — 48 active Savannah maint customers).
+OFFICE_TO_AIRTABLE = {
+    "Brunswick, GA": "Brunswick",
+    "Richmond Hill, GA": "Richmond Hill",
+    "Saint Marys, GA": "St Marys",
+    "Savannah, GA": "Savannah",
+}
 
 # Confirmed customer rescues (normalized name -> Customers.id) from manual review.
 CUST_OVERRIDE = {
@@ -169,14 +180,16 @@ def _phone10(s):
     return d[-10:] if len(d) >= 10 else ""
 
 def build_maps(sb):
-    custs = _paginate(sb, "Customers", "id,display_name,first_name,last_name,company,account_name,phone")
+    custs = _paginate(sb, "Customers", "id,display_name,first_name,last_name,company,account_name,phone,office_id")
     pool = {}
     disp = {}
     phone_idx = {}
     cust_phone = {}
+    cust_office_id = {}
     for c in custs:
         disp[c["id"]] = c.get("display_name")
         cust_phone[c["id"]] = c.get("phone")
+        cust_office_id[c["id"]] = c.get("office_id")
         for v in (c.get("display_name"),
                   f"{c.get('first_name') or ''} {c.get('last_name') or ''}",
                   c.get("company"), c.get("account_name")):
@@ -198,6 +211,7 @@ def build_maps(sb):
 
     # employees + branches
     branches = {b["id"]: b["name"] for b in sb.table("branches").select("id,name").execute().data}
+    cust_office = {cid: OFFICE_TO_AIRTABLE.get(branches.get(oid)) for cid, oid in cust_office_id.items()}
     emps = _paginate(sb, "employees", "id,first_name,last_name,hire_date,department_id,branch_id")
     E = [{"id": e["id"], "first": (e.get("first_name") or "").lower(),
           "last": (e.get("last_name") or "").lower(), "hire": e.get("hire_date") or "0000-01-01",
@@ -217,7 +231,7 @@ def build_maps(sb):
 
     return {"pool": pool, "pool_keys": pool_keys, "surn": surn, "phone_idx": phone_idx,
             "byfirst": byfirst, "find_emp": find_emp, "disp": disp, "emp_name": emp_name,
-            "cust_phone": cust_phone}
+            "cust_phone": cust_phone, "cust_office": cust_office}
 
 
 def match_customer(name, phone, M):
@@ -358,6 +372,9 @@ def _airtable_fields(sb, r, M):
     phone = M.get("cust_phone", {}).get(r.get("customer_id"))
     if phone:
         fields["Phone Number"] = phone
+    office = M.get("cust_office", {}).get(r.get("customer_id"))
+    if office:
+        fields["Office"] = office
     if r.get("equipment_off") is not None:
         fields["Equipment Off?"] = "TRUE" if r["equipment_off"] else "FALSE"
     if r.get("next_steps"):
@@ -380,14 +397,16 @@ def _push_pending_app_rows(sb, headers):
         return {"mode": "push", "pushed": 0}
     cust_ids = list({r["customer_id"] for r in rows if r.get("customer_id")})
     emp_ids = list({r["tech_employee_id"] for r in rows if r.get("tech_employee_id")})
-    custs = (sb.table("Customers").select("id,display_name,phone").in_("id", cust_ids).execute().data
+    custs = (sb.table("Customers").select("id,display_name,phone,office_id").in_("id", cust_ids).execute().data
              if cust_ids else [])
     disp = {c["id"]: c.get("display_name") for c in custs}
     cust_phone = {c["id"]: c.get("phone") for c in custs}
+    branches = {b["id"]: b["name"] for b in sb.table("branches").select("id,name").execute().data}
+    cust_office = {c["id"]: OFFICE_TO_AIRTABLE.get(branches.get(c.get("office_id"))) for c in custs}
     enm = {}
     for e in (sb.table("employees").select("id,first_name,last_name").in_("id", emp_ids).execute().data if emp_ids else []):
         enm[e["id"]] = " ".join(w.title() for w in (e.get("first_name") or "", e.get("last_name") or "") if w)
-    M = {"disp": disp, "emp_name": enm, "cust_phone": cust_phone}
+    M = {"disp": disp, "emp_name": enm, "cust_phone": cust_phone, "cust_office": cust_office}
     pushed = 0
     for r in rows:
         att = (r.get("sync_attempts") or 0) + 1
@@ -438,6 +457,46 @@ def _rehost_media(sb, batch, after_id):
     return {"mode": "rehost_media", "rehosted": done, "last_id": rows[-1]["id"], "done": len(rows) < batch}
 
 
+def _backfill_office(sb, headers, M, apply):
+    # One-time: stamp the Airtable Office single-select on every already-mirrored
+    # ticket, derived from the ticket's customer. In-place PATCH on the current
+    # table (all history lives there) — leaves every other field untouched.
+    fu = sb.schema("maintenance").table("follow_ups")
+    rows, start = [], 0
+    while True:
+        page = (fu.select("airtable_record_id,customer_id")
+                .not_.is_("airtable_record_id", "null")
+                .range(start, start + 999).execute().data)
+        rows += page
+        if len(page) < 1000:
+            break
+        start += 1000
+    updates, by_office, no_office = [], {}, 0
+    for r in rows:
+        office = M["cust_office"].get(r["customer_id"])
+        if not office:
+            no_office += 1
+            continue
+        by_office[office] = by_office.get(office, 0) + 1
+        updates.append({"id": r["airtable_record_id"], "fields": {"Office": office}})
+    patched, failed, err = 0, 0, None
+    if apply:
+        # Airtable caps batch update at 10 records; sleep keeps us under 5 req/s.
+        for i in range(0, len(updates), 10):
+            chunk = updates[i:i + 10]
+            resp = requests.patch(AIRTABLE_URL, headers=headers,
+                                  json={"records": chunk, "typecast": True}, timeout=30)
+            if resp.ok:
+                patched += len(chunk)
+            else:
+                failed += len(chunk)
+                err = err or resp.text[:300]
+            time.sleep(0.25)
+    return {"mode": "backfill_office", "apply": apply, "total_mirrored": len(rows),
+            "to_patch": len(updates), "by_office": by_office, "no_office": no_office,
+            "patched": patched, "failed": failed, "error_sample": err}
+
+
 def main(mode: str = "dry_run", since: str = "2023-01-01", batch: int = 300,
          after_id: str = "", apply: bool = True):
     sb = _sb()
@@ -448,6 +507,8 @@ def main(mode: str = "dry_run", since: str = "2023-01-01", batch: int = 300,
         return _push_pending_app_rows(sb, headers)
     if mode == "rehost_media":
         return _rehost_media(sb, batch, after_id)
+    if mode == "backfill_office":
+        return _backfill_office(sb, headers, build_maps(sb), apply)
 
     recs = load_airtable(headers)
     recs = [r for r in recs if _created(r)[:10] >= since]
