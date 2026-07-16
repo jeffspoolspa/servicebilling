@@ -41,7 +41,12 @@ Key columns:
    for genuine app rows (`airtable_record_id IS NULL AND source='app'`, so
    backfill/ingest can't flood it) — pokes `mode='push'` via pg_net, which
    creates the Airtable record immediately (concurrent_limit=1 prevents
-   double-create). The office sees new app tickets right away.
+   double-create). The office sees new app tickets right away. The pushed
+   record's **Office** is derived from the customer's `Customers.office_id`
+   → `branches.name`, mapped to the Airtable single-select label
+   (`Brunswick, GA`→`Brunswick`, `Saint Marys, GA`→`St Marys`,
+   `Richmond Hill, GA`→`Richmond Hill`, `Savannah, GA`→`Savannah`); no local
+   `office` column — it's always resolved from the customer at push time.
 3. [batch, daily] pg_cron `follow-ups-airtable-daily-sync` (08:00 ET) runs
    `mode='daily_sync'`: **push** any app rows the trigger missed (backstop),
    **ingest** Airtable records not in our DB (old-form / other sources) via the
