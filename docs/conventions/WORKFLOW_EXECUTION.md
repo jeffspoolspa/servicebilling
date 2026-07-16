@@ -94,11 +94,12 @@ BOTH drain signals, as a pair (never a choice):
   any row wakes; priority orders WITHIN the drain. `concurrent_limit 1`
   makes a mid-drain wake queue behind the running drain, closing the exit
   race.
-- **Heartbeat** [pending: needs schedules:write scope or UI creation]:
-  15-min schedules (`process_invoice {drain: true}`,
-  `process_maint_charges {dry_run: false}`; preprocess already has its
-  2-min). pg_net is at-most-once (~6% drops seen under burst) — wake gives
-  latency, only the heartbeat guarantees nothing is forgotten.
+- **Heartbeat** [active 2026-07-14, offset crons]: service charge :00/15/
+  30/45, maintenance charge :05/20/35/50 [pending Carter's click — the
+  auto-charge schedule is his to arm], qbo inbox :10/25/40/55, integrity
+  probe daily 5:15am; preprocess keeps its 2-min. pg_net is at-most-once
+  (~6% drops seen under burst) — wake gives latency, only the heartbeat
+  guarantees nothing is forgotten.
 
 For money queues this means gates-pass = charged: the Ready tab is a monitor
 and a priority lever, not a launch pad. Interactive "process now" = enqueue
