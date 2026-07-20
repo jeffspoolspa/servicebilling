@@ -31,7 +31,7 @@ The clean, self-healing QBO mirror that every other workflow reads. Three loops
 | Step | Script | Entry | Role |
 |---|---|---|---|
 | Ingest | `billing.qbo_inbox` (table) ← QBO webhook envelope | `[webhook]` | queue |
-| Drain | `f/service_billing/drain_qbo_inbox` | `[wake]` qbo_inbox + 15m | worker |
+| Drain | `f/service_billing/drain_qbo_inbox` | `[wake]` qbo_inbox (wake-only by design — no heartbeat; next webhook + drain-until-empty self-heals, CDC is the real backstop) | worker |
 | Reflect | `refresh_invoice` / `refresh_customer` / `refresh_payment` / `refresh_credit_memo` | `[hook]` | refresh (single-writer) |
 | Sweep | `f/service_billing/cdc_reconciler` → the same `refresh_*` | `[sched]` 15m | drift catch-all |
 | Probe | `f/service_billing/probe_balance_integrity` → enqueues missing inputs | `[sched]` daily | integrity |
