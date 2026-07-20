@@ -19,8 +19,8 @@ export const dynamic = "force-dynamic"
  * one row per customer (autopay sweeps the customer), cross-referenced
  * against the autopay roster so you can see the card each charge will hit.
  * Selection + actions + all table interactions live client-side in
- * ProcessTable; processing runs f/billing/process_maint_period
- * (fire-and-forget, tracked by the Processing chip).
+ * ProcessTable; processing runs f/billing/process_maint_charges
+ * (the queue worker; fire-and-forget, tracked by the Processing chip).
  */
 export default async function ProcessPage({
   searchParams,

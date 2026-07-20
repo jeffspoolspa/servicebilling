@@ -80,7 +80,7 @@ remains wired:
 | `apply_maint_credits`, `sync_invoice_balances`, `stamp_invoice_memos` | `monthly_autopay.flow` | flow superseded by the v2 queue path |
 | `apply_maint_adjustments` | `[route]` adjustments | review-workbench adjustment write (may stay) |
 | `analyze_maint_bill` | `[route]` analyze | AI review workbench (may stay) |
-| `process_maint_period` | nothing | `[dead]` — retire now |
+| `process_maint_period` | nothing | RETIRED 2026-07-20 → `f/z_retired/maintenance_v1/` |
 
 Retirement of this cluster is the maintenance v1→v2 **cutover** (repoint Send +
 retire the autopay flow), then move to `f/z_retired/maintenance_v1/`.
@@ -113,14 +113,14 @@ These are the "build on these" canonical layer. Consumers (`process_invoice`,
 | `build_task_billing_periods` `reconcile_billing_periods` `backfill_missing_invoices` `preprocess_maint_customer_month` `drain_maint_preprocess_queue` `process_maint_charges` | C | handler | active |
 | `send_monthly_invoices` `stamp_invoice_memos` `apply_maint_credits` `sync_invoice_balances` | D | handler | v1-retiring |
 | `apply_maint_adjustments` `analyze_maint_bill` | D | review workbench | active (verify) |
-| `process_maint_period` | D | — | **dead** |
+| `process_maint_period` | — | (retired) | `f/z_retired/maintenance_v1/` |
 | `send_decline_email` | B/C | notify | active (verify) |
 
 ## Orphans — billing/sync scripts with no active workflow caller
 
 Archive candidates (confirm not app-route/webhook reachable first):
 
-- `process_maint_period` — superseded by `process_maint_charges` `[dead]`
+- ~~`process_maint_period`~~ — RETIRED to `f/z_retired/maintenance_v1/` (2026-07-20), superseded by `process_maint_charges`
 - `switch_to_weekly_campaign` — no caller, idle
 - `classify_work_orders_ai` — no caller (the non-AI `classify_work_orders` is used)
 - `initial_full_credit_pull` — one-off backfill
