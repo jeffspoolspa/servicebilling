@@ -114,11 +114,39 @@ and a priority lever, not a launch pad. Interactive "process now" = enqueue
 at priority 1 (under a running drain that beats a direct call, which would
 queue behind the WHOLE drain on the concurrency key).
 
+### Wake-trigger safety [added 2026-07-20, after an incident]
+
+A wake trigger is a loaded gun pointed at your execution quota. On 2026-07-20
+one misconfigured wake produced 706,682 executions/month — a single runaway,
+not distributed load (postmortem: `reference_windmill_execution_incident`).
+Three rules, each earned:
+
+- **Enqueue per UNIT, not per ROW; wake off the coalesced insert.** The failure
+  was `trg_link_invoice_to_maint_period` — ROW-LEVEL on `billing.invoices`,
+  inserting one queue row (and firing one wake) per invoice write. Any bulk
+  write (CDC heal, sync, backfill, even dev echo-testing) became a wake flood.
+  The charge/inbox queues don't have this: they enqueue on a state TRANSITION
+  (`ready_to_process`), one row per unit. If your enqueue is row-level on a
+  hot table, it is wrong — move it to the transition, or make the wake
+  statement-level so N rows = one wake.
+- **After ANY script move/rename, grep every `wake_queue_worker(` path.** A
+  Windmill move leaves the old path as `…__MOVED`; a wake hardcoding the old
+  clean path spawns jobs that can't resolve their script and fail in 0ms —
+  invisible in "success" dashboards, but each still bills as an execution. The
+  path string in the trigger is not refactored for you.
+- **A wake is best-effort latency, never the guarantee.** pg_net is
+  at-most-once (~6% drops under burst). Correctness comes from drain-until-
+  empty + coalescing (a dropped wake self-heals on the next enqueue) or an
+  evidence-justified sweep — never from the wake landing. So a wake that
+  over-fires is a COST bug, not a correctness bug: safe to drop first, diagnose
+  second. That is exactly how the incident was stopped (trigger dropped; the
+  schedule kept draining).
+
 ## Existing instances
 
 | Stage | Queue | Worker | Handler | Status |
 |---|---|---|---|---|
-| Maintenance preprocess | `billing_audit.maint_preprocess_queue` (trigger-fed on invoice link) | `drain_maint_preprocess_queue` (wake + 2 min heartbeat, serial, 3-attempt dead-letter) | `preprocess_maint_customer_month` | [active] — the reference implementation |
+| Maintenance preprocess | `billing_audit.maint_preprocess_queue` (was trigger-fed per-invoice-link — the row-level enqueue behind the 2026-07-20 wake-storm; `trg_wake_maint_preprocess` DROPPED in `stop_maint_preprocess_wake_storm`) | `drain_maint_preprocess_queue` at path `…__MOVED` (15-min schedule only, serial, 3-attempt dead-letter; NO wake) | `preprocess_maint_customer_month` | [drift] wake removed; re-add a per-BATCH (statement-level) wake at the clean path if sub-15-min latency is needed |
 | Service preprocess | `billing.service_preprocess_queue` (unit = invoice; `trg_enqueue_service_preprocess` on WO link; migration `20260713190000`; replaced the at-most-once pg_net direct-fire) | `dispatch_pre_processing` (wake + 60s heartbeat + self-heal scan; claim-time eligibility; ONE token refresh per drain) | `pre_process_invoice.process_one` in-process | [active] 2026-07-13 |
 | Maintenance charge/send | `billing_audit.maint_charge_queue` (unit = customer-month; `trg_enqueue_maint_charge` on the `ready_to_process` transition; migration `20260710120000`) | `f/billing/process_maint_charges` — self-draining (wake trigger + 15-min heartbeat), drains until empty | inline `process()` sentence: claim-time resolve -> `send_invoice` or `charge_and_record(lines=invoice_ids)`; stamps no status (the projection derives, incl. the delivered-without-charge rule) | [active] 2026-07-10; supersedes `process_maint_period` (kept deployed as manual fallback until verified) |
 | Service-billing charge/send | `billing.service_charge_queue` (unit = invoice; `trg_enqueue_service_charge` on the `ready_to_process` transition; migration `20260713150000`) | `process_invoice` itself — self-draining (wake trigger + 15-min heartbeat); live batches enqueue (interactive priority 1); `drain=True` manual kicks; force/orphan recovery stay direct | `process_one` (sentence over `_lib`) | [active] 2026-07-13 |
