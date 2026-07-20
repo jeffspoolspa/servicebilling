@@ -38,13 +38,13 @@ import psycopg2.extras
 
 from f.billing._lib.qbo import (
     charge_card, charge_bank_account, get_qbo_invoice_details,
-    record_qbo_payment, send_receipt, apply_credit, send_invoice,
+    record_qbo_payment, send_receipt, apply_credit,
 )
 from f.billing._lib.wal import (
     latest_attempt, create_attempt, update_attempt,
     insert_webhook_expectation, dumps,
 )
-from f.billing._lib.cache import echo_payment, mark_emailed
+from f.billing._lib.cache import echo_payment
 
 # Intuit's Request-Id idempotency cache window. Past it, an uncertain
 # attempt's key would be treated as a NEW charge — so we expire the attempt
@@ -471,27 +471,6 @@ def apply_credits(conn, customer_id, invoice_id, access_token, realm_id,
         remaining = round(remaining - amount, 2)
     out["remaining_balance"] = remaining
     return out
-
-
-def deliver_invoice(conn, invoice_id, email, email_status,
-                    access_token, realm_id, resend=False):
-    """Shared invoice-copy delivery gate (ADR 009 §B).
-
-    Email the customer their invoice copy, idempotently, and record the emailed
-    fact. Skips if the invoice is already `EmailSent` (unless `resend=True` — the
-    manual "Send invoice copies" path). This is the SINGLE send gate for both the
-    maintenance charge worker (auto, non-autopay) and the manual Send action;
-    sharing one idempotent gate is what makes a double-send structurally
-    impossible. Returns {ok, error?, already?}.
-    """
-    if not resend and email_status == "EmailSent":
-        return {"ok": True, "already": True}
-    if not email:
-        return {"ok": False, "error": "no email on file"}
-    r = send_invoice(invoice_id, email, access_token, realm_id)
-    if r.get("ok"):
-        mark_emailed(conn, invoice_id)
-    return r
 
 
 # ── self-check: fakes swapped into this module's namespace, NO network/DB ───

@@ -29,7 +29,8 @@ from datetime import datetime
 
 from f.billing._lib.db import get_db_conn
 from f.billing._lib.qbo import set_rate_limiter, refresh_qbo_token
-from f.billing._lib.payments import charge_and_record, deliver_invoice
+from f.billing._lib.payments import charge_and_record
+from f.billing._lib.delivery import deliver_invoice
 
 STAGE = "maint"
 
