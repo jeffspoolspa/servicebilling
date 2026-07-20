@@ -28,9 +28,8 @@ import psycopg2.extras
 from datetime import datetime
 
 from f.billing._lib.db import get_db_conn
-from f.billing._lib.qbo import set_rate_limiter, refresh_qbo_token, send_invoice
-from f.billing._lib.payments import charge_and_record
-from f.billing._lib.cache import mark_emailed
+from f.billing._lib.qbo import set_rate_limiter, refresh_qbo_token
+from f.billing._lib.payments import charge_and_record, deliver_invoice
 
 STAGE = "maint"
 
@@ -142,16 +141,12 @@ def build_intent(u, cust, month):
 
 
 def deliver(conn, member, email, at, rid):
-    """Invoice copy to the customer — NEVER a resend (manual 'Send invoice
-    copies' is the only resend path). Success writes the emailed fact."""
-    if member["email_status"] == "EmailSent":
-        return {"ok": True, "already": True}
-    if not email:
-        return {"ok": False, "error": "no email on file"}
-    r = send_invoice(member["qbo_invoice_id"], email, at, rid)
-    if r["ok"]:
-        mark_emailed(conn, member["qbo_invoice_id"])
-    return r
+    """Invoice copy to the customer via the shared send gate (_lib/payments.
+    deliver_invoice) — the SAME idempotent gate the manual 'Send invoice copies'
+    path uses (resend=True there), which is what makes a double-send impossible.
+    Auto path never resends (skips already-EmailSent)."""
+    return deliver_invoice(conn, member["qbo_invoice_id"], email,
+                           member["email_status"], at, rid)
 
 
 def process(conn, cust, month, at, rid, dry_run):
