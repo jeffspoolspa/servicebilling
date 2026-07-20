@@ -142,6 +142,10 @@ Three rules, each earned:
   second. That is exactly how the incident was stopped (trigger dropped; the
   schedule kept draining).
 
+For the full runaway-failure-mode catalog, the "middleware vs. hardened
+chokepoint" decision, and the new-trigger checklist, see
+[COMPUTE_GOVERNANCE.md](COMPUTE_GOVERNANCE.md).
+
 ## Existing instances
 
 | Stage | Queue | Worker | Handler | Status |
