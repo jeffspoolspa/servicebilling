@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import crypto from "crypto"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
-import { triggerScript } from "@/lib/windmill"
 
 /**
  * QBO webhook receiver.
@@ -107,23 +106,15 @@ function verifySignature(rawBody: string, signature: string | null): boolean {
  *   refresh scripts. The webhook handler will gracefully skip them in the
  *   meantime if we subscribe to their events in Intuit's dashboard.
  */
-const REFRESH_SCRIPTS: Record<string, { script: string; argName: string }> = {
-  Invoice: {
-    script: "f/service_billing/refresh_invoice",
-    argName: "qbo_invoice_id",
-  },
-  Payment: {
-    script: "f/service_billing/refresh_payment",
-    argName: "qbo_payment_id",
-  },
-  CreditMemo: {
-    script: "f/service_billing/refresh_credit_memo",
-    argName: "qbo_credit_memo_id",
-  },
-  Customer: {
-    script: "f/service_billing/refresh_customer",
-    argName: "qbo_customer_id",
-  },
+// ADR 008: the route is DUMB — persist the envelope into billing.qbo_inbox
+// (one RPC), return 200. f/qbo/drain_qbo_inbox (woken by the insert trigger)
+// does the fetching and cache writing through the per-entity handlers.
+// Priority: money-adjacent entities drain first (ADR 008 §4 classes).
+const INBOX_ENTITIES: Record<string, number> = {
+  Invoice: 2,
+  Payment: 2,
+  CreditMemo: 2,
+  Customer: 3,
 }
 
 export async function POST(req: NextRequest) {
@@ -149,7 +140,6 @@ export async function POST(req: NextRequest) {
   }
 
   const sb = createSupabaseAdmin()
-  const dispatchPromises: Promise<unknown>[] = []
 
   // We talk to Postgres via PostgREST RPC functions in the public schema
   // (log_qbo_webhook, mark_webhook_processed, confirm_webhook_expectation)
@@ -189,11 +179,11 @@ export async function POST(req: NextRequest) {
         p_entity_id: entity.id,
       })
 
-      // Dispatch the actual cache refresh to Windmill. Don't await — fire
-      // and forget so we return 200 fast. The script is idempotent so even
-      // if Intuit re-delivers, we don't corrupt anything.
-      const mapping = REFRESH_SCRIPTS[entity.name]
-      if (!mapping) {
+      // Enqueue the cache refresh into the inbox (coalesced; the newest
+      // signal's operation wins so a Void can't be masked by a queued
+      // Update). The insert trigger wakes the drainer.
+      const priority = INBOX_ENTITIES[entity.name]
+      if (priority === undefined) {
         // We're not subscribed to this entity type — log and skip.
         // Awaited (not voided) for the same Vercel-lambda-lifecycle reason
         // as the expectation confirm above.
@@ -207,59 +197,31 @@ export async function POST(req: NextRequest) {
         continue
       }
 
-      const dispatchPromise = (async () => {
-        try {
-          // Pass the QBO operation as a hint to refresh scripts that
-          // care (e.g. refresh_invoice routes Void → handle_voided).
-          // Scripts that don't care about it (refresh_payment,
-          // refresh_customer) ignore the parameter — Windmill scripts
-          // accept extra unknown args harmlessly.
-          await triggerScript(mapping.script, {
-            [mapping.argName]: entity.id,
-            operation: entity.operation,
-          })
-          if (logId) {
-            await sb.rpc("mark_webhook_processed", {
-              p_id: logId,
-              p_status: "succeeded",
-              p_error_message: null,
-            })
-          }
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e)
-          console.error(
-            `[qbo webhook] dispatch failed for ${entity.name}:${entity.id}:`,
-            msg,
-          )
-          if (logId) {
-            await sb.rpc("mark_webhook_processed", {
-              p_id: logId,
-              p_status: "failed",
-              p_error_message: msg.slice(0, 500),
-            })
-          }
-        }
-      })()
-
-      dispatchPromises.push(dispatchPromise)
+      // Awaited (Vercel kills the lambda on return — the invoice-62744
+      // lesson); one ~50ms RPC per entity, far under Intuit's 5s timeout.
+      const { error: enqErr } = await sb.rpc("enqueue_qbo_inbox", {
+        p_entity_type: entity.name,
+        p_entity_id: entity.id,
+        p_operation: entity.operation,
+        p_payload: entity as unknown as Record<string, unknown>,
+        p_source: "webhook",
+        p_priority: priority,
+      })
+      if (logId) {
+        await sb.rpc("mark_webhook_processed", {
+          p_id: logId,
+          p_status: enqErr ? "failed" : "succeeded",
+          p_error_message: enqErr ? enqErr.message.slice(0, 500) : null,
+        })
+      }
+      if (enqErr) {
+        console.error(
+          `[qbo webhook] inbox enqueue failed for ${entity.name}:${entity.id}:`,
+          enqErr.message,
+        )
+      }
     }
   }
-
-  // Vercel serverless terminates the lambda the moment we return the
-  // response. `void Promise.allSettled(...)` does NOT keep the promises
-  // alive — the dispatch IIFEs (which call triggerScript and then mark
-  // the webhook_log row succeeded/failed) get cancelled mid-flight,
-  // leaving rows stuck at status='received' and refresh scripts never
-  // running. We hit this in production: invoice 62744 (The Farm) had a
-  // valid webhook arrive at 21:02:39 with status='received' but
-  // processed_at=null because the dispatch was killed. The cache stayed
-  // stale until a manual refresh_invoice run.
-  //
-  // The fix is to AWAIT the dispatches before returning. Each dispatch
-  // is fast (~200ms triggerScript + ~50ms mark_webhook_processed RPC),
-  // so total handler time stays well under Intuit's 5s timeout even
-  // for batched events with multiple entities.
-  await Promise.allSettled(dispatchPromises)
 
   return NextResponse.json({
     ok: true,
