@@ -140,3 +140,34 @@ Before shipping a trigger/wake, confirm:
 - [ ] No fixed schedule unless a probe justifies the cadence.
 - [ ] If it pulls an external system, it pulls **incrementally**.
 - [ ] It will show up in the daily digest — you'll see it if it misbehaves.
+
+---
+
+## 6. The billing model — what an "execution" actually is
+
+Windmill does NOT bill per job. Per the billing page:
+
+- **1 execution = one job up to 1 second on a 2 GB worker.** Each additional
+  second is another execution; each additional 2 GB block multiplies. So a
+  43-second job is ~43 executions; a 32-minute job is ~1,920. **Compute time
+  IS the bill.**
+- **Seats:** `used_seats = user_seats + ceil(max(0, monthly_execs - 10000*user_seats) / 10000)`.
+  Each seat includes 10,000 executions/month. (2026-07 example: 707,048 execs,
+  1 user seat -> 1 + ceil(697,048/10000) = 71 seats.)
+
+Consequences for the two cost axes (Sec 1):
+
+- **Execution count still matters** for sub-second jobs (each is >=1 execution)
+  — that is why the failing wake-storm (0.2s x 38,893 = 38,893+ execs/day) was
+  93% of the bill.
+- **Compute time matters at full weight** for anything over 1s. Post-storm, the
+  bill is dominated by a few heavy scripts: the QBO full-pulls
+  (`get_transfers` ~1,920/day, `get_adjustments` ~1,770, `pull_qbo_credits`
+  ~2,100, `pull_qbo_invoices` ~470) alone are ~6,300 execs/day ~= 190k/month
+  ~= 19 seats. Making them incremental (pull by `LastUpdatedTime`) is the
+  single biggest post-storm lever.
+
+The audit therefore tracks `billable_execs = sum over jobs of max(1,
+ceil(seconds)) * max(1, ceil(mem_gb/2))` in `ops.script_usage_daily`, and the
+digest/dashboard rank by it and project seats. Memory has been ~1x (peak 0.44
+GB << 2 GB), so time dominates.
