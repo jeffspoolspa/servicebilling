@@ -4,6 +4,8 @@ import psycopg2
 import psycopg2.extras
 import time
 
+from f.billing._lib.delivery import deliver_invoice
+
 
 def refresh_qbo_tokens(resource_path: str) -> tuple:
     """Refresh QBO tokens and SAVE new refresh token. Returns (access_token, realm_id)."""
@@ -37,23 +39,6 @@ def get_qbo_invoice_details(invoice_id: str, realm_id: str, access_token: str):
         }
     except Exception:
         return None
-
-
-def send_qbo_invoice_email(invoice_id: str, email: str, realm_id: str, access_token: str) -> tuple:
-    try:
-        resp = requests.post(
-            f"https://quickbooks.api.intuit.com/v3/company/{realm_id}/invoice/{invoice_id}/send?sendTo={requests.utils.quote(email)}",
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Accept": "application/json",
-                "Content-Type": "application/octet-stream",
-            },
-        )
-        if resp.ok:
-            return True, None
-        return False, f"QBO {resp.status_code}: {resp.text[:300]}"
-    except Exception as e:
-        return False, str(e)
 
 
 def main(
@@ -238,7 +223,11 @@ def main(
                 results["skipped_already_emailed_qbo"] += 1
                 continue
 
-            success, err_msg = send_qbo_invoice_email(qbo_invoice_id, email, realm_id, access_token)
+            # Manual send gate -> the SHARED delivery service (the same
+            # idempotent gate the maint charge worker uses; no double-send).
+            r = deliver_invoice(conn, qbo_invoice_id, email, email_status,
+                                access_token, realm_id)
+            success, err_msg = r["ok"], r.get("error")
 
             if success:
                 results["sent"] += 1

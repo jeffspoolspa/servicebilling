@@ -111,7 +111,8 @@ These are the "build on these" canonical layer. Consumers (`process_invoice`,
 | `pull_qbo_invoices` `pull_qbo_credits` `pull_customer_payment_methods` `set_customer_company` | A/B | pull | active |
 | `pre_process_invoice` `dispatch_pre_processing` `process_invoice` `reconcile_payments` `push_invoice_edits` `apply_credit_manual` | B | handler | active |
 | `build_task_billing_periods` `reconcile_billing_periods` `backfill_missing_invoices` `preprocess_maint_customer_month` `drain_maint_preprocess_queue` `process_maint_charges` | C | handler | active |
-| `send_monthly_invoices` `stamp_invoice_memos` `apply_maint_credits` `sync_invoice_balances` | D | handler | v1-retiring |
+| `send_monthly_invoices` `stamp_invoice_memos` | D | manual send gate (on `_lib/delivery.deliver_invoice`) | active |
+| `apply_maint_credits` `sync_invoice_balances` `monthly_autopay.flow` | D | autopay orchestration | v1-retiring |
 | `apply_maint_adjustments` `analyze_maint_bill` | D | review workbench | active (verify) |
 | `process_maint_period` | — | (retired) | `f/z_retired/maintenance_v1/` |
 | `send_decline_email` | B/C | notify | active (verify) |

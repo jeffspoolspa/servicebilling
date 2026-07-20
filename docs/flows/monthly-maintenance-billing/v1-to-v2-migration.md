@@ -61,9 +61,15 @@ process_maint_charges   (wake-driven, per customer-month, drains until empty):
 
 | State | Scripts | Action |
 |---|---|---|
-| **Cut over** | `process_maint_period` | Process route already calls `process_maint_charges`; only a stale page comment referenced it (fixed). `[dead]` → retire to `f/z_retired/maintenance_v1/`. |
-| **Pending 1 cutover** | `send_monthly_invoices`, `stamp_invoice_memos`, `apply_maint_credits`, `sync_invoice_balances`, `monthly_autopay.flow` | Repoint the **Send** button (`/api/maintenance-billing/send`) to enqueue into `maint_charge_queue` (which `process_maint_charges` already sends per-unit). Then retire the whole cluster together. |
-| **Keep** | `apply_maint_adjustments`, `analyze_maint_bill` | Review-workbench (adjustments write / AI analysis) — not part of the charge/send path. |
+| **Retired (charge engine)** | `process_maint_period` | RETIRED 2026-07-20 → `f/z_retired/maintenance_v1/`. Process route calls `process_maint_charges`; only a stale page comment referenced it (fixed). |
+| **Kept — manual send gate, now on the shared service** | `send_monthly_invoices`, `stamp_invoice_memos` | The manual "Send" button stays. `send_monthly_invoices` now sends via **`_lib/delivery.deliver_invoice`** — the SAME idempotent gate `process_maint_charges` uses, so the auto and manual paths can't double-send. Sending is a shared primitive, not a v1 remnant. |
+| **Retire (autopay orchestration)** | `apply_maint_credits`, `sync_invoice_balances`, `monthly_autopay.flow` | Superseded by the queue path: credits applied at pre-process (`preprocess_maint_customer_month`), balances kept fresh by the QBO cache sync, orchestration by the charge queue. Retire together once verified. |
+| **Keep** | `apply_maint_adjustments`, `analyze_maint_bill` | Review-workbench (adjustments write / AI analysis). |
+
+The send is now a shared service — `_lib/delivery.deliver_invoice(conn, invoice_id,
+email, email_status, …, resend=False)` — called by BOTH `process_maint_charges`
+(auto, non-autopay) and `send_monthly_invoices` (manual, the "Send" button). One
+idempotent gate = no double-send, structurally.
 
 Retirement follows the [runbook](../../runbooks/retiring-a-script.md): clear the
 five guards, move the cluster to `f/z_retired/maintenance_v1/`, update this doc +
