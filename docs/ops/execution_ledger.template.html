@@ -49,13 +49,14 @@
       <thead><tr>
         <th>Script</th><th>What it does</th>
         <th class="num">Billable</th><th class="barcell"></th>
-        <th class="num">Compute</th><th class="num">Runs</th><th class="num">Failed</th>
+        <th class="num">Seats/mo</th><th class="num">Compute</th><th class="num">Runs</th><th class="num">Failed</th>
       </tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
   <div class="foot">
     <span><b>Billable</b> = what Windmill charges: max(1, ceil(seconds)) per job &times; 2GB memory blocks.</span>
+    <span><b>Seats/mo</b> = this script&rsquo;s marginal cost = its monthly billable &divide; 10,000 &mdash; what you&rsquo;d save by replacing/removing it.</span>
     <span>Source <b class="mono">ops.script_usage_daily</b>; descriptions from each script&rsquo;s Windmill summary.</span>
   </div>
 </div>
@@ -68,6 +69,7 @@ const RUNAWAY_RUNS = 5000, LOOP_RUNS = 200, LOOP_RATE = 0.30;
 const QUOTA = 10000, USER_SEATS = 1;
 const nf = n => Math.round(n).toLocaleString('en-US');
 const seats = m => USER_SEATS + Math.ceil(Math.max(0, m - QUOTA*USER_SEATS)/QUOTA);
+const seatsFor = b => (b*30/QUOTA).toFixed(1);   // per-script marginal seats/mo = monthly billable / 10k
 const runawayReason = r =>
   r.r >= RUNAWAY_RUNS ? nf(r.r)+" runs/day"
   : (r.r >= LOOP_RUNS && r.f/Math.max(r.r,1) >= LOOP_RATE) ? nf(r.f)+"/"+nf(r.r)+" failing" : "";
@@ -99,6 +101,7 @@ document.getElementById('rows').innerHTML = rows.map(r=>{
     <td><span class="desc">${r.d}</span><br><span class="src">${r.k}</span></td>
     <td class="num mono" style="font-weight:700">${nf(r.b)}</td>
     <td class="barcell"><span class="bar" style="width:${w}px"></span></td>
+    <td class="num mono" style="color:var(--accent);font-weight:600">${seatsFor(r.b)}</td>
     <td class="num mono" style="color:var(--ink-dim)">${nf(r.c)}s</td>
     <td class="num mono" style="color:var(--ink-mute)">${nf(r.r)}</td>
     <td class="num mono" style="color:${r.f?'var(--crit)':'var(--ink-mute)'}">${nf(r.f)}</td>
