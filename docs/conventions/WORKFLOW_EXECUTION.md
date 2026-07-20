@@ -94,12 +94,20 @@ BOTH drain signals, as a pair (never a choice):
   any row wakes; priority orders WITHIN the drain. `concurrent_limit 1`
   makes a mid-drain wake queue behind the running drain, closing the exit
   race.
-- **Heartbeat** [active 2026-07-14, offset crons]: service charge :00/15/
-  30/45, maintenance charge :05/20/35/50 [pending Carter's click — the
-  auto-charge schedule is his to arm], qbo inbox :10/25/40/55, integrity
-  probe daily 5:15am; preprocess keeps its 2-min. pg_net is at-most-once
-  (~6% drops seen under burst) — wake gives latency, only the heartbeat
-  guarantees nothing is forgotten.
+- **Heartbeat is EVIDENCE-DRIVEN, not reflexive** [revised 2026-07-20]: wake
+  is primary; a scheduled sweep exists only where evidence (a probe finding
+  drops, or v_queue_health.oldest_unprocessed climbing) justifies its cadence.
+  A usage audit (2026-07-20) killed the "cheap no-op" assumption: an idle
+  scheduled run still costs ~1s of FIXED overhead (worker spin-up + resource
+  fetch + DB connect), not ~0 — dispatch_pre_processing at 60s was the single
+  biggest consumer (1440 no-op runs/day). So: the 60s pre-process sweep -> 15
+  min; the reflexive 15-min charge/inbox heartbeats were REMOVED (drain-until-
+  empty + coalescing self-heals a dropped wake on the next enqueue; the qbo
+  inbox is swept by cdc_reconciler; balance by the daily integrity probe).
+  Only genuine polling-domain sweeps keep a fixed cadence (reconcile_payments
+  5m — Intuit has no webhooks; cdc_reconciler 15m — cache-drift catch-all).
+  pg_net is at-most-once (~6% drops under burst) — wake gives latency, the
+  cadence-matched sweep guarantees nothing is forgotten.
 
 For money queues this means gates-pass = charged: the Ready tab is a monitor
 and a priority lever, not a launch pad. Interactive "process now" = enqueue
