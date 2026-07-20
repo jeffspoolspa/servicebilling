@@ -89,26 +89,32 @@ triggers. Until that changes, a broker is the wrong tool.
 ## 4. The guardrails to implement (at the chokepoint)
 
 In priority order. Items marked [proposed] are designed but not yet built —
-they change live wake behaviour, so they ship on Carter's go.
+the last three are now BUILT (migration `20260720190000_harden_wake_gateway`).
 
-1. **Debounce/coalesce in `wake_queue_worker`** [proposed]. Before POSTing,
-   skip if a wake for the same `script_path` was sent in the last N seconds
-   (a tiny `billing.wake_log(script_path, sent_at)` check + upsert). Turns a
-   12-row bulk insert's 12 wakes into 1. This **structurally caps wake volume
-   no matter how hot a trigger fires** — the single highest-value fix for a
-   wake-driven architecture. Safe *only because* the worker drains-until-empty
-   and a heartbeat backstops a dropped wake (the wake is best-effort latency,
-   never the correctness guarantee — WORKFLOW_EXECUTION §wake-safety).
+The gateway now enforces all four in one structure — `billing.wake_policy`
+(per-path allowlist + debounce + counters) and `billing.wake_settings` (global
+kill), checked by `billing.wake_queue_worker` before every POST, fail-open:
 
-2. **Path validation in `wake_queue_worker`** [proposed]. If the target script
-   path doesn't resolve, don't POST — insert a `system_alerts` row instead.
-   Kills the `…__MOVED` footgun at the source.
+1. **Debounce/coalesce** [active]. Per-path `min_interval_secs` in
+   `wake_policy`; a wake inside the window is skipped (`wakes_skipped++`). Turns
+   a burst into one wake. **Structurally caps wake volume no matter how hot a
+   trigger fires.** Safe because the worker drains-until-empty and the heartbeat
+   backstops a dropped wake (the wake is best-effort latency, never the
+   correctness guarantee — WORKFLOW_EXECUTION §wake-safety).
 
-3. **A kill switch** [proposed]. A `billing.wake_enabled` boolean the wake fn
-   checks. One `UPDATE` halts ALL wakes instantly in an incident and is
-   reversible — faster and safer than dropping a trigger (what we did on
-   07-20). Per-script granularity via a small `billing.wake_policy` table if
-   needed.
+2. **Allowlist / path validation** [active]. Only a path REGISTERED in
+   `wake_policy` fires; an unregistered path is blocked and auto-recorded
+   (`enabled=false`, `wakes_skipped++`). This **kills the `…__MOVED` footgun at
+   the source** — the storm's wake to the moved path would now be a no-op with a
+   visible counter, not 40k failing jobs. Registering a new wake target is a
+   one-row insert (also the natural place the new-trigger checklist lands).
+
+3. **Kill switch** [active]. `wake_settings.globally_enabled=false` halts ALL
+   wakes with one UPDATE; `wake_policy.enabled=false` halts one path. Faster and
+   reversible vs dropping a trigger (what we did on 07-20). All wake functions
+   (charge, inbox, service, follow-up) route through the gateway — the follow-up
+   push previously inlined its own POST and bypassed every guard; it now goes
+   through too.
 
 4. **`concurrent_limit 1` on every worker** [active]. Already the pattern; it
    caps concurrent copies of a self-drain. Keep it non-negotiable for new
