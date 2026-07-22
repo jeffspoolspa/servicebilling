@@ -866,6 +866,29 @@ export interface OpenCredit {
   memo: string | null
 }
 
+/** One row of the per-invoice credit decision record (billing.invoice_credit_decisions
+ * via the public view) — the frozen snapshot of every credit CONSIDERED for
+ * this invoice and its outcome. */
+export interface CreditDecision {
+  id: number
+  qbo_invoice_id: string
+  credit_id: string
+  amount: number | null
+  unapplied_at_decision: number | null
+  state: "candidate" | "applied" | "rejected" | "stale"
+  reason: string | null
+  decided_by: string | null
+  applied_via: string | null
+  created_at: string
+  decided_at: string | null
+  applied_at: string | null
+  credit_type: string | null
+  ref_num: string | null
+  memo: string | null
+  txn_date: string | null
+  current_unapplied_amt: number | null
+}
+
 export interface PaymentMethod {
   id: string
   type: string            // 'card' | 'ach'
@@ -1219,6 +1242,7 @@ export async function getWorkOrderDetail(
       wo: WorkOrderDetail
       invoice: InvoiceDetail | null
       openCredits: OpenCredit[]
+      creditDecisions: CreditDecision[]
       paymentMethods: PaymentMethod[]
     }
   | null
@@ -1237,6 +1261,7 @@ export async function getWorkOrderDetail(
 
   let invoice: InvoiceDetail | null = null
   let openCredits: OpenCredit[] = []
+  let creditDecisions: CreditDecision[] = []
   let paymentMethods: PaymentMethod[] = []
 
   if (wo.qbo_invoice_id) {
@@ -1256,7 +1281,7 @@ export async function getWorkOrderDetail(
       const sixMonthsAgo = new Date()
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
       const cutoff = sixMonthsAgo.toISOString().slice(0, 10)
-      const [credRes, pmRes] = await Promise.all([
+      const [credRes, decRes, pmRes] = await Promise.all([
         sb
           .from("billing_customer_payments")
           .select("id, qbo_payment_id, type, unapplied_amt, total_amt, txn_date, ref_num, memo")
@@ -1264,6 +1289,14 @@ export async function getWorkOrderDetail(
           .gt("unapplied_amt", 0)
           .or(`txn_date.is.null,txn_date.gte.${cutoff}`)
           .order("txn_date", { ascending: true }),
+        // The per-invoice credit decision record — what pre-process saw for
+        // THIS invoice and each credit's outcome (candidate/applied/rejected/
+        // stale). The frozen snapshot; openCredits above is the live view.
+        sb
+          .from("billing_invoice_credit_decisions")
+          .select("*")
+          .eq("qbo_invoice_id", wo.qbo_invoice_id as string)
+          .order("created_at", { ascending: true }),
         // Show every active PM in QBO's wallet for this customer. Whether
         // any individual PM is flagged QBO-default is independent of
         // whether the customer exists in our cache — and it's also
@@ -1284,9 +1317,10 @@ export async function getWorkOrderDetail(
       openCredits = ((credRes.data ?? []) as OpenCredit[]).filter(
         (c) => !(c.memo && /maint/i.test(c.memo)),
       )
+      creditDecisions = (decRes.data ?? []) as CreditDecision[]
       paymentMethods = (pmRes.data ?? []) as PaymentMethod[]
     }
   }
 
-  return { wo: wo as WorkOrderDetail, invoice, openCredits, paymentMethods }
+  return { wo: wo as WorkOrderDetail, invoice, openCredits, creditDecisions, paymentMethods }
 }

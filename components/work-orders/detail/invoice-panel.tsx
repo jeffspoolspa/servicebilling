@@ -2,6 +2,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { InvoiceCard } from "@/components/billing/invoice-card"
 import type {
   AppliedPayment,
+  CreditDecision,
   InvoiceDetail,
   OpenCredit,
   PaymentMethod,
@@ -29,12 +30,14 @@ export function InvoicePanel({
   wo,
   invoice,
   openCredits,
+  creditDecisions,
   paymentMethods,
   appliedPayments,
 }: {
   wo: WorkOrderDetail
   invoice: InvoiceDetail | null
   openCredits: OpenCredit[]
+  creditDecisions: CreditDecision[]
   paymentMethods: PaymentMethod[]
   appliedPayments: AppliedPayment[]
 }) {
@@ -88,11 +91,13 @@ export function InvoicePanel({
       {/* Applied payments (history) */}
       <AppliedPaymentsCard payments={appliedPayments} />
 
-      {/* Credit review — open unapplied credits with Apply + Override */}
+      {/* Credit review — the per-invoice decision record (what pre-process
+          saw + each credit's outcome) with Apply / Reject / Complete review */}
       <CreditReviewCard
         qboInvoiceId={invoice.qbo_invoice_id}
         balance={Number(invoice.balance ?? 0)}
         credits={openCredits}
+        decisions={creditDecisions}
         overriddenAt={invoice.credit_review_overridden_at}
       />
 

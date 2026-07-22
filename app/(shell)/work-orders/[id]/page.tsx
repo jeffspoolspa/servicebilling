@@ -72,7 +72,7 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
   const data = await getWorkOrderDetail(id)
   if (!data) notFound()
 
-  const { wo, invoice, openCredits, paymentMethods } = data
+  const { wo, invoice, openCredits, creditDecisions, paymentMethods } = data
   const skipped = wo.skipped_at != null
   const status = deriveStatus(
     wo.billable,
@@ -279,6 +279,7 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
               wo={wo}
               invoice={invoice}
               openCredits={openCredits}
+              creditDecisions={creditDecisions}
               paymentMethods={paymentMethods}
               appliedPayments={appliedPayments}
             />

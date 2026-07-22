@@ -93,11 +93,21 @@ export async function POST(
     )
   }
 
+  const sb = createAnon("public")
+
+  // Flip this credit's decision row (candidate -> applied) so the decision
+  // record reflects the apply immediately; the refresh_payment webhook
+  // maintenance is the async backstop for the same transition.
+  await sb.rpc("mark_credit_decision_applied", {
+    p_qbo_invoice_id: id,
+    p_credit_id: body.credit_id,
+    p_amount: result.amount_applied ?? null,
+  })
+
   // Fetch fresh invoice state so the UI can show the authoritative balance
   // (the script also returns post_balance from its own QBO re-fetch, but
   // our billing.invoices cache lags behind that; we query here so the UI
   // sees the same row a page refresh would show).
-  const sb = createAnon("public")
   const { data: inv } = await sb
     .from("billing_invoices")
     .select("qbo_invoice_id, doc_number, balance, total_amt, billing_status, needs_review_reason")
