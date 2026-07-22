@@ -1,39 +1,100 @@
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Coins,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
+  CreditCard,
+  ClipboardCheck,
+  CircleDot,
+} from "lucide-react"
 import { formatCurrency } from "@/lib/utils/format"
 import type { InvoiceHistoryEvent } from "@/lib/queries/dashboard"
 
 /**
- * History tab — the per-invoice event log (public.invoice_history): every
- * pre-process run, process/charge attempt, credit decision event, and review
- * completion, newest first. This replaces the old pre-processing status card:
- * status lives inline next to the fields it describes; history lives here.
+ * History — the invoice's activity feed. Reads public.invoice_history (the
+ * projection over the operational fact tables — decisions, attempts, queue
+ * runs, review stamps; each action writes ONE fact, the story is the union)
+ * and renders each event as a sentence. Kind -> sentence templates live here;
+ * the DB stays vocabulary-agnostic, so new event kinds render raw until given
+ * a template (forward compatible).
  */
 
-const KIND_LABEL: Record<string, string> = {
-  pre_process_run: "Pre-process run",
-  process_attempt_process: "Process attempt",
-  process_attempt_pre_process: "Pre-process attempt",
-  credit_proposed: "Credit proposed",
-  credit_applied: "Credit applied",
-  credit_rejected: "Credit rejected",
-  credit_candidate: "Credit considered",
-  credit_stale: "Credit lapsed",
-  review_completed: "Review completed",
+type Tone = "grass" | "coral" | "sun" | "cyan" | "mute"
+
+const TONE_CLS: Record<Tone, string> = {
+  grass: "text-grass",
+  coral: "text-coral",
+  sun: "text-sun",
+  cyan: "text-cyan",
+  mute: "text-ink-mute",
 }
 
-const OUTCOME_TONE: Record<string, string> = {
-  completed: "text-grass",
-  succeeded: "text-grass",
-  applied: "text-grass",
-  running: "text-sun",
-  queued: "text-ink-mute",
-  proposed: "text-cyan",
-  rejected: "text-ink-mute",
-  failed: "text-coral",
-  error: "text-coral",
-  charge_declined: "text-coral",
-  charge_uncertain: "text-sun",
-  payment_orphan: "text-coral",
+function describe(e: InvoiceHistoryEvent): {
+  sentence: string
+  tone: Tone
+  Icon: typeof Coins
+} {
+  const amt = e.amount != null ? formatCurrency(Number(e.amount)) : null
+  const reason = (e.detail ?? "").replace(/\s*\(credit [^)]+\)\s*/, "").trim()
+
+  switch (e.kind) {
+    case "credit_applied":
+      return {
+        sentence: `Applied ${amt ?? "a"} credit${
+          e.actor === "auto" ? ` automatically${reason ? ` (${reason.replace(/_/g, " ")})` : ""}` : ""
+        }${e.actor && e.actor !== "auto" ? ` — ${e.actor}` : ""}`,
+        tone: "grass",
+        Icon: Coins,
+      }
+    case "credit_rejected":
+      return {
+        sentence: `Marked ${amt ?? "a"} credit not applicable${
+          e.actor === "review_complete" ? " (review completed)" : e.actor ? ` — ${e.actor}` : ""
+        }`,
+        tone: "mute",
+        Icon: XCircle,
+      }
+    case "credit_proposed":
+    case "credit_candidate":
+      return {
+        sentence: `Recommended ${amt ?? "a"} credit${reason ? ` (${reason.replace(/_/g, " ")})` : ""}`,
+        tone: "cyan",
+        Icon: CircleDot,
+      }
+    case "credit_stale":
+      return { sentence: `Credit lapsed (${reason || "no longer available"})`, tone: "mute", Icon: XCircle }
+    case "pre_process_run":
+      return e.outcome === "failed"
+        ? { sentence: `Pre-processing failed${e.detail ? ` — ${e.detail}` : ""}`, tone: "coral", Icon: RefreshCw }
+        : e.outcome === "completed"
+          ? { sentence: "Pre-processing ran (credits matched, memo & class written)", tone: "grass", Icon: RefreshCw }
+          : { sentence: `Pre-processing ${e.outcome}`, tone: "sun", Icon: RefreshCw }
+    case "process_attempt_process": {
+      const via = e.actor ? ` via ${e.actor}` : ""
+      switch (e.outcome) {
+        case "succeeded":
+          return { sentence: `Charged ${amt ?? ""}${via}`.trim(), tone: "grass", Icon: CreditCard }
+        case "charge_declined":
+          return { sentence: `Charge declined${via}${e.detail ? ` — ${e.detail}` : ""}`, tone: "coral", Icon: CreditCard }
+        case "charge_uncertain":
+          return { sentence: `Charge outcome uncertain${via} — reconciler will confirm`, tone: "sun", Icon: CreditCard }
+        case "payment_orphan":
+          return { sentence: "Charge succeeded but QBO payment failed to record — needs recovery", tone: "coral", Icon: CreditCard }
+        default:
+          return { sentence: `Process attempt: ${e.outcome ?? "unknown"}${e.detail ? ` — ${e.detail}` : ""}`, tone: "sun", Icon: CreditCard }
+      }
+    }
+    case "review_completed":
+      return { sentence: "Credit review completed", tone: "grass", Icon: ClipboardCheck }
+    default:
+      // unknown kind: render raw — forward compatible with new event arms
+      return {
+        sentence: `${e.kind.replace(/_/g, " ")}${e.outcome ? `: ${e.outcome}` : ""}`,
+        tone: "mute",
+        Icon: CircleDot,
+      }
+  }
 }
 
 export function HistoryPanel({ events }: { events: InvoiceHistoryEvent[] }) {
@@ -44,7 +105,7 @@ export function HistoryPanel({ events }: { events: InvoiceHistoryEvent[] }) {
           <CardTitle>History</CardTitle>
         </CardHeader>
         <CardBody className="text-ink-mute text-sm">
-          No events yet — nothing has run against this invoice.
+          No activity yet — nothing has run against this invoice.
         </CardBody>
       </Card>
     )
@@ -58,50 +119,37 @@ export function HistoryPanel({ events }: { events: InvoiceHistoryEvent[] }) {
           {events.length} event{events.length === 1 ? "" : "s"}
         </span>
       </CardHeader>
-      <div className="overflow-x-auto">
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="text-left text-[10px] uppercase tracking-[0.12em] text-ink-mute border-b border-line-soft bg-[#0c1926]">
-              <th className="px-5 py-2 font-medium">When</th>
-              <th className="font-medium">Event</th>
-              <th className="font-medium">Outcome</th>
-              <th className="font-medium">Detail</th>
-              <th className="num text-right font-medium">Amount</th>
-              <th className="pr-5 font-medium">By</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((e, i) => (
-              <tr key={i} className="border-b border-line-soft last:border-b-0">
-                <td className="px-5 py-2 text-ink-mute whitespace-nowrap" title={e.at}>
+      <CardBody className="py-1">
+        <ol className="relative">
+          {events.map((e, i) => {
+            const { sentence, tone, Icon } = describe(e)
+            return (
+              <li
+                key={i}
+                className="flex items-start gap-3 py-2.5 border-b border-line-soft/60 last:border-b-0"
+              >
+                <span className={`mt-0.5 ${TONE_CLS[tone]}`}>
+                  <Icon className="w-3.5 h-3.5" strokeWidth={2} />
+                </span>
+                <span className="flex-1 min-w-0 text-[13px] text-ink leading-relaxed">
+                  {sentence}
+                </span>
+                <span
+                  className="text-[11px] text-ink-mute whitespace-nowrap"
+                  title={new Date(e.at).toLocaleString()}
+                >
                   {new Date(e.at).toLocaleString(undefined, {
                     month: "short",
                     day: "numeric",
                     hour: "numeric",
                     minute: "2-digit",
                   })}
-                </td>
-                <td className="py-2 pr-2 text-ink">
-                  {KIND_LABEL[e.kind] ?? e.kind.replace(/_/g, " ")}
-                </td>
-                <td className={`py-2 pr-2 ${OUTCOME_TONE[e.outcome ?? ""] ?? "text-ink-dim"}`}>
-                  {(e.outcome ?? "—").replace(/_/g, " ")}
-                </td>
-                <td
-                  className="py-2 pr-2 text-ink-mute max-w-[280px] truncate"
-                  title={e.detail ?? undefined}
-                >
-                  {e.detail || "—"}
-                </td>
-                <td className="py-2 pr-2 text-right num text-ink-dim">
-                  {e.amount != null ? formatCurrency(Number(e.amount)) : "—"}
-                </td>
-                <td className="py-2 pr-5 text-ink-mute">{e.actor ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                </span>
+              </li>
+            )
+          })}
+        </ol>
+      </CardBody>
     </Card>
   )
 }

@@ -15,6 +15,7 @@ import { CreditReviewCard } from "@/components/work-orders/credit-review-card"
 import { AppliedPaymentsCard } from "./applied-payments-card"
 import { PaymentMethodsCard } from "./payment-methods-card"
 import { PaymentsCreditsTabs } from "./payments-credits-tabs"
+import { FieldFlag } from "@/components/ui/field-flag"
 
 /**
  * Invoice tab — everything about the QBO invoice side:
@@ -86,7 +87,7 @@ export function InvoicePanel({
                 needsReviewReason={invoice.needs_review_reason}
               />
             ) : (
-              <LockedClassification invoice={invoice} />
+              <LockedClassification invoice={invoice} state={billingState} />
             )}
           </div>
         }
@@ -151,7 +152,13 @@ export function InvoicePanel({
   )
 }
 
-function LockedClassification({ invoice }: { invoice: InvoiceDetail }) {
+function LockedClassification({
+  invoice,
+  state,
+}: {
+  invoice: InvoiceDetail
+  state: ServiceBillingState | null
+}) {
   return (
     <div className="px-5 py-4">
       <div className="flex items-baseline justify-between mb-3">
@@ -163,7 +170,18 @@ function LockedClassification({ invoice }: { invoice: InvoiceDetail }) {
         </span>
       </div>
       <div className="grid grid-cols-3 gap-4 text-[12px]">
-        <Field label="QBO class" value={invoice.qbo_class ?? "—"} />
+        <Field
+          label="QBO class"
+          value={invoice.qbo_class ?? "—"}
+          flag={
+            state && !state.class_present ? (
+              <FieldFlag
+                show
+                title="No QBO class — blocking processing. Re-run pre-processing or set it in Edit classification."
+              />
+            ) : null
+          }
+        />
         <Field
           label="Payment method"
           value={
@@ -171,8 +189,27 @@ function LockedClassification({ invoice }: { invoice: InvoiceDetail }) {
               ? "—"
               : paymentChannelLabel(invoice)
           }
+          flag={
+            state && !state.pm_resolved ? (
+              <FieldFlag
+                show
+                title={`Route is ${state.payment_route ?? "unresolved"} but no matching method is on file — blocking processing.`}
+              />
+            ) : null
+          }
         />
-        <Field label="Memo" value={invoice.memo ?? "—"} />
+        <Field
+          label="Memo"
+          value={invoice.memo ?? "—"}
+          flag={
+            state && !state.memo_present ? (
+              <FieldFlag
+                show
+                title="No memo — blocking processing. Pre-processing writes it (deterministic or AI); low-confidence memos need a manual edit here."
+              />
+            ) : null
+          }
+        />
       </div>
     </div>
   )
@@ -182,15 +219,18 @@ function Field({
   label,
   value,
   mono = false,
+  flag = null,
 }: {
   label: string
   value: string
   mono?: boolean
+  flag?: React.ReactNode
 }) {
   return (
     <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-[0.14em] text-ink-mute">
+      <div className="text-[10px] uppercase tracking-[0.14em] text-ink-mute inline-flex items-center gap-1.5">
         {label}
+        {flag}
       </div>
       <div
         className={`${mono ? "num text-ink" : "text-ink"} mt-0.5 truncate`}
