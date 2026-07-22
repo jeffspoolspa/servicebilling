@@ -925,6 +925,32 @@ export interface ServiceBillingState {
   needs_review_reason: string | null
 }
 
+/** One row of public.invoice_history — the per-invoice event log the
+ * History tab renders (pre-process runs, process attempts, credit decision
+ * events, review completions). */
+export interface InvoiceHistoryEvent {
+  qbo_invoice_id: string
+  at: string
+  kind: string
+  outcome: string | null
+  detail: string | null
+  amount: number | null
+  actor: string | null
+}
+
+export async function getInvoiceHistory(
+  qboInvoiceId: string,
+): Promise<InvoiceHistoryEvent[]> {
+  const sb = createAnon("public")
+  const { data } = await sb
+    .from("invoice_history")
+    .select("*")
+    .eq("qbo_invoice_id", qboInvoiceId)
+    .order("at", { ascending: false })
+    .limit(200)
+  return (data ?? []) as InvoiceHistoryEvent[]
+}
+
 export interface PaymentMethod {
   id: string
   type: string            // 'card' | 'ach'

@@ -1,7 +1,7 @@
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { formatCurrency } from "@/lib/utils/format"
-import type { InvoiceDetail, WorkOrderDetail } from "@/lib/queries/dashboard"
+import type { InvoiceDetail, ServiceBillingState, WorkOrderDetail } from "@/lib/queries/dashboard"
 import { isChargeChannel, paymentChannelShortLabel } from "@/lib/payment-channel"
 
 /**
@@ -26,9 +26,11 @@ interface Props {
   /** Compact bonus-pool toggle row (BonusInline) — rendered under the money
    * facts. Passed as a slot so this card stays a server component. */
   bonus?: React.ReactNode
+  /** Derived readiness row — inline indicators (subtotal mismatch dot). */
+  state?: ServiceBillingState | null
 }
 
-export function SummaryCard({ wo, invoice, status, bonus }: Props) {
+export function SummaryCard({ wo, invoice, status, bonus, state }: Props) {
   const hasInvoice = invoice != null
   const subtotal = hasInvoice ? Number(invoice!.subtotal ?? 0) : Number(wo.sub_total ?? 0)
   const total = hasInvoice ? Number(invoice!.total_amt ?? 0) : Number(wo.total_due ?? 0)
@@ -54,7 +56,15 @@ export function SummaryCard({ wo, invoice, status, bonus }: Props) {
       </CardHeader>
       <CardBody className="text-sm space-y-2">
         <Row label="Subtotal">
-          <span className="num text-ink-dim">{formatCurrency(subtotal)}</span>
+          <span className="num text-ink-dim inline-flex items-center gap-1.5">
+            {state && !state.subtotal_matches && (
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-coral"
+                title={`Doesn't match the WO subtotal (${formatCurrency(Number(wo.sub_total ?? 0))}) — line items may have been dropped in the ION->QBO push; blocking processing`}
+              />
+            )}
+            {formatCurrency(subtotal)}
+          </span>
         </Row>
         <Row label="Tax">
           <span className="num text-ink-dim">{formatCurrency(taxTotal)}</span>

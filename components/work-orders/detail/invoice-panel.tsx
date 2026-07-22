@@ -6,6 +6,7 @@ import type {
   InvoiceDetail,
   OpenCredit,
   PaymentMethod,
+  ServiceBillingState,
   WorkOrderDetail,
 } from "@/lib/queries/dashboard"
 import { paymentChannelLabel } from "@/lib/payment-channel"
@@ -32,6 +33,7 @@ export function InvoicePanel({
   invoice,
   openCredits,
   creditDecisions,
+  billingState,
   paymentMethods,
   appliedPayments,
 }: {
@@ -39,6 +41,7 @@ export function InvoicePanel({
   invoice: InvoiceDetail | null
   openCredits: OpenCredit[]
   creditDecisions: CreditDecision[]
+  billingState: ServiceBillingState | null
   paymentMethods: PaymentMethod[]
   appliedPayments: AppliedPayment[]
 }) {
@@ -134,6 +137,11 @@ export function InvoicePanel({
           AppliedPaymentsCard above shows the historical record. */}
       <PaymentMethodsCard
         qboInvoiceId={invoice.qbo_invoice_id}
+        routeUnresolved={
+          billingState && !billingState.pm_resolved
+            ? billingState.payment_route
+            : null
+        }
         methods={paymentMethods}
         preferredPaymentType={invoice.preferred_payment_type}
         disabled={invoice.billing_status === "processed"}

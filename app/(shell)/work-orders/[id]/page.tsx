@@ -5,6 +5,7 @@ import { Pill } from "@/components/ui/pill"
 import { notFound } from "next/navigation"
 import {
   getWorkOrderDetail,
+  getInvoiceHistory,
   getLatestProcessAttempt,
   getProcessAttempts,
   getAppliedPaymentsForInvoice,
@@ -26,7 +27,7 @@ import {
 import { WorkOrderPanel } from "@/components/work-orders/detail/work-order-panel"
 import { InvoicePanel } from "@/components/work-orders/detail/invoice-panel"
 import { SummaryCard } from "@/components/work-orders/detail/summary-card"
-import { PreProcessingCard } from "@/components/work-orders/detail/pre-processing-card"
+import { HistoryPanel } from "@/components/work-orders/detail/history-panel"
 import { BonusInline } from "@/components/work-orders/detail/bonus-inline"
 import { CustomerPaymentPreferenceCard } from "@/components/work-orders/detail/customer-payment-preference-card"
 import { createAnon } from "@/lib/supabase/anon"
@@ -83,7 +84,8 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
   const techDisplay = wo.assigned_to?.split(",")[1]?.trim() ?? wo.assigned_to ?? "—"
 
   // Default tab: invoice when one is linked, else work. URL param overrides.
-  const requestedTab = sp.tab === "work" || sp.tab === "invoice" ? sp.tab : null
+  const requestedTab =
+    sp.tab === "work" || sp.tab === "invoice" || sp.tab === "history" ? sp.tab : null
   const activeTab: DetailTab =
     requestedTab ?? (invoice ? "invoice" : "work")
 
@@ -94,7 +96,7 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
   // - customerPref + needsReviewCount: for CustomerPaymentPreferenceCard
   const customerId = invoice?.qbo_customer_id ?? null
   const sb = createAnon("public")
-  const [processAttempt, processAttempts, appliedPayments, custPrefRow, needsReviewCounts] =
+  const [processAttempt, processAttempts, appliedPayments, historyEvents, custPrefRow, needsReviewCounts] =
     await Promise.all([
       invoice?.qbo_invoice_id
         ? getLatestProcessAttempt(invoice.qbo_invoice_id)
@@ -104,6 +106,9 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
         : Promise.resolve([]),
       invoice?.qbo_invoice_id
         ? getAppliedPaymentsForInvoice(invoice.qbo_invoice_id)
+        : Promise.resolve([]),
+      invoice?.qbo_invoice_id
+        ? getInvoiceHistory(invoice.qbo_invoice_id)
         : Promise.resolve([]),
       customerId
         ? sb
@@ -274,12 +279,15 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
           />
           {activeTab === "work" ? (
             <WorkOrderPanel wo={wo} />
+          ) : activeTab === "history" ? (
+            <HistoryPanel events={historyEvents} />
           ) : (
             <InvoicePanel
               wo={wo}
               invoice={invoice}
               openCredits={openCredits}
               creditDecisions={creditDecisions}
+              billingState={billingState}
               paymentMethods={paymentMethods}
               appliedPayments={appliedPayments}
             />
@@ -292,6 +300,7 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
             wo={wo}
             invoice={invoice}
             status={status}
+            state={billingState}
             bonus={
               invoice ? (
                 <BonusInline
@@ -302,7 +311,6 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
               ) : undefined
             }
           />
-          <PreProcessingCard wo={wo} invoice={invoice} state={billingState} />
           {invoice && customerId && (
             <CustomerPaymentPreferenceCard
               qboCustomerId={customerId}

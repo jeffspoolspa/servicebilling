@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils/cn"
  * Server-rendered via Link — no client JS, navigation preserves scroll
  * position when Next's router handles it.
  */
-export type DetailTab = "work" | "invoice"
+export type DetailTab = "work" | "invoice" | "history"
 
 interface Props {
   active: DetailTab
@@ -43,6 +43,14 @@ export function DetailTabs({ active, woNumber, invoiceAttention, invoiceDisabled
           attention={invoiceAttention}
         >
           Invoice
+        </TabLink>
+      )}
+      {!invoiceDisabled && (
+        <TabLink
+          href={`/work-orders/${woNumber}?tab=history` as never}
+          active={active === "history"}
+        >
+          History
         </TabLink>
       )}
     </div>

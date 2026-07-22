@@ -39,12 +39,16 @@ function normalizeChannel(
 }
 
 export function PaymentMethodsCard({
+  routeUnresolved,
   qboInvoiceId,
   methods,
   preferredPaymentType,
   disabled = false,
   invoiceBalance = null,
 }: {
+  /** The resolved charge route (card/ach) has NO matching method on file —
+   * render an attention chip so the user sees what's holding the invoice. */
+  routeUnresolved?: string | null
   qboInvoiceId: string
   methods: PaymentMethod[]
   /** Accepts the new vocab ('email' | 'ach' | 'credit_card') from invoices.preferred_payment_type
@@ -151,7 +155,14 @@ export function PaymentMethodsCard({
       <Card>
         <CardHeader>
           <CardTitle>Payment method on file</CardTitle>
-          <span className="ml-auto text-[11px] text-ink-mute">none</span>
+          {routeUnresolved ? (
+            <span className="ml-auto inline-flex items-center rounded-full border border-coral/40 bg-coral/[0.08] px-2 py-0.5 text-[10px] text-coral"
+                  title={`Route is ${routeUnresolved} but no matching method is on file — blocking processing`}>
+              no {routeUnresolved} method
+            </span>
+          ) : (
+            <span className="ml-auto text-[11px] text-ink-mute">none</span>
+          )}
         </CardHeader>
         <CardBody className="text-ink-mute text-sm">
           No card or ACH on file — invoice will be emailed.
