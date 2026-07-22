@@ -1,0 +1,65 @@
+//bun-extra-requirements:
+//node-html-parser@6.1.13
+//playwright@1.40.0
+
+// Canonical per-DAY service-log enumerator. ONE call to customerLogDetails.cfm
+// (global, all customers) returns every scheduled event + submitted log for the date,
+// each row carrying the unique LogID + calendarID (-> addLog.cfm), customer name,
+// service type, tech, and a status bullet (green = completed/submitted log).
+// Pass an existing `sess` (e.g. from a long backfill) to REUSE it and skip the per-call
+// session_cache + f/ION variable reads -- those reads degrade ~15 min into a long job.
+
+import "playwright@1.40.0"
+import * as wmill from "windmill-client"
+import { parse } from "node-html-parser"
+import { getOrRefreshSession, ionFetchText } from "/f/ION/_lib/session_cache"
+
+// date_us = MM/DD/YYYY
+export async function main(date_us: string, officeid: number | string = 0, sess: any = null) {
+  let s = sess
+  if (!s) {
+    const ion = {
+      loginUrl: await wmill.getVariable("f/ION/LOGIN_URL"),
+      username: await wmill.getVariable("f/ION/USERNAME"),
+      password: await wmill.getVariable("f/ION/PASSWORD"),
+    }
+    s = await getOrRefreshSession(ion)
+  }
+  const o = s.ionOrigin
+  const url = `/home/customerLogDetails.cfm?officeid=${officeid}&techid=0&status=0&logset=1`
+    + `&dayindexsel=${encodeURIComponent(date_us)}&dayindex=&_cf_nodebug=true&_cf_nocache=true&_cf_rc=0`
+  // ionFetchText adds the session cookie + UA/Accept, throws IonSessionExpiredError on a login redirect
+  // (a dead session errors loudly instead of silently parsing 0 logs), and bounds the request so an ION
+  // hang fails fast instead of running for tens of minutes.
+  const html = await ionFetchText(s, `${o}${url}`, {
+    headers: { "X-Requested-With": "XMLHttpRequest", Referer: `${o}/main.cfm` },
+    signal: AbortSignal.timeout(20000),
+  })
+
+  const root = parse(html)
+  const logs: any[] = []
+  for (const a of root.querySelectorAll('a[href*="addLog.cfm"]')) {
+    const href = a.getAttribute("href") || ""
+    const log = href.match(/LogID=(\d+)/)?.[1]
+    if (!log) continue
+    const cal = href.match(/calendarID=(\d+)/)?.[1] || null
+    // row = the enclosing <tr>; its tds: [status-bullet, customer(link), service, tech, date]
+    let tr: any = a
+    for (let k = 0; k < 6 && tr && tr.tagName !== "TR"; k++) tr = tr.parentNode
+    const tds = tr ? tr.querySelectorAll("td") : []
+    const txt = (n: any) => (n ? n.text.replace(/\s+/g, " ").trim() : "")
+    const bullet = tr ? (tr.querySelector("img")?.getAttribute("src") || "") : ""
+    logs.push({
+      log_id: log,
+      calendar_id: cal,
+      customer_name: txt(a),
+      service_type: txt(tds[2]),
+      tech: txt(tds[3]),
+      date: txt(tds[4]) || date_us,
+      status_bullet: bullet.split("/").pop()?.replace(/\.(png|gif)$/i, "") || null,
+      completed: /green/i.test(bullet),
+      addlog_url: `/tasks/addLog.cfm?calendarID=${cal || ""}&LogID=${log}&source=ServiceLog`,
+    })
+  }
+  return { date: date_us, total: logs.length, completed: logs.filter((l) => l.completed).length, logs }
+}
