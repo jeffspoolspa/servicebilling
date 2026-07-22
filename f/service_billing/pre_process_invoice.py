@@ -137,6 +137,30 @@ def write_result(conn, qbo_invoice_id, result):
 DETERMINISTIC_REASONS = {"wo_number_in_ref_num", "wo_number_in_memo"}
 
 
+def credits_cache_fresh(conn, max_sweep_age_min=20):
+    """DB-only freshness evidence for the credit cache — no QBO call.
+    Green when BOTH hold:
+      1. the stream is drained: no live qbo_inbox rows for Payment/CreditMemo
+         (dead-letter rows attempts>=3 excluded — they'd block forever), and
+      2. the CDC sweep ran recently and didn't fail (the unknown-unknowns
+         bound: anything the stream missed is at most one sweep old).
+    Returns (fresh, checked_at). checked_at is the provenance timestamp."""
+    row = _row(conn, """SELECT
+        NOT EXISTS (SELECT 1 FROM billing.qbo_inbox
+                    WHERE finished_at IS NULL AND attempts < 3
+                      AND entity_type IN ('Payment','CreditMemo')) AS inbox_drained,
+        EXISTS (SELECT 1 FROM billing.cdc_cursors
+                WHERE source = 'qbo'
+                  AND last_run_status IN ('succeeded','partial')
+                  AND last_run_at > now() - make_interval(mins => %s)) AS sweep_recent,
+        now() AS checked_at""", (max_sweep_age_min,))
+    fresh = bool(row and row["inbox_drained"] and row["sweep_recent"])
+    if not fresh and row:
+        print(f"  credit cache not provably fresh (inbox_drained={row['inbox_drained']}, "
+              f"sweep_recent={row['sweep_recent']}) — falling back to QBO read-through")
+    return fresh, (row["checked_at"] if row else None)
+
+
 def upsert_pre_process_row(conn, qbo_invoice_id, credits_verified_at=None):
     _exec(conn, """INSERT INTO billing.invoice_pre_process
                      (qbo_invoice_id, state, credits_verified_at)
@@ -526,23 +550,26 @@ def process_one(conn, qbo_invoice_id, access_token, realm_id, api_key, force=Fal
         # Credits: matching is THIS workflow's policy (WO-number / amount
         # heuristics, oldest first); applying + echoing is the shared service.
         set_stage(conn, qbo_invoice_id, STAGE_CREDITS)
-        # Money decision reads fresh: targeted read-through of THIS customer's
-        # credits from QBO (upserts customer_payments, bumps fetched_at) so the
-        # match below cannot decide on a stale replica. Reuses our already-
-        # refreshed token to avoid a second refresh-token rotation.
-        # ponytail: unconditional read-through; add an age-bound skip
-        # (max(fetched_at) > now()-BOUND) only if pre-process volume makes the
-        # per-invoice QBO query measurably cost — the compute ledger will show it.
-        credits_verified_at = None
-        try:
-            refresh_customer_credits(qbo_customer_id,
-                                     access_token=access_token, realm_id=realm_id)
-            cur = conn.cursor()
-            cur.execute("SELECT now()"); credits_verified_at = cur.fetchone()[0]; cur.close()
-        except Exception as e:
-            # decision proceeds on the cache; provenance stays NULL = "decided
-            # without a confirmed fresh read" (visible in v_service_billing_state)
-            print(f"  (credit read-through warning: {e})")
+        # Money decision reads the CACHE — the stream (webhooks -> inbox ->
+        # drain) + CDC sweep keep customer_payments current; re-polling QBO
+        # per invoice would pay twice for what the sync already maintains
+        # (Carter 2026-07-22). Trust is evidence-based, not assumed: the
+        # DB-only freshness check below. Only when the evidence is red (inbox
+        # backlog on Payment/CreditMemo, or the sweep hasn't run) do we fall
+        # back to the targeted QBO read-through, reusing our token.
+        fresh, checked_at = credits_cache_fresh(conn)
+        credits_verified_at = checked_at if fresh else None
+        if not fresh:
+            try:
+                refresh_customer_credits(qbo_customer_id,
+                                         access_token=access_token, realm_id=realm_id)
+                cur = conn.cursor()
+                cur.execute("SELECT now()"); credits_verified_at = cur.fetchone()[0]; cur.close()
+            except Exception as e:
+                # decision proceeds on the cache; provenance stays NULL =
+                # "decided without confirmed freshness" (visible in
+                # v_service_billing_state)
+                print(f"  (credit read-through warning: {e})")
 
         open_credits = sorted(
             load_applicable_credits(conn, qbo_customer_id),
