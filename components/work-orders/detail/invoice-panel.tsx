@@ -13,6 +13,7 @@ import { ClassificationEditor } from "@/components/work-orders/classification-ed
 import { CreditReviewCard } from "@/components/work-orders/credit-review-card"
 import { AppliedPaymentsCard } from "./applied-payments-card"
 import { PaymentMethodsCard } from "./payment-methods-card"
+import { PaymentsCreditsTabs } from "./payments-credits-tabs"
 
 /**
  * Invoice tab — everything about the QBO invoice side:
@@ -88,17 +89,30 @@ export function InvoicePanel({
         }
       />
 
-      {/* Applied payments (history) */}
-      <AppliedPaymentsCard payments={appliedPayments} />
-
-      {/* Credit review — the per-invoice decision record (what pre-process
-          saw + each credit's outcome) with Apply / Reject / Complete review */}
-      <CreditReviewCard
-        qboInvoiceId={invoice.qbo_invoice_id}
-        balance={Number(invoice.balance ?? 0)}
-        credits={openCredits}
-        decisions={creditDecisions}
-        overriddenAt={invoice.credit_review_overridden_at}
+      {/* Two tabbed views over the same money: payment_invoice_links (what
+          IS applied) and the credit decision record (what pre-process saw +
+          each credit's outcome). An applied credit appears in both. */}
+      <PaymentsCreditsTabs
+        appliedCount={appliedPayments.length}
+        toDecideCount={creditDecisions.filter((d) => d.state === "candidate").length}
+        applied={
+          appliedPayments.length > 0 ? (
+            <AppliedPaymentsCard payments={appliedPayments} />
+          ) : (
+            <div className="text-[12px] text-ink-mute italic border border-line-soft rounded-lg px-4 py-3">
+              No payments applied to this invoice yet.
+            </div>
+          )
+        }
+        credits={
+          <CreditReviewCard
+            qboInvoiceId={invoice.qbo_invoice_id}
+            balance={Number(invoice.balance ?? 0)}
+            credits={openCredits}
+            decisions={creditDecisions}
+            overriddenAt={invoice.credit_review_overridden_at}
+          />
+        }
       />
 
       {/* Payment methods on file — every active PM in QBO's wallet, with
