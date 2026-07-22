@@ -23,9 +23,12 @@ interface Props {
   wo: WorkOrderDetail
   invoice: InvoiceDetail | null
   status: Status
+  /** Compact bonus-pool toggle row (BonusInline) — rendered under the money
+   * facts. Passed as a slot so this card stays a server component. */
+  bonus?: React.ReactNode
 }
 
-export function SummaryCard({ wo, invoice, status }: Props) {
+export function SummaryCard({ wo, invoice, status, bonus }: Props) {
   const hasInvoice = invoice != null
   const subtotal = hasInvoice ? Number(invoice!.subtotal ?? 0) : Number(wo.sub_total ?? 0)
   const total = hasInvoice ? Number(invoice!.total_amt ?? 0) : Number(wo.total_due ?? 0)
@@ -60,6 +63,9 @@ export function SummaryCard({ wo, invoice, status }: Props) {
         <Row label="Total">
           <span className="num text-ink font-medium">{formatCurrency(total)}</span>
         </Row>
+        {bonus && (
+          <div className="text-[12px] pt-1">{bonus}</div>
+        )}
         {hasInvoice && (
           <>
             <Row label="Balance">

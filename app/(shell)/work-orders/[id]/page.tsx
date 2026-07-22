@@ -27,7 +27,7 @@ import { WorkOrderPanel } from "@/components/work-orders/detail/work-order-panel
 import { InvoicePanel } from "@/components/work-orders/detail/invoice-panel"
 import { SummaryCard } from "@/components/work-orders/detail/summary-card"
 import { PreProcessingCard } from "@/components/work-orders/detail/pre-processing-card"
-import { BonusCard } from "@/components/work-orders/detail/bonus-card"
+import { BonusInline } from "@/components/work-orders/detail/bonus-inline"
 import { CustomerPaymentPreferenceCard } from "@/components/work-orders/detail/customer-payment-preference-card"
 import { createAnon } from "@/lib/supabase/anon"
 
@@ -288,14 +288,20 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
 
         {/* Right 1/3 — persistent sidebar (summary + pre-processing + processing) */}
         <div className="flex flex-col gap-5">
-          <SummaryCard wo={wo} invoice={invoice} status={status} />
-          {invoice && (
-            <BonusCard
-              woNumber={wo.wo_number}
-              initialOverride={wo.included_in_bonus}
-              qboClass={invoice.qbo_class}
-            />
-          )}
+          <SummaryCard
+            wo={wo}
+            invoice={invoice}
+            status={status}
+            bonus={
+              invoice ? (
+                <BonusInline
+                  woNumber={wo.wo_number}
+                  initialOverride={wo.included_in_bonus}
+                  qboClass={invoice.qbo_class}
+                />
+              ) : undefined
+            }
+          />
           <PreProcessingCard wo={wo} invoice={invoice} />
           {invoice && customerId && (
             <CustomerPaymentPreferenceCard
