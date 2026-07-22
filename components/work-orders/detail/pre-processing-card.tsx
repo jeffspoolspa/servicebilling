@@ -10,15 +10,14 @@ import type {
 
 /**
  * Sidebar card — persistent across tabs. Reads ONE row
- * (public.service_billing_state) and renders three zones:
+ * (public.service_billing_state, derived readiness v3) and renders:
  *
- *   1. state header  — where the invoice is (pre_process_state, falling back
- *                      to derived_status until the projection consolidation)
- *   2. gates         — why it isn't further along (subtotal / credits /
- *                      enrichment / payment route), each a typed fact —
- *                      no needs_review_reason string parsing
- *   3. provenance    — can the decision be trusted (credits_verified_at /
- *                      invoice mirror age / review completion)
+ *   1. ready pill    — billing.invoice_ready(), the one rule function
+ *   2. rule lights   — one row per rule, each a named boolean from the view
+ *                      (no needs_review_reason string parsing; adding a rule
+ *                      = adding a column + a row here)
+ *   3. provenance    — what evidence backed the decision (credits verified /
+ *                      invoice mirror age / review completed / last run)
  */
 export function PreProcessingCard({
   wo,
@@ -44,86 +43,86 @@ export function PreProcessingCard({
     )
   }
 
-  // Zone 1 — the state pill. pre_process_state is authoritative once the new
-  // worker has touched the invoice; older invoices fall back to derived_status.
-  const effState = state.pre_process_state ?? state.derived_status ?? "unknown"
-  const stateMeta: Record<string, { label: string; tone: "cyan" | "teal" | "sun" | "coral" | "grass" | "neutral" }> = {
-    deciding: { label: "deciding", tone: "sun" },
-    awaiting_pre_processing: { label: "awaiting", tone: "neutral" },
-    needs_review: { label: "needs review", tone: "coral" },
-    ready_to_process: { label: "ready", tone: "cyan" },
-    processing: { label: "processing", tone: "teal" },
-    processed: { label: "processed", tone: "grass" },
-    open_ar: { label: "open AR", tone: "sun" },
-  }
-  const pill = stateMeta[effState] ?? { label: effState, tone: "neutral" as const }
-
-  // Zone 2 — gates from typed facts.
-  const decisionsExist =
-    state.open_candidate_count + state.applied_count +
-    state.rejected_count + state.stale_count > 0
-
-  let creditsState: boolean | null
+  // credits detail from the decision rollup (typed facts, no parsing)
   let creditsDetail: string
   if (!state.credits_settled) {
-    creditsState = false
-    creditsDetail = `${state.open_candidate_count} to decide — review on Invoice tab`
-  } else if (decisionsExist) {
-    creditsState = true
+    creditsDetail = `${state.undecided_credit_count} to decide — review on Invoice tab`
+  } else if (state.applied_count + state.rejected_count > 0) {
     const parts: string[] = []
     if (state.applied_count > 0)
-      parts.push(`${state.applied_count} applied · ${formatCurrency(Number(state.credits_applied_amount))}`)
+      parts.push(
+        `${state.applied_count} applied · ${formatCurrency(Number(state.credits_applied_amount))}`,
+      )
     if (state.rejected_count > 0) parts.push(`${state.rejected_count} rejected`)
-    if (state.stale_count > 0) parts.push(`${state.stale_count} stale`)
-    creditsDetail = parts.join(" · ") || "settled"
-  } else if (state.pre_processed_at) {
-    creditsState = true
-    creditsDetail = "no applicable credits"
+    creditsDetail = parts.join(" · ")
   } else {
-    creditsState = null
-    creditsDetail = "not yet checked"
+    creditsDetail = "no applicable credits"
   }
-
-  const route = state.preferred_payment_type ?? state.payment_method
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Pre-processing</CardTitle>
         <div className="ml-auto flex items-center gap-2">
-          <Pill tone={pill.tone} dot>
-            {pill.label}
-          </Pill>
+          {state.ready ? (
+            <Pill tone="cyan" dot>
+              ready
+            </Pill>
+          ) : (
+            <Pill tone={state.derived_status === "needs_review" ? "coral" : "sun"} dot>
+              {state.derived_status === "needs_review" ? "needs review" : "not ready"}
+            </Pill>
+          )}
         </div>
       </CardHeader>
       <CardBody className="text-sm space-y-2">
         <CheckRow
+          label="Pre-process run"
+          state={state.run_complete}
+          detail={state.run_complete ? "completed" : "not yet run (or failed)"}
+        />
+        <CheckRow
           label="Subtotal"
-          state={state.subtotal_ok}
+          state={state.subtotal_matches}
           detail={
-            state.subtotal_ok === false
-              ? `WO ${formatCurrency(Number(wo.sub_total ?? 0))} vs QBO ${formatCurrency(Number(state.subtotal ?? 0))}`
-              : state.subtotal_ok === true
-                ? "matches"
-                : "not yet checked"
+            state.subtotal_matches
+              ? "matches WO"
+              : `WO ${formatCurrency(Number(wo.sub_total ?? 0))} vs QBO ${formatCurrency(Number(state.subtotal ?? 0))}`
           }
         />
-        <CheckRow label="Credits" state={creditsState} detail={creditsDetail} />
+        <CheckRow label="Credits" state={state.credits_settled} detail={creditsDetail} />
         <CheckRow
-          label="QBO enrichment"
-          state={state.enrichment_ok}
+          label="Memo & class"
+          state={state.memo_present && state.class_present}
           detail={
-            state.enrichment_ok === false
-              ? "memo / class issue"
-              : state.enrichment_ok === true
-                ? "written"
-                : "not yet attempted"
+            state.memo_present && state.class_present
+              ? "written"
+              : [
+                  !state.memo_present && "memo missing",
+                  !state.class_present && "class missing",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+          }
+        />
+        <CheckRow
+          label="Due date"
+          state={state.due_date_ok}
+          detail={
+            state.due_date_ok
+              ? "current"
+              : "past — first send blocked (delivery guard)"
           }
         />
         <CheckRow
           label="Payment route"
-          state={route ? true : null}
-          detail={route ?? "not yet resolved"}
+          state={state.pm_resolved}
+          detail={
+            state.payment_route
+              ? state.payment_route +
+                (state.pm_resolved ? "" : " — no matching method on file")
+              : "not resolvable"
+          }
         />
 
         {state.needs_review_reason && (
@@ -135,7 +134,7 @@ export function PreProcessingCard({
           </div>
         )}
 
-        {/* Zone 3 — freshness provenance: what evidence backed the decision. */}
+        {/* provenance: what evidence backed the decision */}
         <div className="pt-2 border-t border-line-soft text-[10px] text-ink-mute space-y-0.5">
           <ProvRow
             label="Credits verified"

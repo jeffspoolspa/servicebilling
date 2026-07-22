@@ -94,7 +94,17 @@ export function InvoicePanel({
           each credit's outcome). An applied credit appears in both. */}
       <PaymentsCreditsTabs
         appliedCount={appliedPayments.length}
-        toDecideCount={creditDecisions.filter((d) => d.state === "candidate").length}
+        toDecideCount={
+          // derived: open credits without a terminal decision on this invoice
+          openCredits.filter(
+            (c) =>
+              !creditDecisions.some(
+                (d) =>
+                  d.credit_id === c.qbo_payment_id &&
+                  ["applied", "rejected", "stale"].includes(d.state),
+              ),
+          ).length
+        }
         applied={
           appliedPayments.length > 0 ? (
             <AppliedPaymentsCard payments={appliedPayments} />

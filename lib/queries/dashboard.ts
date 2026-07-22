@@ -875,7 +875,7 @@ export interface CreditDecision {
   credit_id: string
   amount: number | null
   unapplied_at_decision: number | null
-  state: "candidate" | "applied" | "rejected" | "stale"
+  state: "proposed" | "applied" | "rejected" | "candidate" | "stale" // candidate/stale = legacy rows
   reason: string | null
   decided_by: string | null
   applied_via: string | null
@@ -889,32 +889,40 @@ export interface CreditDecision {
   current_unapplied_amt: number | null
 }
 
-/** One row of public.service_billing_state — the pre-processing card's whole
- * data contract: state machine + gates + credit rollup + freshness provenance. */
+/** One row of public.service_billing_state (derived readiness v3) — the
+ * pre-processing card's whole data contract: per-rule indicator booleans
+ * (each named for the field it describes), the ready conjunction, the credit
+ * decision rollup, and freshness provenance. */
 export interface ServiceBillingState {
   qbo_invoice_id: string
   qbo_customer_id: string | null
   balance: number | null
   subtotal: number | null
   invoice_verified_at: string | null
-  pre_process_state: "deciding" | "ready_to_process" | "processed" | "needs_review" | null
+  // per-rule indicators
+  run_complete: boolean
+  credits_settled: boolean
+  subtotal_matches: boolean
+  memo_present: boolean
+  class_present: boolean
+  due_date_ok: boolean
+  payment_route: string | null
+  pm_resolved: boolean
+  ready: boolean
+  // credit decision rollup (events)
+  undecided_credit_count: number
+  proposed_count: number
+  applied_count: number
+  rejected_count: number
+  credits_applied_amount: number
+  // provenance + context
   credits_verified_at: string | null
   pm_verified_at: string | null
   reviewed_at: string | null
-  subtotal_ok: boolean | null
-  enrichment_ok: boolean | null
-  payment_method: string | null
-  preferred_payment_type: string | null
   pre_processed_at: string | null
   pre_process_stage: string | null
   derived_status: string | null
   needs_review_reason: string | null
-  open_candidate_count: number
-  applied_count: number
-  rejected_count: number
-  stale_count: number
-  credits_settled: boolean
-  credits_applied_amount: number
 }
 
 export interface PaymentMethod {
