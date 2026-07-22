@@ -7,7 +7,6 @@ import {
   getWorkOrderDetail,
   getInvoiceHistory,
   getLatestProcessAttempt,
-  getProcessAttempts,
   getAppliedPaymentsForInvoice,
 } from "@/lib/queries/dashboard"
 import { formatDate } from "@/lib/utils/format"
@@ -18,7 +17,6 @@ import { SyncButton } from "@/components/work-orders/sync-button"
 import { SkipButton } from "@/components/work-orders/skip-button"
 import { MarkProcessedButton } from "@/components/work-orders/mark-processed-button"
 import { RecoveryBanner } from "@/components/work-orders/recovery-banner"
-import { AttemptTimeline } from "@/components/work-orders/attempt-timeline"
 import { LiveWorkOrderDetail } from "@/components/work-orders/live-work-order-detail"
 import {
   DetailTabs,
@@ -29,7 +27,6 @@ import { InvoicePanel } from "@/components/work-orders/detail/invoice-panel"
 import { SummaryCard } from "@/components/work-orders/detail/summary-card"
 import { HistoryPanel } from "@/components/work-orders/detail/history-panel"
 import { BonusInline } from "@/components/work-orders/detail/bonus-inline"
-import { CustomerPaymentPreferenceCard } from "@/components/work-orders/detail/customer-payment-preference-card"
 import { createAnon } from "@/lib/supabase/anon"
 
 export const dynamic = "force-dynamic"
@@ -84,66 +81,36 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
   const techDisplay = wo.assigned_to?.split(",")[1]?.trim() ?? wo.assigned_to ?? "—"
 
   // Default tab: invoice when one is linked, else work. URL param overrides.
-  const requestedTab =
-    sp.tab === "work" || sp.tab === "invoice" || sp.tab === "history" ? sp.tab : null
+  const requestedTab = sp.tab === "work" || sp.tab === "invoice" ? sp.tab : null
   const activeTab: DetailTab =
     requestedTab ?? (invoice ? "invoice" : "work")
 
   // Parallel fetch what the panels need.
   // - processAttempt: latest only (still used by RecoveryBanner)
-  // - processAttempts: full timeline for the AttemptTimeline card
   // - appliedPayments: for the applied-payments card
-  // - customerPref + needsReviewCount: for CustomerPaymentPreferenceCard
+  // - historyEvents: sidebar History feed
   const customerId = invoice?.qbo_customer_id ?? null
   const sb = createAnon("public")
-  const [processAttempt, processAttempts, appliedPayments, historyEvents, custPrefRow, needsReviewCounts] =
+  const [processAttempt, appliedPayments, historyEvents, custPrefRow] =
     await Promise.all([
       invoice?.qbo_invoice_id
         ? getLatestProcessAttempt(invoice.qbo_invoice_id)
         : Promise.resolve(null),
-      invoice?.qbo_invoice_id
-        ? getProcessAttempts(invoice.qbo_invoice_id)
-        : Promise.resolve([]),
       invoice?.qbo_invoice_id
         ? getAppliedPaymentsForInvoice(invoice.qbo_invoice_id)
         : Promise.resolve([]),
       invoice?.qbo_invoice_id
         ? getInvoiceHistory(invoice.qbo_invoice_id)
         : Promise.resolve([]),
+      // Local Customers.id for the /customers/[id] link.
       customerId
         ? sb
             .from("Customers")
-            .select("id, preferred_payment_type")
+            .select("id")
             .eq("qbo_customer_id", customerId)
             .maybeSingle()
-            .then(
-              (r) =>
-                r.data as
-                  | { id: number | string; preferred_payment_type: string | null }
-                  | null,
-            )
+            .then((r) => r.data as { id: number | string } | null)
         : Promise.resolve(null),
-      // Two counts: needs_review invoices for this customer (a) without an
-      // override (cascade target), (b) with an override (would be skipped).
-      // Surface both so the user knows what'll change vs what won't.
-      customerId
-        ? Promise.all([
-            sb
-              .from("billing_invoices")
-              .select("qbo_invoice_id", { count: "exact", head: true })
-              .eq("qbo_customer_id", customerId)
-              .eq("billing_status", "needs_review")
-              .is("preferred_payment_type_overridden_at", null)
-              .then((r) => r.count ?? 0),
-            sb
-              .from("billing_invoices")
-              .select("qbo_invoice_id", { count: "exact", head: true })
-              .eq("qbo_customer_id", customerId)
-              .eq("billing_status", "needs_review")
-              .not("preferred_payment_type_overridden_at", "is", null)
-              .then((r) => r.count ?? 0),
-          ])
-        : Promise.resolve([0, 0] as [number, number]),
     ])
 
   // Invoice tab should show an attention dot if there's something to look at
@@ -279,8 +246,6 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
           />
           {activeTab === "work" ? (
             <WorkOrderPanel wo={wo} />
-          ) : activeTab === "history" ? (
-            <HistoryPanel events={historyEvents} />
           ) : (
             <InvoicePanel
               wo={wo}
@@ -311,22 +276,7 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
               ) : undefined
             }
           />
-          {invoice && customerId && (
-            <CustomerPaymentPreferenceCard
-              qboCustomerId={customerId}
-              customerName={invoice.customer_name}
-              currentPreference={
-                (custPrefRow?.preferred_payment_type as
-                  | "email"
-                  | "ach"
-                  | "credit_card"
-                  | null) ?? null
-              }
-              needsReviewCount={needsReviewCounts[0]}
-              needsReviewOverriddenCount={needsReviewCounts[1]}
-            />
-          )}
-          {invoice && <AttemptTimeline attempts={processAttempts} />}
+          {invoice && <HistoryPanel events={historyEvents} />}
         </div>
       </div>
     </>
