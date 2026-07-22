@@ -126,6 +126,56 @@ def write_result(conn, qbo_invoice_id, result):
           qbo_invoice_id))
 
 
+# ── decision-record writes (migration 20260722150834) ───────────────────────
+# The pre-process row is the gate state machine; invoice_credit_decisions is
+# the frozen candidate snapshot: EVERY open credit the matcher saw gets a row
+# (reason non-null = auto-recommended). Terminal rows are history; only
+# 'candidate' rows are ever maintained afterwards (by refresh_payment).
+
+# Matches on the WO number are deterministic -> auto-apply. Amount heuristics
+# (full_cover / half_deposit) stay 'candidate' for human review.
+DETERMINISTIC_REASONS = {"wo_number_in_ref_num", "wo_number_in_memo"}
+
+
+def upsert_pre_process_row(conn, qbo_invoice_id, credits_verified_at=None):
+    _exec(conn, """INSERT INTO billing.invoice_pre_process
+                     (qbo_invoice_id, state, credits_verified_at)
+                   VALUES (%s, 'deciding', %s)
+                   ON CONFLICT (qbo_invoice_id) DO UPDATE SET
+                     state = 'deciding',
+                     credits_verified_at = COALESCE(EXCLUDED.credits_verified_at,
+                                                    billing.invoice_pre_process.credits_verified_at),
+                     updated_at = now()""",
+          (qbo_invoice_id, credits_verified_at))
+
+
+def record_credit_decisions(conn, qbo_invoice_id, open_credits, reason_by_id):
+    """One 'candidate' row per open credit considered, matched or not."""
+    cur = conn.cursor()
+    for c in open_credits:
+        cur.execute("""INSERT INTO billing.invoice_credit_decisions
+                         (qbo_invoice_id, credit_id, amount, unapplied_at_decision, reason)
+                       VALUES (%s, %s, %s, %s, %s)
+                       ON CONFLICT (qbo_invoice_id, credit_id) DO UPDATE SET
+                         amount = EXCLUDED.amount,
+                         unapplied_at_decision = EXCLUDED.unapplied_at_decision,
+                         reason = EXCLUDED.reason
+                       WHERE billing.invoice_credit_decisions.state = 'candidate'""",
+                    (qbo_invoice_id, c["qbo_payment_id"],
+                     float(c.get("unapplied_amt") or 0),
+                     float(c.get("unapplied_amt") or 0),
+                     reason_by_id.get(c["qbo_payment_id"])))
+    conn.commit(); cur.close()
+
+
+def mark_decision_applied(conn, qbo_invoice_id, credit_id, amount):
+    _exec(conn, """UPDATE billing.invoice_credit_decisions
+                   SET state = 'applied', amount = %s, decided_by = 'auto',
+                       applied_via = 'pre_process', decided_at = now(), applied_at = now()
+                   WHERE qbo_invoice_id = %s AND credit_id = %s AND state = 'candidate'""",
+          (amount, qbo_invoice_id, credit_id))
+
+
 def read_projected_status(conn, qbo_invoice_id):
     row = _row(conn, "SELECT billing_status, needs_review_reason FROM billing.invoices WHERE qbo_invoice_id = %s",
                (qbo_invoice_id,))
@@ -460,8 +510,14 @@ def process_one(conn, qbo_invoice_id, access_token, realm_id, api_key, force=Fal
     qbo_customer_id = invoice.get("qbo_customer_id")
 
     try:
-        set_stage(conn, qbo_invoice_id, STAGE_FETCHING)
-        qbo_inv, _err = fetch_qbo_invoice(qbo_invoice_id, access_token, realm_id)
+        # The cache row IS the fresh read — refresh_invoice upserted it from
+        # QBO moments ago (webhook -> inbox -> drain), and update_invoice_sparse
+        # does its own SyncToken-CAS fetch at write time. Only fall back to a
+        # live fetch when raw is missing (pre-inbox rows).
+        qbo_inv = invoice.get("raw")
+        if not qbo_inv:
+            set_stage(conn, qbo_invoice_id, STAGE_FETCHING)
+            qbo_inv, _err = fetch_qbo_invoice(qbo_invoice_id, access_token, realm_id)
         if not qbo_inv:
             mark_enrichment_failed(conn, qbo_invoice_id)
             return {"status": "needs_review", "qbo_invoice_id": qbo_invoice_id,
@@ -477,20 +533,43 @@ def process_one(conn, qbo_invoice_id, access_token, realm_id, api_key, force=Fal
         # ponytail: unconditional read-through; add an age-bound skip
         # (max(fetched_at) > now()-BOUND) only if pre-process volume makes the
         # per-invoice QBO query measurably cost — the compute ledger will show it.
+        credits_verified_at = None
         try:
             refresh_customer_credits(qbo_customer_id,
                                      access_token=access_token, realm_id=realm_id)
+            cur = conn.cursor()
+            cur.execute("SELECT now()"); credits_verified_at = cur.fetchone()[0]; cur.close()
         except Exception as e:
+            # decision proceeds on the cache; provenance stays NULL = "decided
+            # without a confirmed fresh read" (visible in v_service_billing_state)
             print(f"  (credit read-through warning: {e})")
+
         open_credits = sorted(
             load_applicable_credits(conn, qbo_customer_id),
             key=lambda c: (c.get("txn_date") is None, c.get("txn_date")))
         matches = match_credits_to_wo(open_credits, wo, qbo_inv)
-        if matches:
-            reason_by_id = {c["qbo_payment_id"]: reason for c, _amt, reason in matches}
+        reason_by_id = {c["qbo_payment_id"]: reason for c, _amt, reason in matches}
+
+        # Decision record: the gate row + one 'candidate' row per credit SEEN
+        # (matched or not) — the frozen snapshot of what this decision saw.
+        upsert_pre_process_row(conn, qbo_invoice_id, credits_verified_at)
+        record_credit_decisions(conn, qbo_invoice_id, open_credits, reason_by_id)
+
+        # Auto-apply ONLY deterministic (WO-number) matches; amount heuristics
+        # stay 'candidate' for human review. apply_credits fresh-reads the
+        # balance, applies in QBO, echoes customer_payments + links from the
+        # response; we then flip each applied decision row.
+        auto = [(c, amt, r) for c, amt, r in matches if r in DETERMINISTIC_REASONS]
+        if auto:
             ar = apply_credits(conn, qbo_customer_id, qbo_invoice_id,
                                access_token, realm_id,
-                               credits=[c for c, _amt, _r in matches])
+                               credits=[c for c, _amt, _r in auto],
+                               applied_via="pre_process")
+            for e in ar["applied"]:
+                mark_decision_applied(conn, qbo_invoice_id,
+                                      e["qbo_payment_id"], e["amount"])
+            # transition dual-write: keep the legacy jsonb until the projection
+            # reads invoice_credit_decisions (then drop the column)
             result["credits_applied"] = (
                 [{"credit_id": e["qbo_payment_id"], "amount": e["amount"],
                   "reason": reason_by_id.get(e["qbo_payment_id"]), "success": True}
