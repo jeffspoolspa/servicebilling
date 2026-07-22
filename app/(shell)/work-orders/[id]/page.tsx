@@ -72,7 +72,7 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
   const data = await getWorkOrderDetail(id)
   if (!data) notFound()
 
-  const { wo, invoice, openCredits, creditDecisions, paymentMethods } = data
+  const { wo, invoice, openCredits, creditDecisions, billingState, paymentMethods } = data
   const skipped = wo.skipped_at != null
   const status = deriveStatus(
     wo.billable,
@@ -302,7 +302,7 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
               ) : undefined
             }
           />
-          <PreProcessingCard wo={wo} invoice={invoice} />
+          <PreProcessingCard wo={wo} invoice={invoice} state={billingState} />
           {invoice && customerId && (
             <CustomerPaymentPreferenceCard
               qboCustomerId={customerId}

@@ -1,25 +1,35 @@
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
+import { Pill } from "@/components/ui/pill"
 import { CheckCircle2, XCircle, AlertCircle } from "lucide-react"
 import { formatCurrency } from "@/lib/utils/format"
-import type { InvoiceDetail, WorkOrderDetail } from "@/lib/queries/dashboard"
+import type {
+  InvoiceDetail,
+  ServiceBillingState,
+  WorkOrderDetail,
+} from "@/lib/queries/dashboard"
 
 /**
- * Sidebar card — persistent across tabs. Shows the four pre-processing
- * checkpoints + the review reason (if flagged). The user can see why an
- * invoice is stuck even while they're on the Work Order tab.
+ * Sidebar card — persistent across tabs. Reads ONE row
+ * (public.service_billing_state) and renders three zones:
  *
- * The Credits row reconciles two signals (credits_applied jsonb and
- * needs_review_reason containing credit_review) so a "no matching credits"
- * green check never masks an unmatched-credit flag.
+ *   1. state header  — where the invoice is (pre_process_state, falling back
+ *                      to derived_status until the projection consolidation)
+ *   2. gates         — why it isn't further along (subtotal / credits /
+ *                      enrichment / payment route), each a typed fact —
+ *                      no needs_review_reason string parsing
+ *   3. provenance    — can the decision be trusted (credits_verified_at /
+ *                      invoice mirror age / review completion)
  */
 export function PreProcessingCard({
   wo,
   invoice,
+  state,
 }: {
   wo: WorkOrderDetail
   invoice: InvoiceDetail | null
+  state: ServiceBillingState | null
 }) {
-  if (!invoice) {
+  if (!invoice || !state) {
     return (
       <Card>
         <CardHeader>
@@ -27,69 +37,73 @@ export function PreProcessingCard({
         </CardHeader>
         <CardBody className="text-ink-mute text-sm">
           {wo.invoice_number
-            ? "Invoice hasn't been pulled from QBO yet."
+            ? "Invoice hasn't landed from QBO yet (webhook + sync will pick it up)."
             : "No invoice number on this WO yet."}
         </CardBody>
       </Card>
     )
   }
 
-  const reason = invoice.needs_review_reason ?? ""
-  const hasCreditReview = /credit_review/i.test(reason)
-  const applied = invoice.credits_applied ?? null
-  const appliedSuccess = applied?.filter((c) => c.success) ?? []
-  const appliedFailed = applied?.filter((c) => !c.success) ?? []
+  // Zone 1 — the state pill. pre_process_state is authoritative once the new
+  // worker has touched the invoice; older invoices fall back to derived_status.
+  const effState = state.pre_process_state ?? state.derived_status ?? "unknown"
+  const stateMeta: Record<string, { label: string; tone: "cyan" | "teal" | "sun" | "coral" | "grass" | "neutral" }> = {
+    deciding: { label: "deciding", tone: "sun" },
+    awaiting_pre_processing: { label: "awaiting", tone: "neutral" },
+    needs_review: { label: "needs review", tone: "coral" },
+    ready_to_process: { label: "ready", tone: "cyan" },
+    processing: { label: "processing", tone: "teal" },
+    processed: { label: "processed", tone: "grass" },
+    open_ar: { label: "open AR", tone: "sun" },
+  }
+  const pill = stateMeta[effState] ?? { label: effState, tone: "neutral" as const }
+
+  // Zone 2 — gates from typed facts.
+  const decisionsExist =
+    state.open_candidate_count + state.applied_count +
+    state.rejected_count + state.stale_count > 0
 
   let creditsState: boolean | null
   let creditsDetail: string
-  if (hasCreditReview) {
+  if (!state.credits_settled) {
     creditsState = false
-    const m = reason.match(
-      /credit_review \((\d+) unmatched credit\(s\), (\$[\d.]+) unapplied\)/,
-    )
-    creditsDetail = m
-      ? `${m[1]} unmatched credit(s), ${m[2]} — review on Invoice tab`
-      : "credits available but unmatched"
-  } else if (applied == null) {
-    creditsState = null
-    creditsDetail = "not yet checked"
-  } else if (applied.length === 0) {
+    creditsDetail = `${state.open_candidate_count} to decide — review on Invoice tab`
+  } else if (decisionsExist) {
+    creditsState = true
+    const parts: string[] = []
+    if (state.applied_count > 0)
+      parts.push(`${state.applied_count} applied · ${formatCurrency(Number(state.credits_applied_amount))}`)
+    if (state.rejected_count > 0) parts.push(`${state.rejected_count} rejected`)
+    if (state.stale_count > 0) parts.push(`${state.stale_count} stale`)
+    creditsDetail = parts.join(" · ") || "settled"
+  } else if (state.pre_processed_at) {
     creditsState = true
     creditsDetail = "no applicable credits"
   } else {
-    creditsState = applied.every((c) => c.success)
-    const appliedTotal = appliedSuccess.reduce(
-      (a, c) => a + Number(c.amount ?? 0),
-      0,
-    )
-    creditsDetail =
-      `${appliedSuccess.length} applied · ${formatCurrency(appliedTotal)}` +
-      (appliedFailed.length > 0 ? ` · ${appliedFailed.length} failed` : "")
+    creditsState = null
+    creditsDetail = "not yet checked"
   }
+
+  const route = state.preferred_payment_type ?? state.payment_method
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Pre-processing</CardTitle>
-        {invoice.pre_processed_at && (
-          <span className="ml-auto text-[11px] text-ink-mute">
-            {new Date(invoice.pre_processed_at).toLocaleString(undefined, {
-              month: "short",
-              day: "numeric",
-              hour: "numeric",
-              minute: "2-digit",
-            })}
-          </span>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          <Pill tone={pill.tone} dot>
+            {pill.label}
+          </Pill>
+        </div>
       </CardHeader>
       <CardBody className="text-sm space-y-2">
         <CheckRow
           label="Subtotal"
-          state={invoice.subtotal_ok}
+          state={state.subtotal_ok}
           detail={
-            invoice.subtotal_ok === false
-              ? `WO ${formatCurrency(Number(wo.sub_total ?? 0))} vs QBO ${formatCurrency(Number(invoice.subtotal ?? 0))}`
-              : invoice.subtotal_ok === true
+            state.subtotal_ok === false
+              ? `WO ${formatCurrency(Number(wo.sub_total ?? 0))} vs QBO ${formatCurrency(Number(state.subtotal ?? 0))}`
+              : state.subtotal_ok === true
                 ? "matches"
                 : "not yet checked"
           }
@@ -97,30 +111,80 @@ export function PreProcessingCard({
         <CheckRow label="Credits" state={creditsState} detail={creditsDetail} />
         <CheckRow
           label="QBO enrichment"
-          state={invoice.enrichment_ok}
+          state={state.enrichment_ok}
           detail={
-            invoice.enrichment_ok === false
+            state.enrichment_ok === false
               ? "memo / class issue"
-              : invoice.enrichment_ok === true
+              : state.enrichment_ok === true
                 ? "written"
                 : "not yet attempted"
           }
         />
         <CheckRow
-          label="Payment method"
-          state={invoice.payment_method ? true : null}
-          detail={invoice.payment_method ?? "not yet resolved"}
+          label="Payment route"
+          state={route ? true : null}
+          detail={route ?? "not yet resolved"}
         />
-        {invoice.needs_review_reason && (
+
+        {state.needs_review_reason && (
           <div className="mt-2 rounded border border-coral/30 bg-coral/5 px-3 py-2 text-[12px] text-coral">
             <div className="font-medium mb-0.5">Needs review</div>
             <div className="text-coral/80 text-[11px] break-words">
-              {invoice.needs_review_reason}
+              {state.needs_review_reason}
             </div>
           </div>
         )}
+
+        {/* Zone 3 — freshness provenance: what evidence backed the decision. */}
+        <div className="pt-2 border-t border-line-soft text-[10px] text-ink-mute space-y-0.5">
+          <ProvRow
+            label="Credits verified"
+            at={state.credits_verified_at}
+            fallback={
+              state.pre_processed_at
+                ? "decided without confirmed fresh read"
+                : "pending first run"
+            }
+          />
+          <ProvRow label="Invoice mirror" at={state.invoice_verified_at} fallback="never" />
+          {state.reviewed_at && <ProvRow label="Review completed" at={state.reviewed_at} fallback="" />}
+          {state.pre_processed_at && (
+            <ProvRow label="Last pre-process" at={state.pre_processed_at} fallback="" />
+          )}
+        </div>
       </CardBody>
     </Card>
+  )
+}
+
+function relTime(iso: string): string {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000)
+  if (s < 90) return `${Math.round(s)}s ago`
+  if (s < 5400) return `${Math.round(s / 60)}m ago`
+  if (s < 129600) return `${Math.round(s / 3600)}h ago`
+  return `${Math.round(s / 86400)}d ago`
+}
+
+function ProvRow({
+  label,
+  at,
+  fallback,
+}: {
+  label: string
+  at: string | null
+  fallback: string
+}) {
+  return (
+    <div className="flex justify-between gap-2">
+      <span>{label}</span>
+      <span
+        className={at ? "text-ink-dim" : "text-sun"}
+        title={at ? new Date(at).toLocaleString() : undefined}
+        suppressHydrationWarning
+      >
+        {at ? relTime(at) : fallback}
+      </span>
+    </div>
   )
 }
 

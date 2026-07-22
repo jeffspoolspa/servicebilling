@@ -889,6 +889,34 @@ export interface CreditDecision {
   current_unapplied_amt: number | null
 }
 
+/** One row of public.service_billing_state — the pre-processing card's whole
+ * data contract: state machine + gates + credit rollup + freshness provenance. */
+export interface ServiceBillingState {
+  qbo_invoice_id: string
+  qbo_customer_id: string | null
+  balance: number | null
+  subtotal: number | null
+  invoice_verified_at: string | null
+  pre_process_state: "deciding" | "ready_to_process" | "processed" | "needs_review" | null
+  credits_verified_at: string | null
+  pm_verified_at: string | null
+  reviewed_at: string | null
+  subtotal_ok: boolean | null
+  enrichment_ok: boolean | null
+  payment_method: string | null
+  preferred_payment_type: string | null
+  pre_processed_at: string | null
+  pre_process_stage: string | null
+  derived_status: string | null
+  needs_review_reason: string | null
+  open_candidate_count: number
+  applied_count: number
+  rejected_count: number
+  stale_count: number
+  credits_settled: boolean
+  credits_applied_amount: number
+}
+
 export interface PaymentMethod {
   id: string
   type: string            // 'card' | 'ach'
@@ -1243,6 +1271,7 @@ export async function getWorkOrderDetail(
       invoice: InvoiceDetail | null
       openCredits: OpenCredit[]
       creditDecisions: CreditDecision[]
+      billingState: ServiceBillingState | null
       paymentMethods: PaymentMethod[]
     }
   | null
@@ -1262,6 +1291,7 @@ export async function getWorkOrderDetail(
   let invoice: InvoiceDetail | null = null
   let openCredits: OpenCredit[] = []
   let creditDecisions: CreditDecision[] = []
+  let billingState: ServiceBillingState | null = null
   let paymentMethods: PaymentMethod[] = []
 
   if (wo.qbo_invoice_id) {
@@ -1281,7 +1311,7 @@ export async function getWorkOrderDetail(
       const sixMonthsAgo = new Date()
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
       const cutoff = sixMonthsAgo.toISOString().slice(0, 10)
-      const [credRes, decRes, pmRes] = await Promise.all([
+      const [credRes, decRes, stateRes, pmRes] = await Promise.all([
         sb
           .from("billing_customer_payments")
           .select("id, qbo_payment_id, type, unapplied_amt, total_amt, txn_date, ref_num, memo")
@@ -1297,6 +1327,13 @@ export async function getWorkOrderDetail(
           .select("*")
           .eq("qbo_invoice_id", wo.qbo_invoice_id as string)
           .order("created_at", { ascending: true }),
+        // The one-row pre-processing contract: state machine + gates +
+        // credit rollup + freshness provenance (service_billing_state v2).
+        sb
+          .from("service_billing_state")
+          .select("*")
+          .eq("qbo_invoice_id", wo.qbo_invoice_id as string)
+          .maybeSingle(),
         // Show every active PM in QBO's wallet for this customer. Whether
         // any individual PM is flagged QBO-default is independent of
         // whether the customer exists in our cache — and it's also
@@ -1318,9 +1355,10 @@ export async function getWorkOrderDetail(
         (c) => !(c.memo && /maint/i.test(c.memo)),
       )
       creditDecisions = (decRes.data ?? []) as CreditDecision[]
+      billingState = (stateRes.data ?? null) as ServiceBillingState | null
       paymentMethods = (pmRes.data ?? []) as PaymentMethod[]
     }
   }
 
-  return { wo: wo as WorkOrderDetail, invoice, openCredits, creditDecisions, paymentMethods }
+  return { wo: wo as WorkOrderDetail, invoice, openCredits, creditDecisions, billingState, paymentMethods }
 }
