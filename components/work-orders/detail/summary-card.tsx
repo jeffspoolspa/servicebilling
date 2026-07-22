@@ -63,9 +63,6 @@ export function SummaryCard({ wo, invoice, status, bonus }: Props) {
         <Row label="Total">
           <span className="num text-ink font-medium">{formatCurrency(total)}</span>
         </Row>
-        {bonus && (
-          <div className="text-[12px] pt-1">{bonus}</div>
-        )}
         {hasInvoice && (
           <>
             <Row label="Balance">
@@ -94,6 +91,10 @@ export function SummaryCard({ wo, invoice, status, bonus }: Props) {
               )}
             </div>
           </>
+        )}
+        {/* Bonus pool — its own strip below the money facts, not among them */}
+        {bonus && (
+          <div className="pt-2 border-t border-line-soft text-[12px]">{bonus}</div>
         )}
       </CardBody>
     </Card>
