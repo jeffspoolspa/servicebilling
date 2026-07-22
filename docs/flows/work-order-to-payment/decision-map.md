@@ -18,8 +18,15 @@ types per [ADR 001](../../adrs/001-platform-architecture.md): `[internal]` = our
 
 ## Decision sequence
 
-1. **Invoice lands** ([pull_qbo_invoices](../../scripts/service_billing/pull_qbo_invoices.md)) →
-   `invoices.billing_status = awaiting_pre_processing`. `[reflection <- QBO]`
+1. **Invoice lands** — the office creates the invoice in QBO from the ION WO;
+   the QBO webhook → `billing.qbo_inbox` → `drain_qbo_inbox` →
+   [refresh_invoice](../../scripts/service_billing/refresh_invoice.md), which
+   upserts `billing.invoices` AND links the WO (`DocNumber` →
+   `work_orders.invoice_number`, stamping `work_orders.qbo_invoice_id`) →
+   `invoices.billing_status = awaiting_pre_processing`; the link-write fires
+   `trg_enqueue_service_preprocess` (queue + wake). `[reflection <- QBO]`
+   ([pull_qbo_invoices](../../scripts/service_billing/pull_qbo_invoices.md) is
+   the manual retry fallback + 4h backstop, not the entry.)
 2. **Pre-process / enrich** ([pre_process_invoice](../../scripts/service_billing/pre_process_invoice.md)) —
    **first refresh the customer's payment methods** (single-customer, once per invoice — the home for
    the PM refresh; see [qbo-payment-methods](../sync/qbo-payment-methods.md)), then PATCH QBO memo /

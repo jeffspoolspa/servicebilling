@@ -43,10 +43,18 @@ probe converged to zero.
 
 ### B. Service billing — work order → invoice → charge
 
+The work order originates in ION; the invoice is created in QBO (synced from
+ION by the office). Our system's entry point is the QBO webhook — NOT an app
+route. The chain: webhook → `qbo_inbox` → `drain_qbo_inbox` → `refresh_invoice`
+(upserts `billing.invoices` AND matches `DocNumber` → `work_orders.invoice_number`,
+stamping `work_orders.qbo_invoice_id`) → that link-write fires
+`trg_enqueue_service_preprocess` → preprocess queue → worker.
+
 | Step | Script | Entry | Role |
 |---|---|---|---|
-| Pull | `pull_qbo_invoices` (+ match WOs) | `[route]` sync/sync-all, `[sched]` 4h | pull |
-| Pre-process | `pre_process_invoice` | `[route]` pre-process/bulk/retry, `[wake]` service_preprocess_queue | handler |
+| Ingest + WO link | workflow A's `drain_qbo_inbox` → `refresh_invoice` (`link_to_work_order`) | `[webhook]` QBO Invoice event | refresh + link |
+| Pull (manual/backstop only) | `pull_qbo_invoices` | `[route]` sync/sync-all (retry fallback), `[sched]` 4h | pull |
+| Pre-process | `pre_process_invoice` | `[wake]` service_preprocess_queue (via WO-link trigger), `[route]` pre-process/bulk/retry | handler |
 | Dispatch | `dispatch_pre_processing` → `pre_process_invoice` | `[wake]` + `[sched]` 15m backstop | worker |
 | Charge | `process_invoice` (self-draining) | `[route]` process/charge-balance, `[wake]` service_charge_queue | handler |
 | Reconcile | `reconcile_payments` | `[sched]` 5m (Intuit has no webhook) | refresh |

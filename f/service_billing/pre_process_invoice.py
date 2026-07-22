@@ -36,6 +36,7 @@ from f.billing._lib.qbo import (
 )
 from f.billing._lib.payments import load_applicable_credits, apply_credits
 from f.billing._lib.cache import echo_invoice
+from f.service_billing.refresh_customer_credits import main as refresh_customer_credits
 
 OPENAI_KEY_VAR = "f/service_billing/OPENAI_API_KEY"
 MEMO_CONFIDENCE_THRESHOLD = 0.85
@@ -469,6 +470,18 @@ def process_one(conn, qbo_invoice_id, access_token, realm_id, api_key, force=Fal
         # Credits: matching is THIS workflow's policy (WO-number / amount
         # heuristics, oldest first); applying + echoing is the shared service.
         set_stage(conn, qbo_invoice_id, STAGE_CREDITS)
+        # Money decision reads fresh: targeted read-through of THIS customer's
+        # credits from QBO (upserts customer_payments, bumps fetched_at) so the
+        # match below cannot decide on a stale replica. Reuses our already-
+        # refreshed token to avoid a second refresh-token rotation.
+        # ponytail: unconditional read-through; add an age-bound skip
+        # (max(fetched_at) > now()-BOUND) only if pre-process volume makes the
+        # per-invoice QBO query measurably cost — the compute ledger will show it.
+        try:
+            refresh_customer_credits(qbo_customer_id,
+                                     access_token=access_token, realm_id=realm_id)
+        except Exception as e:
+            print(f"  (credit read-through warning: {e})")
         open_credits = sorted(
             load_applicable_credits(conn, qbo_customer_id),
             key=lambda c: (c.get("txn_date") is None, c.get("txn_date")))

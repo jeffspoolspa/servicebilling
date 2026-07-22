@@ -12,7 +12,9 @@ sequenceDiagram
   participant QBO as QuickBooks
   participant GM as Gmail
   ION-->>QBO: WO closed -> invoice created + number; manual ION->QBO push
-  QBO-->>DB: qbo-invoices sync caches invoice (awaiting_pre_processing)
+  QBO-->>DB: webhook -> qbo_inbox
+  W->>DB: drain_qbo_inbox -> refresh_invoice: upsert invoice + link WO (DocNumber match)
+  DB->>W: WO-link trigger -> preprocess queue + wake
   W->>QBO: pre_process_invoice — PATCH memo / PM / class / TxnDate
   W->>DB: set enrichment_ok; evaluate subtotal_ok + indicators
   alt any indicator false (e.g. subtotal mismatch)
@@ -30,7 +32,10 @@ sequenceDiagram
 ```
 
 **Steps (click for detail):**
-1. **Invoice cached** — [pull_qbo_invoices](../../scripts/service_billing/pull_qbo_invoices.md). `[reflection <- QBO]`
+1. **Invoice cached + WO linked** — QBO webhook → `billing.qbo_inbox` →
+   `drain_qbo_inbox` → [refresh_invoice](../../scripts/service_billing/refresh_invoice.md)
+   (upsert + `link_to_work_order`). `[reflection <- QBO]`
+   ([pull_qbo_invoices](../../scripts/service_billing/pull_qbo_invoices.md) = manual retry fallback + 4h backstop.)
 2. **Pre-process / enrich** — [pre_process_invoice](../../scripts/service_billing/pre_process_invoice.md). `[write-out -> QBO]`
 3. **Indicator gates** — triggers on `billing.invoices`: [set_subtotal_ok](../../scripts/_triggers/set_subtotal_ok.md), [set_payment_method_ok](../../scripts/_triggers/set_payment_method_ok.md), [set_credits_ok](../../scripts/_triggers/set_credits_ok.md), [set_attempts_ok](../../scripts/_triggers/set_attempts_ok.md). `[internal]`
 4. **Charge** — [process_invoice](../../scripts/service_billing/process_invoice.md) (event handler over `f/billing/_lib`: `charge_and_record` = WAL + fresh-read + charge + QBO Payment + receipt; engine keeps route/credit/delivery policy). `[write-out -> Intuit Payments]` then `[write-out -> QBO]`. (`process_work_order` [retired 2026-07].)
