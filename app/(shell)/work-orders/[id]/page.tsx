@@ -26,6 +26,7 @@ import { WorkOrderPanel } from "@/components/work-orders/detail/work-order-panel
 import { InvoicePanel } from "@/components/work-orders/detail/invoice-panel"
 import { SummaryCard } from "@/components/work-orders/detail/summary-card"
 import { HistoryPanel } from "@/components/work-orders/detail/history-panel"
+import { PaymentMethodInline } from "@/components/work-orders/detail/payment-method-inline"
 import { BonusInline } from "@/components/work-orders/detail/bonus-inline"
 import { createAnon } from "@/lib/supabase/anon"
 
@@ -276,6 +277,23 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
               ) : undefined
             }
           />
+          {invoice && (
+            <PaymentMethodInline
+              qboInvoiceId={invoice.qbo_invoice_id}
+              methods={paymentMethods}
+              preferredPaymentType={
+                invoice.preferred_payment_type as
+                  | "email" | "ach" | "credit_card" | "card" | null
+              }
+              routeUnresolved={
+                billingState && !billingState.pm_resolved
+                  ? billingState.payment_route
+                  : null
+              }
+              disabled={invoice.billing_status === "processed"}
+              invoiceBalance={Number(invoice.balance ?? 0)}
+            />
+          )}
           {invoice && <HistoryPanel events={historyEvents} />}
         </div>
       </div>

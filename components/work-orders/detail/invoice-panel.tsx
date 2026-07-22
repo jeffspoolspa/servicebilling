@@ -13,7 +13,6 @@ import { paymentChannelLabel } from "@/lib/payment-channel"
 import { ClassificationEditor } from "@/components/work-orders/classification-editor"
 import { CreditReviewCard } from "@/components/work-orders/credit-review-card"
 import { AppliedPaymentsCard } from "./applied-payments-card"
-import { PaymentMethodsCard } from "./payment-methods-card"
 import { PaymentsCreditsTabs } from "./payments-credits-tabs"
 import { FieldFlag } from "@/components/ui/field-flag"
 
@@ -129,25 +128,6 @@ export function InvoicePanel({
         }
       />
 
-      {/* Payment methods on file — every active PM in QBO's wallet, with
-          the would-charge one highlighted. Read-only on processed
-          invoices, EXCEPT when balance > 0 — then each card row gets a
-          "Charge $X.XX" button so the user can recover an open balance
-          (e.g., emailed invoice that the customer never paid; we still
-          have their card on file and want to collect). The
-          AppliedPaymentsCard above shows the historical record. */}
-      <PaymentMethodsCard
-        qboInvoiceId={invoice.qbo_invoice_id}
-        routeUnresolved={
-          billingState && !billingState.pm_resolved
-            ? billingState.payment_route
-            : null
-        }
-        methods={paymentMethods}
-        preferredPaymentType={invoice.preferred_payment_type}
-        disabled={invoice.billing_status === "processed"}
-        invoiceBalance={Number(invoice.balance ?? 0)}
-      />
     </div>
   )
 }
