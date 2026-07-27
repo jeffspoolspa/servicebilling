@@ -1,5 +1,6 @@
 import { ModuleTabs } from "./ModuleTabs"
 import { BottomNav } from "./BottomNav"
+import { TechMenu } from "./TechMenu"
 import { BottomBarProvider } from "./bottom-bar"
 import { getCurrentEmployee } from "@/lib/auth/require-role"
 import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
@@ -14,9 +15,13 @@ export default async function TechLayout({ children }: { children: React.ReactNo
   return (
     <div className="min-h-screen flex flex-col">
       <header className="px-5 py-3.5 border-b border-line-soft flex items-center gap-3">
-        <div className="w-8 h-8 rounded-[8px] grid place-items-center bg-gradient-to-b from-cyan to-cyan-deep text-[#061018] font-display font-bold">
-          J
-        </div>
+        <TechMenu
+          techName={
+            isAuthedMaintenance
+              ? [employee.first_name, employee.last_name].filter(Boolean).join(" ") || null
+              : null
+          }
+        />
         <div className="font-display text-lg tracking-tight">Field</div>
       </header>
       {isAuthedMaintenance ? (
