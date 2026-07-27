@@ -23,9 +23,16 @@ const modules = [
   },
 ] as const
 
-export function BottomNav() {
+export function BottomNav({ hideInventory = false }: { hideInventory?: boolean }) {
   const pathname = usePathname()
   const { action } = useBottomBar()
+
+  // Follow-up-only techs (RH/Savannah) get no Inventory module. With a single
+  // module the switcher is noise — render only the morphed action button.
+  const visible = hideInventory
+    ? modules.filter((m) => m.href === "/follow-up")
+    : modules
+  if (!action && visible.length < 2) return null
 
   return (
     <div className="fixed bottom-0 inset-x-0 z-20 pb-[env(safe-area-inset-bottom)] pointer-events-none">
@@ -58,7 +65,7 @@ export function BottomNav() {
               "shadow-[0_8px_30px_-10px_rgba(0,0,0,0.6)]",
             )}
           >
-            {modules.map((m) => {
+            {visible.map((m) => {
               const active = m.match.some(
                 (p) => pathname === p || pathname.startsWith(p + "/"),
               )
