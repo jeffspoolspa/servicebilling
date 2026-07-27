@@ -3,11 +3,13 @@ import { BottomNav } from "./BottomNav"
 import { BottomBarProvider } from "./bottom-bar"
 import { getCurrentEmployee } from "@/lib/auth/require-role"
 import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
+import { isFollowUpOnly } from "@/lib/auth/tech-scope"
 
 export default async function TechLayout({ children }: { children: React.ReactNode }) {
   const employee = await getCurrentEmployee()
   const isAuthedMaintenance =
     !!employee && employee.department_id === MAINTENANCE_DEPARTMENT_ID
+  const followUpOnly = isAuthedMaintenance && (await isFollowUpOnly(employee))
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -22,7 +24,7 @@ export default async function TechLayout({ children }: { children: React.ReactNo
           <ModuleTabs />
           {/* pb leaves room for the fixed bottom nav / submit button */}
           <main className="flex-1 w-full max-w-md mx-auto px-5 py-6 pb-28">{children}</main>
-          <BottomNav />
+          <BottomNav hideInventory={followUpOnly} />
         </BottomBarProvider>
       ) : (
         <main className="flex-1 w-full max-w-md mx-auto px-5 py-6">{children}</main>
