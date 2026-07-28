@@ -11,9 +11,7 @@ import type {
 } from "@/lib/queries/dashboard"
 import { paymentChannelLabel } from "@/lib/payment-channel"
 import { ClassificationEditor } from "@/components/work-orders/classification-editor"
-import { CreditReviewCard } from "@/components/work-orders/credit-review-card"
-import { AppliedPaymentsCard } from "./applied-payments-card"
-import { PaymentsCreditsTabs } from "./payments-credits-tabs"
+import { PaymentsCreditsCard } from "./payments-credits-card"
 import { FieldFlag } from "@/components/ui/field-flag"
 
 /**
@@ -36,6 +34,8 @@ export function InvoicePanel({
   billingState,
   paymentMethods,
   appliedPayments,
+  header,
+  voided,
 }: {
   wo: WorkOrderDetail
   invoice: InvoiceDetail | null
@@ -44,12 +44,16 @@ export function InvoicePanel({
   billingState: ServiceBillingState | null
   paymentMethods: PaymentMethod[]
   appliedPayments: AppliedPayment[]
+  /** Replaces the card title — the detail page puts its tabs here. */
+  header?: React.ReactNode
+  /** Derived (billing.v_invoice_state) — suppresses the "paid" pill. */
+  voided?: boolean
 }) {
   if (!invoice) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle>Invoice (not yet matched)</CardTitle>
+        <CardHeader className={header ? "pt-2 pb-0" : undefined}>
+          {header ?? <CardTitle>Invoice (not yet matched)</CardTitle>}
         </CardHeader>
         <CardBody className="text-ink-mute text-sm">
           {wo.invoice_number
@@ -70,6 +74,8 @@ export function InvoicePanel({
           (components/billing/invoice-card); classification injected between
           header fields and line items. */}
       <InvoiceCard
+        header={header}
+        voided={voided}
         invoice={invoice}
         afterHeader={
           <div className="border-b border-line-soft">
@@ -92,40 +98,16 @@ export function InvoicePanel({
         }
       />
 
-      {/* Two tabbed views over the same money: payment_invoice_links (what
-          IS applied) and the credit decision record (what pre-process saw +
-          each credit's outcome). An applied credit appears in both. */}
-      <PaymentsCreditsTabs
-        appliedCount={appliedPayments.length}
-        toDecideCount={
-          // derived: open credits without a terminal decision on this invoice
-          openCredits.filter(
-            (c) =>
-              !creditDecisions.some(
-                (d) =>
-                  d.credit_id === c.qbo_payment_id &&
-                  ["applied", "rejected", "stale"].includes(d.state),
-              ),
-          ).length
-        }
-        applied={
-          appliedPayments.length > 0 ? (
-            <AppliedPaymentsCard payments={appliedPayments} />
-          ) : (
-            <div className="text-[12px] text-ink-mute italic border border-line-soft rounded-lg px-4 py-3">
-              No payments applied to this invoice yet.
-            </div>
-          )
-        }
-        credits={
-          <CreditReviewCard
-            qboInvoiceId={invoice.qbo_invoice_id}
-            balance={Number(invoice.balance ?? 0)}
-            credits={openCredits}
-            decisions={creditDecisions}
-            overriddenAt={invoice.credit_review_overridden_at}
-          />
-        }
+      {/* ONE table over the money: every recommendation (all open payments/
+          credits are recommended) with its outcome — to decide / applied /
+          not applicable / lapsed. Replaces the Applied-payments + Credit-
+          review tabs. */}
+      <PaymentsCreditsCard
+        qboInvoiceId={invoice.qbo_invoice_id}
+        balance={Number(invoice.balance ?? 0)}
+        openCredits={openCredits}
+        decisions={creditDecisions}
+        appliedPayments={appliedPayments}
       />
 
     </div>

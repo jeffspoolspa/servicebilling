@@ -87,7 +87,7 @@ def main(limit: int = 25):
         results, stats = [], {"enqueued": 0, "unmodeled": 0, "fetch_failed": 0}
         for m in mismatches:
             inv_id = m["qbo_invoice_id"]
-            inv, err = fetch_qbo_invoice(inv_id, access_token, realm_id)
+            inv, err = fetch_qbo_invoice(inv_id, access_token, realm_id, conn=conn)
             if not inv:
                 stats["fetch_failed"] += 1
                 results.append({"invoice": inv_id, "doc": m["doc_number"],

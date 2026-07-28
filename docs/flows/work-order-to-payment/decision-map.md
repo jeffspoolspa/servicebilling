@@ -1,75 +1,142 @@
 # Work Order → Payment — Business Rules (Decision Map, Layer 2)
 
-> Status: [active]
+> Status: [active] — rewritten 2026-07-23 for derived-readiness v3 + the
+> ADR 010 event model. Rules marked [pending] are specified here but not yet
+> enforced in code; everything else is live.
 > Flow: [index](index.md)
-> Architecture rationale: [ADR 001](../../adrs/001-platform-architecture.md)
+> Architecture: [ADR 001](../../adrs/001-platform-architecture.md) ·
+> [ADR 010](../../adrs/010-domain-event-stream.md) ·
+> [EVENT_VOCABULARY.md](../../conventions/EVENT_VOCABULARY.md)
 
-Three entities each run their own state machine — `work_orders.billing_status`,
-`billing.invoices.billing_status`, and the payment (`customer_payments` + `processing_attempts`).
-This flow is the coordination between them, plus the writes back to the external leaders. Edge
-types per [ADR 001](../../adrs/001-platform-architecture.md): `[internal]` = our state; `[write-out]`
-= we push to a leader; `[reflection]` = a leader change flows back via a sync flow.
+The workflow is two sentences separated by one gate wall. **Pre-processing**
+enriches; the **gates** decide `ready_to_process` vs `needs_review`;
+**processing** moves money and delivers. No step stamps status — every state
+is a projection over facts (`billing.events` + the QBO cache), and the
+terminal state is derived, never forced.
 
 ## Pre-conditions (maintained by sync flows, not this flow)
 
 - A closed, billable WO with `invoice_number` set — [ion-work-orders sync](../sync/ion-work-orders.md).
-- The invoice cached from QBO — [qbo-invoices sync](../sync/qbo-invoices.md).
-- (Payment methods need no pre-caching — pre-processing refreshes them per invoice; see step 2 + [qbo-payment-methods](../sync/qbo-payment-methods.md).)
+- The invoice cached from QBO (`invoice_created`) and linked to its WO
+  (`invoice_linked`) — webhook → inbox → [refresh_invoice](../../scripts/service_billing/refresh_invoice.md).
+- The WO not skipped (`work_order_skipped` absent / reversed).
 
-## Decision sequence
+## Pre-processing (the enrichment sentence — emits, never stamps)
 
-1. **Invoice lands** — the office creates the invoice in QBO from the ION WO;
-   the QBO webhook → `billing.qbo_inbox` → `drain_qbo_inbox` →
-   [refresh_invoice](../../scripts/service_billing/refresh_invoice.md), which
-   upserts `billing.invoices` AND links the WO (`DocNumber` →
-   `work_orders.invoice_number`, stamping `work_orders.qbo_invoice_id`) →
-   `invoices.billing_status = awaiting_pre_processing`; the link-write fires
-   `trg_enqueue_service_preprocess` (queue + wake). `[reflection <- QBO]`
-   ([pull_qbo_invoices](../../scripts/service_billing/pull_qbo_invoices.md) is
-   the manual retry fallback + 4h backstop, not the entry.)
-2. **Pre-process / enrich** ([pre_process_invoice](../../scripts/service_billing/pre_process_invoice.md)) —
-   **first refresh the customer's payment methods** (single-customer, once per invoice — the home for
-   the PM refresh; see [qbo-payment-methods](../sync/qbo-payment-methods.md)), then PATCH QBO memo /
-   `PaymentMethodRef` / `ClassRef` / `TxnDate = wo.completed` and set `enrichment_ok` +
-   `payment_method_ok` on the fresh data. `[write-out -> QBO]` + `[internal]`
-3. **Indicator gates** — when all of `enrichment_ok`, `subtotal_ok`, `payment_method_ok`, `credits_ok`,
-   `attempts_ok` are true → `invoices: awaiting_pre_processing → ready_to_process`, and a trigger
-   promotes the linked `WO → ready_to_process`. Any gate false (especially `subtotal_ok`) →
-   `needs_review` (held out of the charge path). `[internal]`
-4. **Charge** ([process_work_order](../../scripts/service_billing/process_work_order.md) acquires a lock;
-   `WO → processing`) → Intuit Payments charges the card → `charge_succeeded`.
-   `[write-out -> Intuit Payments]`
-5. **Record** → QBO Payment (`CCTransId`) applied to the invoice; receipt emailed. `[write-out -> QBO]`
-6. **Reflect** → QBO webhook (`balance=0`, `EmailSent`) promotes `invoices → processed`
-   (`trg_auto_promote_to_processed`); the final step moves `WO → processed`. `[reflection <- QBO]`
+Trigger: the WO link fires `trg_enqueue_service_preprocess`; the queue
+drainer runs `pre_process_invoice.process_one` per unit. Steps, each with its
+fact:
 
-## The `subtotal_ok` gate (why it exists)
+1. **Apply the credits that clearly belong here** — `credits.open_for` (open,
+   newest last), matched by `calc.credit_match_reason`: the WO number appears
+   in the credit's ref number or memo, or the credit covers the invoice's
+   remaining **balance**. The running balance is decremented as each is
+   applied, so two credits cannot both "cover" one invoice. Anything else is
+   left open — NO row, NO event — undecided until a human decides in the UI.
+   Each application emits `payment_applied` + `credit_applied`.
+2. **Reconverge the balance** if anything was applied. `apply_credits`
+   fresh-reads QBO *before* applying, so our cached balance is stale-high
+   afterwards — and the gate reads it (see rule 2 below). One extra read,
+   only when money moved.
+3. **Refresh the customer's payment methods** from the QBO Payments API,
+   then resolve the route. This ordering is load-bearing: QBO Payments sends
+   **no webhooks**, and the daily sweep in `pull_customer_payment_methods`
+   selects customers by joining `billing.invoices` — so it structurally
+   cannot see a customer at the moment an invoice is *born*, which is exactly
+   when the route is decided. Pre-processing is therefore the only wallet
+   sync point that runs at the right time. TTL-gated (15 min) purely to
+   amortise a burst of invoices for one customer within a drain. A failed
+   fetch RAISES — an unreadable wallet must never be read as "no cards"
+   (see `payment_methods.fetch`, which returns methods and errors separately).
+   Route order: `*bill*` office override → the customer's stored
+   `preferred_payment_type` → the type of their **default active method**.
+   The end result on the row is a `target_payment_method_id`, or NULL.
+4. **Resolve class + memo + TxnDate** → ONE QBO PATCH → `invoice_edited`
+   (`intent_ref: pre_process`, before→after in payload). If QBO refuses the
+   patch, `enrich` raises and writes nothing — the row must never claim an
+   enrichment QBO did not accept.
 
-The manual ION-to-QBO invoice push (pre-condition above) can **drop line items**. `subtotal_ok`
-compares the WO `sub_total` (ION's view) against the invoice subtotal (QBO's view) — a **drift check
-between two external systems, using our cache as the comparison point**. A mismatch means line items
-were lost in the sync, so the invoice is held at `needs_review` and never charged. Invisible from the
-code without this context.
+Pre-processing writes its source-of-truth columns; the projection recomputes
+status. It never touches `billing_status`.
+
+## The gate wall (boundary rules — ALL must hold to process)
+
+`billing.invoice_ready` is the one rule function; each gate is an indicator
+with a `needs_review_reason`. Any gate false → `needs_review` (held out of
+the charge path until a human clears it or the fact changes underneath it).
+
+| # | Gate | The question it asks | Source of truth | Status |
+|---|---|---|---|---|
+| 1 | `enrichment_ok` | Are memo, QBO class, and TxnDate written? | pre-process result columns (echo of `invoice_edited`) | [active] |
+| 2 | `subtotal_ok` | Does the WO subtotal match the invoice subtotal (±$0.02)? Catches line items dropped in the manual ION→QBO push | WO mirror vs invoice cache | [active] |
+| 3 | `payment_method_ok` | Is the resolved route executable — a matching active card/ACH on file, or the email route? | `customer_payment_methods` + route columns | [active] |
+| 4 | `credits_ok` | Has every open credit been decided — applied or rejected? (undecided = derived absence of a terminal decision; "review complete" is this gate, not an event) | decisions + `customer_payments.unapplied_amt` | [active] |
+| 5 | `attempts_ok` | Is there no blocking prior charge (`charge_declined` / `charge_uncertain` unresolved on this invoice's latest attempt)? | `processing_attempts` (→ `charge` events) | [active] |
+| 6 | `mirror_ok` | Does the mirror prove itself — fold == QBO's reported balance, no ordering regression under investigation? | `billing.events` fold vs cache balance (ADR 010 §E) | [pending] — checksum live via backfill; the indicator + trigger wiring is not built |
+
+The charge path keeps its own last line regardless of gates:
+`charge_and_record` fresh-reads every balance from QBO at charge time — a
+stale mirror can delay money but never mis-charge it.
+
+## Processing (the money sentence — per unit from the charge queue)
+
+The `ready_to_process` transition enqueues (`trg_enqueue_service_charge`);
+`process_invoice` self-drains. Per invoice, by route:
+
+- **Card / ACH**: `charge_and_record` — WAL intent (`charge_attempted`,
+  idempotency key committed BEFORE the call) → charge →
+  `charge_captured` / `charge_declined` / `charge_uncertain` → QBO Payment
+  (`payment_recorded` + `payment_applied`) → best-effort receipt
+  (`receipt_sent`). Declines/uncertain flip `attempts_ok` → `needs_review`;
+  uncertain resolves via `reconcile_payments` (late outcome fact, actor
+  `reconciler`).
+- **Email**: deliver the invoice (due-date rule lives in the delivery
+  service) → `invoice_emailed`. No charge occurs; settlement arrives later
+  as an external reflection (`payment_applied`, source external).
+
+## Terminal derivation (never forced)
+
+```
+processed  =  settled  AND  delivered
+settled    =  fold == 0            (Σ payment_applied lines == TotalAmt;
+                                    QBO's reported Balance is the checksum)
+delivered  =  invoice_emailed  OR  delivery_waived        [waiver arm pending]
+```
+
+- Balance remaining → NEVER `processed`. The honest terminals for a
+  never-to-be-paid balance are the disposition projections: `written_off`
+  (from `invoice_written_off` events) or `in_collections`
+  (`invoice_sent_to_collections`). [pending — events registered, projection
+  arms + RPCs not built]
+- `invoice_force_processed` does not exist. Historical imports settle via
+  backfilled applications, waive delivery by rule, and dispose the tail.
 
 ## Failure handling
 
-- **subtotal mismatch / any indicator false** → `needs_review`; surfaced for a human; never charged.
-- **Intuit times out / 5xx** → `charge_uncertain` (no reflection yet) →
-  [reconcile_payments](../../scripts/service_billing/reconcile_payments.md) polls QBO (every 5 min)
-  to confirm whether the charge actually landed.
-- **Dropped pre_process `pg_net` trigger** →
-  [dispatch_pre_processing](../../scripts/service_billing/dispatch_pre_processing.md) re-fires (every 60s).
-- **Missing QBO webhook** → [cdc_reconciler](../../scripts/service_billing/cdc_reconciler.md) replays
-  state via the CDC endpoint (every 15 min; [qbo-drift-reconciliation](../sync/qbo-drift-reconciliation.md)).
-
-## Post-conditions
-
-- `invoices.billing_status = processed` (balance 0, receipt emailed); `work_orders.billing_status = processed`.
-- A `customer_payments` row + a QBO Payment recorded against the invoice.
+- Any gate false → `needs_review` + reason; surfaced, never charged.
+- Intuit 5xx/timeout → `charge_uncertain` → reconciler confirms (5 min
+  poll), expires the key after 24h (`charge_expired`), escalates at 7d.
+- Charge landed but QBO Payment record failed → derived `payment_orphan`
+  (captured ∧ ¬recorded) — human recovery only; never auto-retried.
+- Dropped wake → drain-until-empty + coalescing self-heal; CDC (15 min) is
+  the entity-completeness backstop.
 
 ## Invariants
 
-- `needs_review` holds an invoice out of the charge path until a human clears it.
-- The charge is idempotent + recoverable — one `processing_attempts` row per attempt; a retry never
-  double-charges.
-- We never write to ION; the WO mirror is read-only.
+- `needs_review` holds an invoice out of the charge path until cleared.
+- One WAL row per attempt; a retry never double-charges (persisted
+  idempotency key; Intuit dedupes).
+- Every fact is emitted once, with provenance (`source: intent | external`);
+  status is always derivable from the stream + cache — deleting every status
+  column must lose zero information.
+- We never write to ION; the WO mirror is read-only (skip/override
+  annotations via definer RPCs only).
+
+## See also
+
+- [EVENT_VOCABULARY.md](../../conventions/EVENT_VOCABULARY.md) — every fact
+  named above, with payload shapes and the derived-conditions list.
+- [WORKFLOW_EXECUTION.md](../../conventions/WORKFLOW_EXECUTION.md) — queue
+  in, drainer through, events out (how the sentences run at scale).
+- [ADR 010](../../adrs/010-domain-event-stream.md) §E — the integrity stack
+  behind gate 6.

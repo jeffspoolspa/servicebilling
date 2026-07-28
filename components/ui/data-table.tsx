@@ -63,6 +63,9 @@ interface DataTableProps<TData, TValue> {
   onSelectionChange?: (rows: TData[]) => void
   /** Expansion: render an expanded panel row under a clicked row. */
   renderSubRow?: (row: Row<TData>) => React.ReactNode
+  /** Row click → detail view (modal/sheet). Ignored when renderSubRow is set.
+   *  Interactive cell content must stopPropagation. */
+  onRowClick?: (row: TData) => void
   rowClassName?: (row: Row<TData>) => string | undefined
   /** Hide columns that exist only to power facet filters. */
   columnVisibility?: VisibilityState
@@ -83,6 +86,7 @@ export function DataTable<TData, TValue>({
   emptyText = "No rows.",
   onSelectionChange,
   renderSubRow,
+  onRowClick,
   rowClassName,
   columnVisibility,
   csvFilename = "export",
@@ -228,10 +232,16 @@ export function DataTable<TData, TValue>({
                     data-state={row.getIsSelected() && "selected"}
                     className={cn(
                       "border-line-soft/40 hover:bg-white/[0.02]",
-                      renderSubRow && "cursor-pointer",
+                      (renderSubRow || onRowClick) && "cursor-pointer",
                       rowClassName?.(row),
                     )}
-                    onClick={renderSubRow ? () => row.toggleExpanded() : undefined}
+                    onClick={
+                      renderSubRow
+                        ? () => row.toggleExpanded()
+                        : onRowClick
+                          ? () => onRowClick(row.original)
+                          : undefined
+                    }
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell

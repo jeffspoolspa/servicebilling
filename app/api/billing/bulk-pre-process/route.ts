@@ -4,7 +4,7 @@ import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/billing/bulk-pre-process
- * Body: { qbo_invoice_ids: string[], force?: boolean }
+ * Body: { qbo_invoice_ids: string[] }
  *
  * Fires N independent pre_process_invoice script invocations — one per
  * invoice id. Returns immediately with the queued job IDs; actual
@@ -15,15 +15,13 @@ import { guardApi } from "@/lib/auth/api"
  * `concurrent_limit` setting (currently 2), so even a 100-invoice bulk
  * select self-paces and won't overwhelm OpenAI.
  *
- * `force=true` bypasses the "already processing" guard so users can
- * re-run an invoice that's mid-flight stuck on a stage. The terminal
  * `processed` state is still respected — those need an explicit Revert
  * first.
  */
 export async function POST(request: NextRequest) {
   const guard = await guardApi("service", { write: true })
   if (guard instanceof NextResponse) return guard
-  let body: { qbo_invoice_ids?: unknown; force?: boolean } = {}
+  let body: { qbo_invoice_ids?: unknown } = {}
   try {
     body = await request.json()
   } catch {
@@ -49,7 +47,6 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     )
   }
-  const force = body.force === true
 
   // Fire all triggerScript calls in parallel — each is one HTTP POST to
   // Windmill, doesn't block on the actual job. Errors per-id are
@@ -58,8 +55,7 @@ export async function POST(request: NextRequest) {
     ids.map(async (id) => {
       try {
         const { jobId } = await triggerScript(
-          "f/service_billing/pre_process_invoice",
-          { qbo_invoice_id: id, bulk_all: false, force },
+          "f/service_billing/pre_process_invoice", { qbo_invoice_id: id },
         )
         return { qbo_invoice_id: id, jobId, ok: true as const }
       } catch (e) {

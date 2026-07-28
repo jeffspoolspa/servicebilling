@@ -2,8 +2,17 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Landmark, Pencil, Mail, X } from "lucide-react"
+import { Landmark, Pencil, Mail, X, Check } from "lucide-react"
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item"
 import { Pill } from "@/components/ui/pill"
 import type { PaymentMethod } from "@/lib/queries/dashboard"
 import { formatCurrency, formatDate } from "@/lib/utils/format"
@@ -208,59 +217,65 @@ export function PaymentMethodInline({
           </div>
         )}
 
-        {/* anchored picker — every method on file, click to use */}
+        {/* anchored picker — every method on file as a selectable item card */}
         {open && (
-          <div className="mt-3 pt-2 border-t border-line-soft space-y-1">
-            {active.map((m) => {
-              const ch = normalize(m.type)
-              const isSelected = selected?.id === m.id
-              return (
-                <div
-                  key={m.id}
-                  className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[12px] ${
-                    isSelected ? "bg-cyan/[0.06]" : "hover:bg-white/[0.02]"
-                  }`}
-                >
-                  <BrandIcon brand={m.card_brand} type={m.type} />
-                  <div className="min-w-0 flex-1">
-                    <span className="text-ink">
-                      {ch === "ach" ? "Bank account" : (m.card_brand ?? "Card")}{" "}
-                      <span className="font-mono text-ink-dim">···{m.last_four ?? "—"}</span>
-                    </span>
-                    <div className="text-[10px] text-ink-mute">
-                      added {m.qbo_created_at ? formatDate(m.qbo_created_at) : "—"}
-                      {m.is_default ? " · QBO default" : ""}
-                    </div>
-                  </div>
-                  {canChargeBalance && ch ? (
-                    <button
-                      onClick={() => chargeBalance(m.id, ch)}
-                      disabled={busy !== null}
-                      className="text-[11px] text-cyan border border-cyan/40 bg-cyan/10 rounded-md px-2 py-0.5 hover:bg-cyan/20 disabled:opacity-50"
-                    >
-                      {busy === `charge:${m.id}`
-                        ? "Charging…"
-                        : `Charge ${formatCurrency(invoiceBalance ?? 0)}`}
-                    </button>
-                  ) : isSelected ? (
-                    <span className="text-[10px] text-cyan">selected</span>
-                  ) : (
-                    <button
-                      onClick={() => ch && switchTo(ch)}
-                      disabled={busy !== null || !ch}
-                      className="text-[11px] text-cyan hover:underline disabled:opacity-50"
-                    >
-                      use
-                    </button>
-                  )}
-                </div>
-              )
-            })}
+          <div className="mt-3 pt-2 border-t border-line-soft">
+            <ItemGroup>
+              {active.map((m) => {
+                const ch = normalize(m.type)
+                const isSelected = selected?.id === m.id
+                const canSwitch = !disabled && !isSelected && ch != null && busy === null
+                return (
+                  <Item
+                    key={m.id}
+                    variant={isSelected ? "outline" : "muted"}
+                    size="xs"
+                    onClick={canSwitch ? () => switchTo(ch) : undefined}
+                    className={`${isSelected ? "border-cyan/40 bg-cyan/[0.06]" : ""} ${
+                      canSwitch ? "cursor-pointer hover:border-line" : ""
+                    }`}
+                  >
+                    <ItemMedia>
+                      <BrandIcon brand={m.card_brand} type={m.type} />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle>
+                        {ch === "ach" ? "Bank account" : (m.card_brand ?? "Card")}
+                        <span className="font-mono text-ink-dim">···{m.last_four ?? "—"}</span>
+                      </ItemTitle>
+                      <ItemDescription>
+                        added {m.qbo_created_at ? formatDate(m.qbo_created_at) : "—"}
+                        {m.is_default ? " · QBO default" : ""}
+                      </ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      {canChargeBalance && ch ? (
+                        <button
+                          onClick={() => chargeBalance(m.id, ch)}
+                          disabled={busy !== null}
+                          className="text-[11px] text-cyan border border-cyan/40 bg-cyan/10 rounded-md px-2 py-0.5 hover:bg-cyan/20 disabled:opacity-50"
+                        >
+                          {busy === `charge:${m.id}`
+                            ? "Charging…"
+                            : `Charge ${formatCurrency(invoiceBalance ?? 0)}`}
+                        </button>
+                      ) : isSelected ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-cyan">
+                          <Check className="w-3 h-3" strokeWidth={2.5} /> selected
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-cyan">use</span>
+                      )}
+                    </ItemActions>
+                  </Item>
+                )
+              })}
+            </ItemGroup>
             {preferred && !disabled && (
               <button
                 onClick={() => switchTo(null)}
                 disabled={busy !== null}
-                className="text-[11px] text-ink-mute hover:text-ink px-2 pt-1"
+                className="text-[11px] text-ink-mute hover:text-ink px-1 pt-2"
                 title="Clear the per-invoice override and fall back to the QBO default"
               >
                 reset to default

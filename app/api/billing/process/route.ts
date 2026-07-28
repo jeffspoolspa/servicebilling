@@ -45,11 +45,42 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const args: Record<string, unknown> = { dry_run, force, recover_orphan }
+  // Orphan recovery is its own script — recovery is not processing.
+  if (recover_orphan) {
+    const { jobId } = await triggerScript("f/service_billing/recover_payment", {
+      qbo_invoice_id,
+    })
+    return NextResponse.json({ jobId, mode: "recover_payment" })
+  }
+
+  if (dry_run) {
+    return NextResponse.json(
+      { error: "dry runs removed — readiness gates + the fresh QBO balance are the plan" },
+      { status: 400 },
+    )
+  }
+  // Force is the human override — it runs the sentence directly, outside
+  // the queue (process_one is force-only as a direct entry).
+  if (force) {
+    if (!qbo_invoice_id) {
+      return NextResponse.json(
+        { error: "force requires a single qbo_invoice_id" },
+        { status: 400 },
+      )
+    }
+    const { jobId } = await triggerScript("f/service_billing/process_one", {
+      qbo_invoice_id,
+      force: true,
+    })
+    return NextResponse.json({ jobId, mode: "force" })
+  }
+
+  // Normal processing: enqueue (the worker claims through the atomic gate).
+  const args: Record<string, unknown> = {}
   if (qbo_invoice_id) args.qbo_invoice_id = qbo_invoice_id
   if (qbo_invoice_ids) args.qbo_invoice_ids = qbo_invoice_ids
 
   const { jobId } = await triggerScript("f/service_billing/process_invoice", args)
 
-  return NextResponse.json({ jobId, status: "triggered", dry_run })
+  return NextResponse.json({ jobId, status: "triggered" })
 }

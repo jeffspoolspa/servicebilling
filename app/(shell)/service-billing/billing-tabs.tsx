@@ -12,12 +12,21 @@ import { cn } from "@/lib/utils/cn"
  * parts of the shell — it's specific to this module's workflow.
  */
 
+// ADR 011: four views, one per derived state.
+//   Awaiting Invoice — a WORK ORDER state (billable, no invoice yet)
+//   Needs Attention  — not finished, and nothing will move it automatically
+//   Open AR          — sent, not settled
+//   Paid             — sent, settled
+//
+// "Ready to Process" is gone on purpose: in-flight is a claimable queue row,
+// not a state, so it belongs as a status on the row rather than its own tab.
+// "Sent" is likewise a FIELD and a filter on these tables, not a view — every
+// terminal state already implies it (or an explicit skip_send waiver).
 const TABS = [
   { href: "/service-billing/awaiting-invoice", label: "Awaiting Invoice" },
-  { href: "/service-billing/queue", label: "Ready to Process" },
-  { href: "/service-billing/needs-attention", label: "Needs Review" },
-  { href: "/service-billing/sent", label: "Processed" },
+  { href: "/service-billing/needs-attention", label: "Needs Attention" },
   { href: "/service-billing/open-ar", label: "Open AR" },
+  { href: "/service-billing/sent", label: "Paid" },
   { href: "/service-billing/audit", label: "Audit" },
 ] as const
 

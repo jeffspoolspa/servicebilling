@@ -819,7 +819,6 @@ export interface InvoiceDetail {
   statement_memo: string | null
   subtotal_ok: boolean | null
   enrichment_ok: boolean | null
-  credits_applied: CreditApplied[] | null
   pre_processed_at: string | null
   processed_at: string | null
   // Credit-review override state (user acknowledged credits not applicable)
@@ -889,6 +888,37 @@ export interface CreditDecision {
   current_unapplied_amt: number | null
 }
 
+/**
+ * One row of billing.v_invoice_state — ADR-011's derived invoice state.
+ *
+ * `state` is the whole answer: paid | ar | in_flight | needs_review | audit.
+ * `sent`, `on_hold` and `voided` are FLAGS, not states — an invoice can be
+ * voided and settled at once, and the flag wins for display.
+ *
+ * This replaced reading invoice.billing_status, a stamped column that kept
+ * saying "processed" after QBO voided the invoice underneath it.
+ */
+export interface InvoiceState {
+  qbo_invoice_id: string
+  balance: number | null
+  sent: boolean
+  settled: boolean
+  voided: boolean
+  on_hold: boolean
+  state: "paid" | "ar" | "in_flight" | "needs_review" | "audit"
+}
+
+export async function getInvoiceState(
+  qboInvoiceId: string,
+): Promise<InvoiceState | null> {
+  const { data } = await createAnon("billing")
+    .from("v_invoice_state")
+    .select("qbo_invoice_id, balance, sent, settled, voided, on_hold, state")
+    .eq("qbo_invoice_id", qboInvoiceId)
+    .maybeSingle()
+  return (data as InvoiceState | null) ?? null
+}
+
 /** One row of public.service_billing_state (derived readiness v3) — the
  * pre-processing card's whole data contract: per-rule indicator booleans
  * (each named for the field it describes), the ready conjunction, the credit
@@ -949,6 +979,39 @@ export async function getInvoiceHistory(
     .order("at", { ascending: false })
     .limit(200)
   return (data ?? []) as InvoiceHistoryEvent[]
+}
+
+/** One row of the ADR-010 domain event stream, via the public.invoice_events
+ * RPC — invoice-homed events plus events naming this invoice as a participant
+ * (payment applications, charges). Payload carries changes/lines/provenance. */
+export interface InvoiceStreamEvent {
+  seq: number
+  occurred_at: string
+  aggregate: string
+  aggregate_id: string
+  type: string
+  actor: string
+  participants: string[]
+  payload: {
+    changes?: Record<string, { from: string | null; to: string | null }>
+    lines?: { invoice_id: string; amount: number }[]
+    funding?: { kind: string; id?: string }
+    amount?: number
+    error?: string | null
+    reason?: string | null
+    provenance?: { source?: string; intent_ref?: string; discovered_via?: string }
+    [k: string]: unknown
+  }
+}
+
+export async function getInvoiceStreamEvents(
+  qboInvoiceId: string,
+): Promise<InvoiceStreamEvent[]> {
+  const sb = createAnon("public")
+  const { data } = await sb.rpc("invoice_events", {
+    p_qbo_invoice_id: qboInvoiceId,
+  })
+  return (data ?? []) as InvoiceStreamEvent[]
 }
 
 export interface PaymentMethod {
@@ -1332,7 +1395,7 @@ export async function getWorkOrderDetail(
     const { data: inv } = await sb
       .from("billing_invoices")
       .select(
-        "qbo_invoice_id, doc_number, qbo_customer_id, customer_name, txn_date, due_date, total_amt, subtotal, balance, email_status, line_items, fetched_at, billing_status, needs_review_reason, payment_method, qbo_class, memo, statement_memo, subtotal_ok, enrichment_ok, credits_applied, pre_processed_at, processed_at, credit_review_overridden_at, credit_review_overridden_note, preferred_payment_type",
+        "qbo_invoice_id, doc_number, qbo_customer_id, customer_name, txn_date, due_date, total_amt, subtotal, balance, email_status, line_items, fetched_at, billing_status, needs_review_reason, payment_method, qbo_class, memo, statement_memo, subtotal_ok, enrichment_ok, pre_processed_at, processed_at, credit_review_overridden_at, credit_review_overridden_note, preferred_payment_type",
       )
       .eq("qbo_invoice_id", wo.qbo_invoice_id as string)
       .maybeSingle()
@@ -1395,4 +1458,48 @@ export async function getWorkOrderDetail(
   }
 
   return { wo: wo as WorkOrderDetail, invoice, openCredits, creditDecisions, billingState, paymentMethods }
+}
+
+/* ── Customer card (WO detail header) ─────────────────────────────────── */
+
+import type { CustomerCardData } from "@/components/work-orders/detail/customer-card"
+
+/**
+ * The customer this work order belongs to: contact, address, balance,
+ * unapplied credits, billing route and recent invoice history.
+ *
+ * The route comes back RESOLVED by billing.resolve_preferred_payment_type —
+ * the same function the gate and enrichment use — rather than read from a
+ * stored column, so the header cannot show a route the pipeline wouldn't take.
+ */
+export async function getCustomerCard(
+  qboCustomerId: string | null,
+): Promise<CustomerCardData | null> {
+  if (!qboCustomerId) return null
+  const sb = createAnon("public")
+  const { data } = await sb.rpc("customer_card", {
+    p_qbo_customer_id: qboCustomerId,
+  })
+  if (!data) return null
+  const d = data as Record<string, unknown>
+  return {
+    qboCustomerId: (d.qboCustomerId as string) ?? null,
+    localId: d.localId != null ? String(d.localId) : null,
+    name: (d.name as string) ?? "—",
+    accountType: (d.accountType as string) ?? null,
+    accountName: (d.accountName as string) ?? null,
+    isActive: (d.isActive as boolean) ?? null,
+    email: (d.email as string) ?? null,
+    phone: (d.phone as string) ?? null,
+    address: (d.address as string) ?? null,
+    preferredPaymentType: (d.preferredPaymentType as string) ?? null,
+    resolvedRoute: (d.resolvedRoute as string) ?? null,
+    defaultMethod: (d.defaultMethod as CustomerCardData["defaultMethod"]) ?? null,
+    activeMethodCount: Number(d.activeMethodCount ?? 0),
+    openArTotal: Number(d.openArTotal ?? 0),
+    openArCount: Number(d.openArCount ?? 0),
+    openCreditTotal: Number(d.openCreditTotal ?? 0),
+    openCreditCount: Number(d.openCreditCount ?? 0),
+    invoices: (d.invoices as CustomerCardData["invoices"]) ?? [],
+  }
 }

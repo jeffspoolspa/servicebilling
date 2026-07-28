@@ -11,7 +11,7 @@ import { guardApi } from "@/lib/auth/api"
  *   1. PATCHes QBO with PrivateNote + CustomerMemo + ClassRef
  *   2. Updates billing.invoices cache with the same values
  *   3. Sets memo_locked=true (user has affirmed the memo)
- *   4. Sets enrichment_ok=true (the QBO write went through)
+ *   4. (enrichment_ok derives from memo+class+memo_locked)
  *   5. Strips memo_low_confidence from needs_review_reason
  *   6. Calls recheck_invoice_status to recompute billing_status
  *

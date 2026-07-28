@@ -1,111 +1,356 @@
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Coins,
-  CheckCircle2,
-  XCircle,
-  RefreshCw,
-  CreditCard,
-  ClipboardCheck,
-  CircleDot,
-} from "lucide-react"
 import { formatCurrency } from "@/lib/utils/format"
-import type { InvoiceHistoryEvent } from "@/lib/queries/dashboard"
+import type {
+  InvoiceHistoryEvent,
+  InvoiceStreamEvent,
+} from "@/lib/queries/dashboard"
 
 /**
- * History — the invoice's activity feed. Reads public.invoice_history (the
- * projection over the operational fact tables — decisions, attempts, queue
- * runs, review stamps; each action writes ONE fact, the story is the union)
- * and renders each event as a sentence. Kind -> sentence templates live here;
- * the DB stays vocabulary-agnostic, so new event kinds render raw until given
- * a template (forward compatible).
+ * History — the invoice's activity feed, read from the ADR-010 event stream
+ * (public.invoice_events: home events + events naming this invoice as a
+ * participant). Row format: short standardized ACTION with linked references,
+ * an ACTOR TAG on the right, and detail as subtext or an expandable bullet
+ * list (invoice_edited's before→after changes).
+ *
+ * Lens (deliberate, per EVENT_VOCABULARY "cross-aggregate display"): document
+ * lifecycle + money only — created / edited / emailed / applications /
+ * charge outcomes / dispositions. Decisions (credit_proposed / rejected) are
+ * NOT shown here; they live in the Payments & credits table on the Invoice
+ * tab. Legacy process_attempt rows render only until stream charge events
+ * exist for this invoice (transitional, until the charge path emits live).
  */
 
-type Tone = "grass" | "coral" | "sun" | "cyan" | "mute"
-
-const TONE_CLS: Record<Tone, string> = {
-  grass: "text-grass",
-  coral: "text-coral",
-  sun: "text-sun",
-  cyan: "text-cyan",
-  mute: "text-ink-mute",
+type Row = {
+  key: string
+  at: string
+  /** A stage boundary (pre-processing / processing started or finished).
+   * Rendered as a coloured rule, not an event row — it BRACKETS the events a
+   * workflow produced so you can see which run did what, without the boundary
+   * itself pretending to be something that happened to the invoice. */
+  boundary?: { label: string; edge: "start" | "end"; stage: "preprocess" | "charge" }
+  /** stream sequence — the tiebreaker when several events share a timestamp.
+   * Enrichment, the charge enqueue it triggers, and the claim that follows all
+   * land in the same second; sorting on `at` alone rendered them out of order. */
+  seq?: number
+  action: React.ReactNode | null
+  tag: string | null
+  note?: string | null
+  changes?: [string, { from: string | null; to: string | null }][]
+  /** Gate rules and their outcomes AT THE TIME OF THE DECISION. Recorded in
+   * the event, not re-derived — so refactoring billing.invoice_ready() cannot
+   * rewrite what a past invoice was actually judged against. */
+  checks?: [string, boolean][]
 }
 
-function describe(e: InvoiceHistoryEvent): {
-  sentence: string
-  tone: Tone
-  Icon: typeof Coins
-} {
-  const amt = e.amount != null ? formatCurrency(Number(e.amount)) : null
-  const reason = (e.detail ?? "").replace(/\s*\(credit [^)]+\)\s*/, "").trim()
+const qboTxnUrl = (kind: string, id: string) =>
+  `https://app.qbo.intuit.com/app/${kind}?txnId=${id}`
 
-  switch (e.kind) {
-    case "credit_applied":
+function ExtLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="font-mono text-cyan hover:underline"
+    >
+      {children}
+    </a>
+  )
+}
+
+/** Actor tag: provenance intent_ref beats raw actor — "who did it" the way
+ * Carter reads it (pre-processing, auto-match, QBO, a person, reconciler). */
+function tagFor(e: InvoiceStreamEvent): string {
+  const ref = e.payload?.provenance?.intent_ref
+  if (ref === "pre_process") return "pre-processing"
+  // the send runs in the processing stage and passes its stage as intent_ref;
+  // it used to fall through to the raw actor and read "auto", which said
+  // nothing about which workflow sent the email
+  if (ref === "process" || ref === "charge") return "processing"
+  if (ref === "bump_due_date") return "processing"
+  if (ref === "work_order_link") return "link"
+  if (ref?.startsWith("apply_credits/")) {
+    const via = ref.split("/")[1]
+    return via === "manual" ? "manual" : "auto-match"
+  }
+  if (e.actor === "qbo_webhook") return "QBO"
+  if (e.actor === "reconciler") return "reconciler"
+  if (e.actor === "system") return "system"
+  if (e.actor.includes("@")) return e.actor.split("@")[0]
+  return "auto"
+}
+
+function rowFor(e: InvoiceStreamEvent, invoiceId: string): Row | null {
+  const base = { key: `s${e.seq}`, at: e.occurred_at, seq: e.seq, tag: tagFor(e) }
+  const amt = (n: number | undefined | null) =>
+    n != null ? formatCurrency(Number(n)) : null
+
+  switch (e.type) {
+    case "invoice_created":
+      return { ...base, action: "Invoice created" }
+    case "invoice_emailed":
+      return { ...base, action: "Invoice emailed" }
+    case "invoice_edited":
       return {
-        sentence: `Applied ${amt ?? "a"} credit${
-          e.actor === "auto" ? ` automatically${reason ? ` (${reason.replace(/_/g, " ")})` : ""}` : ""
-        }${e.actor && e.actor !== "auto" ? ` — ${e.actor}` : ""}`,
-        tone: "grass",
-        Icon: Coins,
+        ...base,
+        action: "Invoice edited",
+        changes: Object.entries(e.payload?.changes ?? {}),
       }
-    case "credit_rejected":
+    case "delivery_waived":
+      return { ...base, action: "Delivery waived", note: e.payload?.reason ?? null }
+    case "payment_applied": {
+      const line = e.payload?.lines?.find((l) => l.invoice_id === invoiceId)
+      const funding =
+        (line as { funding?: { kind: string; id?: string } } | undefined)?.funding ??
+        e.payload?.funding
+      const isCM = funding?.kind === "credit_memo"
+      const cmId = isCM ? (funding?.id ?? "").replace(/^CM-/, "") : null
+      const label = (e.payload as { ref?: string | null })?.ref ?? e.aggregate_id
       return {
-        sentence: `Marked ${amt ?? "a"} credit not applicable${
-          e.actor === "review_complete" ? " (review completed)" : e.actor ? ` — ${e.actor}` : ""
-        }`,
-        tone: "mute",
-        Icon: XCircle,
-      }
-    case "credit_proposed":
-    case "credit_candidate":
-      return {
-        sentence: `Recommended ${amt ?? "a"} credit${reason ? ` (${reason.replace(/_/g, " ")})` : ""}`,
-        tone: "cyan",
-        Icon: CircleDot,
-      }
-    case "credit_stale":
-      return { sentence: `Credit lapsed (${reason || "no longer available"})`, tone: "mute", Icon: XCircle }
-    case "pre_process_run":
-      return e.outcome === "failed"
-        ? { sentence: `Pre-processing failed${e.detail ? ` — ${e.detail}` : ""}`, tone: "coral", Icon: RefreshCw }
-        : e.outcome === "completed"
-          ? { sentence: "Pre-processing ran (credits matched, memo & class written)", tone: "grass", Icon: RefreshCw }
-          : { sentence: `Pre-processing ${e.outcome}`, tone: "sun", Icon: RefreshCw }
-    case "process_attempt_process": {
-      const via = e.actor ? ` via ${e.actor}` : ""
-      switch (e.outcome) {
-        case "succeeded":
-          return { sentence: `Charged ${amt ?? ""}${via}`.trim(), tone: "grass", Icon: CreditCard }
-        case "charge_declined":
-          return { sentence: `Charge declined${via}${e.detail ? ` — ${e.detail}` : ""}`, tone: "coral", Icon: CreditCard }
-        case "charge_uncertain":
-          return { sentence: `Charge outcome uncertain${via} — reconciler will confirm`, tone: "sun", Icon: CreditCard }
-        case "payment_orphan":
-          return { sentence: "Charge succeeded but QBO payment failed to record — needs recovery", tone: "coral", Icon: CreditCard }
-        default:
-          return { sentence: `Process attempt: ${e.outcome ?? "unknown"}${e.detail ? ` — ${e.detail}` : ""}`, tone: "sun", Icon: CreditCard }
+        ...base,
+        action: (
+          <>
+            Applied {isCM ? "credit memo" : "payment"}{" "}
+            {isCM && cmId ? (
+              <ExtLink href={qboTxnUrl("creditmemo", cmId)}>#{cmId}</ExtLink>
+            ) : (
+              <ExtLink href={qboTxnUrl("recvpayment", e.aggregate_id)}>
+                #{label}
+              </ExtLink>
+            )}
+            {line ? <span className="text-ink-dim"> · {amt(line.amount)}</span> : null}
+          </>
+        ),
+        note: e.payload?.reason ?? null,
       }
     }
-    case "review_completed":
-      return { sentence: "Credit review completed", tone: "grass", Icon: ClipboardCheck }
-    default:
-      // unknown kind: render raw — forward compatible with new event arms
+    case "payment_unapplied": {
+      const line = e.payload?.lines?.find((l) => l.invoice_id === invoiceId)
       return {
-        sentence: `${e.kind.replace(/_/g, " ")}${e.outcome ? `: ${e.outcome}` : ""}`,
-        tone: "mute",
-        Icon: CircleDot,
+        ...base,
+        action: (
+          <>
+            Unapplied payment{" "}
+            <ExtLink href={qboTxnUrl("recvpayment", e.aggregate_id)}>
+              #{e.aggregate_id}
+            </ExtLink>
+            {line ? <span className="text-ink-dim"> · {amt(line.amount)}</span> : null}
+          </>
+        ),
       }
+    }
+    case "charge_captured":
+      return {
+        ...base,
+        action: (
+          <>
+            Charge captured
+            <span className="text-ink-dim"> · {amt(e.payload?.amount)}</span>
+          </>
+        ),
+      }
+    case "charge_declined":
+      return {
+        ...base,
+        action: "Charge declined",
+        note: e.payload?.error ?? null,
+      }
+    case "charge_uncertain":
+      return {
+        ...base,
+        action: "Charge uncertain",
+        note: "outcome unknown — reconciler will confirm",
+      }
+    case "invoice_written_off":
+      return {
+        ...base,
+        action: (
+          <>
+            Written off
+            <span className="text-ink-dim"> · {amt(e.payload?.amount)}</span>
+          </>
+        ),
+        note: e.payload?.reason ?? null,
+      }
+    case "invoice_sent_to_collections":
+      return { ...base, action: "Sent to collections" }
+    case "invoice_recalled_from_collections":
+      return { ...base, action: "Recalled from collections" }
+    case "receipt_sent":
+      // A payment-aggregate event, surfaced here because the customer was
+      // emailed about THIS invoice. It reaches us via participants
+      // (invoice:<id>), same as charge_captured and payment_applied.
+      return {
+        ...base,
+        action: "Payment receipt emailed",
+        note: (e.payload as { email?: string | null })?.email ?? null,
+      }
+    case "invoice_voided":
+      // Discovered, not caused — QBO voided it and the webhook told us. The
+      // work_orders in the payload are the ones still claiming this doc
+      // number, which is what keeps it in `audit` instead of out of scope.
+      return {
+        ...base,
+        action: "Voided in QBO",
+        note: ((e.payload as { work_orders?: string[] })?.work_orders ?? []).length
+          ? `still linked to WO ${((e.payload as { work_orders?: string[] }).work_orders ?? []).join(", ")}`
+          : null,
+      }
+    case "invoice_linked":
+      return {
+        ...base,
+        action: "Linked to work order",
+        note: (e.payload as { previous_qbo_invoice_id?: string | null })
+          ?.previous_qbo_invoice_id
+          ? `replaced invoice #${(e.payload as { previous_qbo_invoice_id?: string })
+              .previous_qbo_invoice_id}`
+          : null,
+      }
+    // credit_applied is deliberately NOT shown: applying a credit IS
+    // payment_applied on the carrier payment, which already renders above with
+    // the amount and a QBO link. Emitting both put one application in the
+    // timeline twice, from each side.
+    // credit_rejected is deliberately NOT shown. It is a DECISION about a
+    // credit, already visible in the Payments & credits table with its reason;
+    // in the timeline it is noise — a settled invoice emits one per remaining
+    // open credit, so a customer with several credits buries the real story.
+    // The GATE decision — billing.invoice_ready() saying yes or no. Previously
+    // invisible: you could watch the inputs change and the outcome change, but
+    // never see the check itself, or why it refused.
+    case "invoice_cleared_gate": {
+      const checks = Object.entries(
+        (e.payload as { checks?: Record<string, boolean> })?.checks ?? {},
+      ) as [string, boolean][]
+      return {
+        ...base,
+        action: `Passed readiness check${checks.length ? ` · ${checks.length} rules` : ""}`,
+        checks,
+      }
+    }
+    case "invoice_held_for_review": {
+      const p = e.payload as { checks?: Record<string, boolean>; reason?: string }
+      const checks = Object.entries(p?.checks ?? {}) as [string, boolean][]
+      const failed = checks.filter(([, ok]) => !ok).map(([k]) => k)
+      return {
+        ...base,
+        action: `Held for review${failed.length ? ` · ${failed.join(", ")}` : ""}`,
+        note: p?.reason ?? null,
+        checks,
+      }
+    }
+    case "hold_placed":
+      return {
+        ...base,
+        action: "Held — do not transact",
+        note: (e.payload as { reason?: string })?.reason ?? null,
+      }
+    case "hold_released":
+      return {
+        ...base,
+        action: "Hold released",
+        note: (e.payload as { reason?: string })?.reason ?? null,
+      }
+    // ── queue lifecycle. The stage lives in the payload, not the type, so
+    // both queues share these four and read as one continuous story.
+    // Queued is NOT shown: being put on a queue is not something that
+    // happened to the invoice, and the claim that follows says the same thing
+    // with the time that matters.
+    case "processing_enqueued":
+      return null
+    case "processing_claimed":
+    case "processing_finished": {
+      const p = e.payload as { stage?: string; attempt?: number; duration_s?: number }
+      const stage = p?.stage === "charge" ? "charge" : "preprocess"
+      const name = stage === "charge" ? "Processing" : "Pre-processing"
+      const edge = e.type === "processing_claimed" ? "start" : "end"
+      const detail =
+        edge === "end"
+          ? p?.duration_s != null
+            ? `${p.duration_s}s`
+            : ""
+          : p?.attempt && p.attempt > 1
+            ? `attempt ${p.attempt}`
+            : ""
+      return {
+        ...base,
+        action: null,
+        boundary: {
+          stage,
+          edge,
+          label: edge === "start" ? name : detail ? `${name} · ${detail}` : name,
+        },
+      }
+    }
+    case "processing_failed": {
+      const p = e.payload as { stage?: string; error?: string; attempt?: number }
+      const name = p?.stage === "charge" ? "Processing" : "Pre-processing"
+      return {
+        ...base,
+        action: `${name} failed`,
+        note: p?.error ?? null,
+      }
+    }
+    default:
+      // outside the lens (birth of payments, cache echoes)
+      return null
   }
 }
 
-export function HistoryPanel({ events }: { events: InvoiceHistoryEvent[] }) {
-  if (events.length === 0) {
+/** Transitional: WAL attempt rows shown only until the stream carries charge
+ * events for this invoice — then the stream is the story. */
+function legacyChargeRows(events: InvoiceHistoryEvent[]): Row[] {
+  return events
+    .filter((e) => e.kind.startsWith("process_attempt_"))
+    .map((e, i) => ({
+      key: `l${i}`,
+      at: e.at,
+      action: (
+        <>
+          {e.outcome === "succeeded"
+            ? "Charge captured"
+            : e.outcome === "charge_declined"
+              ? "Charge declined"
+              : `Charge ${e.outcome ?? "attempted"}`}
+          {e.amount != null && (
+            <span className="text-ink-dim"> · {formatCurrency(Number(e.amount))}</span>
+          )}
+        </>
+      ),
+      tag: "auto",
+      note: e.detail || null,
+    }))
+}
+
+export function HistoryPanel({
+  events,
+  stream = [],
+}: {
+  events: InvoiceHistoryEvent[]
+  stream?: InvoiceStreamEvent[]
+}) {
+  const invoiceId =
+    stream.find((e) => e.aggregate === "invoice")?.aggregate_id ??
+    events[0]?.qbo_invoice_id ??
+    ""
+  const streamRows = stream
+    .map((e) => rowFor(e, invoiceId))
+    .filter((r): r is Row => r !== null)
+  const hasStreamCharges = stream.some((e) => e.type.startsWith("charge_"))
+  const rows = [
+    ...streamRows,
+    ...(hasStreamCharges ? [] : legacyChargeRows(events)),
+  ].sort((a, b) =>
+    a.at !== b.at ? (a.at < b.at ? 1 : -1) : (b.seq ?? 0) - (a.seq ?? 0),
+  )
+
+  if (rows.length === 0) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>History</CardTitle>
         </CardHeader>
         <CardBody className="text-ink-mute text-sm">
-          No activity yet — nothing has run against this invoice.
+          No activity yet — nothing has happened to this invoice.
         </CardBody>
       </Card>
     )
@@ -116,38 +361,104 @@ export function HistoryPanel({ events }: { events: InvoiceHistoryEvent[] }) {
       <CardHeader>
         <CardTitle>History</CardTitle>
         <span className="ml-auto text-[11px] text-ink-mute">
-          {events.length} event{events.length === 1 ? "" : "s"}
+          {rows.filter((r) => !r.boundary).length} event
+          {rows.filter((r) => !r.boundary).length === 1 ? "" : "s"}
         </span>
       </CardHeader>
       <CardBody className="py-1">
-        <ol className="relative">
-          {events.map((e, i) => {
-            const { sentence, tone, Icon } = describe(e)
-            return (
-              <li
-                key={i}
-                className="flex items-start gap-3 py-2.5 border-b border-line-soft/60 last:border-b-0"
-              >
-                <span className={`mt-0.5 ${TONE_CLS[tone]}`}>
-                  <Icon className="w-3.5 h-3.5" strokeWidth={2} />
-                </span>
-                <span className="flex-1 min-w-0 text-[13px] text-ink leading-relaxed">
-                  {sentence}
+        <ol>
+          {rows.map((r) =>
+            r.boundary ? (
+              <li key={r.key} className="flex items-center gap-2 py-1.5">
+                <span
+                  className={
+                    "h-px flex-1 " +
+                    (r.boundary.stage === "charge" ? "bg-cyan/30" : "bg-grass/30")
+                  }
+                />
+                <span
+                  className={
+                    "shrink-0 text-[10px] uppercase tracking-[0.1em] " +
+                    (r.boundary.stage === "charge" ? "text-cyan/70" : "text-grass/70")
+                  }
+                >
+                  {r.boundary.label}
+                  {r.boundary.edge === "end" ? " done" : ""}
                 </span>
                 <span
-                  className="text-[11px] text-ink-mute whitespace-nowrap"
-                  title={new Date(e.at).toLocaleString()}
+                  className={
+                    "h-px w-4 " +
+                    (r.boundary.stage === "charge" ? "bg-cyan/30" : "bg-grass/30")
+                  }
+                />
+              </li>
+            ) : (
+            <li
+              key={r.key}
+              className="py-2.5 border-b border-line-soft/60 last:border-b-0"
+            >
+              <div className="flex items-start gap-2">
+                <span className="flex-1 min-w-0 text-[13px] text-ink leading-snug">
+                  {r.action}
+                </span>
+                {r.tag && (
+                  <span className="shrink-0 text-[10px] text-ink-mute border border-line-soft rounded-full px-1.5 py-px">
+                    {r.tag}
+                  </span>
+                )}
+                <span
+                  className="shrink-0 text-[11px] text-ink-mute whitespace-nowrap"
+                  title={new Date(r.at).toLocaleString()}
                 >
-                  {new Date(e.at).toLocaleString(undefined, {
+                  {new Date(r.at).toLocaleString(undefined, {
                     month: "short",
                     day: "numeric",
                     hour: "numeric",
                     minute: "2-digit",
                   })}
                 </span>
-              </li>
-            )
-          })}
+              </div>
+              {r.note && (
+                <div className="mt-0.5 text-[11px] text-ink-mute">{r.note}</div>
+              )}
+              {r.checks && r.checks.length > 0 && (
+                <details className="mt-1">
+                  <summary className="text-[11px] text-ink-mute cursor-pointer select-none hover:text-ink-dim">
+                    rules applied
+                  </summary>
+                  <ul className="mt-1 space-y-0.5 pl-4 list-none">
+                    {r.checks.map(([rule, ok]) => (
+                      <li key={rule} className="text-[11px]">
+                        <span className={ok ? "text-grass" : "text-coral"}>
+                          {ok ? "\u2713" : "\u2717"}
+                        </span>{" "}
+                        <span className="text-ink-dim">{rule.replace(/_/g, " ")}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {r.changes && r.changes.length > 0 && (
+                <details className="mt-1">
+                  <summary className="text-[11px] text-ink-mute cursor-pointer select-none hover:text-ink-dim">
+                    {r.changes.length} change{r.changes.length === 1 ? "" : "s"}
+                  </summary>
+                  <ul className="mt-1 space-y-0.5 pl-4 list-disc marker:text-ink-mute">
+                    {r.changes.map(([field, c]) => (
+                      <li key={field} className="text-[11px] text-ink-dim">
+                        <span className="text-ink-mute">{field.replace(/_/g, " ")}:</span>{" "}
+                        <span className="line-through opacity-60">
+                          {c.from ?? "—"}
+                        </span>{" "}
+                        → <span className="text-ink">{c.to ?? "—"}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </li>
+            ),
+          )}
         </ol>
       </CardBody>
     </Card>

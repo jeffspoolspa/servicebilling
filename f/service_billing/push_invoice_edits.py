@@ -2,7 +2,7 @@
 #
 # Apply user edits from the classification editor to QBO + cache atomically.
 # Pushes memo + statement_memo + qbo_class to QBO via PATCH, then writes the
-# same values to billing.invoices along with memo_locked=true + enrichment_ok=true.
+# same values to billing.invoices along with memo_locked=true (enrichment_ok derives).
 #
 # Phase 2C-touch: when payment_method (or its derived preferred/target)
 # actually CHANGES, also stamp preferred_payment_type_overridden_at = now().
@@ -261,7 +261,6 @@ def main(qbo_invoice_id: str,
                       ELSE preferred_payment_type_overridden_at
                     END,
                     memo_locked               = true,
-                    enrichment_ok             = true,
                     needs_review_reason       = NULL,
                     fetched_at                = now()
                 WHERE qbo_invoice_id = %s
@@ -281,7 +280,6 @@ def main(qbo_invoice_id: str,
                     statement_memo      = COALESCE(%s, statement_memo),
                     qbo_class           = COALESCE(%s, qbo_class),
                     memo_locked         = true,
-                    enrichment_ok       = true,
                     needs_review_reason = NULL,
                     fetched_at          = now()
                 WHERE qbo_invoice_id = %s

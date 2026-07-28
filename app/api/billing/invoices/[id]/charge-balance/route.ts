@@ -18,10 +18,10 @@ import { createSupabaseServer } from "@/lib/supabase/server"
  *      level cascade doesn't undo our choice). The BEFORE-UPDATE
  *      attempts_unblocked_at trigger also fires, clearing any prior
  *      charge_declined block.
- *   2. Call f/service_billing/process_invoice with force=true. The
- *      script reads the LIVE QBO balance and charges THAT amount, not
- *      the original invoice total — handles partial credits / writes /
- *      refunds correctly.
+ *   2. Call f/service_billing/process_one with force=true (the force-only
+ *      direct entry, outside the queue). It reads the LIVE QBO balance and
+ *      charges THAT amount, not the original invoice total — handles
+ *      partial credits / writes / refunds correctly.
  *
  * Pre-flight gates (server-side):
  *   - Service write access required
@@ -128,11 +128,13 @@ export async function POST(
     )
   }
 
-  // 2. Call process_invoice with force=true to bypass the
-  //    "billing_status='ready_to_process' required" gate. The script
-  //    reads the live QBO balance (not the original invoice total) and
-  //    charges THAT amount, which handles partial credits / past
-  //    payments correctly.
+  // 2. Charge via process_one, the force-only direct entry — a deliberate
+  //    human override that runs OUTSIDE the queue. Not process_invoice:
+  //    that is the queue worker, and its claim guard is
+  //    billing.invoice_ready(), which an already-processed invoice will
+  //    never satisfy. process_one reads the live QBO balance (not the
+  //    original invoice total) and charges THAT amount, so partial credits
+  //    and past payments are handled correctly.
   try {
     const result = await triggerScriptSync<{
       status?: string
@@ -141,7 +143,7 @@ export async function POST(
       qbo_payment_id?: string
       error?: string
     }>(
-      "f/service_billing/process_invoice",
+      "f/service_billing/process_one",
       {
         qbo_invoice_id: id,
         force: true,

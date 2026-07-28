@@ -34,6 +34,21 @@ export function LiveWorkOrderDetail() {
       // current pref + applied state stays live if it's changed elsewhere
       // (e.g. from the customer detail page in another tab).
       { schema: "public" as const, table: "Customers" },
+      // The event stream — the History feed AND the live processing pills.
+      //
+      // Deliberately unfiltered. Half an invoice's history comes from OTHER
+      // aggregates naming it as a participant (payment_applied on the payment,
+      // charge_captured on the WAL attempt, receipt_sent on the payment), so a
+      // filter on aggregate_id would miss exactly the events that matter most.
+      // At ~39 events/day system-wide, the 350ms debounce makes the cost of
+      // listening to all of them nil.
+      //
+      // This is also why the mutable tables above stay as they are rather than
+      // the page deriving everything from events: an event arriving means
+      // something changed, and router.refresh() re-renders the server component
+      // with both the new events AND the new facts. No client-side merge, no
+      // reconciliation — the append-only stream is only ever the trigger.
+      { schema: "billing" as const, table: "events" },
     ],
     [],
   )

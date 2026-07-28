@@ -39,11 +39,18 @@ export interface InvoiceCardLineItem {
 }
 
 export function InvoiceCard({
+  header,
   invoice,
   afterHeader,
+  voided = false,
 }: {
+  /** Replaces the card title — the WO detail page puts its tabs here. */
+  header?: React.ReactNode
   invoice: InvoiceCardData
   afterHeader?: ReactNode
+  /** From billing.v_invoice_state. A voided invoice carries a zero balance,
+   * so without this it reads as "paid" — the one thing it is not. */
+  voided?: boolean
 }) {
   const subtotal = Number(invoice.subtotal ?? 0)
   const total = Number(invoice.total_amt ?? 0)
@@ -54,8 +61,8 @@ export function InvoiceCard({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Invoice {invoice.doc_number ?? "—"}</CardTitle>
+      <CardHeader className={header ? "pt-2 pb-0" : undefined}>
+        {header ?? <CardTitle>Invoice {invoice.doc_number ?? "—"}</CardTitle>}
         <div className="ml-auto flex items-center gap-2">
           {invoice.email_status === "EmailSent" ? (
             <Pill tone="teal" dot>
@@ -66,7 +73,11 @@ export function InvoiceCard({
               not sent
             </Pill>
           )}
-          {balance === 0 ? (
+          {voided ? (
+            <Pill tone="coral" dot>
+              voided
+            </Pill>
+          ) : balance === 0 ? (
             <Pill tone="grass" dot>
               paid
             </Pill>

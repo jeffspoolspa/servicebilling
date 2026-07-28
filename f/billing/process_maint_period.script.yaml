@@ -1,0 +1,5 @@
+summary: "Maintenance charge/send engine (ADR 009 event handler over f/billing/_lib)"
+description: "Refactored onto shared _lib: charge_and_record (single + group multi-line) + cache echo verbs; engine keeps roster/group/decline/projection policy"
+language: python3
+hash: c012269a876788fe
+mirrored_from: windmill

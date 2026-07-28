@@ -176,5 +176,8 @@ chokepoint" decision, and the new-trigger checklist, see
   handler this doc schedules
 - [ADR 009](../adrs/009-shared-qbo-primitives-lib.md) — the services the
   handlers orchestrate; §E is the events-not-stamps contract
+- [ADR 010](../adrs/010-domain-event-stream.md) + [EVENT_VOCABULARY.md](EVENT_VOCABULARY.md)
+  — the `(event log)` node above: the append-only stream the handlers emit into
+  and the names its facts carry
 - [scripts/billing/drain_maint_preprocess_queue.md](../scripts/billing/drain_maint_preprocess_queue.md)
   — the built reference implementation
