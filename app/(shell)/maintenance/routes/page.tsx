@@ -1,30 +1,47 @@
-import Link from "next/link"
-import { Card, CardBody } from "@/components/ui/card"
-import { formatCurrency } from "@/lib/utils/format"
-import { DAY_NAMES, listRouteSummary, type RouteSummaryRow } from "../_lib/views"
-import { OfficeTabs } from "../_components/office-tabs"
+import { listRouteSummary, type RouteSummaryRow } from "../_lib/views"
+import { HOME_OFFICES, listRouteStopsAll } from "../_lib/route-analysis"
+import {
+  RoutePlanner,
+  type PlannerRoute,
+  type PlannerStop,
+  type PlannerTech,
+} from "../_components/route-planner"
 
-export const metadata = { title: "Maintenance · Routes" }
+export const metadata = { title: "Maintenance · Route Planner" }
 export const dynamic = "force-dynamic"
 
-// Geographic office labels = split_part(branches.name, ',', 1) (ADR 007). Drives tab order.
-const OFFICE_ORDER = ["Brunswick", "Richmond Hill", "Saint Marys", "Savannah"] as const
+// Stable per-tech color palette. Techs are assigned a color by cycling this
+// list (sorted by tech name so the assignment is deterministic across renders).
+// Bright, saturated, MUTUALLY-DISTINCT hues = the pin fill (tech). Ordered so the
+// first ~8 are maximally different (offices of that size get the cleanest spread);
+// the largest office (11) uses 11 of the 12. Day is encoded by the pin's center
+// glyph, not color, so these only need to separate techs WITHIN an office.
+const TECH_PALETTE = [
+  "#3b82f6", // blue
+  "#f97316", // orange
+  "#22c55e", // green
+  "#ec4899", // pink
+  "#facc15", // yellow
+  "#8b5cf6", // violet
+  "#14b8a6", // teal
+  "#ef4444", // red
+  "#a3e635", // lime
+  "#06b6d4", // cyan
+  "#d946ef", // fuchsia
+  "#f59e0b", // amber
+] as const
 
-export default async function RoutesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ office?: string }>
-}) {
-  const { office: filterOffice } = await searchParams
-  const routes = await listRouteSummary()
+export default async function RoutesPage() {
+  const token = process.env.MAPBOX_TOKEN ?? null
+  const [summary, stops] = await Promise.all([listRouteSummary(), listRouteStopsAll()])
 
   // v_routes_summary groups by (office, tech, day). A tech whose schedule slots
-  // have inconsistent office values (some null) therefore shows up as multiple
-  // rows for one day. A tech's day is a single route — merge to one row per
-  // (tech, day), summing stops/revenue and picking the dominant (most-stops)
-  // office. The route detail page already aggregates by (tech, day).
+  // have inconsistent office values (some null) shows up as multiple rows for
+  // one day — but a (tech, day) is ONE route. Merge to one row per (tech, day),
+  // summing stops/revenue/frequency and picking the dominant (most-stops) office.
+  // (Same merge the previous routes index used.)
   const mergedMap = new Map<string, RouteSummaryRow & { _officeStops: Map<string, number> }>()
-  for (const r of routes) {
+  for (const r of summary) {
     const key = `${r.tech_employee_id}|${r.day_of_week}`
     let m = mergedMap.get(key)
     if (!m) {
@@ -44,7 +61,7 @@ export default async function RoutesPage({
   const techModalOffice = new Map<string, string>()
   {
     const tally = new Map<string, Map<string, number>>()
-    for (const r of routes) {
+    for (const r of summary) {
       if (!r.office) continue
       const t = tally.get(r.tech_employee_id) ?? new Map<string, number>()
       t.set(r.office, (t.get(r.office) ?? 0) + r.stop_count)
@@ -58,7 +75,7 @@ export default async function RoutesPage({
     }
   }
 
-  const merged: RouteSummaryRow[] = [...mergedMap.values()].map(({ _officeStops, ...rest }) => {
+  const mergedRows: RouteSummaryRow[] = [...mergedMap.values()].map(({ _officeStops, ...rest }) => {
     let office: string | null = null
     let best = 0
     for (const [o, n] of _officeStops) if (n > best) { best = n; office = o }
@@ -66,122 +83,86 @@ export default async function RoutesPage({
     return { ...rest, office }
   })
 
-  const officeStops: Record<string, number> = {}
-  for (const r of merged) {
-    const o = r.office ?? "Unassigned"
-    officeStops[o] = (officeStops[o] ?? 0) + r.stop_count
+  // Distinct techs (id + name), each carrying its branch (modal office) and a
+  // stable color. Sort by name for deterministic color assignment.
+  const techNames = new Map<string, string | null>()
+  for (const r of mergedRows) if (!techNames.has(r.tech_employee_id)) techNames.set(r.tech_employee_id, r.tech_name)
+  const techIdsSorted = [...techNames.keys()].sort((a, b) =>
+    (techNames.get(a) ?? "").localeCompare(techNames.get(b) ?? ""),
+  )
+  // Assign colors PER OFFICE: every tech within an office gets a distinct color;
+  // colors recycle across offices (you filter by office, so two same-colored
+  // techs from different branches won't usually be on screen together). The
+  // largest office has 11 techs, so a 12-color palette guarantees no repeats.
+  const techColor = new Map<string, string>()
+  const officeCursor = new Map<string, number>()
+  for (const id of techIdsSorted) {
+    const off = techModalOffice.get(id) ?? "__none"
+    const i = officeCursor.get(off) ?? 0
+    techColor.set(id, TECH_PALETTE[i % TECH_PALETTE.length])
+    officeCursor.set(off, i + 1)
   }
-  const allOffices = Object.keys(officeStops).sort((a, b) => {
-    const ai = (OFFICE_ORDER as readonly string[]).indexOf(a)
-    const bi = (OFFICE_ORDER as readonly string[]).indexOf(b)
-    if (ai >= 0 && bi >= 0) return ai - bi
-    if (ai >= 0) return -1
-    if (bi >= 0) return 1
-    return a.localeCompare(b)
-  })
 
-  const filtered = filterOffice
-    ? merged.filter((r) => (r.office ?? "Unassigned") === filterOffice)
-    : merged
+  const techs: PlannerTech[] = techIdsSorted.map((id) => ({
+    id,
+    name: techNames.get(id) ?? null,
+    office: techModalOffice.get(id) ?? null,
+    color: techColor.get(id) ?? TECH_PALETTE[0],
+  }))
 
-  // Group by day_of_week (when filtered to a single office) or by office (when "All")
-  const byDay = new Map<number, RouteSummaryRow[]>()
-  for (const r of filtered) {
-    const arr = byDay.get(r.day_of_week) ?? []
-    arr.push(r)
-    byDay.set(r.day_of_week, arr)
+  const routes: PlannerRoute[] = mergedRows.map((r) => ({
+    key: `${r.tech_employee_id}|${r.day_of_week}`,
+    techId: r.tech_employee_id,
+    techName: r.tech_name,
+    office: r.office,
+    day: r.day_of_week,
+    color: techColor.get(r.tech_employee_id) ?? TECH_PALETTE[0],
+    stopCount: r.stop_count,
+    totalPriceCents: r.total_price_cents ?? 0,
+    weeklyCount: r.weekly_count,
+    biweeklyCount: r.biweekly_count,
+    monthlyCount: r.monthly_count,
+  }))
+
+  // Stops, keyed to their (tech, day) route, colored by the tech's color.
+  const plannerStops: PlannerStop[] = []
+  for (const s of stops) {
+    if (s.tech_employee_id == null || s.day_of_week == null) continue
+    const techId = s.tech_employee_id
+    const key = `${techId}|${s.day_of_week}`
+    plannerStops.push({
+      key,
+      techId,
+      day: s.day_of_week,
+      scheduleId: s.schedule_id,
+      customerId: s.customer_id,
+      customerName: s.customer_name,
+      street: s.street,
+      city: s.city,
+      sequence: s.sequence,
+      lat: s.latitude,
+      lng: s.longitude,
+      geoTrusted: s.geo_trusted,
+      color: techColor.get(techId) ?? TECH_PALETTE[0],
+    })
   }
-  const days = [...byDay.keys()].sort((a, b) => a - b)
 
-  const visibleRoutes = filtered.length
-  const visibleStops = filtered.reduce((s, r) => s + r.stop_count, 0)
-  const visibleRevenue = filtered.reduce((s, r) => s + (r.total_price_cents ?? 0), 0)
+  // Offices present in the data, in HOME_OFFICES (north→south) order, plus any
+  // unexpected extras at the end.
+  const presentOffices = new Set<string>()
+  for (const r of routes) if (r.office) presentOffices.add(r.office)
+  const offices: string[] = [
+    ...HOME_OFFICES.filter((o) => presentOffices.has(o)),
+    ...[...presentOffices].filter((o) => !(HOME_OFFICES as readonly string[]).includes(o)).sort(),
+  ]
 
   return (
-    <>
-      <OfficeTabs offices={allOffices} counts={officeStops} />
-      <div className="px-7 pt-6 pb-10 space-y-6">
-        <div className="flex items-end justify-between">
-          <div>
-            <h2 className="font-display text-[16px]">
-              Routes{filterOffice ? ` · ${filterOffice}` : ""}
-            </h2>
-            <div className="text-ink-mute text-[12px] mt-0.5">
-              {visibleRoutes} (tech, day) combinations · {visibleStops} stops · {formatCurrency(visibleRevenue / 100)} per cycle
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <Link
-              href={"/maintenance/routes/map" as never}
-              className="text-[12px] text-cyan hover:underline whitespace-nowrap"
-            >
-              Territory map →
-            </Link>
-            <Link
-              href={"/maintenance/routes/addresses" as never}
-              className="text-[12px] text-cyan hover:underline whitespace-nowrap"
-            >
-              Address QA →
-            </Link>
-          </div>
-        </div>
-
-        {days.length === 0 && (
-          <Card className="p-8 text-center text-ink-mute text-[13px]">
-            No active routes for this filter.
-          </Card>
-        )}
-
-        {days.map((day) => {
-          const list = byDay.get(day)!.sort((a, b) =>
-            (a.tech_name ?? "").localeCompare(b.tech_name ?? ""),
-          )
-          return (
-            <section key={day} className="space-y-2">
-              <div className="flex items-center gap-3">
-                <h3 className="font-display text-[14px] text-ink">{DAY_NAMES[day]}</h3>
-                <span className="text-[11px] text-ink-mute">{list.length} routes</span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {list.map((r) => (
-                  <Link
-                    key={`${r.office ?? "_"}-${r.tech_employee_id}-${r.day_of_week}`}
-                    href={`/maintenance/routes/${r.tech_employee_id}/${r.day_of_week}` as never}
-                    className="block"
-                  >
-                    <Card className="hover:border-cyan/40 transition-colors">
-                      <CardBody>
-                        <div className="flex items-center justify-between">
-                          <div className="text-ink font-medium">
-                            {r.tech_name ?? "(no tech)"}
-                          </div>
-                          {!filterOffice && r.office && (
-                            <span className="text-[10px] text-ink-mute uppercase tracking-wide">
-                              {r.office}
-                            </span>
-                          )}
-                        </div>
-                        <div className="font-mono num text-[20px] mt-1 text-ink">
-                          {r.stop_count}
-                          <span className="text-[11px] text-ink-mute font-sans ml-1">stops</span>
-                        </div>
-                        <div className="mt-2 flex items-center gap-3 text-[11px] text-ink-mute">
-                          {r.weekly_count > 0 && <span>{r.weekly_count}× weekly</span>}
-                          {r.biweekly_count > 0 && <span>{r.biweekly_count}× biweekly</span>}
-                          {r.monthly_count > 0 && <span>{r.monthly_count}× monthly</span>}
-                        </div>
-                        <div className="mt-2 text-[11px] text-cyan font-mono">
-                          {formatCurrency((r.total_price_cents ?? 0) / 100)} / cycle
-                        </div>
-                      </CardBody>
-                    </Card>
-                  </Link>
-                ))}
-              </div>
-            </section>
-          )
-        })}
-      </div>
-    </>
+    <RoutePlanner
+      token={token}
+      routes={routes}
+      stops={plannerStops}
+      techs={techs}
+      offices={offices}
+    />
   )
 }
