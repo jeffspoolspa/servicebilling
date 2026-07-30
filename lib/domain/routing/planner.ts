@@ -293,6 +293,33 @@ export class Planner {
       assignment.set(p.slotId, p.techId)
       taken.add(p.techKey)
     }
+    // Second pass, week-wide: a draft that moves pools across days leaves a
+    // slot with no same-day overlap even though every pool on it belongs to
+    // one tech's week (the one-tech scope). Hand it to the tech who serves
+    // most of its pools on ANY day — still one slot per tech-day.
+    const servesWeek = new Map<string, Set<string>>()
+    for (const q of live)
+      for (const st of q.stops) {
+        const set = servesWeek.get(st.techId) ?? new Set()
+        set.add(q.id)
+        servesWeek.set(st.techId, set)
+      }
+    const relaxed: { slotId: string; techKey: string; techId: string; overlap: number }[] = []
+    for (const slot of world.slots) {
+      if (assignment.has(slot.slotId)) continue
+      for (const [techId, quotaIds] of servesWeek) {
+        const techKey = `${techId}|${slot.weekday}`
+        if (taken.has(techKey)) continue
+        const overlap = slot.quotaIds.filter((id) => quotaIds.has(id)).length
+        if (overlap > 0) relaxed.push({ slotId: slot.slotId, techKey, techId, overlap })
+      }
+    }
+    relaxed.sort((a, b) => b.overlap - a.overlap)
+    for (const p of relaxed) {
+      if (assignment.has(p.slotId) || taken.has(p.techKey)) continue
+      assignment.set(p.slotId, p.techId)
+      taken.add(p.techKey)
+    }
     for (const slot of world.slots) {
       if (!assignment.has(slot.slotId)) assignment.set(slot.slotId, slot.slotId)
     }
