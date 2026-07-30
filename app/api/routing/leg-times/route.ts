@@ -80,5 +80,46 @@ export async function POST(req: Request) {
       miles: Math.round(((c.distanceMeters ?? 0) / 1609.34) * 10) / 10,
     })
   }
+  // Own each measured leg permanently: the road between two fixed pins does
+  // not change, so a leg bought once is never bought again. Pin snapshots ride
+  // along as the invalidation key; a write failure never blocks the response.
+  if (legs.length > 0) {
+    const at = new Map(points.map((p) => [p.id, p]))
+    const rows = legs.map((l) => ({
+      from_id: l.fromId,
+      to_id: l.toId,
+      minutes: l.minutes,
+      miles: l.miles,
+      from_lat: at.get(l.fromId)!.lat,
+      from_lng: at.get(l.fromId)!.lng,
+      to_lat: at.get(l.toId)!.lat,
+      to_lng: at.get(l.toId)!.lng,
+      measured_at: new Date().toISOString(),
+    }))
+    const { error } = await sb.schema("maintenance").from("drive_legs").upsert(rows)
+    if (error) console.warn("drive_legs persist failed:", error.message)
+  }
+
   return NextResponse.json({ legs })
+}
+
+/**
+ * The permanent matrix, for hydration on map open. The client drops any leg
+ * whose stored pin no longer matches the quota's current pin (re-geocoded
+ * pool), so a stale measurement can never price a route.
+ */
+export async function GET() {
+  const sb = await createSupabaseServer()
+  const {
+    data: { user },
+  } = await sb.auth.getUser()
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+
+  const { data, error } = await sb
+    .schema("maintenance")
+    .from("drive_legs")
+    .select("from_id, to_id, minutes, miles, from_lat, from_lng, to_lat, to_lng")
+    .range(0, 199999)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ legs: data ?? [] })
 }

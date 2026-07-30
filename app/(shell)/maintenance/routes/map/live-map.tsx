@@ -899,6 +899,58 @@ export function LiveMap({
   }, [selectedRoute, selectedLeg, visible, token])
 
   /**
+   * Hydrate the matrix from the permanent leg store (maintenance.drive_legs):
+   * a road between two fixed pins never changes, so every leg ever measured
+   * prices routes forever — across reloads and sessions. Legs whose stored pin
+   * snapshot no longer matches the quota's current pin (re-geocoded pool) are
+   * dropped here and simply re-measure on next view.
+   */
+  const legStoreHydrated = useRef(false)
+  useEffect(() => {
+    if (legStoreHydrated.current) return
+    legStoreHydrated.current = true
+    ;(async () => {
+      try {
+        const res = await fetch("/api/routing/leg-times")
+        if (!res.ok) return
+        const body = (await res.json()) as {
+          legs: {
+            from_id: string
+            to_id: string
+            minutes: number
+            miles: number
+            from_lat: number
+            from_lng: number
+            to_lat: number
+            to_lng: number
+          }[]
+        }
+        if (!body.legs?.length) return
+        const pinOf = new Map<string, Pin>()
+        for (const q of plan.all) if (q.requirement.pin) pinOf.set(q.id, q.requirement.pin)
+        const close = (a: number, b: number) => Math.abs(a - b) < 1e-5
+        const current = (id: string, lat: number, lng: number) => {
+          if (id.startsWith("base:")) return true // coords live in the id; a moved office mints a new id
+          const pin = pinOf.get(id)
+          return pin !== undefined && close(pin.lat, lat) && close(pin.lng, lng)
+        }
+        const valid = body.legs.filter(
+          (l) => current(l.from_id, l.from_lat, l.from_lng) && current(l.to_id, l.to_lat, l.to_lng),
+        )
+        if (valid.length > 0) {
+          geometry.matrix.learn(
+            valid.map((l) => ({ fromId: l.from_id, toId: l.to_id, minutes: l.minutes, miles: l.miles })),
+          )
+          setMatrixRev((n) => n + 1)
+        }
+      } catch (err) {
+        console.warn("leg store hydration failed, estimates stand:", err)
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /**
    * Learn real drive times for the highlighted route: one computeRouteMatrix
    * call for office + stops gives the full asymmetric grid, folded into the
    * DriveMatrix — after which every estimate touching this route (cards,
