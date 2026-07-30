@@ -2013,6 +2013,22 @@ export function LiveMap({
                                     <span className="shrink-0 font-mono text-[9.5px] text-ink-mute">
                                       {stop.serviceMinutes ?? "~"}m
                                     </span>
+                                    <span
+                                      role="button"
+                                      className="shrink-0 px-1 text-[11px] leading-none text-ink-mute hover:text-coral"
+                                      title="unassign — the pool becomes owed until re-placed"
+                                      onClick={(ev) => {
+                                        ev.stopPropagation()
+                                        try {
+                                          plan.unplaceStop(stop.quotaId, route.techId, route.weekday)
+                                          forceRender((n) => n + 1)
+                                        } catch (err) {
+                                          alert(String(err instanceof Error ? err.message : err))
+                                        }
+                                      }}
+                                    >
+                                      ×
+                                    </span>
                                   </button>
                                 </TourStopRow>
                               </Fragment>

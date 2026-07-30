@@ -526,7 +526,47 @@ check("clear a route: quotas surface on the unplaced layer, adoption blocks, ref
   }
   assert.equal(scenario.unplacedQuotas().length, 0)
   assert.equal(scenario.adoptionBlockers().length, 0, "refit clears the gate")
-  assert.equal(scenario.changes().length, 6, "3 removals + 3 placements — the full story, recorded")
+  // Remove-then-place compacts: the list is the minimal diff, not a journal.
+  assert.equal(scenario.changes().length, 3, "3 net moves — remove+place pairs compacted")
+  assert.ok(scenario.changes().every((e) => e.kind === "StopMoved"), "each reads as one move")
+})
+
+check("the change list is the minimal honest diff — pairs cancel or combine", () => {
+  const mk = () => {
+    const q = quotaOf("q1", { pin: Pin.hypothetical(31.1, -81.4) })
+    q.place("korey", 2 as Weekday)
+    q.pullEvents()
+    return Scenario.from([q])
+  }
+  // unassign then reassign elsewhere = one move
+  const a = mk()
+  a.unplaceStop("q1", "korey", 2 as Weekday)
+  a.placeStop("q1", "dana", 4 as Weekday)
+  assert.equal(a.changes().length, 1)
+  assert.equal(a.changes()[0].kind, "StopMoved")
+  // unassign then reassign back home = nothing happened
+  const b = mk()
+  b.unplaceStop("q1", "korey", 2 as Weekday)
+  b.placeStop("q1", "korey", 2 as Weekday)
+  assert.equal(b.changes().length, 0, "returned home — no pending change")
+  // an owed pool mid-rebuild still carries its removal
+  const c = mk()
+  c.unplaceStop("q1", "korey", 2 as Weekday)
+  assert.equal(c.changes().length, 1)
+  assert.equal(c.changes()[0].kind, "StopRemoved", "owed = honest pending removal")
+  // place then unassign the same spot = change of mind, not two changes
+  const d = mk()
+  d.placeStop("q1", "dana", 4 as Weekday)
+  d.unplaceStop("q1", "dana", 4 as Weekday)
+  assert.equal(d.changes().length, 0)
+  // move then unassign the destination = one removal from the ORIGINAL spot
+  const e = mk()
+  e.moveStop("q1", { techId: "korey", weekday: 2 as Weekday }, { techId: "dana", weekday: 4 as Weekday })
+  e.unplaceStop("q1", "dana", 4 as Weekday)
+  assert.equal(e.changes().length, 1)
+  const only = e.changes()[0]
+  assert.equal(only.kind, "StopRemoved")
+  assert.equal((only as { from: { techId: string } }).from.techId, "korey", "removal traces to live")
 })
 
 check("the unplaced layer partitions: displaced quotas keep their memory, backlog stays backlog", () => {

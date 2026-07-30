@@ -313,7 +313,48 @@ export class Scenario {
     const quota = this.quotas.get(quotaId)
     if (!quota) throw new Error(`no quota ${quotaId} in this scenario`)
     change(quota)
-    this.recorded.push(...quota.pullEvents())
+    for (const e of quota.pullEvents()) this.record(e)
+  }
+
+  /**
+   * Record one event, keeping the change list the MINIMAL honest diff against
+   * live. Every recorded event is pending by definition, so pairs that cancel
+   * or combine do so here rather than crowding the list:
+   *   Removed(a) … Placed(b)      → Moved(a→b), or nothing when b = a
+   *   Placed(b) … Removed(b)      → nothing (placed, then changed our mind)
+   *   Moved(a→b) … Removed(b)     → Removed(a)
+   * An owed pool mid-rebuild still carries its StopRemoved until it lands.
+   */
+  private record(e: RoutingEvent): void {
+    const same = (x: Placement, y: Placement) => x.techId === y.techId && x.weekday === y.weekday
+    if (e.kind === "StopPlaced") {
+      for (let i = this.recorded.length - 1; i >= 0; i--) {
+        const prior = this.recorded[i]
+        if (prior.kind === "StopRemoved" && prior.quotaId === e.quotaId) {
+          this.recorded.splice(i, 1)
+          if (!same(prior.from, e.to)) {
+            this.recorded.push({ kind: "StopMoved", quotaId: e.quotaId, from: prior.from, to: e.to })
+          }
+          return
+        }
+      }
+    }
+    if (e.kind === "StopRemoved") {
+      for (let i = this.recorded.length - 1; i >= 0; i--) {
+        const prior = this.recorded[i]
+        if (prior.quotaId !== e.quotaId) continue
+        if (prior.kind === "StopPlaced" && same(prior.to, e.from)) {
+          this.recorded.splice(i, 1)
+          return
+        }
+        if (prior.kind === "StopMoved" && same(prior.to, e.from)) {
+          this.recorded.splice(i, 1)
+          this.recorded.push({ kind: "StopRemoved", quotaId: e.quotaId, from: prior.from, reason: e.reason })
+          return
+        }
+      }
+    }
+    this.recorded.push(e)
   }
 
   /* ---------------------------------------------------------------- reads */
