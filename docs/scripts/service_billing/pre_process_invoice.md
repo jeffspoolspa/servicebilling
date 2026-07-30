@@ -1,6 +1,6 @@
 # f/service_billing/pre_process_invoice
 
-> Status: [active]
+> Status: [active] — collapsed onto f/billing/_lib 2026-07-13 (enrichment sentence over shared verbs; stamps no status; derived processed/open_ar are terminal for enrichment)
 > Source: [f/service_billing/pre_process_invoice.py](../../../f/service_billing/pre_process_invoice.py)
 > Triggered by: [pg_net] on `billing.invoices` INSERT + [schedule] [dispatch_pre_processing](dispatch_pre_processing.md) backstop (60s) + auto-chain from [pull_qbo_invoices](pull_qbo_invoices.md) single-WO mode
 > Concurrency: `qbo_api`, `openai_api` (target — not yet applied)

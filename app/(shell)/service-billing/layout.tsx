@@ -79,7 +79,7 @@ export default async function ServiceBillingLayout({
         </div>
       </div>
 
-      <BillingTabs />
+      <BillingTabs openArCount={kpis.open_ar} />
 
       {children}
     </>

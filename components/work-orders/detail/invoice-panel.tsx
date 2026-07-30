@@ -2,16 +2,17 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { InvoiceCard } from "@/components/billing/invoice-card"
 import type {
   AppliedPayment,
+  CreditDecision,
   InvoiceDetail,
   OpenCredit,
   PaymentMethod,
+  ServiceBillingState,
   WorkOrderDetail,
 } from "@/lib/queries/dashboard"
 import { paymentChannelLabel } from "@/lib/payment-channel"
 import { ClassificationEditor } from "@/components/work-orders/classification-editor"
-import { CreditReviewCard } from "@/components/work-orders/credit-review-card"
-import { AppliedPaymentsCard } from "./applied-payments-card"
-import { PaymentMethodsCard } from "./payment-methods-card"
+import { PaymentsCreditsCard } from "./payments-credits-card"
+import { FieldFlag } from "@/components/ui/field-flag"
 
 /**
  * Invoice tab — everything about the QBO invoice side:
@@ -29,20 +30,30 @@ export function InvoicePanel({
   wo,
   invoice,
   openCredits,
+  creditDecisions,
+  billingState,
   paymentMethods,
   appliedPayments,
+  header,
+  voided,
 }: {
   wo: WorkOrderDetail
   invoice: InvoiceDetail | null
   openCredits: OpenCredit[]
+  creditDecisions: CreditDecision[]
+  billingState: ServiceBillingState | null
   paymentMethods: PaymentMethod[]
   appliedPayments: AppliedPayment[]
+  /** Replaces the card title — the detail page puts its tabs here. */
+  header?: React.ReactNode
+  /** Derived (billing.v_invoice_state) — suppresses the "paid" pill. */
+  voided?: boolean
 }) {
   if (!invoice) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle>Invoice (not yet matched)</CardTitle>
+        <CardHeader className={header ? "pt-2 pb-0" : undefined}>
+          {header ?? <CardTitle>Invoice (not yet matched)</CardTitle>}
         </CardHeader>
         <CardBody className="text-ink-mute text-sm">
           {wo.invoice_number
@@ -63,6 +74,8 @@ export function InvoicePanel({
           (components/billing/invoice-card); classification injected between
           header fields and line items. */}
       <InvoiceCard
+        header={header}
+        voided={voided}
         invoice={invoice}
         afterHeader={
           <div className="border-b border-line-soft">
@@ -79,42 +92,35 @@ export function InvoicePanel({
                 needsReviewReason={invoice.needs_review_reason}
               />
             ) : (
-              <LockedClassification invoice={invoice} />
+              <LockedClassification invoice={invoice} state={billingState} />
             )}
           </div>
         }
       />
 
-      {/* Applied payments (history) */}
-      <AppliedPaymentsCard payments={appliedPayments} />
-
-      {/* Credit review — open unapplied credits with Apply + Override */}
-      <CreditReviewCard
+      {/* ONE table over the money: every recommendation (all open payments/
+          credits are recommended) with its outcome — to decide / applied /
+          not applicable / lapsed. Replaces the Applied-payments + Credit-
+          review tabs. */}
+      <PaymentsCreditsCard
         qboInvoiceId={invoice.qbo_invoice_id}
         balance={Number(invoice.balance ?? 0)}
-        credits={openCredits}
-        overriddenAt={invoice.credit_review_overridden_at}
+        openCredits={openCredits}
+        decisions={creditDecisions}
+        appliedPayments={appliedPayments}
       />
 
-      {/* Payment methods on file — every active PM in QBO's wallet, with
-          the would-charge one highlighted. Read-only on processed
-          invoices, EXCEPT when balance > 0 — then each card row gets a
-          "Charge $X.XX" button so the user can recover an open balance
-          (e.g., emailed invoice that the customer never paid; we still
-          have their card on file and want to collect). The
-          AppliedPaymentsCard above shows the historical record. */}
-      <PaymentMethodsCard
-        qboInvoiceId={invoice.qbo_invoice_id}
-        methods={paymentMethods}
-        preferredPaymentType={invoice.preferred_payment_type}
-        disabled={invoice.billing_status === "processed"}
-        invoiceBalance={Number(invoice.balance ?? 0)}
-      />
     </div>
   )
 }
 
-function LockedClassification({ invoice }: { invoice: InvoiceDetail }) {
+function LockedClassification({
+  invoice,
+  state,
+}: {
+  invoice: InvoiceDetail
+  state: ServiceBillingState | null
+}) {
   return (
     <div className="px-5 py-4">
       <div className="flex items-baseline justify-between mb-3">
@@ -126,7 +132,18 @@ function LockedClassification({ invoice }: { invoice: InvoiceDetail }) {
         </span>
       </div>
       <div className="grid grid-cols-3 gap-4 text-[12px]">
-        <Field label="QBO class" value={invoice.qbo_class ?? "—"} />
+        <Field
+          label="QBO class"
+          value={invoice.qbo_class ?? "—"}
+          flag={
+            state && !state.class_present ? (
+              <FieldFlag
+                show
+                title="No QBO class — blocking processing. Re-run pre-processing or set it in Edit classification."
+              />
+            ) : null
+          }
+        />
         <Field
           label="Payment method"
           value={
@@ -134,8 +151,27 @@ function LockedClassification({ invoice }: { invoice: InvoiceDetail }) {
               ? "—"
               : paymentChannelLabel(invoice)
           }
+          flag={
+            state && !state.pm_resolved ? (
+              <FieldFlag
+                show
+                title={`Route is ${state.payment_route ?? "unresolved"} but no matching method is on file — blocking processing.`}
+              />
+            ) : null
+          }
         />
-        <Field label="Memo" value={invoice.memo ?? "—"} />
+        <Field
+          label="Memo"
+          value={invoice.memo ?? "—"}
+          flag={
+            state && !state.memo_present ? (
+              <FieldFlag
+                show
+                title="No memo — blocking processing. Pre-processing writes it (deterministic or AI); low-confidence memos need a manual edit here."
+              />
+            ) : null
+          }
+        />
       </div>
     </div>
   )
@@ -145,15 +181,18 @@ function Field({
   label,
   value,
   mono = false,
+  flag = null,
 }: {
   label: string
   value: string
   mono?: boolean
+  flag?: React.ReactNode
 }) {
   return (
     <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-[0.14em] text-ink-mute">
+      <div className="text-[10px] uppercase tracking-[0.14em] text-ink-mute inline-flex items-center gap-1.5">
         {label}
+        {flag}
       </div>
       <div
         className={`${mono ? "num text-ink" : "text-ink"} mt-0.5 truncate`}

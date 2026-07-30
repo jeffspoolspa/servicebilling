@@ -22,7 +22,14 @@ import { formatCurrency, formatDate } from "@/lib/utils/format"
  * can differ due to tax or QBO adjustments) live on the Invoice tab +
  * sidebar summary.
  */
-export function WorkOrderPanel({ wo }: { wo: WorkOrderDetail }) {
+export function WorkOrderPanel({
+  wo,
+  header,
+}: {
+  wo: WorkOrderDetail
+  /** Replaces the card title — the detail page puts its tabs here. */
+  header?: React.ReactNode
+}) {
   const techDisplay =
     wo.assigned_to?.split(",")[1]?.trim() ?? wo.assigned_to ?? "—"
   const hasWorkText = Boolean(
@@ -31,8 +38,8 @@ export function WorkOrderPanel({ wo }: { wo: WorkOrderDetail }) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Work</CardTitle>
+      <CardHeader className={header ? "pt-2 pb-0" : undefined}>
+        {header ?? <CardTitle>Work</CardTitle>}
       </CardHeader>
 
       {/* Meta strip — type · tech · office · completed. Horizontal row, whitespace-nowrap

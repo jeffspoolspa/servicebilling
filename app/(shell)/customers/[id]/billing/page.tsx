@@ -104,7 +104,7 @@ function ReadOnlyServicePreference({ current }: { current: Channel | null }) {
       <CardBody className="text-ink-mute text-[12px]">
         {current
           ? `Service invoices default to ${prefLabel(current)}.`
-          : "No explicit preference — invoices auto-derive from the default method on file."}
+          : "No preference on record — service invoices are emailed. A card on file is not consent to charge it."}
         <div className="mt-1 text-[11px]">Read-only access — ask an admin to change this.</div>
       </CardBody>
     </Card>

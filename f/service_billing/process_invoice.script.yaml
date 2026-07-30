@@ -1,4 +1,7 @@
-summary: Pre-confirm webhook_expectations when webhook arrived before insert
+summary: Service-billing charge handler + queue worker (ADR 009 sentence over f/billing/_lib)
+concurrency_key: qbo_writer
+concurrency_time_window_s: 5
+concurrent_limit: 1
 description: ''
 lock: '!inline f/service_billing/process_invoice.script.lock'
 kind: script

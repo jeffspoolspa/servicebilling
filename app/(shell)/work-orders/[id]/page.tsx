@@ -1,23 +1,21 @@
 import Link from "next/link"
-import { ObjectHeader } from "@/components/shell/object-header"
+import { BackButton } from "@/components/shell/back-button"
 import { ClipboardList } from "lucide-react"
 import { Pill } from "@/components/ui/pill"
 import { notFound } from "next/navigation"
 import {
   getWorkOrderDetail,
+  getInvoiceHistory,
+  getInvoiceStreamEvents,
+  getCustomerCard,
+  getInvoiceState,
   getLatestProcessAttempt,
-  getProcessAttempts,
   getAppliedPaymentsForInvoice,
+  type InvoiceState,
 } from "@/lib/queries/dashboard"
 import { formatDate } from "@/lib/utils/format"
-import { PreProcessButton } from "@/components/work-orders/pre-process-button"
-import { ProcessButton } from "@/components/work-orders/process-button"
-import { RevertButton } from "@/components/work-orders/revert-button"
-import { SyncButton } from "@/components/work-orders/sync-button"
-import { SkipButton } from "@/components/work-orders/skip-button"
-import { MarkProcessedButton } from "@/components/work-orders/mark-processed-button"
+import { HoldButton } from "@/components/work-orders/hold-button"
 import { RecoveryBanner } from "@/components/work-orders/recovery-banner"
-import { AttemptTimeline } from "@/components/work-orders/attempt-timeline"
 import { LiveWorkOrderDetail } from "@/components/work-orders/live-work-order-detail"
 import {
   DetailTabs,
@@ -26,9 +24,11 @@ import {
 import { WorkOrderPanel } from "@/components/work-orders/detail/work-order-panel"
 import { InvoicePanel } from "@/components/work-orders/detail/invoice-panel"
 import { SummaryCard } from "@/components/work-orders/detail/summary-card"
-import { PreProcessingCard } from "@/components/work-orders/detail/pre-processing-card"
-import { BonusCard } from "@/components/work-orders/detail/bonus-card"
-import { CustomerPaymentPreferenceCard } from "@/components/work-orders/detail/customer-payment-preference-card"
+import { HistoryPanel } from "@/components/work-orders/detail/history-panel"
+import { ProcessingPill } from "@/components/work-orders/detail/processing-pill"
+import { CustomerCard } from "@/components/work-orders/detail/customer-card"
+import { PaymentMethodInline } from "@/components/work-orders/detail/payment-method-inline"
+import { BonusInline } from "@/components/work-orders/detail/bonus-inline"
 import { createAnon } from "@/lib/supabase/anon"
 
 export const dynamic = "force-dynamic"
@@ -39,32 +39,38 @@ interface PageProps {
 }
 
 /**
- * Derived UI status for the ribbon + summary pill.
- * WOs no longer carry billing_status — it lives on the linked invoice.
+ * The sidebar pill. Reads billing.v_invoice_state — the ONE derivation
+ * (ADR-011) — rather than the invoice's stamped billing_status, which kept
+ * reporting "processed" after QBO voided the invoice underneath it.
+ *
+ * `voided` and `on_hold` are flags, not states, so they are returned as extra
+ * pills beside the state rather than replacing it.
  */
-function deriveStatus(
+const STATE_PILL: Record<
+  InvoiceState["state"],
+  { label: string; tone: "cyan" | "teal" | "sun" | "coral" | "grass" | "neutral" }
+> = {
+  paid: { label: "paid", tone: "grass" },
+  ar: { label: "open A/R", tone: "sun" },
+  in_flight: { label: "processing", tone: "cyan" },
+  needs_review: { label: "needs review", tone: "coral" },
+  audit: { label: "audit", tone: "coral" },
+}
+
+function summaryPills(
   billable: boolean,
-  qboInvoiceId: string | null,
-  invoiceStatus: string | null,
   skipped: boolean,
-): { label: string; tone: "cyan" | "teal" | "sun" | "coral" | "grass" | "neutral" } {
-  if (skipped) return { label: "skipped", tone: "neutral" }
-  if (!billable) return { label: "not billable", tone: "neutral" }
-  if (!qboInvoiceId) return { label: "awaiting invoice", tone: "cyan" }
-  switch (invoiceStatus) {
-    case "awaiting_pre_processing":
-      return { label: "awaiting pre-processing", tone: "cyan" }
-    case "needs_review":
-      return { label: "needs review", tone: "coral" }
-    case "ready_to_process":
-      return { label: "ready to process", tone: "teal" }
-    case "processing":
-      return { label: "processing", tone: "sun" }
-    case "processed":
-      return { label: "processed", tone: "grass" }
-    default:
-      return { label: "matched", tone: "cyan" }
-  }
+  state: InvoiceState | null,
+): { label: string; tone: "cyan" | "teal" | "sun" | "coral" | "grass" | "neutral" }[] {
+  if (skipped) return [{ label: "skipped", tone: "neutral" }]
+  if (!billable) return [{ label: "not billable", tone: "neutral" }]
+  // no invoice yet is a real state of the WO, not of an invoice
+  if (!state) return [{ label: "awaiting invoice", tone: "cyan" }]
+  return [
+    STATE_PILL[state.state],
+    ...(state.voided ? [{ label: "voided", tone: "coral" as const }] : []),
+    ...(state.on_hold ? [{ label: "on hold", tone: "sun" as const }] : []),
+  ]
 }
 
 export default async function WorkOrderDetailPage({ params, searchParams }: PageProps) {
@@ -72,14 +78,8 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
   const data = await getWorkOrderDetail(id)
   if (!data) notFound()
 
-  const { wo, invoice, openCredits, paymentMethods } = data
+  const { wo, invoice, openCredits, creditDecisions, billingState, paymentMethods } = data
   const skipped = wo.skipped_at != null
-  const status = deriveStatus(
-    wo.billable,
-    wo.qbo_invoice_id,
-    invoice?.billing_status ?? null,
-    skipped,
-  )
   const techDisplay = wo.assigned_to?.split(",")[1]?.trim() ?? wo.assigned_to ?? "—"
 
   // Default tab: invoice when one is linked, else work. URL param overrides.
@@ -89,57 +89,61 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
 
   // Parallel fetch what the panels need.
   // - processAttempt: latest only (still used by RecoveryBanner)
-  // - processAttempts: full timeline for the AttemptTimeline card
   // - appliedPayments: for the applied-payments card
-  // - customerPref + needsReviewCount: for CustomerPaymentPreferenceCard
+  // - historyEvents: sidebar History feed
   const customerId = invoice?.qbo_customer_id ?? null
   const sb = createAnon("public")
-  const [processAttempt, processAttempts, appliedPayments, custPrefRow, needsReviewCounts] =
+  const [
+    processAttempt,
+    appliedPayments,
+    historyEvents,
+    streamEvents,
+    custPrefRow,
+    customerCard,
+    openHold,
+    invoiceState,
+  ] =
     await Promise.all([
       invoice?.qbo_invoice_id
         ? getLatestProcessAttempt(invoice.qbo_invoice_id)
         : Promise.resolve(null),
       invoice?.qbo_invoice_id
-        ? getProcessAttempts(invoice.qbo_invoice_id)
-        : Promise.resolve([]),
-      invoice?.qbo_invoice_id
         ? getAppliedPaymentsForInvoice(invoice.qbo_invoice_id)
         : Promise.resolve([]),
+      invoice?.qbo_invoice_id
+        ? getInvoiceHistory(invoice.qbo_invoice_id)
+        : Promise.resolve([]),
+      invoice?.qbo_invoice_id
+        ? getInvoiceStreamEvents(invoice.qbo_invoice_id)
+        : Promise.resolve([]),
+      // Local Customers.id for the /customers/[id] link.
       customerId
         ? sb
             .from("Customers")
-            .select("id, preferred_payment_type")
+            .select("id")
             .eq("qbo_customer_id", customerId)
             .maybeSingle()
-            .then(
-              (r) =>
-                r.data as
-                  | { id: number | string; preferred_payment_type: string | null }
-                  | null,
-            )
+            .then((r) => r.data as { id: number | string } | null)
         : Promise.resolve(null),
-      // Two counts: needs_review invoices for this customer (a) without an
-      // override (cascade target), (b) with an override (would be skipped).
-      // Surface both so the user knows what'll change vs what won't.
-      customerId
-        ? Promise.all([
-            sb
-              .from("billing_invoices")
-              .select("qbo_invoice_id", { count: "exact", head: true })
-              .eq("qbo_customer_id", customerId)
-              .eq("billing_status", "needs_review")
-              .is("preferred_payment_type_overridden_at", null)
-              .then((r) => r.count ?? 0),
-            sb
-              .from("billing_invoices")
-              .select("qbo_invoice_id", { count: "exact", head: true })
-              .eq("qbo_customer_id", customerId)
-              .eq("billing_status", "needs_review")
-              .not("preferred_payment_type_overridden_at", "is", null)
-              .then((r) => r.count ?? 0),
-          ])
-        : Promise.resolve([0, 0] as [number, number]),
+      // Header context: billing route, credits, open A/R.
+      getCustomerCard(customerId),
+      // The open hold, if any. Subject is the WO — the gate
+      // (billing.invoice_on_hold) honours a hold on either side.
+      createAnon("billing")
+        .from("holds")
+        .select("reason, placed_by, placed_at")
+        .eq("subject_type", "work_order")
+        .eq("subject_id", id)
+        .is("released_at", null)
+        .maybeSingle()
+        .then((r) => r.data as { reason: string; placed_by: string; placed_at: string } | null),
+      // ADR-011 derived state — what the sidebar pill reports.
+      invoice?.qbo_invoice_id
+        ? getInvoiceState(invoice.qbo_invoice_id)
+        : Promise.resolve(null),
     ])
+
+  const pills = summaryPills(wo.billable, skipped, invoiceState)
 
   // Invoice tab should show an attention dot if there's something to look at
   const invoiceAttention =
@@ -157,97 +161,46 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
           router.refresh() (debounced 350ms) when any change. Without this
           the detail page is stale until manual reload. */}
       <LiveWorkOrderDetail />
-      <ObjectHeader back
-        eyebrow={`${wo.type} · ${wo.office_name ?? "—"}`}
-        title={`WO ${wo.wo_number}`}
-        sub={
-          <>
-            {customerLocalId != null && wo.customer ? (
-              <Link
-                href={`/customers/${customerLocalId}` as never}
-                className="text-cyan hover:underline"
-              >
-                {wo.customer}
-              </Link>
-            ) : (
-              wo.customer ?? "—"
-            )}
-            {` · ${techDisplay} · completed ${formatDate(wo.completed)}`}
-          </>
-        }
-        icon={<ClipboardList className="w-6 h-6" strokeWidth={1.8} />}
-        actions={
-          <div className="flex items-center gap-2 flex-wrap justify-end">
-            <Pill tone={status.tone} dot>
-              {status.label}
-            </Pill>
-            {wo.invoice_number && !skipped && <SyncButton woNumber={wo.wo_number} />}
+      {/* The header is the CUSTOMER, not the work order — the WO's own details
+          fill the page below. Name (linked to their page) and what they owe;
+          everything else about them lives one click away. The Sync /
+          Pre-process / Process / Mark-processed controls that lived here are
+          gone — each fired a step that now happens on its own, and a manual
+          second path to money has none of the queue's guards. */}
+      <div className="px-7 pt-6">
+      <div className="flex items-center gap-3 mb-3">
+        <BackButton />
+        <span className="text-[12px] text-ink-mute">
+          {wo.type} · {wo.office_name ?? "—"} · WO {wo.wo_number} · {techDisplay} ·
+          completed {formatDate(wo.completed)}
+        </span>
+        {invoice && <ProcessingPill stream={streamEvents} />}
+        <span className="ml-auto">
+          {/* A hold is a BILLING decision (don't transact on this yet), not a
+              processing control — it survived the header cleanup. Unlike the
+              Skip flag it replaced, it lives in billing.holds and emits an
+              event both ways, so the reason is in the invoice's history. */}
+          <HoldButton
+            woNumber={wo.wo_number}
+            held={Boolean(openHold)}
+            holdReason={openHold?.reason ?? null}
+          />
+        </span>
+      </div>
+      {customerCard && (
+        <CustomerCard data={customerCard} />
+      )}
+      </div>
 
-            {/* State-aware processing controls */}
-            {invoice && !skipped && (
-              <>
-                {(invoice.billing_status === "awaiting_pre_processing" ||
-                  invoice.billing_status === "needs_review") && (
-                  <PreProcessButton qboInvoiceId={invoice.qbo_invoice_id} />
-                )}
-                {invoice.billing_status === "ready_to_process" && (
-                  <>
-                    <RevertButton qboInvoiceId={invoice.qbo_invoice_id} />
-                    <ProcessButton
-                      qboInvoiceId={invoice.qbo_invoice_id}
-                      balance={Number(invoice.balance ?? 0)}
-                      paymentMethod={invoice.payment_method}
-                    />
-                  </>
-                )}
-                {/* Force-processed: close an already-settled invoice without
-                    charging or sending. Allowed from needs_review /
-                    ready_to_process (mirrors the force_mark_processed RPC). */}
-                {(invoice.billing_status === "needs_review" ||
-                  invoice.billing_status === "ready_to_process") && (
-                  <MarkProcessedButton
-                    qboInvoiceId={invoice.qbo_invoice_id}
-                    balance={Number(invoice.balance ?? 0)}
-                  />
-                )}
-              </>
-            )}
-            {/* Skip is a pre-charge option — available with no invoice, or
-                while the invoice is awaiting_pre_processing / needs_review
-                (nothing has been charged yet). Once ready_to_process or later,
-                skipping would abandon work we've already done — use "Mark
-                processed" instead. Always show Unskip so a prior skip can be
-                reversed even if the invoice has since moved forward. */}
-            {(() => {
-              const canSkip = !invoice ||
-                invoice.billing_status === "awaiting_pre_processing" ||
-                invoice.billing_status === "needs_review"
-              if (skipped || canSkip) {
-                return (
-                  <SkipButton
-                    woNumber={wo.wo_number}
-                    skipped={skipped}
-                    skippedReason={wo.skipped_reason}
-                  />
-                )
-              }
-              return null
-            })()}
-          </div>
-        }
-      />
-
-      {skipped && (
+      {openHold && (
         <div className="px-7 pt-5">
-          <div className="rounded-lg border border-line-soft bg-white/[0.02] px-4 py-3 flex items-center gap-3">
+          <div className="rounded-lg border border-sun/30 bg-sun/[0.06] px-4 py-3 flex items-center gap-3">
             <div className="text-ink-dim text-[12px]">
-              <span className="text-ink font-medium">Skipped</span>
-              {wo.skipped_at && (
-                <span className="text-ink-mute ml-2">
-                  {new Date(wo.skipped_at).toLocaleString()}
-                </span>
-              )}
-              {wo.skipped_reason && <span className="ml-2">— {wo.skipped_reason}</span>}
+              <span className="text-sun font-medium">On hold</span>
+              <span className="ml-2">— {openHold.reason}</span>
+              <span className="text-ink-mute ml-2">
+                {openHold.placed_by} · {new Date(openHold.placed_at).toLocaleString()}
+              </span>
             </div>
           </div>
         </div>
@@ -266,52 +219,71 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
       <div className="px-7 py-6 grid grid-cols-3 gap-5">
         {/* Left 2/3 — tab content */}
         <div className="col-span-2 flex flex-col gap-5">
-          <DetailTabs
-            active={activeTab}
-            woNumber={wo.wo_number}
-            invoiceAttention={invoiceAttention}
-            invoiceDisabled={!invoice}
-          />
-          {activeTab === "work" ? (
-            <WorkOrderPanel wo={wo} />
-          ) : (
-            <InvoicePanel
-              wo={wo}
-              invoice={invoice}
-              openCredits={openCredits}
-              paymentMethods={paymentMethods}
-              appliedPayments={appliedPayments}
-            />
-          )}
+          {(() => {
+            // one node, handed to whichever panel is showing — the tabs are
+            // that card's header, not a nav bar sitting above it
+            const tabs = (
+              <DetailTabs
+                active={activeTab}
+                woNumber={wo.wo_number}
+                invoiceAttention={invoiceAttention}
+                invoiceDisabled={!invoice}
+                docNumber={invoice?.doc_number ?? null}
+              />
+            )
+            return activeTab === "work" ? (
+              <WorkOrderPanel wo={wo} header={tabs} />
+            ) : (
+              <InvoicePanel
+                wo={wo}
+                invoice={invoice}
+                openCredits={openCredits}
+                creditDecisions={creditDecisions}
+                billingState={billingState}
+                paymentMethods={paymentMethods}
+                appliedPayments={appliedPayments}
+                header={tabs}
+                voided={invoiceState?.voided ?? false}
+              />
+            )
+          })()}
         </div>
 
         {/* Right 1/3 — persistent sidebar (summary + pre-processing + processing) */}
         <div className="flex flex-col gap-5">
-          <SummaryCard wo={wo} invoice={invoice} status={status} />
+          <SummaryCard
+            wo={wo}
+            invoice={invoice}
+            pills={pills}
+            state={billingState}
+            bonus={
+              invoice ? (
+                <BonusInline
+                  woNumber={wo.wo_number}
+                  initialOverride={wo.included_in_bonus}
+                  qboClass={invoice.qbo_class}
+                />
+              ) : undefined
+            }
+          />
           {invoice && (
-            <BonusCard
-              woNumber={wo.wo_number}
-              initialOverride={wo.included_in_bonus}
-              qboClass={invoice.qbo_class}
-            />
-          )}
-          <PreProcessingCard wo={wo} invoice={invoice} />
-          {invoice && customerId && (
-            <CustomerPaymentPreferenceCard
-              qboCustomerId={customerId}
-              customerName={invoice.customer_name}
-              currentPreference={
-                (custPrefRow?.preferred_payment_type as
-                  | "email"
-                  | "ach"
-                  | "credit_card"
-                  | null) ?? null
+            <PaymentMethodInline
+              qboInvoiceId={invoice.qbo_invoice_id}
+              methods={paymentMethods}
+              preferredPaymentType={
+                invoice.preferred_payment_type as
+                  | "email" | "ach" | "credit_card" | "card" | null
               }
-              needsReviewCount={needsReviewCounts[0]}
-              needsReviewOverriddenCount={needsReviewCounts[1]}
+              routeUnresolved={
+                billingState && !billingState.pm_resolved
+                  ? billingState.payment_route
+                  : null
+              }
+              disabled={invoice.billing_status === "processed"}
+              invoiceBalance={Number(invoice.balance ?? 0)}
             />
           )}
-          {invoice && <AttemptTimeline attempts={processAttempts} />}
+          {invoice && <HistoryPanel events={historyEvents} stream={streamEvents} />}
         </div>
       </div>
     </>

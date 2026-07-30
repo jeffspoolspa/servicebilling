@@ -1,6 +1,6 @@
 # Script: process_maint_period
 
-> Status: [active]
+> Status: [retired pending verification 2026-07-10] — superseded by [process_maint_charges](process_maint_charges.md) (queue-drained worker, conventions/WORKFLOW_EXECUTION.md); kept deployed as manual fallback
 > Path: `f/billing/process_maint_period` (python3)
 > Concurrency: `qbo_writer` (limit 1 — money movement serializes)
 > Flow: [monthly-maintenance-billing](../../flows/monthly-maintenance-billing/index.md), Phase B

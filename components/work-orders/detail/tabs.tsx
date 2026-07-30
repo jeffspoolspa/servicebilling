@@ -5,6 +5,10 @@ import { cn } from "@/lib/utils/cn"
  * URL-driven tab switcher for the WO detail page.
  * `?tab=work` or `?tab=invoice` (default depends on whether invoice exists).
  *
+ * Rendered INSIDE the panel's own CardHeader, in place of its title — the two
+ * views are two faces of one card, not two pages behind a nav bar. The header
+ * already draws the bottom rule, so the active tab's underline lands on it.
+ *
  * Server-rendered via Link — no client JS, navigation preserves scroll
  * position when Next's router handles it.
  */
@@ -18,20 +22,28 @@ interface Props {
   invoiceAttention?: boolean
   /** When true, Invoice tab is disabled (WO not linked). */
   invoiceDisabled?: boolean
+  /** The matched invoice's QBO doc number, so the tab names what it shows. */
+  docNumber?: string | null
 }
 
-export function DetailTabs({ active, woNumber, invoiceAttention, invoiceDisabled }: Props) {
+export function DetailTabs({
+  active,
+  woNumber,
+  invoiceAttention,
+  invoiceDisabled,
+  docNumber,
+}: Props) {
   return (
-    <div className="flex items-center gap-1 border-b border-line-soft">
+    <div className="flex items-center gap-1 -ml-2">
       <TabLink
         href={`/work-orders/${woNumber}?tab=work` as never}
         active={active === "work"}
       >
-        Work order
+        Work order {woNumber}
       </TabLink>
       {invoiceDisabled ? (
         <div
-          className="px-4 py-2 text-[12px] uppercase tracking-[0.08em] text-ink-mute/40 cursor-not-allowed"
+          className="px-2.5 py-2 text-[12px] uppercase tracking-[0.08em] text-ink-mute/40 cursor-not-allowed"
           title="Invoice not yet matched"
         >
           Invoice
@@ -42,7 +54,7 @@ export function DetailTabs({ active, woNumber, invoiceAttention, invoiceDisabled
           active={active === "invoice"}
           attention={invoiceAttention}
         >
-          Invoice
+          Invoice {docNumber ?? ""}
         </TabLink>
       )}
     </div>
@@ -65,7 +77,7 @@ function TabLink({
       href={href as never}
       scroll={false}
       className={cn(
-        "relative px-4 py-2 text-[12px] uppercase tracking-[0.08em] font-medium transition-colors",
+        "relative px-2.5 py-2 text-[12px] uppercase tracking-[0.08em] font-medium transition-colors",
         active
           ? "text-ink border-b-2 border-cyan -mb-px"
           : "text-ink-mute hover:text-ink",

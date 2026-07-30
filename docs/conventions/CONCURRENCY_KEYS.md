@@ -27,13 +27,13 @@ When you write a new script that touches an external API, find the key here firs
 
 ### `qbo_api`
 
-- **Used by**: every script that calls QuickBooks Online (refresh_*, pull_qbo_*, process_work_order, pre_process_invoice, reconcile_payments, cdc_reconciler, all `f/check_buddy/*`)
+- **Used by**: every script that calls QuickBooks Online (refresh_*, pull_qbo_*, pre_process_invoice, reconcile_payments, cdc_reconciler, all `f/check_buddy/*`)
 - **Recommended limits**: `concurrent_limit: 5`, `concurrency_time_window_s: 10` (or `1, 5` for conservative scripts like daily_payment_sync)
 - **Why**: QBO has a per-realm rate limit (~500 requests/minute, varies by endpoint). Serializing to ~5 concurrent calls keeps us well under the limit even during burst-triggered fanout (e.g., webhook arrivals)
 
 ### `qbo_writer`
 
-- **Used by**: scripts that WRITE to QBO (process_work_order, push_invoice_edits, apply_credit_manual, monthly_autopay flow)
+- **Used by**: scripts that WRITE money-side to QBO/Intuit (process_invoice, process_maint_charges, push_invoice_edits, apply_credit_manual)
 - **Recommended limits**: `concurrent_limit: 1`, `concurrency_time_window_s: 5`
 - **Why**: Serialize every money-movement-side QBO write to eliminate race conditions on the same invoice/payment. Read-only refreshes can run alongside (they use `qbo_api`, not `qbo_writer`)
 
@@ -66,7 +66,7 @@ When you write a new script that touches an external API, find the key here firs
 
 ### `intuit_payments`
 
-- **Used by**: process_work_order's charge/echeck calls (currently called inline; would be split out if we ever isolate the charge step)
+- **Used by**: [retired] — charge/echeck calls live in f/billing/_lib (charge_and_record) under the callers' qbo_writer; per-call volume is governed by the billing.rate_buckets token bucket (ADR 008 §4)
 - **Recommended limits**: `concurrent_limit: 1`, `concurrency_time_window_s: 5`
 - **Why**: Money movement. One at a time. Belt-and-suspenders on top of the per-attempt idempotency key
 

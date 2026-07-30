@@ -27,6 +27,7 @@ export interface DashboardKpis {
   total_billable_value: number
   audit_billable_zero_subtotal: number
   audit_non_billable_with_charges: number
+  open_ar: number
 }
 
 export async function getDashboardKpis(): Promise<DashboardKpis> {
@@ -112,9 +113,12 @@ export async function getDashboardKpis(): Promise<DashboardKpis> {
   ])
 
   // Audit counts: data-quality issues not caught by pre-processing.
-  const [auditZero, auditNonBillable] = await Promise.all([
+  // Open AR: sent invoices carrying an open balance (billing.v_invoice_status
+  // derivation) — powers the tab badge.
+  const [auditZero, auditNonBillable, openAr] = await Promise.all([
     sb.from("v_billable_zero_subtotal").select("wo_number", { count: "exact", head: true }),
     sb.from("v_non_billable_with_charges").select("wo_number", { count: "exact", head: true }),
+    sb.from("v_open_ar").select("wo_number", { count: "exact", head: true }),
   ])
 
   return {
@@ -133,6 +137,7 @@ export async function getDashboardKpis(): Promise<DashboardKpis> {
     total_billable_value: totalBillableSum,
     audit_billable_zero_subtotal: auditZero.count ?? 0,
     audit_non_billable_with_charges: auditNonBillable.count ?? 0,
+    open_ar: openAr.count ?? 0,
   }
 }
 
@@ -331,6 +336,57 @@ export async function getBillingQueue(opts: {
   }))
 
   return { rows, total: count ?? 0 }
+}
+
+// ─── Open AR (sent invoices carrying an open balance) ────────────────────
+// Backed by public.v_open_ar (wrapper over billing.v_open_ar), which reads
+// billing.v_invoice_status: derived_status = 'open_ar' means the invoice was
+// sent but money is still outstanding. ar_reason distinguishes a declined
+// charge from a plain unpaid invoice.
+
+export interface OpenArRow {
+  wo_number: string
+  customer: string | null
+  qbo_invoice_id: string
+  invoice_number: string | null
+  qbo_balance: number | null
+  total_amt: number | null
+  txn_date: string | null
+  due_date: string | null
+  days_past_due: number
+  last_attempt_status: string | null
+  ar_reason: "declined" | "invoiced"
+  preferred_payment_type: string | null
+}
+
+const OPEN_AR_COLS =
+  "wo_number, customer, qbo_invoice_id, invoice_number, qbo_balance, total_amt, " +
+  "txn_date, due_date, days_past_due, last_attempt_status, ar_reason, preferred_payment_type"
+
+export async function getOpenAr(opts: {
+  offset?: number
+  limit?: number
+  sortBy?: string
+  sortDir?: "asc" | "desc"
+  search?: string
+} = {}): Promise<{ rows: OpenArRow[]; total: number }> {
+  const sb = createAnon("public")
+  const offset = opts.offset ?? 0
+  const limit = opts.limit ?? 25
+  const sortBy = opts.sortBy ?? "days_past_due"
+  const sortDir = opts.sortDir ?? "desc"
+  let q = sb
+    .from("v_open_ar")
+    .select(OPEN_AR_COLS, { count: "exact" })
+    .order(sortBy, { ascending: sortDir === "asc", nullsFirst: false })
+    .range(offset, offset + limit - 1)
+  q = applyAuditSearch(q, opts.search)
+  const { data, count, error } = await q
+  if (error) {
+    console.error("getOpenAr error:", error)
+    return { rows: [], total: 0 }
+  }
+  return { rows: (data ?? []) as unknown as OpenArRow[], total: count ?? 0 }
 }
 
 // ─── Missing invoice alerts (WO side only; no invoice yet) ───────────────
@@ -763,7 +819,6 @@ export interface InvoiceDetail {
   statement_memo: string | null
   subtotal_ok: boolean | null
   enrichment_ok: boolean | null
-  credits_applied: CreditApplied[] | null
   pre_processed_at: string | null
   processed_at: string | null
   // Credit-review override state (user acknowledged credits not applicable)
@@ -808,6 +863,155 @@ export interface OpenCredit {
   txn_date: string | null
   ref_num: string | null
   memo: string | null
+}
+
+/** One row of the per-invoice credit decision record (billing.invoice_credit_decisions
+ * via the public view) — the frozen snapshot of every credit CONSIDERED for
+ * this invoice and its outcome. */
+export interface CreditDecision {
+  id: number
+  qbo_invoice_id: string
+  credit_id: string
+  amount: number | null
+  unapplied_at_decision: number | null
+  state: "proposed" | "applied" | "rejected" | "candidate" | "stale" // candidate/stale = legacy rows
+  reason: string | null
+  decided_by: string | null
+  applied_via: string | null
+  created_at: string
+  decided_at: string | null
+  applied_at: string | null
+  credit_type: string | null
+  ref_num: string | null
+  memo: string | null
+  txn_date: string | null
+  current_unapplied_amt: number | null
+}
+
+/**
+ * One row of billing.v_invoice_state — ADR-011's derived invoice state.
+ *
+ * `state` is the whole answer: paid | ar | in_flight | needs_review | audit.
+ * `sent`, `on_hold` and `voided` are FLAGS, not states — an invoice can be
+ * voided and settled at once, and the flag wins for display.
+ *
+ * This replaced reading invoice.billing_status, a stamped column that kept
+ * saying "processed" after QBO voided the invoice underneath it.
+ */
+export interface InvoiceState {
+  qbo_invoice_id: string
+  balance: number | null
+  sent: boolean
+  settled: boolean
+  voided: boolean
+  on_hold: boolean
+  state: "paid" | "ar" | "in_flight" | "needs_review" | "audit"
+}
+
+export async function getInvoiceState(
+  qboInvoiceId: string,
+): Promise<InvoiceState | null> {
+  const { data } = await createAnon("billing")
+    .from("v_invoice_state")
+    .select("qbo_invoice_id, balance, sent, settled, voided, on_hold, state")
+    .eq("qbo_invoice_id", qboInvoiceId)
+    .maybeSingle()
+  return (data as InvoiceState | null) ?? null
+}
+
+/** One row of public.service_billing_state (derived readiness v3) — the
+ * pre-processing card's whole data contract: per-rule indicator booleans
+ * (each named for the field it describes), the ready conjunction, the credit
+ * decision rollup, and freshness provenance. */
+export interface ServiceBillingState {
+  qbo_invoice_id: string
+  qbo_customer_id: string | null
+  balance: number | null
+  subtotal: number | null
+  invoice_verified_at: string | null
+  // per-rule indicators
+  run_complete: boolean
+  credits_settled: boolean
+  subtotal_matches: boolean
+  memo_present: boolean
+  class_present: boolean
+  due_date_ok: boolean
+  payment_route: string | null
+  pm_resolved: boolean
+  ready: boolean
+  // credit decision rollup (events)
+  undecided_credit_count: number
+  proposed_count: number
+  applied_count: number
+  rejected_count: number
+  credits_applied_amount: number
+  // provenance + context
+  credits_verified_at: string | null
+  pm_verified_at: string | null
+  reviewed_at: string | null
+  pre_processed_at: string | null
+  pre_process_stage: string | null
+  derived_status: string | null
+  needs_review_reason: string | null
+}
+
+/** One row of public.invoice_history — the per-invoice event log the
+ * History tab renders (pre-process runs, process attempts, credit decision
+ * events, review completions). */
+export interface InvoiceHistoryEvent {
+  qbo_invoice_id: string
+  at: string
+  kind: string
+  outcome: string | null
+  detail: string | null
+  amount: number | null
+  actor: string | null
+}
+
+export async function getInvoiceHistory(
+  qboInvoiceId: string,
+): Promise<InvoiceHistoryEvent[]> {
+  const sb = createAnon("public")
+  const { data } = await sb
+    .from("invoice_history")
+    .select("*")
+    .eq("qbo_invoice_id", qboInvoiceId)
+    .order("at", { ascending: false })
+    .limit(200)
+  return (data ?? []) as InvoiceHistoryEvent[]
+}
+
+/** One row of the ADR-010 domain event stream, via the public.invoice_events
+ * RPC — invoice-homed events plus events naming this invoice as a participant
+ * (payment applications, charges). Payload carries changes/lines/provenance. */
+export interface InvoiceStreamEvent {
+  seq: number
+  occurred_at: string
+  aggregate: string
+  aggregate_id: string
+  type: string
+  actor: string
+  participants: string[]
+  payload: {
+    changes?: Record<string, { from: string | null; to: string | null }>
+    lines?: { invoice_id: string; amount: number }[]
+    funding?: { kind: string; id?: string }
+    amount?: number
+    error?: string | null
+    reason?: string | null
+    provenance?: { source?: string; intent_ref?: string; discovered_via?: string }
+    [k: string]: unknown
+  }
+}
+
+export async function getInvoiceStreamEvents(
+  qboInvoiceId: string,
+): Promise<InvoiceStreamEvent[]> {
+  const sb = createAnon("public")
+  const { data } = await sb.rpc("invoice_events", {
+    p_qbo_invoice_id: qboInvoiceId,
+  })
+  return (data ?? []) as InvoiceStreamEvent[]
 }
 
 export interface PaymentMethod {
@@ -1163,6 +1367,8 @@ export async function getWorkOrderDetail(
       wo: WorkOrderDetail
       invoice: InvoiceDetail | null
       openCredits: OpenCredit[]
+      creditDecisions: CreditDecision[]
+      billingState: ServiceBillingState | null
       paymentMethods: PaymentMethod[]
     }
   | null
@@ -1181,13 +1387,15 @@ export async function getWorkOrderDetail(
 
   let invoice: InvoiceDetail | null = null
   let openCredits: OpenCredit[] = []
+  let creditDecisions: CreditDecision[] = []
+  let billingState: ServiceBillingState | null = null
   let paymentMethods: PaymentMethod[] = []
 
   if (wo.qbo_invoice_id) {
     const { data: inv } = await sb
       .from("billing_invoices")
       .select(
-        "qbo_invoice_id, doc_number, qbo_customer_id, customer_name, txn_date, due_date, total_amt, subtotal, balance, email_status, line_items, fetched_at, billing_status, needs_review_reason, payment_method, qbo_class, memo, statement_memo, subtotal_ok, enrichment_ok, credits_applied, pre_processed_at, processed_at, credit_review_overridden_at, credit_review_overridden_note, preferred_payment_type",
+        "qbo_invoice_id, doc_number, qbo_customer_id, customer_name, txn_date, due_date, total_amt, subtotal, balance, email_status, line_items, fetched_at, billing_status, needs_review_reason, payment_method, qbo_class, memo, statement_memo, subtotal_ok, enrichment_ok, pre_processed_at, processed_at, credit_review_overridden_at, credit_review_overridden_note, preferred_payment_type",
       )
       .eq("qbo_invoice_id", wo.qbo_invoice_id as string)
       .maybeSingle()
@@ -1200,7 +1408,7 @@ export async function getWorkOrderDetail(
       const sixMonthsAgo = new Date()
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
       const cutoff = sixMonthsAgo.toISOString().slice(0, 10)
-      const [credRes, pmRes] = await Promise.all([
+      const [credRes, decRes, stateRes, pmRes] = await Promise.all([
         sb
           .from("billing_customer_payments")
           .select("id, qbo_payment_id, type, unapplied_amt, total_amt, txn_date, ref_num, memo")
@@ -1208,6 +1416,21 @@ export async function getWorkOrderDetail(
           .gt("unapplied_amt", 0)
           .or(`txn_date.is.null,txn_date.gte.${cutoff}`)
           .order("txn_date", { ascending: true }),
+        // The per-invoice credit decision record — what pre-process saw for
+        // THIS invoice and each credit's outcome (candidate/applied/rejected/
+        // stale). The frozen snapshot; openCredits above is the live view.
+        sb
+          .from("billing_invoice_credit_decisions")
+          .select("*")
+          .eq("qbo_invoice_id", wo.qbo_invoice_id as string)
+          .order("created_at", { ascending: true }),
+        // The one-row pre-processing contract: state machine + gates +
+        // credit rollup + freshness provenance (service_billing_state v2).
+        sb
+          .from("service_billing_state")
+          .select("*")
+          .eq("qbo_invoice_id", wo.qbo_invoice_id as string)
+          .maybeSingle(),
         // Show every active PM in QBO's wallet for this customer. Whether
         // any individual PM is flagged QBO-default is independent of
         // whether the customer exists in our cache — and it's also
@@ -1228,9 +1451,55 @@ export async function getWorkOrderDetail(
       openCredits = ((credRes.data ?? []) as OpenCredit[]).filter(
         (c) => !(c.memo && /maint/i.test(c.memo)),
       )
+      creditDecisions = (decRes.data ?? []) as CreditDecision[]
+      billingState = (stateRes.data ?? null) as ServiceBillingState | null
       paymentMethods = (pmRes.data ?? []) as PaymentMethod[]
     }
   }
 
-  return { wo: wo as WorkOrderDetail, invoice, openCredits, paymentMethods }
+  return { wo: wo as WorkOrderDetail, invoice, openCredits, creditDecisions, billingState, paymentMethods }
+}
+
+/* ── Customer card (WO detail header) ─────────────────────────────────── */
+
+import type { CustomerCardData } from "@/components/work-orders/detail/customer-card"
+
+/**
+ * The customer this work order belongs to: contact, address, balance,
+ * unapplied credits, billing route and recent invoice history.
+ *
+ * The route comes back RESOLVED by billing.resolve_preferred_payment_type —
+ * the same function the gate and enrichment use — rather than read from a
+ * stored column, so the header cannot show a route the pipeline wouldn't take.
+ */
+export async function getCustomerCard(
+  qboCustomerId: string | null,
+): Promise<CustomerCardData | null> {
+  if (!qboCustomerId) return null
+  const sb = createAnon("public")
+  const { data } = await sb.rpc("customer_card", {
+    p_qbo_customer_id: qboCustomerId,
+  })
+  if (!data) return null
+  const d = data as Record<string, unknown>
+  return {
+    qboCustomerId: (d.qboCustomerId as string) ?? null,
+    localId: d.localId != null ? String(d.localId) : null,
+    name: (d.name as string) ?? "—",
+    accountType: (d.accountType as string) ?? null,
+    accountName: (d.accountName as string) ?? null,
+    isActive: (d.isActive as boolean) ?? null,
+    email: (d.email as string) ?? null,
+    phone: (d.phone as string) ?? null,
+    address: (d.address as string) ?? null,
+    preferredPaymentType: (d.preferredPaymentType as string) ?? null,
+    resolvedRoute: (d.resolvedRoute as string) ?? null,
+    defaultMethod: (d.defaultMethod as CustomerCardData["defaultMethod"]) ?? null,
+    activeMethodCount: Number(d.activeMethodCount ?? 0),
+    openArTotal: Number(d.openArTotal ?? 0),
+    openArCount: Number(d.openArCount ?? 0),
+    openCreditTotal: Number(d.openCreditTotal ?? 0),
+    openCreditCount: Number(d.openCreditCount ?? 0),
+    invoices: (d.invoices as CustomerCardData["invoices"]) ?? [],
+  }
 }

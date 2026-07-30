@@ -8,7 +8,7 @@ import { guardApi } from "@/lib/auth/api"
  * Body: { wo_number: string }
  *
  * Legacy retry endpoint — kept for UI compatibility. Resolves the WO's
- * qbo_invoice_id and re-runs pre-processing on it (force=true).
+ * qbo_invoice_id and re-runs pre-processing on it.
  *
  * The preferred path for interactive UIs is /api/billing/pre-process
  * directly with qbo_invoice_id (saves a lookup).
@@ -40,12 +40,9 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // bulk_all: false is REQUIRED — script defaults bulk_all=True, omitting
-  // it makes this single-WO retry scan every needs_review invoice.
+  // One invoice, by id. There is no bulk mode to fall into any more.
   const { jobId } = await triggerScript("f/service_billing/pre_process_invoice", {
-    qbo_invoice_id: wo.qbo_invoice_id,
-    bulk_all: false,
-    force: true,
+    qbo_invoice_id: wo.qbo_invoice_id
   })
 
   return NextResponse.json({ jobId, status: "triggered", wo_number })

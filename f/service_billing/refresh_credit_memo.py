@@ -80,7 +80,9 @@ def parse_qbo_timestamp(ts):
         return None
 
 
-def main(qbo_credit_memo_id: str, operation: str = ""):
+def main(qbo_credit_memo_id: str, operation: str = "", qbo_body: dict | None = None):
+    # qbo_body accepted for dispatcher parity (CDC/inbox); this handler
+    # refetches regardless — CM applications ripple beyond the body.
     """
     Args:
       qbo_credit_memo_id: Required. QBO Id of the CreditMemo (raw, no CM- prefix).
@@ -121,6 +123,9 @@ def main(qbo_credit_memo_id: str, operation: str = ""):
                 RETURNING qbo_customer_id
             """, (storage_id,))
             row = cur.fetchone()
+            # (no decision-table maintenance: the unapplied_amt=0 write above
+            # drops this credit out of the derived undecided set on its own —
+            # derived readiness v3)
             conn.commit()
             cur.close()
             return {
@@ -229,6 +234,9 @@ def main(qbo_credit_memo_id: str, operation: str = ""):
                       -- preserve applied_via + applied_at on updates
                 """, (storage_id, inv_id, float(amount), txn_date))
                 links_written += 1
+
+        # No decision-table maintenance (derived readiness v3): the upsert
+        # above already moved unapplied_amt, and "undecided" derives from it.
 
         # Recheck linked invoices explicitly. This duplicates work the new
         # trg_recheck_credits_on_payment_change trigger does (since the

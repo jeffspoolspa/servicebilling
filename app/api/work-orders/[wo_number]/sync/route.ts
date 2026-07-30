@@ -13,7 +13,11 @@ interface RouteContext {
  *   1. Looks up the WO's invoice_number
  *   2. Fetches that invoice from QBO live
  *   3. Upserts billing.invoices + links the WO via qbo_invoice_id
- *   4. Auto-chains to pre_process_invoice with force=True
+ *
+ * Pre-processing is NOT called from here. Step 3 fires
+ * trg_enqueue_service_preprocess, and dispatch_pre_processing drains the
+ * queue — so the enrichment happens exactly once, under the queue's
+ * one-run-per-invoice index.
  *
  * Returns the Windmill jobId immediately. Client polls/refreshes after a delay.
  */

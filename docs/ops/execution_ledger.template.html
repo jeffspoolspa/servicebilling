@@ -1,0 +1,110 @@
+<title>Windmill Execution Ledger &mdash; JPS Internal</title>
+<style>
+  :root { --bg:#0b1622; --elev:#101f2d; --elev2:#0e1b28; --line:rgba(120,180,205,.14); --line-s:rgba(120,180,205,.08);
+    --ink:#e6f0f5; --ink-dim:#a7c0cd; --ink-mute:#6f8a99; --accent:#35c9d6; --crit:#f0616d; --good:#3fb27f;
+    --bar:rgba(53,201,214,.85); --bar-track:rgba(120,180,205,.10); --shadow:0 8px 24px -12px rgba(0,0,0,.6); }
+  @media (prefers-color-scheme:light){ :root{ --bg:#eef3f6;--elev:#fff;--elev2:#f6f9fb;--line:rgba(20,60,80,.12);--line-s:rgba(20,60,80,.07);
+    --ink:#0e2230;--ink-dim:#3f5c6b;--ink-mute:#7690a0;--accent:#0e97a4;--crit:#d63b48;--good:#2b8c62;
+    --bar:rgba(14,151,164,.8);--bar-track:rgba(20,60,80,.08);--shadow:0 10px 30px -16px rgba(20,60,80,.25);} }
+  :root[data-theme="dark"]{ --bg:#0b1622;--elev:#101f2d;--elev2:#0e1b28;--line:rgba(120,180,205,.14);--line-s:rgba(120,180,205,.08);
+    --ink:#e6f0f5;--ink-dim:#a7c0cd;--ink-mute:#6f8a99;--accent:#35c9d6;--crit:#f0616d;--good:#3fb27f;--bar:rgba(53,201,214,.85);--bar-track:rgba(120,180,205,.10);}
+  :root[data-theme="light"]{ --bg:#eef3f6;--elev:#fff;--elev2:#f6f9fb;--line:rgba(20,60,80,.12);--line-s:rgba(20,60,80,.07);
+    --ink:#0e2230;--ink-dim:#3f5c6b;--ink-mute:#7690a0;--accent:#0e97a4;--crit:#d63b48;--good:#2b8c62;--bar:rgba(14,151,164,.8);--bar-track:rgba(20,60,80,.08);}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 22px 72px}
+  .eyebrow{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600}
+  h1{font-size:26px;line-height:1.15;margin:.3em 0 .1em;letter-spacing:-.01em}
+  .statline{color:var(--ink-dim);font-size:14px;margin-top:6px}
+  .statline b{color:var(--ink)}
+  .statline .warn{color:var(--crit);font-weight:600}
+  .seatnote{margin-top:10px;font-size:13px;color:var(--ink-mute);background:var(--elev);border:1px solid var(--line);border-radius:9px;padding:10px 14px}
+  .seatnote b{color:var(--ink)}
+  .tablewrap{margin-top:18px;overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--elev);box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;min-width:780px;font-size:13.5px}
+  th,td{text-align:left;padding:9px 13px;border-bottom:1px solid var(--line-s);vertical-align:top}
+  th{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-mute);font-weight:600;position:sticky;top:0;background:var(--elev);z-index:1}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--elev2)}
+  td.num,th.num{text-align:right;white-space:nowrap}
+  .script{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12px;white-space:nowrap}
+  .desc{color:var(--ink-dim);font-size:12.5px;max-width:320px}
+  .src{color:var(--ink-mute);font-size:11px;white-space:nowrap}
+  .flag{color:var(--crit);font-weight:600;font-size:11px;display:block;margin-top:2px}
+  .barcell{width:84px;padding-right:0}
+  .bar{height:6px;border-radius:3px;background:var(--bar);display:block}
+  .foot{margin-top:18px;color:var(--ink-mute);font-size:12.5px;display:flex;flex-wrap:wrap;gap:6px 18px}
+  .foot b{color:var(--ink-dim)}
+  a{color:var(--good)}
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">Windmill execution ledger &middot; jps-internal</div>
+  <h1 id="title">Execution ledger</h1>
+  <div class="statline" id="statline"></div>
+  <div class="seatnote" id="seatnote"></div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr>
+        <th>Script</th><th>What it does</th>
+        <th class="num">Billable</th><th class="barcell"></th>
+        <th class="num">Seats/mo</th><th class="num">Compute</th><th class="num">Runs</th><th class="num">Failed</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div class="foot">
+    <span><b>Billable</b> = what Windmill charges: max(1, ceil(seconds)) per job &times; 2GB memory blocks.</span>
+    <span><b>Seats/mo</b> = this script&rsquo;s marginal cost = its monthly billable &divide; 10,000 &mdash; what you&rsquo;d save by replacing/removing it.</span>
+    <span>Source <b class="mono">ops.script_usage_daily</b>; descriptions from each script&rsquo;s Windmill summary.</span>
+  </div>
+</div>
+
+<script>
+// Snapshot; the scheduled task refreshes DATA and republishes. b=billable execs, c=compute s, r=runs, f=failed.
+const DATA = /*__LEDGER_DATA__*/{"day":"YYYY-MM-DD","rows":[]}/*__END__*/;
+
+const RUNAWAY_RUNS = 5000, LOOP_RUNS = 200, LOOP_RATE = 0.30;
+const QUOTA = 10000, USER_SEATS = 1;
+const nf = n => Math.round(n).toLocaleString('en-US');
+const seats = m => USER_SEATS + Math.ceil(Math.max(0, m - QUOTA*USER_SEATS)/QUOTA);
+const seatsFor = b => (b*30/QUOTA).toFixed(1);   // per-script marginal seats/mo = monthly billable / 10k
+const runawayReason = r =>
+  r.r >= RUNAWAY_RUNS ? nf(r.r)+" runs/day"
+  : (r.r >= LOOP_RUNS && r.f/Math.max(r.r,1) >= LOOP_RATE) ? nf(r.f)+"/"+nf(r.r)+" failing" : "";
+
+const rows = DATA.rows;
+const totBill = rows.reduce((a,r)=>a+r.b,0);
+const totC = rows.reduce((a,r)=>a+r.c,0);
+const totRuns = rows.reduce((a,r)=>a+r.r,0);
+const totFail = rows.reduce((a,r)=>a+r.f,0);
+const nRun = rows.filter(runawayReason).length;
+const maxB = Math.max(...rows.map(r=>r.b));
+const monthly = totBill*30, seatsEst = seats(monthly);
+
+document.getElementById('title').textContent = "Execution ledger — " + DATA.day;
+document.getElementById('statline').innerHTML =
+  (nRun ? `<span class="warn">&#9888; ${nRun} runaway</span> &middot; ` : "")
+  + `<b>${nf(totBill)}</b> billable executions &middot; <b>${(totC/60).toFixed(0)} min</b> compute &middot; `
+  + `<b class="${totFail?'warn':''}">${nf(totFail)}</b> failures &middot; <b>${rows.length}</b> scripts`;
+document.getElementById('seatnote').innerHTML =
+  `At this day&rsquo;s rate: &asymp;<b>${nf(monthly)}</b> billable executions/month &rarr; <b>${seatsEst} seats</b> `
+  + `(1 user seat + ${seatsEst-1} from computation; ${nf(QUOTA)} included per seat). `
+  + `&nbsp;<b>Capacity note:</b> the 50-worker fleet was idle at audit &mdash; provisioned, not load.`;
+
+document.getElementById('rows').innerHTML = rows.map(r=>{
+  const reason = runawayReason(r);
+  const w = Math.max(2, Math.round((r.b/maxB)*78));
+  return `<tr>
+    <td><span class="script" style="color:${reason?'var(--crit)':'var(--ink)'}">${r.s}</span>${reason?`<span class="flag">&#9888; ${reason}</span>`:''}</td>
+    <td><span class="desc">${r.d}</span><br><span class="src">${r.k}</span></td>
+    <td class="num mono" style="font-weight:700">${nf(r.b)}</td>
+    <td class="barcell"><span class="bar" style="width:${w}px"></span></td>
+    <td class="num mono" style="color:var(--accent);font-weight:600">${seatsFor(r.b)}</td>
+    <td class="num mono" style="color:var(--ink-dim)">${nf(r.c)}s</td>
+    <td class="num mono" style="color:var(--ink-mute)">${nf(r.r)}</td>
+    <td class="num mono" style="color:${r.f?'var(--crit)':'var(--ink-mute)'}">${nf(r.f)}</td>
+  </tr>`;
+}).join('');
+</script>

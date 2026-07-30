@@ -62,3 +62,20 @@ __pycache__/
 
 # one-shot script run artifacts (regenerated each run)
 scripts/*.log
+
+# Windmill mirror pulls. The workspace is the source of truth for f/ and u/ —
+# every file here was verified byte-identical to what is live, so a repo copy
+# is a stale snapshot waiting to happen. The modules service billing composes
+# from ARE tracked (f/billing/_lib, f/service_billing); these are the rest.
+f/ION/
+f/qbo/
+f/gusto/
+f/samsara/
+f/workers_comp/
+f/google_maps/
+u/carter/
+f/maintenance/score_visits.*
+f/maintenance/*follow_ups*.script.yaml
+
+# Repo-inventory analysis output (Jul 2026). One-shot; regenerate if wanted.
+audit/

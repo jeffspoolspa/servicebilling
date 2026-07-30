@@ -1,0 +1,38 @@
+summary: >-
+  Charge / send ready maintenance billing periods (WAL + idempotency keys on
+  billing.processing_attempts)
+description: >-
+  The maintenance charge engine: only processing_status='ready_to_process'
+  periods are chargeable, through the autopay roster row's linked payment
+  method. Same processing_attempts table and write-ahead idempotency-key
+  method as the work-order engine (key persisted before the charge; Intuit
+  Request-Id dedupes on retry). Receipt email first, then the invoice copy.
+  Non-autopay periods get the invoice email only.
+concurrency_key: qbo_writer
+concurrency_time_window_s: 5
+concurrent_limit: 1
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties:
+    period_ids:
+      type: array
+      items: { type: string }
+      description: explicit billing-period uuids
+    qbo_customer_ids:
+      type: array
+      items: { type: string }
+      description: charge these customers' ready periods (with billing_month)
+    billing_month:
+      type: string
+      description: "'YYYY-MM' (required with qbo_customer_ids)"
+    dry_run:
+      type: boolean
+      default: true
+      description: plan only — no attempts beyond dry rows, no external calls
+    force:
+      type: boolean
+      default: false
+      description: bypass the ready_to_process guard (single-period retries)
+  required: []

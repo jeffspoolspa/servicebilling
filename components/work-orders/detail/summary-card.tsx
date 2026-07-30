@@ -1,7 +1,7 @@
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { formatCurrency } from "@/lib/utils/format"
-import type { InvoiceDetail, WorkOrderDetail } from "@/lib/queries/dashboard"
+import type { InvoiceDetail, ServiceBillingState, WorkOrderDetail } from "@/lib/queries/dashboard"
 import { isChargeChannel, paymentChannelShortLabel } from "@/lib/payment-channel"
 
 /**
@@ -22,10 +22,17 @@ interface Status {
 interface Props {
   wo: WorkOrderDetail
   invoice: InvoiceDetail | null
-  status: Status
+  /** Derived state + any flags (voided / on hold). Order is significant:
+   * the state comes first, flags qualify it. */
+  pills: Status[]
+  /** Compact bonus-pool toggle row (BonusInline) — rendered under the money
+   * facts. Passed as a slot so this card stays a server component. */
+  bonus?: React.ReactNode
+  /** Derived readiness row — inline indicators (subtotal mismatch dot). */
+  state?: ServiceBillingState | null
 }
 
-export function SummaryCard({ wo, invoice, status }: Props) {
+export function SummaryCard({ wo, invoice, pills, bonus, state }: Props) {
   const hasInvoice = invoice != null
   const subtotal = hasInvoice ? Number(invoice!.subtotal ?? 0) : Number(wo.sub_total ?? 0)
   const total = hasInvoice ? Number(invoice!.total_amt ?? 0) : Number(wo.total_due ?? 0)
@@ -36,7 +43,10 @@ export function SummaryCard({ wo, invoice, status }: Props) {
     ? Math.max(0, Number((total - subtotal).toFixed(2)))
     : Number(wo.tax_total ?? 0)
   const balance = hasInvoice ? Number(invoice!.balance ?? 0) : Number(wo.total_due ?? 0)
-  const paid = hasInvoice && balance === 0
+  // A voided invoice also carries a zero balance. "Paid" would be a lie, and
+  // it is the lie that hid this invoice from A/R in the first place.
+  const voided = pills.some((p) => p.label === "voided")
+  const paid = hasInvoice && balance === 0 && !voided
   const sent = invoice?.email_status === "EmailSent"
 
   return (
@@ -44,14 +54,24 @@ export function SummaryCard({ wo, invoice, status }: Props) {
       <CardHeader>
         <CardTitle>Summary</CardTitle>
         <div className="ml-auto flex items-center gap-1.5">
-          <Pill tone={status.tone} dot>
-            {status.label}
-          </Pill>
+          {pills.map((p) => (
+            <Pill key={p.label} tone={p.tone} dot>
+              {p.label}
+            </Pill>
+          ))}
         </div>
       </CardHeader>
       <CardBody className="text-sm space-y-2">
         <Row label="Subtotal">
-          <span className="num text-ink-dim">{formatCurrency(subtotal)}</span>
+          <span className="num text-ink-dim inline-flex items-center gap-1.5">
+            {state && !state.subtotal_matches && (
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-coral"
+                title={`Doesn't match the WO subtotal (${formatCurrency(Number(wo.sub_total ?? 0))}) — line items may have been dropped in the ION->QBO push; blocking processing`}
+              />
+            )}
+            {formatCurrency(subtotal)}
+          </span>
         </Row>
         <Row label="Tax">
           <span className="num text-ink-dim">{formatCurrency(taxTotal)}</span>
@@ -63,7 +83,9 @@ export function SummaryCard({ wo, invoice, status }: Props) {
         {hasInvoice && (
           <>
             <Row label="Balance">
-              {paid ? (
+              {voided ? (
+                <span className="text-coral font-medium">Voided</span>
+              ) : paid ? (
                 <span className="text-grass font-medium">Paid</span>
               ) : (
                 <span className="num text-sun font-medium">{formatCurrency(balance)}</span>
@@ -88,6 +110,10 @@ export function SummaryCard({ wo, invoice, status }: Props) {
               )}
             </div>
           </>
+        )}
+        {/* Bonus pool — its own strip below the money facts, not among them */}
+        {bonus && (
+          <div className="pt-2 border-t border-line-soft text-[12px]">{bonus}</div>
         )}
       </CardBody>
     </Card>

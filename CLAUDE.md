@@ -55,8 +55,11 @@ is worse than no doc. If you find drift, fix the doc (or mark it `[drift]`).
   with unusual session/popup behavior; ingestion is keyed off the per-log `LogID`.
 - **QBO** — read the `quickbooks-windmill` skill before any QBO call. The OAuth refresh
   token rotates and will burn if you refresh it wrong.
-- **Deploying a Windmill script update** = delete-by-hash + re-create at the same path
-  (the MCP `createScript` doesn't version in place).
+- **Deploying to Windmill** — the MCP connector is scoped to the wrong workspace (`u/rdoyle`,
+  not `jps-internal`), so it can't see or write `f/billing` (empty reads, RLS-blocked create).
+  Use the **REST API with the `.env.local` app token**; full copy-paste runbook in
+  [docs/conventions/WINDMILL_DEPLOY.md](docs/conventions/WINDMILL_DEPLOY.md) (get / create /
+  update-with-parent_hash / run / delete). Don't debug the connector — switch to the API.
 - **In-repo Windmill scripts must stay excluded from the app's `tsconfig`.** `f/` and `u/`
   are mirrored into this repo, but their files use Windmill-runtime imports
   (`import "playwright@1.40.0"`, `from "/f/ION/_lib/session"`) that `tsc` cannot resolve.

@@ -1,0 +1,36 @@
+summary: >-
+  Maintenance charge-stage worker: drains billing_audit.maint_charge_queue
+  until empty (one customer-month per claim)
+description: >-
+  WORKFLOW_EXECUTION.md worker + sentence handler. trg_enqueue_maint_charge
+  fills the queue as periods reach ready_to_process; this claims one unit at
+  a time (SKIP LOCKED, priority order, 3-attempt dead-letter) and resolves
+  members/route at claim time. Not on autopay -> send invoices; on autopay ->
+  charge_and_record(lines=invoice_ids): one charge for the summed fresh
+  balances, one QBO payment across them, receipt. Stamps no status —
+  processed/needs_review derive via project_maint_processing_status.
+  Human-kicked (no schedule): money movement keeps its human trigger.
+concurrency_key: qbo_writer
+concurrency_time_window_s: 5
+concurrent_limit: 1
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties:
+    billing_month:
+      type: string
+      description: "'YYYY-MM' (with qbo_customer_ids: the units to plan/enqueue)"
+    qbo_customer_ids:
+      type: array
+      items: { type: string }
+      description: enqueue these customers' month (live) or plan them (dry run)
+    dry_run:
+      type: boolean
+      default: true
+      description: plan only — no queue writes, no external calls
+    max_units:
+      type: integer
+      default: 1000
+      description: drain safety cap per run
+  required: []

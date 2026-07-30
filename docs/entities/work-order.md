@@ -25,6 +25,15 @@ How the split is preserved: the ION sync's DataFrame only contains ION columns, 
 
 ## Lifecycle (our `billing_status` column)
 
+> [drift] 2026-07-23: this section is STALE. `billing_status` moved OFF
+> work_orders to `billing.invoices` on 2026-07-13 (`v_invoice_status_derive`
+> migration; the UI derives WO status from the linked invoice —
+> app/(shell)/work-orders/[id]/page.tsx). Billing's only WO writes today are
+> the skip annotation, `billable_override`, and the `qbo_invoice_id` link,
+> via SECURITY DEFINER RPCs. In the event model the WO is an upstream ION
+> reference with billing-annotation events only — see [ADR 010](../adrs/010-domain-event-stream.md)
+> §G. Rewrite this section (and the ownership row above) accordingly.
+
 The ION-owned fields change whenever ION changes (synced every 4h). The `billing_status` is OUR state machine:
 
 ```mermaid

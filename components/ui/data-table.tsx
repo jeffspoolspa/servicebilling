@@ -19,7 +19,7 @@ import {
   type Table as TanTable,
   type VisibilityState,
 } from "@tanstack/react-table"
-import { ArrowDown, ArrowUp, ChevronsUpDown, Search, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ChevronsUpDown, Download, Search, X } from "lucide-react"
 import {
   Table,
   TableBody,
@@ -29,6 +29,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils/cn"
+import { toCsv } from "@/lib/utils/csv"
 
 /**
  * The app's TanStack data table (shadcn data-table pattern, app tokens).
@@ -62,9 +63,15 @@ interface DataTableProps<TData, TValue> {
   onSelectionChange?: (rows: TData[]) => void
   /** Expansion: render an expanded panel row under a clicked row. */
   renderSubRow?: (row: Row<TData>) => React.ReactNode
+  /** Row click → detail view (modal/sheet). Ignored when renderSubRow is set.
+   *  Interactive cell content must stopPropagation. */
+  onRowClick?: (row: TData) => void
   rowClassName?: (row: Row<TData>) => string | undefined
   /** Hide columns that exist only to power facet filters. */
   columnVisibility?: VisibilityState
+  /** CSV download filename stem (date is appended). Every table exports by
+   *  default; pass false to opt out. */
+  csvFilename?: string | false
 }
 
 export function DataTable<TData, TValue>({
@@ -79,8 +86,10 @@ export function DataTable<TData, TValue>({
   emptyText = "No rows.",
   onSelectionChange,
   renderSubRow,
+  onRowClick,
   rowClassName,
   columnVisibility,
+  csvFilename = "export",
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>(initialSorting)
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
@@ -125,7 +134,30 @@ export function DataTable<TData, TValue>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey])
 
-  const hasToolbar = searchAccessor || (facetFilters?.length ?? 0) > 0 || toolbarExtra
+  const hasToolbar =
+    searchAccessor || (facetFilters?.length ?? 0) > 0 || toolbarExtra || csvFilename !== false
+
+  const downloadCsv = () => {
+    // filtered + sorted rows across ALL pages; raw accessor values (not
+    // rendered cells) so numbers/dates stay machine-readable
+    const cols = table
+      .getVisibleLeafColumns()
+      .filter((c) => c.accessorFn !== undefined)
+    const header = cols.map((c) => {
+      const h = c.columnDef.header
+      return typeof h === "string" ? h : c.id
+    })
+    const rows = table
+      .getPrePaginationRowModel()
+      .rows.map((r) => cols.map((c) => r.getValue(c.id)))
+    const csv = toCsv(header, rows)
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }))
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${csvFilename || "export"}-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div className="space-y-3">
@@ -153,7 +185,20 @@ export function DataTable<TData, TValue>({
           {facetFilters?.map((f) => (
             <FacetSelect key={f.columnId} table={table} filter={f} />
           ))}
-          {toolbarExtra && <div className="ml-auto flex items-center gap-2">{toolbarExtra}</div>}
+          <div className="ml-auto flex items-center gap-2">
+            {csvFilename !== false && (
+              <button
+                type="button"
+                onClick={downloadCsv}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-line text-[12px] text-ink-dim hover:text-ink hover:border-line/80 transition-colors"
+                title="Download the filtered rows as CSV"
+              >
+                <Download className="w-3.5 h-3.5" strokeWidth={2} />
+                Download CSV
+              </button>
+            )}
+            {toolbarExtra}
+          </div>
         </div>
       )}
 
@@ -187,10 +232,16 @@ export function DataTable<TData, TValue>({
                     data-state={row.getIsSelected() && "selected"}
                     className={cn(
                       "border-line-soft/40 hover:bg-white/[0.02]",
-                      renderSubRow && "cursor-pointer",
+                      (renderSubRow || onRowClick) && "cursor-pointer",
                       rowClassName?.(row),
                     )}
-                    onClick={renderSubRow ? () => row.toggleExpanded() : undefined}
+                    onClick={
+                      renderSubRow
+                        ? () => row.toggleExpanded()
+                        : onRowClick
+                          ? () => onRowClick(row.original)
+                          : undefined
+                    }
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell

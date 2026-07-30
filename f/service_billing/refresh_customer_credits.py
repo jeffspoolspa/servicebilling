@@ -152,7 +152,8 @@ def upsert_links_from_raw(cur, payment_id, raw, known_invoice_ids, txn_date):
     return written
 
 
-def main(qbo_customer_id: str, lookback_days: int = 365):
+def main(qbo_customer_id: str, lookback_days: int = 365,
+         access_token: str = None, realm_id: str = None):
     """
     Returns:
       {
@@ -163,12 +164,18 @@ def main(qbo_customer_id: str, lookback_days: int = 365):
         "rechecked_invoices": N,
         "changed_invoices": N,
       }
+
+    access_token/realm_id: pass a caller's already-refreshed token to reuse it.
+    QBO refresh tokens rotate on every refresh (CLAUDE.md burn warning), so an
+    in-process caller (e.g. pre_process_invoice's freshness gate) that already
+    holds a token passes it here instead of triggering a second rotation.
     """
     if not qbo_customer_id:
         return {"status": "error", "error": "qbo_customer_id required"}
 
     print(f"=== refresh_customer_credits customer={qbo_customer_id} ===")
-    access_token, realm_id = refresh_qbo_token()
+    if not (access_token and realm_id):
+        access_token, realm_id = refresh_qbo_token()
 
     now = datetime.now(timezone.utc)
     qbo_cutoff = (now - timedelta(days=lookback_days)).strftime("%Y-%m-%d")

@@ -49,6 +49,8 @@ stateDiagram-v2
 
 `billing_status` is **computed** from five indicator columns. Each indicator is maintained by its own trigger. Writing to a source field (e.g., subtotal) updates the indicator; the indicator update fires the projection trigger; the projection sets `billing_status`.
 
+> This status is a **projection** — the read-side of the invoice's domain event stream ([ADR 010](../adrs/010-domain-event-stream.md)). The facts it folds (charge attempts, credit decisions, enrichment, reconciliation) are named in [conventions/EVENT_VOCABULARY.md](../conventions/EVENT_VOCABULARY.md#aggregate-invoice--aggregate_id--qbo_invoice_id).
+
 | Indicator | Set by | True when |
 |---|---|---|
 | `subtotal_ok` | [trigger](../scripts/_triggers/set_subtotal_ok.md) on UPDATE OF subtotal | WO subtotal matches invoice subtotal within $0.02 |

@@ -110,6 +110,125 @@ verified before a live run.
 - New billing/QBO workflows compose primitives instead of cloning them; the
   clone-and-diverge failure mode is closed at the source.
 
+## Addendum (2026-07-10): the `charge_and_record` service + three tiers + derived decline state
+
+> Status: [accepted]
+> Refines this ADR's §3 ("what stays per-engine") after a design review that
+> walked the maintenance charge path end to end. §3 was too coarse: it kept
+> *all* WAL sequencing per-engine. The finer, correct cut is below.
+
+### A. Three tiers, split by concern (not by "shared vs not")
+
+The boundary is **external side effect** vs **payment orchestration** vs
+**billing policy** — each tier has a home:
+
+| Tier | Examples | Home | Shared? |
+|---|---|---|---|
+| 1. Primitives (one side effect, no `conn`) | `charge_card`, `get_qbo_invoice_details`, `send_invoice`, `record_qbo_payment`; `mark_emailed`/`echo_balance` (one cache write); `create_attempt`/`update_attempt` (WAL) | `f/billing/_lib/qbo`, `_lib/cache`, `_lib/wal` | [shared] |
+| 2. Payment service (idempotent charge core) | `charge_and_record` | `f/billing/_lib/payments` | [shared] |
+| 3. Engine sentences (this workflow's policy) | `build_intent`, `deliver`, `record`, `outcome`, `process_one`, `_run_group_charge` | the engine file (`process_maint_period.py`, `process_work_order.py`) | [per-engine] |
+
+Tier-3 functions live **in the engine file**, next to `process_one` — not in
+`_lib` — because they encode policy that diverges (maintenance has an autopay
+roster and group charges; a work order has neither). Share the verbs; keep the
+sentences at home. A tier-3 helper is findable by scrolling up, so extraction
+aids readability instead of scattering it.
+
+### B. `charge_and_record` — the payment port
+
+The refinement to §3: the **idempotent charge core** (WAL find-or-create +
+fresh-read + charge + payment create) is NOT per-engine — it extracts into one
+shared service. Only billing *policy* (decline handling, delivery, cache echo,
+group anchoring) stays per-engine and dispatches on the service's result.
+
+Contract:
+
+    charge_and_record(conn, intent, access_token, realm_id, dry_run=False) -> Result
+
+    intent  = { idempotency_scope, payment_method_id, channel,
+                lines:[{invoice_id}], memo, customer_id,
+                receipt_email: str | None }
+    Result  = { status, amount, charge_id, payment_id, receipt_sent, error, balance }
+      status in { read_failed, already_paid, would_charge, uncertain,
+                  declined, payment_orphan, succeeded }  (one enum, used by the WAL too)
+
+Invariants (all derived this session):
+
+- **The service reads the balance fresh and decides the amount** — the caller
+  passes invoice ids, never a number. This makes the Phase-0 "charge QBO's
+  truth, not the cache" guard structural: there is no amount parameter to pass
+  stale. A failed fresh read returns `read_failed` and HALTS (no cache
+  fallback); `balance <= 0` returns `already_paid`.
+- **WAL commits before the charge**, so a crash mid-charge is recoverable; a
+  resume reuses the persisted idempotency key (Intuit dedupes). Resume is
+  exempt from the fresh-read guard (balance may read 0 from our own in-flight
+  charge).
+- **The receipt is best-effort, after the money is durable, and non-fatal** —
+  it runs last and its failure returns as `receipt_sent=False`, never a charge
+  failure. The switch is **data** (`receipt_email` present or null), never a
+  `send_receipt` boolean. A boolean that turns off half a function is the smell
+  named in §2; a nullable destination keeps the service segment-blind (the
+  caller nulls it for commercial customers who opt out).
+- **The service is segment-blind.** The moment it learns *what kind* of
+  customer it is charging, it has stopped being a payment port and become an
+  engine. It charges and records; it does not know the invoice is a
+  maintenance invoice and never touches an autopay roster.
+
+### C. Verified-echo writes: one column per fact, when the fact is known
+
+The cache echo is not one combined write. `email_status` is a fact we
+**author** (the send returned ok) — write it immediately. `balance` is a value
+we **observe** (only known after a confirming read) — write it at read time.
+The auto-promote trigger (`balance <= 0 AND EmailSent`) is the **join**; it
+re-evaluates on each write and is idempotent (DISTINCT-guarded), so
+independent per-column writes are safe. What makes them safe is the Phase-0
+discipline itself: the cache never holds a fabricated `<= 0` balance, so
+`balance <= 0` always means really paid, so the trigger cannot fire on a lie
+regardless of write order. Atomicity was a workaround for inaccurate
+intermediate state; verified-echo removes the inaccuracy, so the workaround is
+unnecessary.
+
+### D. Decline state is a derived read-model, not engine-maintained
+
+`billing.autopay_customers.consecutive_declines` / `payment_status` stop being
+imperatively bumped/cleared by the engine. The `processing_attempts` table is
+the fact log; autopay health is **derived on read** from it, keyed by
+`payment_method_id`:
+
+- `bump_declines` / `clear_declines` disappear from the hot path — recording
+  the attempt IS the write.
+- Derivation is idempotent (re-reads give the same count) and cannot drift
+  from its source (the ADR 008 rollup-drift lesson applied to this column).
+- Keying to `payment_method_id` makes "new card = clean slate" **structural** —
+  a new pm has no failed attempts, so it reads healthy automatically. This
+  removes the special-case reset in migration
+  `20260511000002_attempts_ok_unblocks_on_pm_change`.
+- **"Consecutive" is an ordered window**, not a `COUNT` — declines since the
+  last `succeeded` for that pm. Put it in a view (`v_autopay_health`) so the
+  threshold rule lives in one place.
+- **Compute-on-read first** (a plain view); promote to a trigger-maintained
+  column or materialized view ONLY on measured read pressure — mirroring the
+  auto-promote trigger pattern. View first, materialize on evidence.
+- Migration: current readers of `autopay_customers.payment_status` move to the
+  view (or the column stays but becomes trigger-maintained from attempts). This
+  is a [SCHEMA_OWNERSHIP](../conventions/SCHEMA_OWNERSHIP.md) change — the
+  column flips from engine-written to derived.
+
+### E. The through-line
+
+`processing_attempts` is the source-of-truth event log. `processing_status`,
+autopay health, and the invoice balance are **projections off facts** (ADR 008
+§7 litmus: "compute over accumulated state" is the read/batch side; the
+auto-promote trigger is the stream side). The engine's job shrinks to: do the
+side effect, record what happened truthfully, and let derived state derive.
+
+### F. Status
+
+Target architecture. Phase-0 guard + verified-echo shipped (maintenance) /
+committed-undeployed (WO). The extraction sequences per §5: primitives first,
+then `charge_and_record` over them, then rewire both engines, then the derived
+decline view. All money-code changes deploy + dry-run verify before a live run.
+
 ## See also
 
 - [ADR 008](008-inbox-single-writer-sync.md) — the data-side twin (one writer

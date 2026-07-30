@@ -9,9 +9,10 @@ import { Button } from "@/components/ui/button"
 /**
  * Live progress modal for pre-processing + processing runs.
  *
- * Pre-process mode: subscribes to billing.invoices (column `pre_process_stage`)
- *   and watches the row transition through stages. Script refactor writes
- *   each stage atomically so Realtime fires an UPDATE per step.
+ * Pre-process mode: subscribes to billing.invoices and derives run state
+ *   from the columns the pipeline writes ANYWAY: pre_processed_at (fresh
+ *   stamp = the run finished) + enrichment_ok / billing_status decide the
+ *   outcome. No stage column — the row's own facts are the progress.
  *
  * Process mode: subscribes to billing.processing_attempts (latest row for this
  *   invoice, stage='process', dry_run=false) and transitions through
@@ -36,13 +37,9 @@ interface Stage {
 }
 
 const PRE_PROCESS_STAGES: Stage[] = [
-  { key: "fetching_qbo", label: "Fetching from QBO", description: "Pull latest invoice + customer data", icon: Search },
-  { key: "checking_subtotal", label: "Checking subtotal", description: "Compare WO subtotal vs QBO subtotal", icon: DollarSign },
-  { key: "matching_credits", label: "Matching credits", description: "Auto-apply eligible unapplied payments", icon: Coins },
-  { key: "resolving_payment_method", label: "Resolving payment method", description: "on_file / invoice", icon: CreditCard },
-  { key: "deriving_class", label: "Deriving QBO class", description: "Service / Delivery / Maintenance / Renovation", icon: Tag },
-  { key: "generating_memo", label: "Generating memo (Claude)", description: "Customer-friendly memo text", icon: FileText },
-  { key: "writing_qbo", label: "Writing back to QBO", description: "PrivateNote, ClassRef, CustomerMemo", icon: Receipt },
+  { key: "enriching", label: "Enriching invoice",
+    description: "Credits · payment route · class · memo · QBO write",
+    icon: FileText },
 ]
 
 const PROCESS_STAGES_ON_FILE: Stage[] = [
@@ -129,7 +126,7 @@ export function ProgressModal({
       if (mode === "pre_process") {
         const { data } = await sb
           .from("billing_invoices")
-          .select("pre_process_stage, billing_status, needs_review_reason")
+          .select("pre_processed_at, enrichment_ok, billing_status, needs_review_reason")
           .eq("qbo_invoice_id", qboInvoiceId)
           .maybeSingle()
         if (data && !cancelled) {
@@ -191,20 +188,28 @@ export function ProgressModal({
   }, [open, qboInvoiceId, mode])
 
   function applyInvoiceRow(row: Record<string, unknown>) {
-    const stage = (row.pre_process_stage as string | null) ?? null
     const billingStatus = (row.billing_status as string | null) ?? null
     const reason = (row.needs_review_reason as string | null) ?? null
     setInvoiceBillingStatus(billingStatus)
     setInvoiceNeedsReason(reason)
-    if (stage === "done" || billingStatus === "ready_to_process" || billingStatus === "processed") {
+    // The run is finished when pre_processed_at is stamped AFTER we fired
+    // (the pipeline's own fact — no stage column). Outcome = enrichment_ok.
+    const stampedAt = row.pre_processed_at
+      ? Date.parse(String(row.pre_processed_at))
+      : null
+    const finished =
+      stampedAt != null && (!triggeredAt || stampedAt >= triggeredAt - 5000)
+    if (finished && (row.enrichment_ok === true
+                     || billingStatus === "ready_to_process"
+                     || billingStatus === "processed")) {
       setCurrentStage("done")
       setStatus("done")
-    } else if (billingStatus === "needs_review" && stage === "done") {
+    } else if (finished) {
       setCurrentStage("done")
       setStatus("failed")
       setFailureReason(reason)
-    } else if (stage) {
-      setCurrentStage(stage)
+    } else {
+      setCurrentStage("enriching")
     }
   }
 

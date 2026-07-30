@@ -4,13 +4,12 @@ import { guardApi } from "@/lib/auth/api"
 
 /**
  * POST /api/billing/pre-process
- * Body: { qbo_invoice_id: string, force?: boolean }
+ * Body: { qbo_invoice_id: string }
  *
  * Triggers f/service_billing/pre_process_invoice for a single invoice.
  * Returns the Windmill jobId immediately (async).
  *
- * IMPORTANT: must pass `bulk_all: false` explicitly. The script's `main()`
- * defaults `bulk_all=True`, so omitting this would cause the script to
+ * IMPORTANT: must pass `` explicitly. The script's `main()`
  * scan ALL needs_review invoices instead of just the one we passed.
  * (Footgun caught in production — a "Re-run" button on a single WO
  * page accidentally re-fired every needs_review invoice.)
@@ -19,7 +18,7 @@ export async function POST(request: NextRequest) {
   const guard = await guardApi("service", { write: true })
   if (guard instanceof NextResponse) return guard
   const body = await request.json()
-  const { qbo_invoice_id, force = false } = body
+  const { qbo_invoice_id } = body
 
   if (!qbo_invoice_id) {
     return NextResponse.json(
@@ -29,9 +28,7 @@ export async function POST(request: NextRequest) {
   }
 
   const { jobId } = await triggerScript("f/service_billing/pre_process_invoice", {
-    qbo_invoice_id,
-    bulk_all: false,
-    force,
+    qbo_invoice_id
   })
 
   return NextResponse.json({ jobId, status: "triggered" })
