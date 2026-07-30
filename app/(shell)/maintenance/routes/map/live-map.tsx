@@ -18,6 +18,12 @@ import { OfficeFilter } from "../_components/office-filter"
 import type { Office } from "@/lib/infrastructure/routing/offices"
 import {
   baseIdOf,
+  cadence,
+  cadenceLabel,
+  Optimizer,
+  Planner,
+  type PlannedWorld,
+  type SuggestedMove,
   Circle,
   CostModel,
   DriveMatrix,
@@ -34,6 +40,7 @@ import {
   type SelectedStop,
   type Weekday,
 } from "@/lib/domain/routing"
+import type { EvaluatedScenario } from "@/lib/application/routing/routing-service"
 
 type Customer = { name: string; office: string | null }
 type LatLng = { lat: number; lng: number }
@@ -104,11 +111,32 @@ export function LiveMap({
   // rest over the live base, which swaps the object rather than mutating it.
   const base = useMemo(() => () => snapshots.map(fromSnapshot), [snapshots])
   const [plan, setPlan] = useState<Scenario>(() => Scenario.from(base()))
+  /**
+   * The Optimal view: the Planner's unconstrained draft, rendered through the
+   * same read models. Read-only — its one exit with side effects is saving the
+   * diff as a scenario.
+   */
+  const [optimal, setOptimal] = useState<{
+    scenario: Scenario
+    factory: RouteFactory
+    labels: Record<string, string>
+    assigned: Map<string, string>
+    world: PlannedWorld
+    scopedIds: Set<string>
+  } | null>(null)
+  const [optimalBusy, setOptimalBusy] = useState(false)
+  /** The clusters lens: recolour pins by natural geographic cluster. */
+  const [clusterLens, setClusterLens] = useState(false)
   /** Bumped when the matrix learns measured legs — estimates must re-derive. */
   const [matrixRev, setMatrixRev] = useState(0)
+  const activePlan = optimal?.scenario ?? plan
+  const activeFactory = optimal?.factory ?? factory
   const rev = plan.revision
-  const routes = useMemo(() => plan.routes(factory, week), [plan, factory, week, rev, matrixRev])
-  const layer = useMemo(() => plan.unplacedLayer(), [plan, rev])
+  const routes = useMemo(
+    () => activePlan.routes(activeFactory, week),
+    [activePlan, activeFactory, week, rev, matrixRev],
+  )
+  const layer = useMemo(() => activePlan.unplacedLayer(), [activePlan, rev])
   const changes = useMemo(() => plan.changes(), [plan, rev])
 
   const [officeScope, setOfficeScope] = useState<string[]>([])
@@ -127,14 +155,41 @@ export function LiveMap({
   const [report, setReport] = useState<ReassignReport | null>(null)
   /** Stops struck off the selection by hand — the shapes still contain them. */
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
-  const [list, setList] = useState<"changes" | "owed" | null>(null)
+  const [list, setList] = useState<"changes" | "owed" | "scenarios" | "suggested" | null>(null)
   const [routesOpen, setRoutesOpen] = useState(true)
+  /** Routes panel: flip between route cards and a tech directory; search both. */
+  const [panelMode, setPanelMode] = useState<"routes" | "techs">("routes")
+  const [routeSearch, setRouteSearch] = useState("")
+  const [techFilter, setTechFilter] = useState<string | null>(null)
+  const [suggestions, setSuggestions] = useState<SuggestedMove[] | null>(null)
+  const [suggestBusy, setSuggestBusy] = useState(false)
+  /** The stored scenario being viewed, if any — the plan holds its changes. */
+  const [viewing, setViewing] = useState<{ id: string; name: string } | null>(null)
+  const [restoreNote, setRestoreNote] = useState<string | null>(null)
+  const [pendingScenarios, setPendingScenarios] = useState<EvaluatedScenario[]>([])
+  const [saveName, setSaveName] = useState<string | null>(null) // null = input closed
+  const [scenarioBusy, setScenarioBusy] = useState(false)
+  const [changesModal, setChangesModal] = useState(false)
   /**
-   * The one selected route (tech|day key). Selecting filters the map to that
-   * route's stops, draws its tour, and opens the route panel on the left;
-   * clearing returns to everything the office and day filters allow.
+   * Selected routes (tech|day keys) — ONE set for viewing and optimizing.
+   * Clicking rows toggles membership; the map filters to the set; exactly one
+   * selected opens the route panel and draws its tour; the Suggest button
+   * searches within the set.
    */
-  const [selectedRoute, setSelectedRoute] = useState<string | null>(null)
+  const [selectedRoutes, setSelectedRoutes] = useState<Set<string>>(new Set())
+  /** The one route whose tour line and panel are open — a separate, deliberate act. */
+  const [tourRoute, setTourRoute] = useState<string | null>(null)
+  const selectedRoute = tourRoute
+  const setSelectedRoute = (key: string | null) => {
+    setTourRoute(key)
+    if (key === null) setSelectedRoutes(new Set())
+  }
+  const toggleRoute = (key: string) =>
+    setSelectedRoutes((prev) => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
   /** One leg of the selected tour ("fromId>toId"), picked on map or panel. */
   const [selectedLeg, setSelectedLeg] = useState<string | null>(null)
   const [, forceRender] = useState(0)
@@ -169,17 +224,22 @@ export function LiveMap({
 
   const nameOf = (id: number | null) => (id !== null ? (customers[id]?.name ?? "—") : "—")
   const officeOf = (id: number | null) => (id !== null ? (customers[id]?.office ?? null) : null)
-  const techOf = (id: string) => techs[id] ?? id.slice(0, 8)
+  const techOf = (id: string) => optimal?.labels[id] ?? techs[id] ?? id.slice(0, 8)
   /**
    * Assigned over ALL routes, not the visible ones, so a tech keeps their colour
    * when the office or day scope changes.
    */
   const techColor = useMemo(() => {
-    const ids = [...new Set(routes.map((r) => r.techId))].sort()
+    const ids = [...new Set(plan.all.flatMap((q) => q.stops.map((st) => st.techId)))].sort()
     return new Map(ids.map((id, i) => [id, PALETTE[i % PALETTE.length]]))
-  }, [routes])
-  const colorOf = (techId: string | null) =>
-    (techId && techColor.get(techId)) || NO_TECH_COLOR
+  }, [plan, rev])
+  const colorOf = (techId: string | null) => {
+    if (!techId) return NO_TECH_COLOR
+    // In the optimal draft a slot wears its assigned tech's colour, so a
+    // tech's pools look the same in both worlds; unassigned slots stay grey.
+    const real = optimal?.assigned.get(techId) ?? techId
+    return techColor.get(real) ?? NO_TECH_COLOR
+  }
 
   /* ---------------------------------------------------------------- scope */
 
@@ -215,11 +275,15 @@ export function LiveMap({
    * The cost model prices routes for the cards and every pending change for
    * the unpublished box. All domain — the UI only formats.
    */
-  const costModel = useMemo(() => new CostModel(geometry, factory), [geometry, factory])
+  const costModel = useMemo(() => new CostModel(geometry, activeFactory), [geometry, activeFactory])
 
   /** Route cards, day-grouped when more than one day is in scope; heaviest first within a day. */
   const byDay = useMemo(() => {
-    const costed = visible.map((v) => ({ route: v.route, cost: costModel.ofRoute(v.route) }))
+    const needle = routeSearch.trim().toLowerCase()
+    const costed = visible
+      .filter((v) => !techFilter || v.route.techId === techFilter)
+      .filter((v) => !needle || techOf(v.route.techId).toLowerCase().includes(needle))
+      .map((v) => ({ route: v.route, cost: costModel.ofRoute(v.route) }))
     const days = new Map<Weekday, typeof costed>()
     for (const c of costed) days.set(c.route.weekday, [...(days.get(c.route.weekday) ?? []), c])
     return [...days.entries()]
@@ -228,21 +292,44 @@ export function LiveMap({
         weekday,
         routes: dayRoutes.sort((a, b) => b.cost.utilization - a.cost.utilization),
       }))
-  }, [visible, costModel])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, costModel, techFilter, routeSearch, techs])
 
-
+  /** The tech directory behind the panel's flip view. */
+  const techDirectory = useMemo(() => {
+    const byTech = new Map<string, { routes: number; stops: number }>()
+    for (const v of visible) {
+      const t = byTech.get(v.route.techId) ?? { routes: 0, stops: 0 }
+      t.routes += 1
+      t.stops += v.stops.length
+      byTech.set(v.route.techId, t)
+    }
+    const needle = routeSearch.trim().toLowerCase()
+    return [...byTech.entries()]
+      .map(([techId, t]) => ({ techId, ...t }))
+      .filter((t) => !needle || techOf(t.techId).toLowerCase().includes(needle))
+      .sort((a, b) => techOf(a.techId).localeCompare(techOf(b.techId)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, routeSearch, techs])
 
   const selectedInfo = useMemo(() => {
     if (!selected) return null
-    const quota = plan.all.find((q) => q.id === selected)
+    const quota = activePlan.all.find((q) => q.id === selected)
     if (!quota) return null
-    const hit = visible.find((v) => v.route.stops.some((s) => s.quotaId === selected))
-    return {
-      quota,
-      route: hit?.route ?? null,
-      profile: hit?.route.profileOf(selected) ?? null,
-    }
-  }, [selected, plan, visible])
+    // Every placement's contribution: the marginal miles its route detours for
+    // it, converted to drive minutes — its share of the plan's road.
+    const placements = quota.stops.map((st) => {
+      const route = activeFactory.routeFor(activePlan.all, st.techId, st.weekday, week)
+      const marginalMi = route?.profileOf(selected)?.runs[0]?.marginalMi ?? null
+      return {
+        stop: st,
+        marginalMi,
+        driveMinutes: marginalMi !== null ? geometry.driveMinutes(marginalMi) : null,
+      }
+    })
+    return { quota, placements }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, activePlan, activeFactory, week, rev, matrixRev, optimal])
 
   /**
    * Derived, not stored: re-asking the domain after every edit is what keeps
@@ -251,12 +338,31 @@ export function LiveMap({
   const selection = useMemo(() => {
     const regions = shapes.map(spanOf).filter((c): c is Circle => c !== null)
     if (regions.length === 0) return null
-    return plan
-      .placementsWithin(regions, dayScope.map((d) => Number(d) as Weekday))
-      .filter((s) => !excluded.has(stopKey(s)))
-  }, [shapes, plan, dayScope, rev, excluded])
+    const caught = activePlan.selectionWithin(regions, dayScope.map((d) => Number(d) as Weekday))
+    // The circle grabs what is ON THE MAP, not everything in the geography:
+    // office filter, tech filter, and a selected route all scope it.
+    const officeOk = (quotaId: string) => {
+      const q = activePlan.all.find((x) => x.id === quotaId)
+      return inOffice(q?.requirement.customerId ?? null)
+    }
+    return {
+      stops: caught.stops.filter(
+        (s) =>
+          !excluded.has(stopKey(s)) &&
+          officeOk(s.quotaId) &&
+          (!techFilter || s.techId === techFilter) &&
+          (selectedRoutes.size === 0 || selectedRoutes.has(routeKey(s.techId, s.weekday))),
+      ),
+      owed: caught.owed.filter((id) => !excluded.has(`owed|${id}`) && officeOk(id)),
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shapes, activePlan, dayScope, rev, excluded, officeScope, techFilter, selectedRoutes, customers])
 
-  const pickedKeys = useMemo(() => new Set((selection ?? []).map(stopKey)), [selection])
+  const pickedKeys = useMemo(
+    () => new Set((selection?.stops ?? []).map(stopKey)),
+    [selection],
+  )
+  const owedPicked = useMemo(() => new Set(selection?.owed ?? []), [selection])
 
   /** Techs who already hold a route — the plausible targets for a reassignment. */
   const techOptions = useMemo(
@@ -266,6 +372,34 @@ export function LiveMap({
         .sort((a, b) => a.name.localeCompare(b.name)),
     [routes, techs],
   )
+
+  /**
+   * Natural clusters over whatever the filters show — colour = cluster,
+   * hollow grey = a pool that belongs to no cluster (every loner is a detour
+   * somebody pays weekly). A lens, not a mode: same pins, different question.
+   */
+  const clusterView = useMemo(() => {
+    if (!clusterLens) return null
+    // The office filter scopes the clustering; within the office, members
+    // hidden by tech/day/route filters still render (dulled) so a cluster is
+    // seen whole.
+    const view = new Planner(geometry).clustersOf(
+      activePlan.all.filter((q) => inOffice(q.requirement.customerId)),
+      0.5,
+    )
+    const colour = new Map<string, string>()
+    const members = new Map<string, { pin: Pin; techId: string | null }>()
+    view.clusters.forEach((c, i) => {
+      for (const id of c.quotaIds) {
+        colour.set(id, PALETTE[i % PALETTE.length])
+        const q = activePlan.all.find((x) => x.id === id)
+        if (q?.requirement.pin) members.set(id, { pin: q.requirement.pin, techId: q.stops[0]?.techId ?? null })
+      }
+    })
+    return { ...view, colour, members }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clusterLens, activePlan, rev, officeScope, customers])
+
 
   /* ------------------------------------------------------------------ map */
 
@@ -286,6 +420,24 @@ export function LiveMap({
       map.addSource("lasso", { type: "geojson", data: { type: "FeatureCollection", features: [] } })
       map.addLayer({ id: "lasso-fill", type: "fill", source: "lasso", paint: { "fill-color": "#22d3ee", "fill-opacity": 0.12 } })
       map.addLayer({ id: "lasso-line", type: "line", source: "lasso", paint: { "line-color": "#22d3ee", "line-width": 2, "line-dasharray": [2, 1] } })
+      map.addSource("clusters", { type: "geojson", data: { type: "FeatureCollection", features: [] } })
+      map.addLayer({
+        id: "cluster-hull",
+        type: "fill",
+        source: "clusters",
+        paint: { "fill-color": ["get", "color"], "fill-opacity": 0.09 },
+      })
+      map.addLayer({
+        id: "cluster-hull-line",
+        type: "line",
+        source: "clusters",
+        paint: {
+          "line-color": ["get", "color"],
+          "line-width": 1.4,
+          "line-opacity": 0.45,
+          "line-dasharray": [3, 2],
+        },
+      })
       map.addSource("tour", { type: "geojson", data: { type: "FeatureCollection", features: [] } })
       map.addLayer({
         id: "tour-body",
@@ -435,12 +587,12 @@ export function LiveMap({
       color: string,
       quotaId: string,
       title: string,
-      opts: { ring?: boolean; owed?: boolean; picked?: boolean } = {},
+      opts: { ring?: boolean; owed?: boolean; picked?: boolean; dull?: boolean } = {},
     ) => {
       const el = document.createElement("button")
       el.type = "button"
       el.title = title
-      const size = opts.ring ? 17 : opts.picked ? 15 : opts.owed ? 15 : 11
+      const size = opts.ring ? 17 : opts.picked ? 15 : opts.owed ? 15 : opts.dull ? 8 : 11
       const border = opts.ring
         ? "3px solid #22d3ee"
         : opts.picked
@@ -449,7 +601,7 @@ export function LiveMap({
             ? "2px solid #fbbf24"
             : "1.5px solid #0b1620"
       el.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;background:${color};
-        border:${border};cursor:pointer;padding:0;opacity:${opts.picked ? 1 : 0.92};
+        border:${border};cursor:pointer;padding:0;opacity:${opts.picked ? 1 : opts.dull ? 0.35 : 0.92};
         ${opts.picked ? "box-shadow:0 0 0 3px rgba(248,250,252,.35);z-index:2;" : ""}${opts.ring ? "z-index:3;" : ""}`
 
       el.addEventListener("click", (e) => {
@@ -484,9 +636,42 @@ export function LiveMap({
 
     // Placed stops first, owed next, route office last so the selected tour has a clear anchor.
     const drawn: { fn: () => void; rank: number }[] = []
-    const shown = selectedRoute
-      ? visible.filter((v) => routeKey(v.route.techId, v.route.weekday) === selectedRoute)
-      : visible
+
+    // The map narrows with every selection layer: the tech filter shows that
+    // tech's whole week, the optimizer scope shows the ticked set, and a
+    // single selected route narrows to just it (and opens the panel).
+    let pool = visible
+    if (techFilter) pool = pool.filter((v) => v.route.techId === techFilter)
+    const matches =
+      selectedRoutes.size > 0
+        ? pool.filter(
+            (v) =>
+              selectedRoutes.has(routeKey(v.route.techId, v.route.weekday)) ||
+              routeKey(v.route.techId, v.route.weekday) === tourRoute,
+          )
+        : pool
+    // A stale selection (a route that no longer exists in this view) must
+    // never blank the map — show everything rather than nothing.
+    const shown = matches.length > 0 ? matches : pool.length > 0 ? pool : visible
+
+    // Under the lens, cluster members hidden by the current filters still
+    // render — dulled — so a cluster is always seen whole.
+    if (clusterView) {
+      const onScreen = new Set<string>()
+      for (const { stops } of shown) for (const st of stops) onScreen.add(st.quotaId)
+      for (const q of unplaced) onScreen.add(q.id)
+      for (const [quotaId, m] of clusterView.members) {
+        if (onScreen.has(quotaId)) continue
+        drawn.push({
+          rank: -1,
+          fn: () =>
+            put(m.pin.lat, m.pin.lng, m.techId ? colorOf(m.techId) : "#64748b", quotaId,
+              `${nameOf(activePlan.all.find((x) => x.id === quotaId)?.requirement.customerId ?? null)} — outside current filters`,
+              { dull: true }),
+        })
+      }
+    }
+
     for (const { route, stops } of shown) {
       if (selectedRoute && route.base) {
         drawn.push({
@@ -530,9 +715,9 @@ export function LiveMap({
 
     boundsRef.current = bounds
     fitIfReady()
-  }, [visible, selectedRoute, unplaced, selected, pickedKeys, colorOf, customers, techs])
+  }, [visible, selectedRoute, tourRoute, techFilter, selectedRoutes, unplaced, selected, pickedKeys, colorOf, customers, techs, clusterView])
 
-  const quotaOf = (id: string) => plan.all.find((q) => q.id === id)
+  const quotaOf = (id: string) => activePlan.all.find((q) => q.id === id)
 
   const analysis = useMemo(() => {
     if (changes.length === 0) return null
@@ -784,6 +969,11 @@ export function LiveMap({
   }
 
   const revertChange = (index: number) => {
+    if (optimal) {
+      alert("the optimal draft is read-only — save the diff as a scenario to work with it")
+      return
+    }
+
     setPlan(Scenario.replay(base(), changes.filter((_, i) => i !== index)))
     setReport(null)
   }
@@ -794,9 +984,360 @@ export function LiveMap({
   }
 
   const applyReassign = (techId: string, weekday: Weekday) => {
-    if (!selection?.length) return
+    if (optimal) {
+      alert("the optimal draft is read-only — save the diff as a scenario to work with it")
+      return
+    }
+    if (!selection || (selection.stops.length === 0 && selection.owed.length === 0)) return
     setReport(plan.reassign(selection, techId, weekday))
     forceRender((n) => n + 1)
+  }
+
+  /* ----------------------------------------------------- stored scenarios */
+
+  const refreshScenarios = async () => {
+    try {
+      const res = await fetch("/api/routing/scenarios")
+      if (!res.ok) return
+      const body = (await res.json()) as { scenarios: EvaluatedScenario[] }
+      setPendingScenarios(body.scenarios)
+    } catch {
+      /* list stays as-is; the card shows what it last knew */
+    }
+  }
+  useEffect(() => {
+    void refreshScenarios()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /** Save the pending changes as a scenario (or update the one being viewed). */
+  const saveScenario = async (name: string) => {
+    if (changes.length === 0) return
+    setScenarioBusy(true)
+    try {
+      const res = viewing
+        ? await fetch(`/api/routing/scenarios/${viewing.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, changes }),
+          })
+        : await fetch("/api/routing/scenarios", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, changes }),
+          })
+      if (!res.ok) throw new Error(`save failed (${res.status})`)
+      // The changes now live in the scenario — the working plan returns to live.
+      setPlan(Scenario.from(base()))
+      setViewing(null)
+      setRestoreNote(null)
+      setSaveName(null)
+      setSuggestions(null)
+      await refreshScenarios()
+    } catch (err) {
+      alert(String(err instanceof Error ? err.message : err))
+    } finally {
+      setScenarioBusy(false)
+    }
+  }
+
+  /** Open a stored scenario: replay over the live plan, invalidating stale changes. */
+  const openScenario = async (id: string, name: string) => {
+    setScenarioBusy(true)
+    try {
+      const res = await fetch(`/api/routing/scenarios/${id}`)
+      if (!res.ok) throw new Error(`load failed (${res.status})`)
+      const body = (await res.json()) as { scenario: { changes: RoutingEvent[] } }
+      const report = Scenario.restore(base(), body.scenario.changes)
+      setPlan(report.scenario)
+      setViewing({ id, name })
+      setSuggestions(null)
+      setRestoreNote(
+        report.invalidated.length > 0
+          ? `${report.invalidated.length} of ${body.scenario.changes.length} changes invalidated — their stops changed underneath`
+          : null,
+      )
+    } catch (err) {
+      alert(String(err instanceof Error ? err.message : err))
+    } finally {
+      setScenarioBusy(false)
+    }
+  }
+
+  const exitScenario = () => {
+    setPlan(Scenario.from(base()))
+    setViewing(null)
+    setRestoreNote(null)
+    setSuggestions(null)
+  }
+
+  const settleScenario = async (id: string, status: "committed" | "discarded") => {
+    setScenarioBusy(true)
+    try {
+      const res = await fetch(`/api/routing/scenarios/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      })
+      if (!res.ok) throw new Error(`update failed (${res.status})`)
+      if (viewing?.id === id) exitScenario()
+      await refreshScenarios()
+    } catch (err) {
+      alert(String(err instanceof Error ? err.message : err))
+    } finally {
+      setScenarioBusy(false)
+    }
+  }
+
+  /** The lens overlay: one soft hull per cluster, pins untouched. */
+  useEffect(() => {
+    const map = mapRef.current
+    const src = map?.getSource("clusters") as mapboxgl.GeoJSONSource | undefined
+    if (!src) return
+    if (!clusterView) {
+      src.setData({ type: "FeatureCollection", features: [] })
+      return
+    }
+    // Convex hull + a small outward buffer. Clusters are chained at 0.5mi, so
+    // any two are at least 0.5mi apart at their nearest members — a 0.12mi
+    // buffer can never make two hulls overlap.
+    const MI_LAT = 1 / 69.0
+    const features: GeoJSON.Feature[] = []
+    clusterView.clusters.forEach((c, i) => {
+      const members = c.quotaIds
+        .map((id) => clusterView.members.get(id)?.pin)
+        .filter((p): p is Pin => !!p)
+      if (members.length === 0) return
+      const miLng = MI_LAT / Math.max(Math.cos((c.centre.lat * Math.PI) / 180), 1e-6)
+      let ringPts: { lat: number; lng: number }[]
+      if (members.length < 3) {
+        ringPts = Circle.of(c.centre, Math.max(0.22, ...members.map((p) => c.centre.distanceTo(p)) ) + 0.1).ring(24)
+      } else {
+        const pts = members.map((p) => ({ x: p.lng, y: p.lat }))
+        pts.sort((a, b) => a.x - b.x || a.y - b.y)
+        const cross = (o: {x:number;y:number}, a: {x:number;y:number}, b: {x:number;y:number}) =>
+          (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+        const lower: typeof pts = []
+        for (const pt of pts) {
+          while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], pt) <= 0) lower.pop()
+          lower.push(pt)
+        }
+        const upper: typeof pts = []
+        for (const pt of [...pts].reverse()) {
+          while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pt) <= 0) upper.pop()
+          upper.push(pt)
+        }
+        const hull = [...lower.slice(0, -1), ...upper.slice(0, -1)]
+        // buffer: push each vertex 0.12mi outward from the centroid
+        ringPts = hull.map((v) => {
+          const dx = v.x - c.centre.lng
+          const dy = v.y - c.centre.lat
+          const lenMi = Math.hypot(dx / miLng, dy / MI_LAT) || 1e-6
+          const k = (lenMi + 0.12) / lenMi
+          return { lat: c.centre.lat + dy * k, lng: c.centre.lng + dx * k }
+        })
+        ringPts.push(ringPts[0])
+      }
+      features.push({
+        type: "Feature",
+        properties: { color: PALETTE[i % PALETTE.length] },
+        geometry: { type: "Polygon", coordinates: [ringPts.map((p) => [p.lng, p.lat])] },
+      })
+    })
+    src.setData({ type: "FeatureCollection", features })
+  }, [clusterView])
+
+  /* --------------------------------------------------------- optimal view */
+
+  const enterOptimal = () => {
+    setOptimalBusy(true)
+    setTimeout(() => {
+      try {
+        const planner = new Planner(geometry)
+        // The draft's inputs are EXACTLY the current view: office filter, tech
+        // filter, scoped routes, and the selected day pills. One tech's pools
+        // loaded → the draft reworks that tech's week and nothing else.
+        // A pool joins the draft only if the view owns EVERY one of its
+        // stops — a pool shared with an out-of-scope tech/route stays in
+        // place, because reworking it would churn routes nobody asked about.
+        const stopInScope = (st: { techId: string; weekday: Weekday }) =>
+          (!techFilter || st.techId === techFilter) &&
+          (selectedRoutes.size === 0 || selectedRoutes.has(routeKey(st.techId, st.weekday))) &&
+          (dayScope.length === 0 || dayScope.includes(String(st.weekday)))
+        let sharedLeftInPlace = 0
+        const scoped = plan.all.filter((q) => {
+          if (!inOffice(q.requirement.customerId)) return false
+          if (q.stops.length === 0) return techFilter === null && selectedRoutes.size === 0
+          const inScope = q.stops.filter(stopInScope).length
+          if (inScope === 0) return false
+          if (inScope < q.stops.length) {
+            sharedLeftInPlace++
+            return false
+          }
+          return true
+        })
+        // The slot inventory is the incumbent's: as many routes per day as the
+        // scoped view actually runs (Elaina's week = 1 per day, not phantom 2).
+        const routesPerDay = new Map<number, Set<string>>()
+        for (const q of scoped)
+          for (const st of q.stops) {
+            const set = routesPerDay.get(st.weekday) ?? new Set()
+            set.add(routeKey(st.techId, st.weekday))
+            routesPerDay.set(st.weekday, set)
+          }
+        const maxSlotsPerDay = Math.max(1, ...[...routesPerDay.values()].map((v) => v.size))
+        const planBases = offices
+          .filter((o) => o.lat !== null && o.lng !== null)
+          .filter((o) => officeScope.length === 0 || officeScope.includes(o.label))
+          .map((o) => ({ label: o.label, pin: Pin.restore(o.lat!, o.lng!) }))
+        // Day slots = the selected day pills; otherwise the days the scoped
+        // pools actually run on today.
+        const days =
+          dayScope.length > 0
+            ? dayScope.map((d) => Number(d) as Weekday).sort((a, b) => a - b)
+            : [...new Set(scoped.flatMap((q) => q.stops.map((st) => st.weekday)))].sort(
+                (a, b) => a - b,
+              )
+        const world = planner.plan(scoped, planBases, days, { maxSlotsPerDay })
+        if (sharedLeftInPlace > 0)
+          console.info(`optimal draft: ${sharedLeftInPlace} shared pools left in place (stops outside the scope)`)
+        const scenario = planner.toScenario(scoped, world)
+        const optFactory = new RouteFactory(geometry, world.slotBases)
+        // Name each slot by the tech who'd keep most of their pools on it —
+        // the same overlap assignment the diff uses. Unmatched slots keep
+        // their draft name: a route with no natural owner.
+        const assignment = planner.assign(scoped, world)
+        const labels: Record<string, string> = {}
+        for (const slot of world.slots) {
+          const techId = assignment.get(slot.slotId)
+          labels[slot.slotId] =
+            techId && techs[techId] ? techs[techId] : world.slotLabels[slot.slotId]
+        }
+        setOptimal({
+          scenario,
+          factory: optFactory,
+          labels,
+          assigned: new Map([...assignment].filter(([slot, tech]) => tech !== slot)),
+          world,
+          scopedIds: new Set(scoped.map((q) => q.id)),
+        })
+        setTourRoute(null)
+        setSelectedRoutes(new Set())
+        setSelectedLeg(null)
+        setSuggestions(null)
+      } catch (err) {
+        alert(String(err instanceof Error ? err.message : err))
+      } finally {
+        setOptimalBusy(false)
+      }
+    }, 30)
+  }
+
+  const exitOptimal = () => {
+    setOptimal(null)
+    setTourRoute(null)
+    setSelectedRoutes(new Set())
+    setSelectedLeg(null)
+    setSelected(null)
+  }
+
+  /** The draft's diff — assigned to real techs by overlap — saved as a scenario. */
+  const saveOptimalDiff = async () => {
+    if (!optimal) return
+    setScenarioBusy(true)
+    try {
+      const planner = new Planner(geometry)
+      const scopedLive = plan.all.filter((q) => optimal.scopedIds.has(q.id))
+      const assignment = planner.assign(scopedLive, optimal.world)
+      const events = planner.diff(scopedLive, optimal.world, assignment)
+      if (events.length === 0) {
+        alert("the draft matches the current plan — nothing to save")
+        return
+      }
+      const name = `optimal rebalance — ${officeScope.length ? officeScope.join(" + ") : "all offices"}`
+      const res = await fetch("/api/routing/scenarios", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, changes: events }),
+      })
+      if (!res.ok) throw new Error(`save failed (${res.status})`)
+      setOptimal(null)
+      setTourRoute(null)
+      setSelectedRoutes(new Set())
+      setSelectedLeg(null)
+      await refreshScenarios()
+    } catch (err) {
+      alert(String(err instanceof Error ? err.message : err))
+    } finally {
+      setScenarioBusy(false)
+    }
+  }
+
+  /* -------------------------------------------------------- the optimizer */
+
+  /**
+   * Suggestions follow the view: whatever the filters currently show IS the
+   * optimizer's scope — offices, day pills, tech filter, selected routes.
+   * Debounced, capped at 20 moves, recomputed as the view or the plan moves.
+   */
+  useEffect(() => {
+    if (optimal) {
+      setSuggestions(null)
+      return
+    }
+    // The scope layers exactly like the map: office and day filters (via
+    // `visible`), then the tech filter, then any selected routes.
+    let inView = visible
+    if (techFilter) inView = inView.filter((v) => v.route.techId === techFilter)
+    if (selectedRoutes.size > 0)
+      inView = inView.filter((v) => selectedRoutes.has(routeKey(v.route.techId, v.route.weekday)))
+    const scope = inView.map((v) => ({ techId: v.route.techId, weekday: v.route.weekday }))
+    if (scope.length < 2) {
+      setSuggestions(null)
+      return
+    }
+    setSuggestBusy(true)
+    const t = setTimeout(() => {
+      try {
+        setSuggestions(new Optimizer(geometry, factory).suggest(plan.all, scope, week, 20))
+      } finally {
+        setSuggestBusy(false)
+      }
+    }, 450)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, techFilter, selectedRoutes, plan, rev, matrixRev, optimal, geometry, factory, week])
+
+  /** Take one suggestion into the pending changes. */
+  const addSuggestion = (m: SuggestedMove) => {
+    if (optimal) {
+      alert("the optimal draft is read-only — save the diff as a scenario to work with it")
+      return
+    }
+    const e = m.event
+    if (e.kind !== "StopMoved") return
+    try {
+      plan.moveStop(e.quotaId, e.from, e.to)
+      forceRender((n) => n + 1)
+    } catch (err) {
+      alert(String(err instanceof Error ? err.message : err))
+    }
+    setSuggestions((prev) => prev?.filter((x) => x !== m) ?? null)
+  }
+
+  /** Take them all, in the order they were priced. */
+  const applyAllSuggestions = () => {
+    if (!suggestions) return
+    try {
+      for (const m of suggestions) {
+        const e = m.event
+        if (e.kind === "StopMoved") plan.moveStop(e.quotaId, e.from, e.to)
+      }
+      forceRender((n) => n + 1)
+    } catch (err) {
+      alert(String(err instanceof Error ? err.message : err))
+    }
+    setSuggestions(null)
   }
 
   /* --------------------------------------------------------------- render */
@@ -837,7 +1378,7 @@ export function LiveMap({
       <div className="pointer-events-none absolute left-4 right-[26rem] top-4 z-10 flex flex-col items-start gap-2">
         <div className={`pointer-events-auto w-full px-3 py-2 ${glass}`}>
           <div className="flex items-center gap-4">
-            <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
               <OfficeFilter
                 offices={offices}
                 value={officeScope}
@@ -845,10 +1386,73 @@ export function LiveMap({
                 counts={officeCounts}
                 size="sm"
               />
+              {viewing && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-400/40 bg-violet-400/10 px-2.5 py-0.5 text-[11px] text-violet-300">
+                  viewing scenario &ldquo;{viewing.name}&rdquo;
+                  {restoreNote && (
+                    <span className="text-sun" title={restoreNote}>
+                      · stale
+                    </span>
+                  )}
+                  <button
+                    className="ml-0.5 text-violet-300/60 hover:text-violet-300"
+                    title="close this scenario (unsaved edits are lost)"
+                    onClick={exitScenario}
+                  >
+                    ×
+                  </button>
+                </span>
+              )}
             </div>
 
             {/* Draw tool and its areas, all on the one row. */}
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+              <button
+                className={`rounded-full border px-3 py-1 text-[11px] font-medium ${
+                  clusterLens
+                    ? "border-violet-400/50 bg-violet-400/15 text-violet-300"
+                    : "border-line bg-white/[0.03] text-ink-dim hover:border-violet-400/40 hover:text-violet-300"
+                }`}
+                title="colour pins by natural geographic cluster; grey = belongs to no cluster"
+                onClick={() => setClusterLens((v) => !v)}
+              >
+                Clusters
+              </button>
+              {optimal ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/50 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] text-emerald-400">
+                  optimal draft — {optimal.scopedIds.size} pools → {optimal.world.slots.length}{" "}
+                  routes
+                  {optimal.world.unplanned.length > 0 && (
+                    <span className="text-sun" title="no legal day pattern within the selected days, or no pin">
+                      · {optimal.world.unplanned.length} unplanned
+                    </span>
+                  )}
+                  <button
+                    className="rounded border border-emerald-500/40 px-1.5 text-[10px] font-medium hover:bg-emerald-500/15 disabled:opacity-50"
+                    disabled={scenarioBusy}
+                    title="save the path from today to this draft as a pending scenario"
+                    onClick={() => void saveOptimalDiff()}
+                  >
+                    save diff
+                  </button>
+                  <button
+                    className="text-emerald-400/60 hover:text-emerald-400"
+                    title="back to the live plan"
+                    onClick={exitOptimal}
+                  >
+                    ×
+                  </button>
+                </span>
+              ) : (
+                <button
+                  className="rounded-full border border-line bg-white/[0.03] px-3 py-1 text-[11px] font-medium text-ink-dim hover:border-emerald-500/40 hover:text-emerald-400 disabled:opacity-50"
+                  disabled={optimalBusy}
+                  title="the Planner's from-scratch draft for the offices in scope — read-only, diffable"
+                  onClick={enterOptimal}
+                >
+                  {optimalBusy ? "drafting…" : "Optimal"}
+                </button>
+              )}
               {armed && <span className="text-[11px] text-ink-mute">click to drop the edge</span>}
               {drawing && (
                 <span className="text-[11px] text-ink-mute">
@@ -920,11 +1524,55 @@ export function LiveMap({
             <div className="flex items-center gap-3 pb-1.5 text-[11px]">
               <Delta minutes={analysis.netMinutes} suffix=" min/wk" />
               <Delta minutes={analysis.netMi} suffix=" mi/wk" digits={1} />
-              <span className="text-ink-mute">
+              <span className="min-w-0 flex-1 truncate text-ink-mute">
                 {Object.entries(analysis.disruption)
                   .map(([k, n]) => `${n} ${k.replace("_", "+")}`)
                   .join(" · ")}
               </span>
+              {changes.length > 8 && (
+                <button
+                  className="shrink-0 text-[10.5px] text-ink-mute hover:text-cyan"
+                  onClick={() => setChangesModal(true)}
+                >
+                  view all
+                </button>
+              )}
+              {saveName === null ? (
+                <button
+                  className="shrink-0 rounded-full border border-violet-400/40 bg-violet-400/10 px-2.5 py-0.5 text-[10.5px] font-medium text-violet-300 hover:bg-violet-400/20 disabled:opacity-50"
+                  disabled={scenarioBusy}
+                  onClick={() => setSaveName(viewing?.name ?? "")}
+                >
+                  {viewing ? "Save scenario" : "Save as scenario"}
+                </button>
+              ) : (
+                <span className="flex shrink-0 items-center gap-1">
+                  <input
+                    autoFocus
+                    className="w-36 rounded border border-line bg-transparent px-1.5 py-0.5 text-[11px] text-ink outline-none focus:border-violet-400/60"
+                    placeholder="scenario name…"
+                    value={saveName}
+                    onChange={(e) => setSaveName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && saveName.trim()) void saveScenario(saveName.trim())
+                      if (e.key === "Escape") setSaveName(null)
+                    }}
+                  />
+                  <button
+                    className="rounded border border-violet-400/40 bg-violet-400/15 px-2 py-0.5 text-[10.5px] font-medium text-violet-300 disabled:opacity-50"
+                    disabled={!saveName.trim() || scenarioBusy}
+                    onClick={() => void saveScenario(saveName.trim())}
+                  >
+                    save
+                  </button>
+                  <button
+                    className="px-1 text-[11px] text-ink-mute hover:text-ink"
+                    onClick={() => setSaveName(null)}
+                  >
+                    ×
+                  </button>
+                </span>
+              )}
             </div>
           )}
           <table className="w-full text-[11px]">
@@ -1000,6 +1648,109 @@ export function LiveMap({
         </Worklist>
         )}
 
+        {pendingScenarios.length > 0 && (
+        <Worklist
+          label={`pending scenario${pendingScenarios.length === 1 ? "" : "s"}`}
+          count={pendingScenarios.length}
+          tone="cyan"
+          open={list === "scenarios"}
+          onToggle={() => setList(list === "scenarios" ? null : "scenarios")}
+        >
+          {pendingScenarios.map((sc) => (
+            <div
+              key={sc.id}
+              className={`flex items-center gap-2 border-b border-line-soft/40 py-1.5 last:border-0 ${
+                viewing?.id === sc.id ? "text-violet-300" : ""
+              }`}
+            >
+              <button
+                className="w-40 truncate text-left font-medium text-ink-dim hover:text-violet-300"
+                title="open this scenario"
+                onClick={() => void openScenario(sc.id, sc.name)}
+              >
+                {sc.name}
+              </button>
+              <span className="w-24 shrink-0 text-right">
+                <Delta minutes={sc.netMinutes} suffix=" min/wk" />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-ink-mute">
+                {sc.appliedCount} change{sc.appliedCount === 1 ? "" : "s"}
+                {sc.invalidCount > 0 && (
+                  <span className="text-sun"> · {sc.invalidCount} stale</span>
+                )}
+              </span>
+              <button
+                className="shrink-0 rounded border border-emerald-500/40 px-1.5 py-0.5 text-[10px] text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-50"
+                disabled={scenarioBusy}
+                title="mark committed — the ION write-back runs when the publisher lands"
+                onClick={() => void settleScenario(sc.id, "committed")}
+              >
+                commit
+              </button>
+              <button
+                className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-mute hover:text-coral disabled:opacity-50"
+                disabled={scenarioBusy}
+                onClick={() => void settleScenario(sc.id, "discarded")}
+              >
+                discard
+              </button>
+            </div>
+          ))}
+        </Worklist>
+        )}
+
+        {(suggestBusy || (suggestions?.length ?? 0) > 0) && (
+        <Worklist
+          label={suggestBusy ? "suggesting…" : "suggested changes"}
+          count={suggestions?.length ?? 0}
+          tone="emerald"
+          open={list === "suggested"}
+          onToggle={() => setList(list === "suggested" ? null : "suggested")}
+        >
+          <div className="flex items-center gap-2 pb-1.5">
+            <span className="text-[10.5px] text-ink-mute">
+              scoped to the current filters · priced in order
+            </span>
+            <span className="flex-1" />
+            {(suggestions?.length ?? 0) > 0 && (
+              <button
+                className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-[10.5px] font-medium text-emerald-400 hover:bg-emerald-500/20"
+                onClick={applyAllSuggestions}
+              >
+                Apply all ·{" "}
+                {Math.round((suggestions ?? []).reduce((n, m) => n + m.exactNetMinutes, 0))} min/wk
+              </button>
+            )}
+          </div>
+          {(suggestions ?? []).slice(0, 20).map((m, i) => {
+            const e = m.event
+            if (e.kind !== "StopMoved") return null
+            return (
+              <div
+                key={i}
+                className="flex items-center gap-1.5 border-t border-line-soft/40 py-1.5 text-[11px] first:border-0"
+              >
+                <span className="w-36 truncate text-ink-dim">{nameOf(m.customerId)}</span>
+                <Chip>{WEEKDAY_NAMES[e.from.weekday]}</Chip>
+                <Chip>{techOf(e.from.techId)}</Chip>
+                <span className="text-ink-mute">&rarr;</span>
+                <Chip>{WEEKDAY_NAMES[e.to.weekday]}</Chip>
+                <Chip>{techOf(e.to.techId)}</Chip>
+                <span className="flex-1" />
+                <Delta minutes={m.exactNetMinutes} suffix="m" digits={1} />
+                <button
+                  className="rounded border border-emerald-500/40 px-1.5 py-0.5 text-[10px] text-emerald-400 hover:bg-emerald-500/10"
+                  title="add to pending changes"
+                  onClick={() => addSuggestion(m)}
+                >
+                  +
+                </button>
+              </div>
+            )
+          })}
+        </Worklist>
+        )}
+
         {owed > 0 && (
         <Worklist
           label="owed"
@@ -1050,6 +1801,39 @@ export function LiveMap({
               serviceMin={routePanel.cost.weeklyServiceMinutes}
               utilization={routePanel.cost.utilization}
             />
+
+            {/* Same pins, same day — handing to an empty-handed tech is free. */}
+            <div className="mx-3.5 mt-2 flex items-center gap-1.5">
+              <select
+                className="min-w-0 flex-1 rounded border border-line bg-transparent px-1.5 py-1 text-[10.5px] text-ink-mute focus:text-ink"
+                value=""
+                onChange={(e) => {
+                  const toTechId = e.target.value
+                  if (!toTechId) return
+                  try {
+                    plan.reassignRouteTech(
+                      routePanel.route.techId,
+                      routePanel.route.weekday,
+                      toTechId,
+                    )
+                    setTourRoute(routeKey(toTechId, routePanel.route.weekday))
+                    forceRender((n) => n + 1)
+                  } catch (err) {
+                    alert(String(err instanceof Error ? err.message : err))
+                  }
+                }}
+              >
+                <option value="">hand this route to another tech…</option>
+                {Object.entries(techs)
+                  .filter(([id, name]) => id !== routePanel.route.techId && name.trim())
+                  .sort((a, b) => a[1].localeCompare(b[1]))
+                  .map(([id, name]) => (
+                    <option key={id} value={id} className="bg-[#0b1620]">
+                      {name}
+                    </option>
+                  ))}
+              </select>
+            </div>
 
             <div className="mt-2 min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3.5 pb-3">
               <div>
@@ -1147,19 +1931,36 @@ export function LiveMap({
           options={WEEKDAY_NAMES.map((n, i) => ({ value: String(i), label: n }))}
         />
 
-        <div className="mt-2.5 flex items-center gap-2 border-t border-line-soft pt-2">
+        <div className="mt-2.5 flex items-center gap-2.5 border-t border-line-soft pt-2">
           <button
-            className="flex-1 text-left text-[10px] uppercase tracking-[0.14em] text-ink-mute"
-            onClick={() => setRoutesOpen((v) => !v)}
+            className={`text-[10px] uppercase tracking-[0.14em] ${
+              panelMode === "routes" ? "text-ink" : "text-ink-mute hover:text-ink-dim"
+            }`}
+            onClick={() => {
+              setPanelMode("routes")
+              setRoutesOpen(true)
+            }}
           >
             Routes ({visible.length})
           </button>
-          {selectedRoute && (
+          <button
+            className={`text-[10px] uppercase tracking-[0.14em] ${
+              panelMode === "techs" ? "text-ink" : "text-ink-mute hover:text-ink-dim"
+            }`}
+            onClick={() => {
+              setPanelMode("techs")
+              setRoutesOpen(true)
+            }}
+          >
+            Techs ({techDirectory.length})
+          </button>
+          <span className="flex-1" />
+          {selectedRoutes.size > 0 && (
             <button
               className="text-[10px] text-ink-mute hover:text-cyan"
               onClick={() => setSelectedRoute(null)}
             >
-              clear
+              clear ({selectedRoutes.size})
             </button>
           )}
           <button className="text-[11px] text-ink-mute" onClick={() => setRoutesOpen((v) => !v)}>
@@ -1168,6 +1969,72 @@ export function LiveMap({
         </div>
 
         {routesOpen && (
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <input
+              className="min-w-0 flex-1 rounded border border-line bg-white/[0.02] px-2 py-1 text-[11px] text-ink placeholder:text-ink-mute/60 outline-none focus:border-cyan/40"
+              placeholder={panelMode === "routes" ? "search routes by tech…" : "search techs…"}
+              value={routeSearch}
+              onChange={(e) => setRouteSearch(e.target.value)}
+            />
+            {techFilter && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-cyan/40 bg-cyan/10 px-2 py-0.5 text-[10.5px] text-cyan">
+                {techOf(techFilter)}
+                <button
+                  className="text-cyan/60 hover:text-cyan"
+                  title="clear tech filter"
+                  onClick={() => setTechFilter(null)}
+                >
+                  ×
+                </button>
+              </span>
+            )}
+          </div>
+        )}
+
+        {routesOpen && panelMode === "techs" && (
+        <div className="mt-1 min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+          <ul className="mt-0.5">
+            {techDirectory.map((t) => (
+              <li key={t.techId}>
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-1.5 py-[7px] text-left hover:bg-white/[0.04]"
+                  onClick={() => {
+                    setTechFilter(t.techId)
+                    setPanelMode("routes")
+                    setRouteSearch("")
+                    // Their whole week lands in the optimizer scope — one
+                    // click from the tech view to "optimize this tech".
+                    setSelectedRoutes(
+                      new Set(
+                        visible
+                          .filter((v) => v.route.techId === t.techId)
+                          .map((v) => routeKey(v.route.techId, v.route.weekday)),
+                      ),
+                    )
+                    setSuggestions(null)
+                  }}
+                >
+                  <span
+                    className="block h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ background: colorOf(t.techId) }}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink">
+                    {techOf(t.techId)}
+                  </span>
+                  <span className="font-mono num text-[10.5px] text-ink-mute">
+                    {t.routes} route{t.routes === 1 ? "" : "s"} · {t.stops}
+                  </span>
+                </button>
+              </li>
+            ))}
+            {techDirectory.length === 0 && (
+              <p className="py-2 text-[11px] text-ink-mute">no techs match</p>
+            )}
+          </ul>
+        </div>
+        )}
+
+        {routesOpen && panelMode === "routes" && (
         <div className="mt-1 min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
           {byDay.map(({ weekday, routes: dayRoutes }) => (
             <div key={weekday}>
@@ -1179,17 +2046,15 @@ export function LiveMap({
               <ul className="mt-0.5">
                 {dayRoutes.map(({ route, cost }) => {
                   const key = routeKey(route.techId, route.weekday)
-                  const picked = selectedRoute === key
+                  const picked = selectedRoutes.has(key)
+                  const inScope = picked
                   return (
-                    <li key={key}>
+                    <li key={key} className="group relative">
                       <button
-                        className={`flex w-full items-center gap-2 rounded-md px-1.5 py-[7px] text-left transition-colors ${
+                        className={`flex w-full items-center gap-2 rounded-md px-1.5 py-[7px] pr-7 text-left transition-colors ${
                           picked ? "bg-cyan/10 ring-1 ring-inset ring-cyan/30" : "hover:bg-white/[0.04]"
                         }`}
-                        onClick={() => {
-                          setSelectedRoute(picked ? null : key)
-                          setSelectedLeg(null)
-                        }}
+                        onClick={() => toggleRoute(key)}
                       >
                         <span
                           className="block h-2.5 w-2.5 shrink-0 rounded-full border"
@@ -1206,6 +2071,32 @@ export function LiveMap({
                           serviceMin={cost.weeklyServiceMinutes}
                           utilization={cost.utilization}
                         />
+                      </button>
+                      {/* Drive lines: one route's tour + panel at a time. */}
+                      <button
+                        className={`absolute right-1.5 top-1/2 flex h-[18px] w-[18px] -translate-y-1/2 items-center justify-center rounded border transition-opacity ${
+                          tourRoute === key
+                            ? "border-cyan/60 bg-cyan/20 text-cyan opacity-100"
+                            : "border-line text-ink-mute opacity-60 hover:text-ink group-hover:opacity-100"
+                        }`}
+                        title={tourRoute === key ? "hide drive lines" : "show drive lines"}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setTourRoute(tourRoute === key ? null : key)
+                          setSelectedLeg(null)
+                        }}
+                      >
+                        <svg viewBox="0 0 14 14" width="11" height="11" aria-hidden="true">
+                          <path
+                            d="M1.5 12 Q4 9 3.5 6.5 T7 4 T12.5 2"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinecap="round"
+                          />
+                          <circle cx="1.5" cy="12" r="1.4" fill="currentColor" />
+                          <circle cx="12.5" cy="2" r="1.4" fill="currentColor" />
+                        </svg>
                       </button>
                     </li>
                   )
@@ -1225,10 +2116,14 @@ export function LiveMap({
         <div className={`absolute bottom-4 left-4 z-10 w-[24rem] p-3 ${glass}`}>
           <div className="flex items-baseline gap-2">
             <span className="text-[13px] font-medium text-ink">
-              {selection.length} stop{selection.length === 1 ? "" : "s"} selected
+              {selection.stops.length} stop{selection.stops.length === 1 ? "" : "s"}
+              {selection.owed.length > 0 && (
+                <span className="text-sun"> + {selection.owed.length} owed</span>
+              )}{" "}
+              selected
             </span>
             <span className="text-[11px] text-ink-mute">
-              {new Set(selection.map((s) => s.quotaId)).size} pools · {shapes.length} area
+              {new Set(selection.stops.map((s) => s.quotaId)).size} pools · {shapes.length} area
               {shapes.length === 1 ? "" : "s"}
               {excluded.size > 0 && (
                 <>
@@ -1249,7 +2144,7 @@ export function LiveMap({
             </span>
           </div>
 
-          {selection.length === 0 ? (
+          {selection.stops.length === 0 && selection.owed.length === 0 ? (
             <p className="mt-2 text-[11px] text-ink-mute">
               {excluded.size > 0
                 ? "Every matching stop in this area is currently dropped from the selection."
@@ -1262,7 +2157,28 @@ export function LiveMap({
               <div className="mt-2 max-h-40 overflow-y-auto overflow-x-hidden">
                 <table className="w-full table-fixed text-[11px]">
                   <tbody>
-                    {selection.map((sel) => {
+                    {selection.owed.map((quotaId) => {
+                      const q = plan.all.find((x) => x.id === quotaId)
+                      return (
+                        <tr key={`owed-${quotaId}`} className="border-b border-line-soft/40 last:border-0">
+                          <td className="truncate py-1 pr-2 text-ink-dim">
+                            {nameOf(q?.requirement.customerId ?? null)}
+                          </td>
+                          <td className="w-12 py-1 pr-2 text-sun">owed</td>
+                          <td className="w-28 truncate py-1 pr-1 text-ink-mute">unplaced</td>
+                          <td className="w-5 py-1 text-right">
+                            <button
+                              className="px-1 text-ink-mute hover:text-coral"
+                              title="drop this owed quota from the selection"
+                              onClick={() => setExcluded((prev) => new Set(prev).add(`owed|${quotaId}`))}
+                            >
+                              ×
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                    {selection.stops.map((sel) => {
                       const q = plan.all.find((x) => x.id === sel.quotaId)
                       return (
                         <tr
@@ -1352,55 +2268,264 @@ export function LiveMap({
         </div>
       )}
 
-      {/* Selected stop — bottom left, over the map */}
-      {selection === null && selectedInfo && (
-        <div className={`absolute bottom-4 left-4 z-10 w-[22rem] p-3 ${glass}`}>
-          <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-medium text-ink">
-                {nameOf(selectedInfo.quota.requirement.customerId)}
-              </div>
-              <div className="text-[11px] text-ink-mute">
-                {officeOf(selectedInfo.quota.requirement.customerId) ?? "no office"}
-                {selectedInfo.route
-                  ? ` · ${WEEKDAY_NAMES[selectedInfo.route.weekday]} · ${techOf(selectedInfo.route.techId)}`
-                  : ` · ${selectedInfo.quota.unmetCount()} placement owed`}
-              </div>
+      {/* Every pending change, grouped by destination — the full ledger */}
+      {changesModal && (
+        <div
+          className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-[2px]"
+          onClick={() => setChangesModal(false)}
+        >
+          <div
+            className={`flex max-h-[80vh] w-[46rem] flex-col p-4 ${glass}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-[14px] font-semibold text-ink">
+                Pending changes ({changes.length})
+              </span>
+              {analysis && (
+                <>
+                  <Delta minutes={analysis.netMinutes} suffix=" min/wk" />
+                  <Delta minutes={analysis.netMi} suffix=" mi/wk" digits={1} />
+                </>
+              )}
+              <span className="flex-1" />
+              <button
+                className="text-[11px] text-ink-mute hover:text-coral"
+                onClick={() => {
+                  revertAll()
+                  setChangesModal(false)
+                }}
+              >
+                clear all
+              </button>
+              <button
+                className="pl-1 text-[14px] text-ink-mute hover:text-ink"
+                onClick={() => setChangesModal(false)}
+              >
+                ×
+              </button>
             </div>
-            <button
-              className="text-[11px] text-ink-mute hover:text-ink"
-              onClick={() => setSelected(null)}
-            >
-              close
-            </button>
-          </div>
 
-          {selectedInfo.profile && (
-            <div className="mt-2 space-y-0.5 text-[11px] text-ink-mute">
-              {selectedInfo.profile.runs.map((r, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="flex-1">
-                    stop {r.position + 1} of {r.runStops}
-                  </span>
-                  <span className="font-mono num">
-                    {r.marginalMi !== null ? `+${r.marginalMi.toFixed(1)}mi` : "—"}
-                  </span>
-                </div>
-              ))}
+            <div className="mt-2 min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+              {(() => {
+                // Group by destination: where the work is landing is the
+                // question a big list is read to answer.
+                const groups = new Map<string, { label: string; items: { e: RoutingEvent; i: number }[] }>()
+                changes.forEach((e, i) => {
+                  const to = sidesOf(e).to
+                  const key = to ? `${to.day}|${to.techId}` : "unplaced"
+                  const label = to
+                    ? `${to.day} · ${to.techId ? techOf(to.techId) : to.day}`
+                    : "unplaced"
+                  const g = groups.get(key) ?? { label, items: [] }
+                  g.items.push({ e, i })
+                  groups.set(key, g)
+                })
+                return [...groups.values()].map((g) => (
+                  <div key={g.label} className="mt-3 first:mt-1">
+                    <div className="flex items-baseline gap-2 border-b border-line-soft pb-1">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-dim">
+                        {g.label}
+                      </span>
+                      <span className="text-[10px] text-ink-mute">
+                        {g.items.length} change{g.items.length === 1 ? "" : "s"}
+                      </span>
+                      {analysis && (
+                        <span className="ml-auto">
+                          <Delta
+                            minutes={g.items.reduce(
+                              (n, it) => n + (analysis.moves[it.i]?.exactNetMinutes ?? 0),
+                              0,
+                            )}
+                            suffix="m"
+                            digits={1}
+                          />
+                        </span>
+                      )}
+                    </div>
+                    {g.items.map(({ e, i }) => {
+                      const move = sidesOf(e)
+                      return (
+                        <div
+                          key={i}
+                          className="flex items-center gap-1.5 border-b border-line-soft/30 py-1.5 text-[11px] last:border-0"
+                        >
+                          <span className="w-44 truncate text-ink-dim">
+                            {nameOf(quotaOf(e.quotaId)?.requirement.customerId ?? null)}
+                          </span>
+                          {move.from ? (
+                            <>
+                              <Chip>{move.from.day}</Chip>
+                              {move.from.techId && <Chip>{techOf(move.from.techId)}</Chip>}
+                            </>
+                          ) : (
+                            <span className="text-ink-mute">unplaced</span>
+                          )}
+                          <span className="text-ink-mute">&rarr;</span>
+                          {move.to ? (
+                            <>
+                              <Chip>{move.to.day}</Chip>
+                              {move.to.techId && <Chip>{techOf(move.to.techId)}</Chip>}
+                            </>
+                          ) : (
+                            <span className="text-ink-mute">unplaced</span>
+                          )}
+                          <span className="flex-1" />
+                          {analysis?.moves[i] && (
+                            <Delta minutes={analysis.moves[i].exactNetMinutes} suffix="m" digits={1} />
+                          )}
+                          <button
+                            className="px-1 text-ink-mute hover:text-coral"
+                            title="undo this change"
+                            onClick={() => revertChange(i)}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ))
+              })()}
             </div>
-          )}
+          </div>
         </div>
       )}
 
-      {/* Legend — bottom centre */}
-      <div
-        className={`absolute bottom-4 left-1/2 z-10 -translate-x-1/2 px-3 py-1.5 text-[10px] text-ink-mute ${glass}`}
-      >
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full border-2 border-sun" /> placement owed
-        </span>
-        <span className="ml-3">colour = tech</span>
-      </div>
+      {/* Bottom centre: the selected stop when there is one, the legend when not */}
+      {selectedInfo ? (
+        <div
+          className={`absolute bottom-4 left-1/2 z-10 flex max-w-[44rem] -translate-x-1/2 items-center gap-3 px-3.5 py-2 ${glass}`}
+        >
+          <div className="min-w-0">
+            <div className="flex items-baseline gap-2">
+              <span className="max-w-[13rem] truncate text-[12.5px] font-semibold text-ink">
+                {nameOf(selectedInfo.quota.requirement.customerId)}
+              </span>
+              <span className="text-[10px] text-ink-mute">
+                {cadenceLabel(
+                  cadence(
+                    selectedInfo.quota.requirement.intervalWeeks,
+                    selectedInfo.quota.requirement.anchorWeek,
+                  ),
+                )}
+                {" · "}
+                {selectedInfo.quota.requirement.serviceMinutes ?? "~22"}m on site
+                {" · "}
+                {officeOf(selectedInfo.quota.requirement.customerId) ?? "no office"}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {selectedInfo.placements.map((p) => (
+                <span
+                  key={`${p.stop.techId}|${p.stop.weekday}`}
+                  className="inline-flex items-center gap-1 rounded-full border border-line bg-white/[0.04] px-2 py-0.5 text-[10px] text-ink-dim"
+                >
+                  {WEEKDAY_NAMES[p.stop.weekday]} · {techOf(p.stop.techId)}
+                  {p.driveMinutes !== null && (
+                    <span className="font-mono text-ink-mute">
+                      +{Math.round(p.driveMinutes)}m drive
+                    </span>
+                  )}
+                </span>
+              ))}
+              {selectedInfo.quota.unmetCount() > 0 && (
+                <span className="rounded-full border border-sun/50 bg-sun/10 px-2 py-0.5 text-[10px] text-sun">
+                  {selectedInfo.quota.unmetCount()} owed
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Move: the first placement (or an owed slot) to a new tech-day. */}
+          <div className="flex shrink-0 items-center gap-1.5 border-l border-line-soft pl-3">
+            <select
+              id="stop-pill-tech"
+              className="w-32 rounded border border-line bg-transparent px-1.5 py-1 text-[10.5px] text-ink"
+              defaultValue=""
+            >
+              <option value="">tech…</option>
+              {Object.entries(techs)
+                .filter(([, name]) => name.trim())
+                .sort((a, b) => a[1].localeCompare(b[1]))
+                .map(([id, name]) => (
+                  <option key={id} value={id} className="bg-[#0b1620]">
+                    {name}
+                  </option>
+                ))}
+            </select>
+            <select
+              id="stop-pill-day"
+              className="rounded border border-line bg-transparent px-1.5 py-1 text-[10.5px] text-ink"
+              defaultValue=""
+            >
+              <option value="">day…</option>
+              {WEEKDAY_NAMES.map((n, i) => (
+                <option key={i} value={i} className="bg-[#0b1620]">
+                  {n}
+                </option>
+              ))}
+            </select>
+            <button
+              className="rounded border border-cyan/40 bg-cyan/15 px-2 py-1 text-[10.5px] font-medium text-cyan"
+              onClick={() => {
+                const t = (document.getElementById("stop-pill-tech") as HTMLSelectElement)?.value
+                const d = (document.getElementById("stop-pill-day") as HTMLSelectElement)?.value
+                if (!t || d === "" || !selectedInfo) return
+                try {
+                  const first = selectedInfo.placements[0]
+                  if (selectedInfo.quota.unmetCount() > 0 && !first) {
+                    plan.placeStop(selectedInfo.quota.id, t, Number(d) as Weekday)
+                  } else if (first) {
+                    plan.moveStop(
+                      selectedInfo.quota.id,
+                      { techId: first.stop.techId, weekday: first.stop.weekday },
+                      { techId: t, weekday: Number(d) as Weekday },
+                    )
+                  }
+                  forceRender((n) => n + 1)
+                } catch (err) {
+                  alert(String(err instanceof Error ? err.message : err))
+                }
+              }}
+            >
+              Move
+            </button>
+            <button
+              className="pl-1 text-[12px] text-ink-mute hover:text-ink"
+              onClick={() => setSelected(null)}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          className={`absolute bottom-4 left-1/2 z-10 -translate-x-1/2 px-3 py-1.5 text-[10px] text-ink-mute ${glass}`}
+        >
+          {clusterView ? (
+            <>
+              <span>
+                colour = cluster ·{" "}
+                <span className="font-mono num text-ink-dim">{clusterView.clusters.length}</span>{" "}
+                clusters
+              </span>
+              <span className="ml-3 inline-flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: "#475569" }} />
+                <span className="font-mono num text-ink-dim">{clusterView.loners.length}</span> in no
+                cluster
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full border-2 border-sun" /> placement owed
+              </span>
+              <span className="ml-3">colour = tech</span>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -1638,12 +2763,13 @@ function Worklist({
 }: {
   label: string
   count: number
-  tone: "cyan" | "sun"
+  tone: "cyan" | "sun" | "emerald"
   open: boolean
   onToggle: () => void
   children: React.ReactNode
 }) {
-  const colour = tone === "cyan" ? "text-cyan" : "text-sun"
+  const colour =
+    tone === "cyan" ? "text-cyan" : tone === "sun" ? "text-sun" : "text-emerald-400"
   return (
     <div className={`pointer-events-auto w-fit max-w-[40rem] ${glass}`}>
       <button className="flex w-full items-center gap-2 px-3 py-1.5 text-left" onClick={onToggle}>

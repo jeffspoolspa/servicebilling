@@ -41,6 +41,20 @@ export const ROUTING_POLICY = {
    * prices are elicitation — tiers filled in with the office, then learnable
    * from vetoes — not something to invent here.
    */
+  /**
+   * The planner's slot-packing target: it closes a slot when the estimated day
+   * reaches this share of the workday, leaving headroom for reality (a long
+   * pool, traffic, a callback). 1.0 would pack days flush against the ceiling.
+   */
+  plannerTargetUtilization: 0.9,
+
+  /**
+   * The optimizing cap: neither engine builds or grows a route past this many
+   * pools. A rule for PROPOSALS, not a live-plan invariant — existing bigger
+   * routes stand, but no suggestion or draft makes one bigger.
+   */
+  maxPoolsPerRoute: 10,
+
   moveResistance: {
     place: 0,
     unplace: 0,

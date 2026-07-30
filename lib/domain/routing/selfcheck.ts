@@ -9,6 +9,8 @@ import { strict as assert } from "node:assert"
 import {
   Adoption,
   AdoptionBlocked,
+  Optimizer,
+  Planner,
   baseIdOf,
   Boundary,
   Circle,
@@ -765,7 +767,7 @@ check("reassign moves a selection and reports what it skipped", () => {
     { quotaId: "b", techId: "korey", weekday: 1 as Weekday },
     { quotaId: "c", techId: "dana", weekday: 3 as Weekday },
   ]
-  const report = scenario.reassign(selection, "dana", 3 as Weekday)
+  const report = scenario.reassign({ stops: selection, owed: [] }, "dana", 3 as Weekday)
 
   assert.equal(report.moved.length, 1, "only a actually moves")
   assert.equal(report.moved[0].quotaId, "a")
@@ -1103,6 +1105,271 @@ check("place and unplace price one-sided", () => {
   assert.equal(removed.moves[0].kind, "unplace")
   assert.equal(removed.moves[0].insertionCostMi, 0, "nothing inserted")
   assert.ok(removed.moves[0].exactNetMinutes < 0, "the plan sheds its service time")
+})
+
+console.log("\nscenarios at rest + the optimizer")
+
+check("restore invalidates per change, not per scenario", () => {
+  const a = quotaOf("a", { pin: Pin.hypothetical(31.0, -81.4) })
+  a.place("korey", 1 as Weekday)
+  const b = quotaOf("b", { pin: Pin.hypothetical(31.1, -81.4) })
+  b.place("korey", 2 as Weekday)
+  const changes = [
+    { kind: "StopMoved" as const, quotaId: "a", from: { techId: "korey", weekday: 1 as Weekday }, to: { techId: "dana", weekday: 3 as Weekday } },
+    // Stale: b's stop moved underneath (stored as korey/1, live says korey/2).
+    { kind: "StopMoved" as const, quotaId: "b", from: { techId: "korey", weekday: 1 as Weekday }, to: { techId: "dana", weekday: 4 as Weekday } },
+  ]
+  const report = Scenario.restore([a, b], changes)
+  assert.equal(report.applied.length, 1, "the healthy change replays")
+  assert.equal(report.invalidated.length, 1, "the stale one is invalidated, not fatal")
+  assert.equal(report.invalidated[0].change.quotaId, "b")
+  assert.ok(report.invalidated[0].reason.length > 0, "with its reason")
+  assert.equal(report.scenario.changes().length, 1, "the restored scenario holds only what applied")
+  assert.equal(report.scenario.stopsOf("b")[0].weekday, 2, "b keeps its live placement")
+})
+
+check("a drawn region catches owed quotas, and reassign places them", () => {
+  const placedQ = quotaOf("placed", { pin: Pin.hypothetical(31.2, -81.4) })
+  placedQ.place("korey", 1 as Weekday)
+  const owedQ = quotaOf("owedq", { pin: Pin.hypothetical(31.21, -81.4), requiredDays: 1 })
+  const outside = quotaOf("outside", { pin: Pin.hypothetical(30.3, -81.0), requiredDays: 1 })
+
+  const sc = Scenario.from([placedQ, owedQ, outside])
+  const region = Circle.of(Pin.hypothetical(31.2, -81.4), 5)
+  const caught = sc.selectionWithin([region])
+  assert.deepEqual(caught.owed, ["owedq"], "the owed quota inside the circle, not the one outside")
+  assert.equal(caught.stops.length, 1)
+
+  const report = sc.reassign(caught, "dana", 3 as Weekday)
+  assert.deepEqual(report.placed, ["owedq"], "owed became a placement — a StopPlaced change")
+  assert.equal(report.moved.length, 1)
+  assert.ok(
+    !sc.unplacedLayer().backlog.some((q) => q.id === "owedq"),
+    "off the owed list (the untouched outside quota stays owed)",
+  )
+  assert.equal(sc.changes().filter((e) => e.kind === "StopPlaced").length, 1)
+})
+
+check("a whole route hands to another tech; empty-handed techs take it for free", () => {
+  const a = quotaOf("a", { pin: Pin.hypothetical(31.0, -81.4) })
+  a.place("korey", 1 as Weekday)
+  const b = quotaOf("b", { pin: Pin.hypothetical(31.05, -81.4) })
+  b.place("korey", 1 as Weekday)
+  const base = Pin.hypothetical(31.0, -81.45)
+  const bases = new Map([["korey", base], ["fresh", base]])
+  const factory = new RouteFactory(geometry, bases)
+  const model = new CostModel(geometry, factory)
+
+  const sc = Scenario.from([a, b])
+  const before = model.ofRoute(factory.routeFor(sc.all, "korey", 1 as Weekday, W0)!)
+  const report = sc.reassignRouteTech("korey", 1 as Weekday, "fresh")
+  assert.equal(report.moved.length, 2, "every stop moved")
+  const after = model.ofRoute(factory.routeFor(sc.all, "fresh", 1 as Weekday, W0)!)
+  assert.ok(Math.abs(after.weeklyMinutes - before.weeklyMinutes) < 0.2,
+    "same pins, same day, same base — no cost")
+  assert.equal(factory.routeFor(sc.all, "korey", 1 as Weekday, W0), null, "old route gone")
+})
+
+check("the optimizer consolidates thin routes within its scope and stays under the day", () => {
+  // Three techs, one pool each, all in one far cluster — Carter's case again,
+  // but this time the optimizer must FIND the moves itself.
+  const base = Pin.hypothetical(31.0, -81.4)
+  const p1 = quotaOf("p1", { pin: Pin.hypothetical(31.2, -81.4), serviceMinutes: 30 })
+  p1.place("t1", 1 as Weekday)
+  const p2 = quotaOf("p2", { pin: Pin.hypothetical(31.21, -81.4), serviceMinutes: 30 })
+  p2.place("t2", 1 as Weekday)
+  const p3 = quotaOf("p3", { pin: Pin.hypothetical(31.2, -81.39), serviceMinutes: 30 })
+  p3.place("t3", 1 as Weekday)
+  // A far-away quota NOT in scope: the optimizer must never touch it.
+  const far = quotaOf("far", { pin: Pin.hypothetical(30.4, -81.0) })
+  far.place("elsewhere", 1 as Weekday)
+
+  const bases = new Map([["t1", base], ["t2", base], ["t3", base]])
+  const factory = new RouteFactory(geometry, bases)
+  const optimizer = new Optimizer(geometry, factory)
+  const scope = [
+    { techId: "t1", weekday: 1 as Weekday },
+    { techId: "t2", weekday: 1 as Weekday },
+    { techId: "t3", weekday: 1 as Weekday },
+  ]
+  const moves = optimizer.suggest([p1, p2, p3, far], scope, W0)
+  assert.equal(moves.length, 2, "two moves consolidate three routes into one")
+  for (const m of moves) {
+    assert.ok(m.exactNetMinutes < -30, `each frees a round trip (${m.exactNetMinutes})`)
+    assert.ok(m.event.kind === "StopMoved" && m.event.quotaId !== "far", "out-of-scope stop untouched")
+  }
+  // Applying the suggestions to a real plan works — they are ordinary changes.
+  const sc = Scenario.from([p1, p2, p3, far])
+  for (const m of moves) {
+    if (m.event.kind === "StopMoved") sc.moveStop(m.event.quotaId, m.event.from, m.event.to)
+  }
+  assert.equal(sc.changes().length, 2)
+})
+
+check("the optimizer refuses moves that push the receiving day past 8 hours", () => {
+  const base = Pin.hypothetical(31.0, -81.4)
+  // Target route already near capacity: 3 stops × 150min service.
+  const heavy = [1, 2, 3].map((i) => {
+    const q = quotaOf(`h${i}`, { pin: Pin.hypothetical(31.1 + i * 0.001, -81.4), serviceMinutes: 150 })
+    q.place("big", 1 as Weekday)
+    return q
+  })
+  const solo = quotaOf("solo", { pin: Pin.hypothetical(31.105, -81.4), serviceMinutes: 60 })
+  solo.place("small", 1 as Weekday)
+  const bases = new Map([["big", base], ["small", base]])
+  const factory = new RouteFactory(geometry, bases)
+  const optimizer = new Optimizer(geometry, factory)
+  const moves = optimizer.suggest(
+    [...heavy, solo],
+    [{ techId: "big", weekday: 1 as Weekday }, { techId: "small", weekday: 1 as Weekday }],
+    W0,
+  )
+  // Consolidating solo ONTO big would blow the day — that direction is refused.
+  // Relieving big by moving work OFF it is allowed and correct.
+  for (const m of moves) {
+    assert.ok(m.event.kind === "StopMoved" && m.event.to.techId !== "big",
+      "no move may push the over-capacity day further over")
+  }
+})
+
+console.log("\nthe planner — construction, blind to the incumbent")
+
+check("the planner reunites a cluster the incumbent scattered — the reachability case", () => {
+  // Two tight clusters, interleaved across three routes: the exact valley a
+  // greedy improver cannot cross (every single relocate loses). The planner
+  // never sees the incumbent, so the clusters simply land together.
+  const base = Pin.hypothetical(31.0, -81.4)
+  const mk = (id: string, lat: number, lng: number, tech: string, day: number) => {
+    const q = quotaOf(id, { pin: Pin.hypothetical(lat, lng), serviceMinutes: 40 })
+    q.place(tech, day as Weekday)
+    return q
+  }
+  const live = [
+    // cluster X, ~14mi north; cluster Y, ~14mi east — members interleaved
+    mk("x1", 31.2, -81.4, "a", 1), mk("x2", 31.202, -81.4, "b", 2), mk("x3", 31.2, -81.402, "c", 3),
+    mk("y1", 31.0, -81.15, "a", 1), mk("y2", 31.0, -81.152, "b", 2), mk("y3", 31.002, -81.15, "c", 3),
+  ]
+  const planner = new Planner(geometry)
+  const world = planner.plan(live, [{ label: "Brunswick", pin: base }], [1, 2, 3, 4, 5] as Weekday[])
+  assert.equal(world.unplanned.length, 0)
+
+  // Each cluster reunited: all members share one (slot, day) — the thing the
+  // incumbent had scattered over three routes and the greedy could not fix.
+  for (const kind of ["x", "y"]) {
+    const spots = new Set(
+      live
+        .filter((q) => q.id[0] === kind)
+        .map((q) => {
+          const p = world.placements.get(q.id)![0]
+          return `${p.techId}|${p.weekday}`
+        }),
+    )
+    assert.equal(spots.size, 1, `cluster ${kind} reunited (got ${[...spots].join(" ")})`)
+  }
+})
+
+check("the planner packs under the target and respects multi-day gaps", () => {
+  const base = Pin.hypothetical(31.0, -81.4)
+  const live = []
+  // 12 pools × 60min service in one cluster: > one day at 90% of 480 → must split slots
+  for (let i = 0; i < 12; i++) {
+    live.push(quotaOf(`p${i}`, { pin: Pin.hypothetical(31.2 + i * 0.001, -81.4), serviceMinutes: 60 }))
+  }
+  const twice = quotaOf("twice", {
+    pin: Pin.hypothetical(31.2, -81.41),
+    requiredDays: 2,
+    serviceMinutes: 45,
+  })
+  const planner = new Planner(geometry)
+  const world = planner.plan([...live, twice], [{ label: "B", pin: base }], [1, 2, 3, 4, 5] as Weekday[], { maxSlotsPerDay: 5 })
+
+  const model = new CostModel(geometry, new RouteFactory(geometry, world.slotBases))
+  const sc = planner.toScenario([...live, twice], world)
+  const factory = new RouteFactory(geometry, world.slotBases)
+  for (const slot of world.slots) {
+    const r = factory.routeFor(sc.all, slot.slotId, slot.weekday, W0)
+    assert.ok(r, `slot ${slot.slotId} derives`)
+    assert.ok(model.ofRoute(r!).utilization <= 1.0, `${slot.slotId} fits the day`)
+  }
+  const days = world.placements.get("twice")!.map((p) => p.weekday).sort((a, b) => a - b)
+  assert.equal(days.length, 2, "twice-weekly gets two days")
+  const gap = Math.min(days[1] - days[0], days[0] + 7 - days[1])
+  assert.ok(gap >= 3, `twice-weekly gap ${gap} respects the min-gap rule`)
+})
+
+check("natural clustering chains neighbours and names the loners", () => {
+  let n = 100
+  const mk = (id: string, lat: number, lng: number) =>
+    quotaOf(id, { pin: Pin.hypothetical(lat, lng), customerId: n++ })
+  // A street of three (chained: a-b close, b-c close, a-c further), a pair, a loner.
+  const quotas = [
+    mk("s1", 31.2, -81.4), mk("s2", 31.204, -81.4), mk("s3", 31.208, -81.4),
+    mk("p1", 31.0, -81.2), mk("p2", 31.003, -81.2),
+    mk("alone", 30.7, -81.6),
+  ]
+  // Two quotas of ONE customer at the same pin: not a cluster.
+  const sameCustomer = [
+    quotaOf("c1", { pin: Pin.hypothetical(30.5, -81.0), customerId: 42 }),
+    quotaOf("c2", { pin: Pin.hypothetical(30.5, -81.0), customerId: 42 }),
+  ]
+  const sameView = new Planner(geometry).clustersOf(sameCustomer, 0.5)
+  assert.equal(sameView.clusters.length, 0, "one property is not a neighbourhood")
+  assert.equal(sameView.loners.length, 2)
+
+  const view = new Planner(geometry).clustersOf(quotas, 0.5)
+  assert.equal(view.clusters.length, 2)
+  assert.deepEqual([...view.clusters[0].quotaIds].sort(), ["s1", "s2", "s3"], "chaining links the whole street")
+  assert.deepEqual(view.loners, ["alone"], "no neighbour in range means no cluster")
+})
+
+check("the slot inventory is respected: one route per day means one, overflow visible", () => {
+  const base = Pin.hypothetical(31.0, -81.4)
+  const live = []
+  for (let i = 0; i < 10; i++) {
+    const q = quotaOf(`p${i}`, { pin: Pin.hypothetical(31.2 + i * 0.001, -81.4), serviceMinutes: 60 })
+    q.place("elaina", 1 as Weekday)
+    live.push(q)
+  }
+  const planner = new Planner(geometry)
+  const world = planner.plan(live, [{ label: "B", pin: base }], [1] as Weekday[], { maxSlotsPerDay: 1 })
+  assert.equal(world.slots.length, 1, "no phantom second route — the day overflows visibly instead")
+  assert.equal(world.slots[0].quotaIds.length, 10)
+})
+
+check("slot assignment goes to the tech with the most overlap, or stays open", () => {
+  const base = Pin.hypothetical(31.0, -81.4)
+  const a = quotaOf("a", { pin: Pin.hypothetical(31.2, -81.4) })
+  a.place("korey", 1 as Weekday)
+  const b = quotaOf("b", { pin: Pin.hypothetical(31.201, -81.4) })
+  b.place("korey", 1 as Weekday)
+  const c = quotaOf("c", { pin: Pin.hypothetical(31.202, -81.4) })
+  c.place("dana", 1 as Weekday)
+  const planner = new Planner(geometry)
+  const world = planner.plan([a, b, c], [{ label: "B", pin: base }], [1] as Weekday[])
+  const assignment = planner.assign([a, b, c], world)
+  // One Monday slot holding all three: korey serves 2 of 3 today → korey gets it.
+  const slotId = world.placements.get("a")![0].techId
+  assert.equal(assignment.get(slotId), "korey", "max overlap wins")
+})
+
+check("diff turns a draft into ordinary events that replay", () => {
+  const base = Pin.hypothetical(31.0, -81.4)
+  const a = quotaOf("a", { pin: Pin.hypothetical(31.2, -81.4) })
+  a.place("korey", 1 as Weekday)
+  const b = quotaOf("b", { pin: Pin.hypothetical(31.201, -81.4) })
+  b.place("dana", 4 as Weekday)
+  const planner = new Planner(geometry)
+  const world = planner.plan([a, b], [{ label: "B", pin: base }], [1, 2, 3, 4, 5] as Weekday[])
+  const events = planner.diff([a, b], world)
+  assert.ok(events.length > 0, "the draft differs from the incumbent")
+  const restored = Scenario.restore([a, b], events)
+  assert.equal(restored.invalidated.length, 0, "every diff event applies cleanly")
+  // After replay, placements match the plan exactly.
+  for (const q of restored.scenario.all) {
+    const want = (world.placements.get(q.id) ?? []).map((p) => `${p.techId}|${p.weekday}`).sort()
+    const got = q.stops.map((s) => `${s.techId}|${s.weekday}`).sort()
+    assert.deepEqual(got, want, `plan realised for ${q.id}`)
+  }
 })
 
 console.log(`\n${checks} checks passed\n`)

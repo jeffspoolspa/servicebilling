@@ -25,7 +25,32 @@ export interface SelectedStop {
 
 export interface ReassignReport {
   readonly moved: readonly SelectedStop[]
+  readonly placed: readonly string[]
   readonly skipped: readonly { quotaId: string; reason: string }[]
+}
+
+/** What a drawn region caught: placements to move, and owed quotas to place. */
+export interface RegionSelection {
+  readonly stops: readonly SelectedStop[]
+  /** Quota ids inside the region still owed placements — no stop exists yet. */
+  readonly owed: readonly string[]
+}
+
+/** A stored change that no longer applies to today's plan. */
+export interface InvalidChange {
+  readonly change: RoutingEvent
+  readonly reason: string
+}
+
+/**
+ * A scenario reconstituted from storage: what replayed cleanly, and what the
+ * live plan has moved out from under. A scenario is nothing but its change
+ * list, so staleness is per-change — one dead change does not kill the rest.
+ */
+export interface RestoreReport {
+  readonly scenario: Scenario
+  readonly applied: readonly RoutingEvent[]
+  readonly invalidated: readonly InvalidChange[]
 }
 
 export interface AdoptionBlocker {
@@ -94,6 +119,34 @@ export class Scenario {
       }
     }
     return scenario
+  }
+
+  /**
+   * Lenient replay for stored scenarios: each change is tried against the
+   * fresh plan, and one whose underlying stops have changed is invalidated
+   * with its reason rather than sinking the whole list. `replay` (strict)
+   * remains the right tool for same-session undo, where a failure is a bug.
+   */
+  static restore(live: readonly Quota[], changes: readonly RoutingEvent[]): RestoreReport {
+    const scenario = Scenario.from(live)
+    const applied: RoutingEvent[] = []
+    const invalidated: InvalidChange[] = []
+    for (const e of changes) {
+      try {
+        if (e.kind === "StopPlaced") scenario.placeStop(e.quotaId, e.to.techId, e.to.weekday)
+        else if (e.kind === "StopMoved") scenario.moveStop(e.quotaId, e.from, e.to)
+        else if (e.kind === "StopRemoved") scenario.unplaceStop(e.quotaId, e.from.techId, e.from.weekday)
+        else {
+          const quota = scenario.quotas.get(e.quotaId)
+          if (!quota) throw new Error(`no quota ${e.quotaId} in the live plan`)
+          scenario.edit(e.quotaId, (q) => q.shiftAnchor(e.toAnchorWeek, quota.requirement.startWeek))
+        }
+        applied.push(e)
+      } catch (err) {
+        invalidated.push({ change: e, reason: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    return { scenario, applied, invalidated }
   }
 
   /* ---------------------------------------------------------------- edits */
@@ -172,6 +225,22 @@ export class Scenario {
   }
 
   /**
+   * Everything a drawn region catches: placements (optionally narrowed by
+   * weekday) and quotas still owed placements. Owed quotas ignore the weekday
+   * narrowing — they have no weekday yet, which is the point of catching them.
+   */
+  selectionWithin(regions: readonly Region[], weekdays?: readonly Weekday[]): RegionSelection {
+    const stops = this.placementsWithin(regions, weekdays)
+    const owed: string[] = []
+    for (const quota of this.quotas.values()) {
+      const pin = quota.requirement.pin
+      if (!pin || quota.unmetCount() === 0) continue
+      if (regions.some((r) => r.contains(pin))) owed.push(quota.id)
+    }
+    return { stops, owed }
+  }
+
+  /**
    * Move a selection of stops onto one (tech, weekday) in a single step.
    *
    * Skips rather than throws on the two cases a bulk move always hits: a stop
@@ -180,11 +249,28 @@ export class Scenario {
    * silent — a bulk edit that quietly dropped members would be worse than one
    * that refused outright.
    */
-  reassign(selection: readonly SelectedStop[], techId: string, weekday: Weekday): ReassignReport {
+  reassign(selection: RegionSelection, techId: string, weekday: Weekday): ReassignReport {
     const moved: SelectedStop[] = []
+    const placed: string[] = []
     const skipped: { quotaId: string; reason: string }[] = []
 
-    for (const sel of selection) {
+    // Owed quotas first: placing one is a new stop, not a move — it comes off
+    // the owed list and onto the change list in the same breath.
+    for (const quotaId of selection.owed) {
+      const quota = this.quotas.get(quotaId)
+      if (!quota) {
+        skipped.push({ quotaId, reason: "not in this scenario" })
+        continue
+      }
+      if (quota.stops.some((s) => s.techId === techId && s.weekday === weekday)) {
+        skipped.push({ quotaId, reason: "already served on that day" })
+        continue
+      }
+      this.edit(quotaId, (q) => q.place(techId, weekday))
+      placed.push(quotaId)
+    }
+
+    for (const sel of selection.stops) {
       const quota = this.quotas.get(sel.quotaId)
       if (!quota) {
         skipped.push({ quotaId: sel.quotaId, reason: "not in this scenario" })
@@ -203,7 +289,24 @@ export class Scenario {
       )
       moved.push(sel)
     }
-    return { moved, skipped }
+    return { moved, placed, skipped }
+  }
+
+  /**
+   * Hand a whole route to another tech: every stop on (techId, weekday) moves
+   * to (toTechId, weekday). Same pins, same day — when the receiving tech has
+   * no route that day this costs nothing, which is exactly why it is the cheap
+   * lever for rebalancing headcount.
+   */
+  reassignRouteTech(techId: string, weekday: Weekday, toTechId: string): ReassignReport {
+    const stops: SelectedStop[] = []
+    for (const quota of this.quotas.values()) {
+      for (const s of quota.stops) {
+        if (s.techId === techId && s.weekday === weekday)
+          stops.push({ quotaId: quota.id, techId, weekday })
+      }
+    }
+    return this.reassign({ stops, owed: [] }, toTechId, weekday)
   }
 
   private edit(quotaId: string, change: (q: Quota) => unknown): void {

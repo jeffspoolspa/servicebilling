@@ -16,19 +16,22 @@ export interface Office {
   name: string
   /** Geographic label used everywhere in the UI, e.g. "Richmond Hill" (ADR 007). */
   label: string
+  /** The branch's geocoded pin — the base the planner anchors slots to. */
+  lat: number | null
+  lng: number | null
 }
 
 export async function listOffices(client: QueryClient): Promise<Office[]> {
   const { data, error } = await client
     .from("branches")
-    .select("id, name")
+    .select("id, name, latitude, longitude")
     .eq("active", true)
     .range(0, 999)
   if (error) throw new Error(`listOffices: ${JSON.stringify(error)}`)
-  return ((data ?? []) as { id: string; name: string }[])
+  return ((data ?? []) as { id: string; name: string; latitude: number | null; longitude: number | null }[])
     .map((b) => {
       const label = b.name.split(",")[0].trim()
-      return { id: b.id, name: b.name, label }
+      return { id: b.id, name: b.name, label, lat: b.latitude, lng: b.longitude }
     })
     .sort((a, b) => a.label.localeCompare(b.label))
 }

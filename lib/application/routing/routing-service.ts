@@ -9,6 +9,8 @@
  */
 
 import {
+  type StoredScenario,
+  CostModel,
   ROUTING_POLICY,
   RouteFactory,
   RouteGeometry,
@@ -68,6 +70,15 @@ export interface PlanAudit {
   readonly spacingFailures: readonly SpacingFinding[]
   readonly farFromRoute: readonly FarStopFinding[]
   readonly load: readonly RouteLoad[]
+}
+
+/** A stored scenario, appraised against today's live plan. */
+export interface EvaluatedScenario extends StoredScenario {
+  /** Exact weekly minutes the surviving changes save (negative = saves). */
+  readonly netMinutes: number
+  readonly appliedCount: number
+  /** Changes whose underlying stops moved since the scenario was saved. */
+  readonly invalidCount: number
 }
 
 export class RoutingService {
@@ -131,6 +142,30 @@ export class RoutingService {
   }
 
   /** Check the live plan against the model's rules. */
+  /**
+   * Appraise stored scenarios against the live plan: restore each (stale
+   * changes invalidate individually), then price what survived. One territory
+   * load for the lot.
+   */
+  async evaluateScenarios(
+    stored: readonly StoredScenario[],
+    asOf: Date = new Date(),
+  ): Promise<EvaluatedScenario[]> {
+    const week = weekOf(asOf)
+    const live = await this.repository.liveIn(week)
+    const model = new CostModel(this.geometry, this.factory)
+    return stored.map((sc) => {
+      const restored = Scenario.restore(live, sc.changes)
+      const analysis = model.analyze(live, restored.applied, week)
+      return {
+        ...sc,
+        netMinutes: analysis.netMinutes,
+        appliedCount: restored.applied.length,
+        invalidCount: restored.invalidated.length,
+      }
+    })
+  }
+
   async audit(asOf: Date = new Date()): Promise<PlanAudit> {
     const week = weekOf(asOf)
     const quotas = await this.repository.liveIn(week)

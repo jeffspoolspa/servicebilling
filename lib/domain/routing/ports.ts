@@ -38,3 +38,28 @@ export interface PublishResult {
   readonly accepted: boolean
   readonly detail: string
 }
+
+/** A scenario at rest: nothing but a named, dated change list with a fate. */
+export interface StoredScenario {
+  readonly id: string
+  readonly name: string
+  readonly status: "pending" | "committed" | "discarded"
+  readonly changes: readonly RoutingEvent[]
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
+/**
+ * Persistence for scenarios. Stores the change list, never the resulting
+ * stops — on open, the list is replayed over the live plan and any change
+ * whose ground has shifted is invalidated (Scenario.restore).
+ */
+export interface ScenarioRepository {
+  list(status?: StoredScenario["status"]): Promise<StoredScenario[]>
+  byId(id: string): Promise<StoredScenario | null>
+  create(name: string, changes: readonly RoutingEvent[]): Promise<StoredScenario>
+  update(
+    id: string,
+    patch: Partial<Pick<StoredScenario, "name" | "changes" | "status">>,
+  ): Promise<void>
+}
