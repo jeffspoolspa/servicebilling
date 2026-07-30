@@ -1,9 +1,8 @@
 /**
- * Territory map — the live view of the plan.
- *
- * Replaces the old page built on route-analysis.ts, which re-derived route
- * geometry in SQL alongside a second implementation in geo.ts. Everything
- * geographic here comes from the one RouteGeometry in the domain instead.
+ * The scenario board: move stops between routes on the map and watch the
+ * numbers move. A UI layer with no logic in it — it loads a snapshot through
+ * the application service and hands it to the client, which runs the domain
+ * itself.
  */
 
 import { createSupabaseServer } from "@/lib/supabase/server"
@@ -12,31 +11,32 @@ import {
   SupabaseQuotaRepository,
   type QueryClient,
 } from "@/lib/infrastructure/routing/supabase-quota-repository"
-import { listOffices, listTechBases } from "@/lib/infrastructure/routing/offices"
-import { LiveMap } from "./live-map"
+import { listTechBases } from "@/lib/infrastructure/routing/offices"
+import { ScenarioBoard } from "./scenario-board"
 
-export const metadata = { title: "Maintenance · Territory map" }
+export const metadata = { title: "Maintenance · Scenario board" }
 export const dynamic = "force-dynamic"
 
-export default async function TerritoryMapPage() {
+export default async function ScenarioPage() {
   const supabase = await createSupabaseServer()
-  const client = supabase as unknown as QueryClient
-  const service = new RoutingService(new SupabaseQuotaRepository(client))
-
-  const [snapshot, offices, baseMap] = await Promise.all([
+  const service = new RoutingService(new SupabaseQuotaRepository(supabase as unknown as QueryClient))
+  const [snapshot, baseMap] = await Promise.all([
     service.snapshot(),
-    listOffices(client),
-    listTechBases(client),
+    listTechBases(supabase as unknown as QueryClient),
   ])
   const bases: Record<string, { lat: number; lng: number }> = {}
   for (const [techId, pin] of baseMap) bases[techId] = { lat: pin.lat, lng: pin.lng }
-  const officeName = new Map(offices.map((o) => [o.id, o.label]))
 
   const ids = [
     ...new Set(
       snapshot.quotas.map((q) => q.requirement.customerId).filter((id): id is number => id !== null),
     ),
   ]
+  // Office is the customer's branch. It reaches routing as a label to filter by,
+  // never as a field on the quota — no rule in the model reads it.
+  const { data: branches } = await supabase.from("branches").select("id, name")
+  const officeName = new Map((branches ?? []).map((b) => [b.id as string, b.name as string]))
+
   const customers: Record<number, { name: string; office: string | null }> = {}
   for (let i = 0; i < ids.length; i += 500) {
     const { data } = await supabase
@@ -50,7 +50,6 @@ export default async function TerritoryMapPage() {
       }
     }
   }
-
   const { data: employees } = await supabase
     .from("employees")
     .select("id, first_name, last_name")
@@ -61,11 +60,10 @@ export default async function TerritoryMapPage() {
   }
 
   return (
-    <LiveMap
+    <ScenarioBoard
       token={process.env.MAPBOX_TOKEN ?? null}
       week={snapshot.week}
       quotas={snapshot.quotas}
-      offices={offices}
       bases={bases}
       customers={customers}
       techs={techs}

@@ -275,3 +275,33 @@
   .animate-sheet-in-right {
     animation: sheet-in-right 180ms ease-out;
   }
+
+/* ---------------------------------------------------------------- scrollbars
+
+   Thin, dark, and nearly invisible until you look for them. The browser
+   default is a light chunky bar that reads as a seam across every dark panel.
+   Firefox gets the standard properties; WebKit/Blink needs the -webkit rules. */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.22) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 0.4);
+}

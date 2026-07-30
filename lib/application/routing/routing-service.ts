@@ -1,0 +1,203 @@
+/**
+ * The application service for Routing — the one named front door.
+ *
+ * An application service is a model element too: it binds the ports to the
+ * domain and exposes use cases. Every method is load → domain → return; the
+ * decisions are all downstairs. No loose functions — behavior that does not
+ * correspond to an entity, value object, domain service, factory, or this
+ * service does not belong in this module.
+ */
+
+import {
+  ROUTING_POLICY,
+  RouteFactory,
+  RouteGeometry,
+  Scenario,
+  toSnapshot,
+  weekOf,
+  WEEKDAY_NAMES,
+  type FitCandidate,
+  type NearbyQuota,
+  type QuotaRepository,
+  type QuotaSnapshot,
+  type Route,
+  type StopProfile,
+  type Weekday,
+  type WeekIndex,
+} from "@/lib/domain/routing"
+
+export interface CoverageFinding {
+  readonly quotaId: string
+  readonly customerId: number | null
+  readonly required: number
+  readonly placed: number
+}
+
+export interface SpacingFinding {
+  readonly quotaId: string
+  readonly customerId: number | null
+  readonly minimumDays: number
+  readonly gapsDays: readonly number[]
+}
+
+export interface FarStopFinding {
+  readonly quotaId: string
+  readonly techId: string
+  readonly weekday: string
+  readonly milesFromCentre: number | null
+}
+
+export interface RouteLoad {
+  readonly techId: string
+  readonly weekday: string
+  readonly distinctRuns: number
+  readonly heaviestStops: number
+  readonly heaviestMinutes: number
+  readonly heaviestUtilization: number
+  readonly overCapacity: boolean
+  readonly overSizeWarning: boolean
+}
+
+export interface PlanAudit {
+  readonly week: WeekIndex
+  readonly cycle: number
+  readonly quotas: number
+  readonly routes: number
+  readonly unpinned: number
+  readonly coverageFailures: readonly CoverageFinding[]
+  readonly spacingFailures: readonly SpacingFinding[]
+  readonly farFromRoute: readonly FarStopFinding[]
+  readonly load: readonly RouteLoad[]
+}
+
+export class RoutingService {
+  constructor(
+    private readonly repository: QuotaRepository,
+    private readonly geometry: RouteGeometry = new RouteGeometry(),
+    private readonly factory: RouteFactory = new RouteFactory(geometry),
+  ) {}
+
+  /** Build one route in memory from its (tech, weekday) — no territory load. */
+  async route(techId: string, weekday: Weekday, asOf: Date = new Date()): Promise<Route | null> {
+    const week = weekOf(asOf)
+    const quotas = await this.repository.withPlacementOn(techId, weekday, week)
+    return this.factory.routeFor(quotas, techId, weekday, week)
+  }
+
+  /** Every route in the territory, measured. One load, shared cycle. */
+  async territory(asOf: Date = new Date()): Promise<Route[]> {
+    const week = weekOf(asOf)
+    return this.factory.territory(await this.repository.liveIn(week), week)
+  }
+
+  /** One stop's profile in its current position. */
+  async profileStop(
+    quotaId: string,
+    techId: string,
+    weekday: Weekday,
+    asOf: Date = new Date(),
+  ): Promise<StopProfile | null> {
+    const route = await this.route(techId, weekday, asOf)
+    return route?.profileOf(quotaId) ?? null
+  }
+
+  /** The k nearest pinned quotas — candidates, not a routing decision. */
+  async nearest(quotaId: string, k = 10, asOf: Date = new Date()): Promise<NearbyQuota[]> {
+    return this.geometry.nearest(await this.repository.liveIn(weekOf(asOf)), quotaId, k)
+  }
+
+  /** Rank the routes that could absorb a quota's next placement, cheapest first. */
+  async fit(quotaId: string, k = 8, asOf: Date = new Date()): Promise<FitCandidate[]> {
+    const week = weekOf(asOf)
+    const quotas = await this.repository.liveIn(week)
+    const quota = quotas.find((q) => q.id === quotaId)
+    if (!quota) return []
+    return this.geometry.fit(this.factory.territory(quotas, week), quota, k)
+  }
+
+  /**
+   * Everything a client needs to run the model itself: the live quotas as
+   * snapshots, plus labels. The browser rehydrates these and edits a Scenario
+   * locally — no round trip per interaction, because the domain is pure.
+   */
+  async snapshot(asOf: Date = new Date()): Promise<{ week: WeekIndex; quotas: QuotaSnapshot[] }> {
+    const week = weekOf(asOf)
+    return { week, quotas: (await this.repository.liveIn(week)).map(toSnapshot) }
+  }
+
+  /** An isolated workbench over the live plan (I6: a clone, never the plan). */
+  async openScenario(asOf: Date = new Date()): Promise<Scenario> {
+    return Scenario.from(await this.repository.liveIn(weekOf(asOf)))
+  }
+
+  /** Check the live plan against the model's rules. */
+  async audit(asOf: Date = new Date()): Promise<PlanAudit> {
+    const week = weekOf(asOf)
+    const quotas = await this.repository.liveIn(week)
+
+    const coverageFailures: CoverageFinding[] = []
+    const spacingFailures: SpacingFinding[] = []
+    for (const quota of quotas) {
+      const coverage = quota.coverage()
+      if (!coverage.met) {
+        coverageFailures.push({
+          quotaId: quota.id,
+          customerId: quota.requirement.customerId,
+          required: coverage.required,
+          placed: coverage.placed,
+        })
+      }
+      const spacing = quota.spacing()
+      if (!spacing.met) {
+        spacingFailures.push({
+          quotaId: quota.id,
+          customerId: quota.requirement.customerId,
+          minimumDays: spacing.minimumDays,
+          gapsDays: spacing.gapsDays,
+        })
+      }
+    }
+
+    const routes = this.factory.territory(quotas, week)
+    const farFromRoute: FarStopFinding[] = []
+    const load: RouteLoad[] = []
+    for (const route of routes) {
+      for (const h of route.health()) {
+        if (h.health === "far_from_route") {
+          farFromRoute.push({
+            quotaId: h.stop.quotaId,
+            techId: route.techId,
+            weekday: WEEKDAY_NAMES[route.weekday],
+            milesFromCentre: h.milesFromCentre,
+          })
+        }
+      }
+      const worst = route.heaviest()
+      load.push({
+        techId: route.techId,
+        weekday: WEEKDAY_NAMES[route.weekday],
+        distinctRuns: route.runs().length,
+        heaviestStops: worst.stops.length,
+        heaviestMinutes: worst.estimate.minutes,
+        heaviestUtilization: worst.estimate.utilization,
+        overCapacity: worst.estimate.utilization > 1,
+        overSizeWarning: route.stops.length > ROUTING_POLICY.routeSizeWarning,
+      })
+    }
+
+    load.sort((a, b) => b.heaviestUtilization - a.heaviestUtilization)
+    farFromRoute.sort((a, b) => (b.milesFromCentre ?? 0) - (a.milesFromCentre ?? 0))
+
+    return {
+      week,
+      cycle: routes[0]?.cycle ?? 1,
+      quotas: quotas.length,
+      routes: routes.length,
+      unpinned: quotas.filter((q) => q.requirement.pin === null).length,
+      coverageFailures,
+      spacingFailures,
+      farFromRoute,
+      load,
+    }
+  }
+}
