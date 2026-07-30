@@ -147,6 +147,8 @@ export function LiveMap({
   /** Routes panel: flip between route cards and a tech directory; search both. */
   const [routeSearch, setRouteSearch] = useState("")
   const [techFilter, setTechFilter] = useState<Set<string>>(new Set())
+  /** Which distinct run of the open route is on view; null = the heaviest. */
+  const [runTab, setRunTab] = useState<number | null>(null)
   /** Techs whose route cards are folded away in the panel. */
   const [collapsedTechs, setCollapsedTechs] = useState<Set<string>>(new Set())
   /** Hovered filter → its pins swell on the map. Pure CSS via data attrs; no marker rebuild. */
@@ -310,6 +312,8 @@ export function LiveMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, techFilter, costModel, techs])
   const techRoutes = useMemo(() => techGroups.flatMap((g) => g.routes), [techGroups])
+
+  useEffect(() => setRunTab(null), [tourRoute])
 
   /** A lone card (one day filtered, or a one-route week) fills the panel. */
   useEffect(() => {
@@ -756,6 +760,12 @@ export function LiveMap({
     }
   }, [costModel, base, changes, week, matrixRev, rev])
 
+  /** The run on view for a route: the tabbed one, else the heaviest. */
+  const runOnView = (route: Route) => {
+    const runs = route.runs()
+    return runTab !== null && runTab < runs.length ? runs[runTab] : route.heaviest()
+  }
+
   /**
    * The tour line: drawn only when exactly one route is highlighted, so it
      * never crowds a busy map. Traced along actual roads via Mapbox Directions
@@ -780,7 +790,7 @@ export function LiveMap({
       src.setData(empty)
       return
     }
-    const run = hit.route.heaviest()
+    const run = runOnView(hit.route)
     const base = hit.route.base
     const stopPts = run.stops
       .filter((st) => st.pin !== null)
@@ -896,7 +906,7 @@ export function LiveMap({
       }
     })()
     return () => aborter.abort()
-  }, [selectedRoute, selectedLeg, visible, token])
+  }, [selectedRoute, selectedLeg, visible, token, runTab])
 
   /**
    * Hydrate the matrix from the permanent leg store (maintenance.drive_legs):
@@ -961,7 +971,7 @@ export function LiveMap({
     if (!selectedRoute) return
     const hit = visible.find((v) => routeKey(v.route.techId, v.route.weekday) === selectedRoute)
     if (!hit) return
-    const run = hit.route.heaviest()
+    const run = runOnView(hit.route)
     const base = hit.route.base
     const points = [
       ...(base ? [{ id: baseIdOf(base), lat: base.lat, lng: base.lng }] : []),
@@ -989,7 +999,7 @@ export function LiveMap({
         console.warn("leg times unavailable, estimates stand:", err)
       }
     })()
-  }, [selectedRoute, visible, geometry])
+  }, [selectedRoute, visible, geometry, runTab])
 
   /**
    * The selected route, prepared for the panel: cost, and the tour as rows of
@@ -1000,7 +1010,7 @@ export function LiveMap({
     if (!selectedRoute) return null
     const hit = visible.find((v) => routeKey(v.route.techId, v.route.weekday) === selectedRoute)
     if (!hit) return null
-    const run = hit.route.heaviest()
+    const run = runOnView(hit.route)
     const cost = costModel.ofRoute(hit.route)
     const base = hit.route.base
     const anchor = base
@@ -1025,10 +1035,12 @@ export function LiveMap({
       rows,
       legOut,
       legOutId,
+      run,
+      runs: hit.route.runs(),
       unpinned: run.stops.filter((st) => st.pin === null),
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedRoute, visible, costModel, geometry, matrixRev])
+  }, [selectedRoute, visible, costModel, geometry, matrixRev, runTab])
 
   /* -------------------------------------------------------------- actions */
 
@@ -1888,6 +1900,37 @@ export function LiveMap({
 
                     {open && routePanel && (
                       <div className="border-t border-line-soft px-2.5 pb-2.5">
+                        {routePanel.runs.length > 1 && (
+                          <div className="mt-1.5 flex items-center gap-1">
+                            <span className="pr-1 text-[9.5px] uppercase tracking-[0.12em] text-ink-mute">
+                              runs
+                            </span>
+                            {routePanel.runs.map((r, i) => {
+                              const active = routePanel.run === r
+                              return (
+                                <button
+                                  key={i}
+                                  className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                                    active
+                                      ? "border-cyan/40 bg-cyan/15 text-cyan"
+                                      : "border-line bg-white/[0.03] text-ink-mute hover:text-ink"
+                                  }`}
+                                  title={`fires weeks ${r.weeks.join(", ")}`}
+                                  onClick={() => setRunTab(i)}
+                                >
+                                  {String.fromCharCode(65 + i)} · {r.stops.length}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                        <div className="-mx-1">
+                          <RouteLoadBar
+                            driveMin={routePanel.run.estimate.driveMinutes}
+                            serviceMin={routePanel.run.estimate.serviceMinutes}
+                            utilization={routePanel.run.estimate.utilization}
+                          />
+                        </div>
                         <div className="mt-1.5 flex items-center gap-1.5">
                           <select
                             className="min-w-0 flex-1 rounded border border-line bg-transparent px-1.5 py-1 text-[10.5px] text-ink-mute focus:text-ink"
@@ -1957,6 +2000,11 @@ export function LiveMap({
                                       }`}
                                     >
                                       {nameOf(stop.customerId)}
+                                      {stop.intervalWeeks > 1 && (
+                                        <span className="ml-1.5 rounded border border-line px-1 font-mono text-[8.5px] text-ink-mute">
+                                          {stop.intervalWeeks}w
+                                        </span>
+                                      )}
                                     </span>
                                     <span className="shrink-0 font-mono text-[9.5px] text-ink-mute">
                                       {stop.serviceMinutes ?? "~"}m
