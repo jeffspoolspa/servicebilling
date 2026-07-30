@@ -2000,11 +2000,15 @@ export function LiveMap({
                                       }`}
                                     >
                                       {nameOf(stop.customerId)}
-                                      {stop.intervalWeeks > 1 && (
-                                        <span className="ml-1.5 rounded border border-line px-1 font-mono text-[8.5px] text-ink-mute">
-                                          {stop.intervalWeeks}w
-                                        </span>
-                                      )}
+                                      <span
+                                        className={`ml-1.5 rounded border px-1 font-mono text-[8.5px] ${
+                                          stop.intervalWeeks > 1
+                                            ? "border-sun/40 text-sun"
+                                            : "border-line text-ink-mute"
+                                        }`}
+                                      >
+                                        {stop.intervalWeeks}w
+                                      </span>
                                     </span>
                                     <span className="shrink-0 font-mono text-[9.5px] text-ink-mute">
                                       {stop.serviceMinutes ?? "~"}m
