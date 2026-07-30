@@ -127,13 +127,22 @@ export class Planner {
       // fewest slots per day that could hold this office's total work.
       const target = this.policy.plannerTargetUtilization * this.policy.drive.workdayMinutes
       const totalMinutes = group.reduce(
-        (n, q) => n + (q.requirement.serviceMinutes ?? this.policy.drive.minutesPerStop) * q.requirement.requiredDays,
+        (n, q) =>
+          n +
+          ((q.requirement.serviceMinutes ?? this.policy.drive.minutesPerStop) +
+            this.policy.drive.stopOverheadMinutes) *
+            q.requirement.requiredDays,
         0,
       )
       const slotsPerDay =
         opts.maxSlotsPerDay ?? Math.max(1, Math.ceil(totalMinutes / target / days.length))
       const dayCap = slotsPerDay * target
+      // A day is full on minutes OR on pools: the inventory's slots can hold
+      // at most maxPoolsPerRoute each, so minutes alone would let a light-
+      // service day pack 13 pools into a slot the cap says holds 10.
+      const dayPoolCap = slotsPerDay * this.policy.maxPoolsPerRoute
       const dayLoad = new Map<Weekday, number>(days.map((d) => [d, 0]))
+      const dayCount = new Map<Weekday, number>(days.map((d) => [d, 0]))
       const dayOf = new Map<string, Weekday[]>() // quotaId → its days
       let prev: Quota | null = null
       for (const q of sweep) {
@@ -142,16 +151,26 @@ export class Planner {
           unplanned.push(q.id)
           continue
         }
-        const minutes = q.requirement.serviceMinutes ?? this.policy.drive.minutesPerStop
+        const minutes =
+          (q.requirement.serviceMinutes ?? this.policy.drive.minutesPerStop) +
+          this.policy.drive.stopOverheadMinutes
         const prevDays = prev ? new Set(dayOf.get(prev.id) ?? []) : new Set<Weekday>()
-        const fits = (p: readonly Weekday[]) => p.every((d) => (dayLoad.get(d) ?? 0) + minutes <= dayCap)
+        const fits = (p: readonly Weekday[]) =>
+          p.every(
+            (d) =>
+              (dayLoad.get(d) ?? 0) + minutes <= dayCap &&
+              (dayCount.get(d) ?? 0) + 1 <= dayPoolCap,
+          )
         const load = (p: readonly Weekday[]) =>
           p.reduce((n: number, d) => n + (dayLoad.get(d) ?? 0), 0) / p.length
         const affinity = (p: readonly Weekday[]) => p.filter((d) => prevDays.has(d)).length
         const feasible = legal.filter(fits)
         const pool = feasible.length > 0 ? feasible : legal // overflow beats unplanned
         const best = [...pool].sort((a, b) => affinity(b) - affinity(a) || load(a) - load(b))[0]
-        for (const d of best) dayLoad.set(d, (dayLoad.get(d) ?? 0) + minutes)
+        for (const d of best) {
+          dayLoad.set(d, (dayLoad.get(d) ?? 0) + minutes)
+          dayCount.set(d, (dayCount.get(d) ?? 0) + 1)
+        }
         dayOf.set(q.id, [...best])
         prev = q
       }

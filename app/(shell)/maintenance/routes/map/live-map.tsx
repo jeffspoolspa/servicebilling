@@ -57,6 +57,9 @@ function spanOf(span: Span): Circle | null {
 }
 const routeKey = (techId: string, weekday: number) => `${techId}|${weekday}`
 
+/** One whisper-letter per weekday for inside an 11px dot (Th/Sa/Su need two). */
+const DAY_LETTER = ["Su", "M", "Tu", "W", "Th", "F", "Sa"] as const
+
 /** Colour is per tech — whose day a pin belongs to is the thing you read off the map. */
 const PALETTE = [
   "#38bdf8", "#34d399", "#f472b6", "#fbbf24", "#a78bfa",
@@ -143,7 +146,11 @@ export function LiveMap({
   const [routesOpen, setRoutesOpen] = useState(true)
   /** Routes panel: flip between route cards and a tech directory; search both. */
   const [routeSearch, setRouteSearch] = useState("")
-  const [techFilter, setTechFilter] = useState<string | null>(null)
+  const [techFilter, setTechFilter] = useState<Set<string>>(new Set())
+  /** Techs whose route cards are folded away in the panel. */
+  const [collapsedTechs, setCollapsedTechs] = useState<Set<string>>(new Set())
+  /** Hovered filter → its pins swell on the map. Pure CSS via data attrs; no marker rebuild. */
+  const [hoverPins, setHoverPins] = useState<{ attr: "day" | "route" | "tech"; values: string[] } | null>(null)
   const [suggestions, setSuggestions] = useState<SuggestedMove[] | null>(null)
   const [suggestBusy, setSuggestBusy] = useState(false)
   /** The stored scenario being viewed, if any — the plan holds its changes. */
@@ -278,18 +285,35 @@ export function LiveMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, routeSearch, techs])
 
-  /** The selected tech's routes for the cards panel, weekday order. */
-  const techRoutes = useMemo(() => {
-    if (!techFilter) return []
-    return visible
-      .filter((v) => v.route.techId === techFilter)
-      .map((v) => ({ route: v.route, cost: costModel.ofRoute(v.route) }))
-      .sort((a, b) => a.route.weekday - b.route.weekday)
-  }, [visible, techFilter, costModel])
+  /** A selected tech who leaves the directory (day/office filtered out) deselects. */
+  useEffect(() => {
+    setTechFilter((prev) => {
+      if (prev.size === 0) return prev
+      const avail = new Set(visible.map((v) => v.route.techId))
+      const next = new Set([...prev].filter((id) => avail.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [visible])
+
+  /** The selected techs' routes for the cards panel, grouped per tech, weekday order. */
+  const techGroups = useMemo(() => {
+    if (techFilter.size === 0) return []
+    return [...techFilter]
+      .map((id) => ({
+        techId: id,
+        routes: visible
+          .filter((v) => v.route.techId === id)
+          .map((v) => ({ route: v.route, cost: costModel.ofRoute(v.route) }))
+          .sort((a, b) => a.route.weekday - b.route.weekday),
+      }))
+      .sort((a, b) => (techs[a.techId] ?? "").localeCompare(techs[b.techId] ?? ""))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, techFilter, costModel, techs])
+  const techRoutes = useMemo(() => techGroups.flatMap((g) => g.routes), [techGroups])
 
   /** A lone card (one day filtered, or a one-route week) fills the panel. */
   useEffect(() => {
-    if (techFilter && techRoutes.length === 1) {
+    if (techFilter.size > 0 && techRoutes.length === 1) {
       const only = routeKey(techRoutes[0].route.techId, techRoutes[0].route.weekday)
       if (tourRoute !== only) setTourRoute(only)
     }
@@ -334,7 +358,7 @@ export function LiveMap({
         (s) =>
           !excluded.has(stopKey(s)) &&
           officeOk(s.quotaId) &&
-          (!techFilter || s.techId === techFilter) &&
+          (techFilter.size === 0 || techFilter.has(s.techId)) &&
           (selectedRoutes.size === 0 || selectedRoutes.has(routeKey(s.techId, s.weekday))),
       ),
       owed: caught.owed.filter((id) => !excluded.has(`owed|${id}`) && officeOk(id)),
@@ -571,7 +595,7 @@ export function LiveMap({
       color: string,
       quotaId: string,
       title: string,
-      opts: { ring?: boolean; owed?: boolean; picked?: boolean; dull?: boolean } = {},
+      opts: { ring?: boolean; owed?: boolean; picked?: boolean; dull?: boolean; day?: Weekday; route?: string; tech?: string } = {},
     ) => {
       const el = document.createElement("button")
       el.type = "button"
@@ -586,7 +610,17 @@ export function LiveMap({
             : "1.5px solid #0b1620"
       el.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;background:${color};
         border:${border};cursor:pointer;padding:0;opacity:${opts.picked ? 1 : opts.dull ? 0.35 : 0.92};
+        display:grid;place-items:center;line-height:1;
         ${opts.picked ? "box-shadow:0 0 0 3px rgba(248,250,252,.35);z-index:2;" : ""}${opts.ring ? "z-index:3;" : ""}`
+      if (opts.day !== undefined && !opts.dull) {
+        // A whisper of a day letter inside the dot — size unchanged.
+        const ab = DAY_LETTER[opts.day]
+        el.innerHTML = `<span style="font:600 ${ab.length > 1 ? 5 : 6.5}px/1 ui-monospace,monospace;
+          color:#0b1620;letter-spacing:-0.2px;pointer-events:none">${ab}</span>`
+        el.dataset.day = String(opts.day)
+      }
+      if (opts.route) el.dataset.route = opts.route
+      if (opts.tech) el.dataset.tech = opts.tech
 
       el.addEventListener("click", (e) => {
         e.stopPropagation()
@@ -625,7 +659,7 @@ export function LiveMap({
     // tech's whole week, the optimizer scope shows the ticked set, and a
     // single selected route narrows to just it (and opens the panel).
     let pool = visible
-    if (techFilter) pool = pool.filter((v) => v.route.techId === techFilter)
+    if (techFilter.size > 0) pool = pool.filter((v) => techFilter.has(v.route.techId))
     const matches =
       selectedRoutes.size > 0
         ? pool.filter(
@@ -634,9 +668,11 @@ export function LiveMap({
               routeKey(v.route.techId, v.route.weekday) === tourRoute,
           )
         : pool
-    // A stale selection (a route that no longer exists in this view) must
-    // never blank the map — show everything rather than nothing.
-    const shown = matches.length > 0 ? matches : pool.length > 0 ? pool : visible
+    // A stale route selection (one that no longer exists in this view) must
+    // never blank the map — fall back to the pool. But an EMPTY pool is an
+    // honest answer (a tech filtered to a day they don't work): the filter
+    // holds and the map goes quiet rather than flashing everyone's pins.
+    const shown = matches.length > 0 ? matches : pool
 
     // Under the lens, cluster members hidden by the current filters still
     // render — dulled — so a cluster is always seen whole.
@@ -679,7 +715,13 @@ export function LiveMap({
               colorOf(route.techId),
               s.quotaId,
               `${nameOf(s.customerId)} — ${WEEKDAY_NAMES[route.weekday]} ${techOf(route.techId)}`,
-              { ring: s.quotaId === selected, picked: pickedKeys.has(`${s.quotaId}|${route.techId}|${route.weekday}`) },
+              {
+                ring: s.quotaId === selected,
+                picked: pickedKeys.has(`${s.quotaId}|${route.techId}|${route.weekday}`),
+                day: route.weekday,
+                route: routeKey(route.techId, route.weekday),
+                tech: route.techId,
+              },
             ),
         })
       }
@@ -1136,13 +1178,13 @@ export function LiveMap({
         // stops — a pool shared with an out-of-scope tech/route stays in
         // place, because reworking it would churn routes nobody asked about.
         const stopInScope = (st: { techId: string; weekday: Weekday }) =>
-          (!techFilter || st.techId === techFilter) &&
+          (techFilter.size === 0 || techFilter.has(st.techId)) &&
           (selectedRoutes.size === 0 || selectedRoutes.has(routeKey(st.techId, st.weekday))) &&
           (dayScope.length === 0 || dayScope.includes(String(st.weekday)))
         let sharedLeftInPlace = 0
         const scoped = plan.all.filter((q) => {
           if (!inOffice(q.requirement.customerId)) return false
-          if (q.stops.length === 0) return techFilter === null && selectedRoutes.size === 0
+          if (q.stops.length === 0) return techFilter.size === 0 && selectedRoutes.size === 0
           const inScope = q.stops.filter(stopInScope).length
           if (inScope === 0) return false
           if (inScope < q.stops.length) {
@@ -1226,7 +1268,7 @@ export function LiveMap({
     // The scope layers exactly like the map: office and day filters (via
     // `visible`), then the tech filter, then any selected routes.
     let inView = visible
-    if (techFilter) inView = inView.filter((v) => v.route.techId === techFilter)
+    if (techFilter.size > 0) inView = inView.filter((v) => techFilter.has(v.route.techId))
     if (selectedRoutes.size > 0)
       inView = inView.filter((v) => selectedRoutes.has(routeKey(v.route.techId, v.route.weekday)))
     const scope = inView.map((v) => ({ techId: v.route.techId, weekday: v.route.weekday }))
@@ -1295,6 +1337,12 @@ export function LiveMap({
         over, and markers are rebuilt whenever the selection changes.
       */}
       <style>{`.draw-active .mapboxgl-marker { pointer-events: none !important; }`}</style>
+      {hoverPins && (
+        <style>{`${hoverPins.values
+          .map((v) => `.mapboxgl-marker[data-${hoverPins.attr}="${v.replace(/"/g, "")}"]`)
+          .join(",")}{width:17px !important;height:17px !important;z-index:4 !important;
+          box-shadow:0 0 0 3px rgba(34,211,238,.45),0 0 10px rgba(34,211,238,.35) !important;}`}</style>
+      )}
       {/*
         Inline positioning on purpose: mapbox-gl.css declares
         `.mapboxgl-map { position: relative }` and is loaded after Tailwind, so a
@@ -1683,15 +1731,24 @@ export function LiveMap({
         </Worklist>
         )}
 
-        {techFilter && (
+        {techFilter.size > 0 && (
           <div className={`pointer-events-auto flex max-h-[74vh] w-[22.5rem] flex-col ${glass}`}>
             <div className="flex items-center gap-2.5 px-3.5 pt-3">
-              <span
-                className="block h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ background: colorOf(techFilter) }}
-              />
+              <span className="flex shrink-0 -space-x-1">
+                {techGroups.map((g) => (
+                  <span
+                    key={g.techId}
+                    className="block h-2.5 w-2.5 rounded-full ring-1 ring-[#0b1620]"
+                    style={{ background: colorOf(g.techId) }}
+                  />
+                ))}
+              </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-semibold text-ink">{techOf(techFilter)}</div>
+                <div className="truncate text-[13px] font-semibold text-ink">
+                  {techGroups.length === 1
+                    ? techOf(techGroups[0].techId)
+                    : `${techGroups.length} techs`}
+                </div>
                 <div className="text-[10px] uppercase tracking-[0.12em] text-ink-mute">
                   {techRoutes.length} route{techRoutes.length === 1 ? "" : "s"} this week
                 </div>
@@ -1699,7 +1756,7 @@ export function LiveMap({
               <button
                 className="pl-1 text-[13px] leading-none text-ink-mute hover:text-ink"
                 onClick={() => {
-                  setTechFilter(null)
+                  setTechFilter(new Set())
                   setTourRoute(null)
                 }}
               >
@@ -1709,7 +1766,39 @@ export function LiveMap({
 
 
             <div className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto overflow-x-hidden px-3.5 pb-3">
-              {techRoutes.map(({ route, cost }) => {
+              {techGroups.map((g) => {
+                const folded = collapsedTechs.has(g.techId)
+                return (
+                <div key={g.techId} className="space-y-1.5">
+                  {techGroups.length > 1 && (
+                    <button
+                      className="flex w-full items-center gap-1.5 pt-1 text-left"
+                      onClick={() =>
+                        setCollapsedTechs((prev) => {
+                          const next = new Set(prev)
+                          if (next.has(g.techId)) next.delete(g.techId)
+                          else next.add(g.techId)
+                          return next
+                        })
+                      }
+                      onMouseEnter={() => setHoverPins({ attr: "tech", values: [g.techId] })}
+                      onMouseLeave={() => setHoverPins(null)}
+                    >
+                      <span
+                        className="block h-2 w-2 shrink-0 rounded-full"
+                        style={{ background: colorOf(g.techId) }}
+                      />
+                      <span className="truncate text-[11px] font-semibold text-ink-dim">
+                        {techOf(g.techId)}
+                      </span>
+                      <span className="text-[10px] text-ink-mute">
+                        {g.routes.length} route{g.routes.length === 1 ? "" : "s"}
+                      </span>
+                      <span className="flex-1" />
+                      <span className="text-[11px] text-ink-mute">{folded ? "+" : "−"}</span>
+                    </button>
+                  )}
+                  {!folded && g.routes.map(({ route, cost }) => {
                 const key = routeKey(route.techId, route.weekday)
                 const open = tourRoute === key
                 return (
@@ -1725,6 +1814,8 @@ export function LiveMap({
                         setTourRoute(open ? null : key)
                         setSelectedLeg(null)
                       }}
+                      onMouseEnter={() => setHoverPins({ attr: "route", values: [key] })}
+                      onMouseLeave={() => setHoverPins(null)}
                     >
                       <span className="w-9 shrink-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-dim">
                         {WEEKDAY_NAMES[route.weekday]}
@@ -1754,7 +1845,7 @@ export function LiveMap({
                               if (!toTechId) return
                               try {
                                 plan.reassignRouteTech(route.techId, route.weekday, toTechId)
-                                setTechFilter(toTechId)
+                                setTechFilter(new Set([toTechId]))
                                 setTourRoute(routeKey(toTechId, route.weekday))
                                 forceRender((n) => n + 1)
                               } catch (err) {
@@ -1847,6 +1938,9 @@ export function LiveMap({
                   </div>
                 )
               })}
+                </div>
+                )
+              })}
               {techRoutes.length === 0 && (
                 <p className="py-2 text-[11px] text-ink-mute">no routes on the selected days</p>
               )}
@@ -1861,7 +1955,14 @@ export function LiveMap({
           routesOpen ? "max-h-[calc(100%-2rem)]" : ""
         }`}
       >
-        <div>
+        <div
+          onMouseOver={(e) => {
+            const label = (e.target as HTMLElement).closest("button")?.textContent?.trim()
+            const i = WEEKDAY_NAMES.indexOf(label as (typeof WEEKDAY_NAMES)[number])
+            setHoverPins(i >= 0 ? { attr: "day", values: [String(i)] } : null)
+          }}
+          onMouseLeave={() => setHoverPins(null)}
+        >
           <OptionPills
             multiple
             allLabel="All days"
@@ -1878,11 +1979,11 @@ export function LiveMap({
           >
             Techs ({techDirectory.length})
           </button>
-          {techFilter && (
+          {techFilter.size > 0 && (
             <button
               className="text-[10px] text-ink-mute hover:text-cyan"
               onClick={() => {
-                setTechFilter(null)
+                setTechFilter(new Set())
                 setTourRoute(null)
               }}
             >
@@ -1904,7 +2005,7 @@ export function LiveMap({
             <div className="mt-1 min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
               <ul className="mt-0.5">
                 {techDirectory.map((t) => {
-                  const picked = techFilter === t.techId
+                  const picked = techFilter.has(t.techId)
                   return (
                     <li key={t.techId}>
                       <button
@@ -1912,11 +2013,18 @@ export function LiveMap({
                           picked ? "bg-cyan/10 ring-1 ring-inset ring-cyan/30" : "hover:bg-white/[0.04]"
                         }`}
                         onClick={() => {
-                          setTechFilter(picked ? null : t.techId)
+                          setTechFilter((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(t.techId)) next.delete(t.techId)
+                            else next.add(t.techId)
+                            return next
+                          })
                           setTourRoute(null)
                           setSelectedRoutes(new Set())
                           setSelected(null)
                         }}
+                        onMouseEnter={() => setHoverPins({ attr: "tech", values: [t.techId] })}
+                        onMouseLeave={() => setHoverPins(null)}
                       >
                         <span
                           className="block h-2.5 w-2.5 shrink-0 rounded-full"

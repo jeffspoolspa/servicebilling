@@ -139,7 +139,9 @@ export class CostModel {
       const affected = affectedKeys(change)
       const quota = scenario.all.find((q) => q.id === change.quotaId) ?? null
       const pin = quota?.requirement.pin ?? null
-      const serviceMinutes = quota?.requirement.serviceMinutes ?? this.policy.drive.minutesPerStop
+      const serviceMinutes =
+        (quota?.requirement.serviceMinutes ?? this.policy.drive.minutesPerStop) +
+        this.policy.drive.stopOverheadMinutes
 
       // Leg delta on the plan BEFORE this change, fixed order.
       let removalGainMi = 0

@@ -21,6 +21,12 @@ export const ROUTING_POLICY = {
     detourFactor: 1.3,
     averageMph: 32,
     minutesPerStop: 22,
+    /**
+     * Fixed per-stop overhead — park, gear out of the truck, gate, log the
+     * visit, gear back in. On top of on-site service minutes everywhere a
+     * stop is priced, so the hours limit binds naturally.
+     */
+    stopOverheadMinutes: 10,
     workdayMinutes: 480,
   },
 

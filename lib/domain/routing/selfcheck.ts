@@ -19,6 +19,7 @@ import {
   Leg,
   firesOn,
   Pin,
+  ROUTING_POLICY,
   RouteFactory,
   Scenario,
   Quota,
@@ -967,7 +968,7 @@ check("estimate charges each stop its own median, defaults where history is thin
   b.place("korey", 1 as Weekday)
   const route = new RouteFactory(geometry).routeFor([a, b], "korey", 1 as Weekday, W0)!
   const est = route.heaviest().estimate
-  assert.equal(est.serviceMinutes, 57, "35 observed + 22 default")
+  assert.equal(est.serviceMinutes, 77, "35 observed + 22 default, +10 overhead each")
   assert.ok(Math.abs(est.minutes - (est.driveMinutes + est.serviceMinutes)) < 0.11)
   assert.ok(est.windshield > 0 && est.windshield < 1)
   assert.ok(Math.abs(est.windshield - est.driveMinutes / est.minutes) < 0.01)
@@ -987,8 +988,8 @@ check("route cost averages over the cycle, so a biweekly stop weighs half", () =
   const route = new RouteFactory(geometry).routeFor([weekly, biweekly], "korey", 1 as Weekday, W0)!
   const cost = model.ofRoute(route)
   assert.equal(cost.stops, 2)
-  // cycle of 2: one week costs 30+40, the other 30 → (70+30)/2
-  assert.equal(cost.weeklyServiceMinutes, 50)
+  // cycle of 2 (with +10 overhead each): one week costs 40+50, the other 40 → (90+40)/2
+  assert.equal(cost.weeklyServiceMinutes, 65)
   assert.equal(cost.weeklyDriveMi, 0)
   assert.equal(cost.windshield, 0, "no drive, all service")
 })
@@ -1016,7 +1017,7 @@ check("analyze prices a move: removal gain, insertion cost, kind, exact delta", 
   assert.ok(m.removalGainMi > 0, "dropping the dogleg saves miles")
   assert.ok(m.insertionCostMi > 0, "dana pays to reach B")
   assert.ok(Math.abs(m.netMi - (m.insertionCostMi - m.removalGainMi)) < 0.05)
-  assert.equal(m.serviceMinutesShifted, 40, "B's own median moves with it")
+  assert.equal(m.serviceMinutesShifted, 50, "B's own median (+10 overhead) moves with it")
   assert.equal(m.before.length, 2, "both affected routes appraised before")
   assert.equal(m.after.length, 2, "and after")
   // The exact delta agrees with re-derived route costs
@@ -1295,6 +1296,26 @@ check("the planner packs under the target and respects multi-day gaps", () => {
   assert.equal(days.length, 2, "twice-weekly gets two days")
   const gap = Math.min(days[1] - days[0], days[0] + 7 - days[1])
   assert.ok(gap >= 3, `twice-weekly gap ${gap} respects the min-gap rule`)
+})
+
+check("the planner honors the pool cap even when minutes would allow more", () => {
+  // 24 light pools (20min) over 3 days with 1 slot/day: minutes alone would
+  // pack ~13 into a day; the cap says a slot holds 10. 3 days x 10 = 30 >= 24,
+  // so every slot must stay at or under the cap — no absorbing past it.
+  const base = Pin.hypothetical(31.0, -81.4)
+  const live = []
+  for (let i = 0; i < 24; i++) {
+    live.push(quotaOf(`c${i}`, { pin: Pin.hypothetical(31.2 + i * 0.001, -81.4), serviceMinutes: 20 }))
+  }
+  const planner = new Planner(geometry)
+  const world = planner.plan(live, [{ label: "B", pin: base }], [1, 3, 5] as Weekday[], { maxSlotsPerDay: 1 })
+  assert.equal(world.unplanned.length, 0)
+  for (const slot of world.slots) {
+    assert.ok(
+      slot.quotaIds.length <= ROUTING_POLICY.maxPoolsPerRoute,
+      `${slot.slotId} holds ${slot.quotaIds.length} <= cap ${ROUTING_POLICY.maxPoolsPerRoute}`,
+    )
+  }
 })
 
 check("natural clustering chains neighbours and names the loners", () => {

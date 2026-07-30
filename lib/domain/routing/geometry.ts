@@ -155,7 +155,7 @@ export class RouteGeometry {
    * is fewer techs paying the stem, which an estimate with no base cannot see.
    */
   estimate(ordered: readonly Placeable[], base: Pin | null = null): DriveEstimate {
-    const { minutesPerStop, workdayMinutes } = this.policy.drive
+    const { minutesPerStop, stopOverheadMinutes, workdayMinutes } = this.policy.drive
     let driveMi = 0
     let driveMinutes = 0
     const take = (from: Placeable, to: Placeable) => {
@@ -170,7 +170,7 @@ export class RouteGeometry {
     if (anchor && pinned.length > 0) take(anchor, pinned[0])
     for (let i = 1; i < pinned.length; i++) take(pinned[i - 1], pinned[i])
     if (anchor && pinned.length > 0) take(pinned[pinned.length - 1], anchor)
-    const serviceMinutes = ordered.reduce((n, s) => n + (s.serviceMinutes ?? minutesPerStop), 0)
+    const serviceMinutes = ordered.reduce((n, s) => n + (s.serviceMinutes ?? minutesPerStop) + stopOverheadMinutes, 0)
     const minutes = driveMinutes + serviceMinutes
     // Tenth-of-a-minute precision, not whole minutes: cost deltas difference
     // these, and a nearby tech-swap costs a real ±0.5 min that integer
@@ -257,7 +257,7 @@ export class RouteGeometry {
   fit(routes: readonly Route[], quota: Quota, k = 8): FitCandidate[] {
     const pin = quota.requirement.pin
     if (!pin) return []
-    const { detourFactor, averageMph, minutesPerStop, workdayMinutes } = this.policy.drive
+    const { detourFactor, averageMph, minutesPerStop, stopOverheadMinutes, workdayMinutes } = this.policy.drive
     // Exclude routes on any weekday the quota already visits: with multi-day
     // minimum gaps, a same-day second visit is always spacing-illegal (I5) —
     // no point suggesting what the adoption gate must refuse.
@@ -272,7 +272,8 @@ export class RouteGeometry {
         const newMinutes =
           worst.estimate.minutes +
           (insertionMi / averageMph) * 60 +
-          (quota.requirement.serviceMinutes ?? minutesPerStop)
+          (quota.requirement.serviceMinutes ?? minutesPerStop) +
+          stopOverheadMinutes
         return {
           techId: r.techId,
           weekday: r.weekday,
