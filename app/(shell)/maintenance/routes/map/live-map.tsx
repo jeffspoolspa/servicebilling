@@ -2305,6 +2305,24 @@ export function LiveMap({
                 >
                   Move
                 </button>
+                <button
+                  className="rounded border border-line px-2.5 py-1 text-[11px] text-ink-mute hover:border-sun/40 hover:text-sun"
+                  title="every selected stop becomes owed until re-placed"
+                  onClick={() => {
+                    if (!selection) return
+                    for (const st of selection.stops) {
+                      try {
+                        plan.unplaceStop(st.quotaId, st.techId, st.weekday)
+                      } catch {
+                        /* already gone — the selection was stale for this one */
+                      }
+                    }
+                    forceRender((n) => n + 1)
+                    setReport(null)
+                  }}
+                >
+                  Unassign
+                </button>
               </div>
             </>
           )}
@@ -2485,6 +2503,20 @@ export function LiveMap({
                       +{Math.round(p.driveMinutes)}m drive
                     </span>
                   )}
+                  <button
+                    className="pl-0.5 text-[11px] leading-none text-ink-mute hover:text-coral"
+                    title="unassign — the pool becomes owed until re-placed"
+                    onClick={() => {
+                      try {
+                        plan.unplaceStop(selectedInfo.quota.id, p.stop.techId, p.stop.weekday)
+                        forceRender((n) => n + 1)
+                      } catch (err) {
+                        alert(String(err instanceof Error ? err.message : err))
+                      }
+                    }}
+                  >
+                    ×
+                  </button>
                 </span>
               ))}
               {selectedInfo.quota.unmetCount() > 0 && (
