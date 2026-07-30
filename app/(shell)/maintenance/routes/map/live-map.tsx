@@ -158,7 +158,6 @@ export function LiveMap({
   const [list, setList] = useState<"changes" | "owed" | "scenarios" | "suggested" | null>(null)
   const [routesOpen, setRoutesOpen] = useState(true)
   /** Routes panel: flip between route cards and a tech directory; search both. */
-  const [panelMode, setPanelMode] = useState<"routes" | "techs">("routes")
   const [routeSearch, setRouteSearch] = useState("")
   const [techFilter, setTechFilter] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<SuggestedMove[] | null>(null)
@@ -278,23 +277,6 @@ export function LiveMap({
   const costModel = useMemo(() => new CostModel(geometry, activeFactory), [geometry, activeFactory])
 
   /** Route cards, day-grouped when more than one day is in scope; heaviest first within a day. */
-  const byDay = useMemo(() => {
-    const needle = routeSearch.trim().toLowerCase()
-    const costed = visible
-      .filter((v) => !techFilter || v.route.techId === techFilter)
-      .filter((v) => !needle || techOf(v.route.techId).toLowerCase().includes(needle))
-      .map((v) => ({ route: v.route, cost: costModel.ofRoute(v.route) }))
-    const days = new Map<Weekday, typeof costed>()
-    for (const c of costed) days.set(c.route.weekday, [...(days.get(c.route.weekday) ?? []), c])
-    return [...days.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([weekday, dayRoutes]) => ({
-        weekday,
-        routes: dayRoutes.sort((a, b) => b.cost.utilization - a.cost.utilization),
-      }))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, costModel, techFilter, routeSearch, techs])
-
   /** The tech directory behind the panel's flip view. */
   const techDirectory = useMemo(() => {
     const byTech = new Map<string, { routes: number; stops: number }>()
@@ -311,6 +293,24 @@ export function LiveMap({
       .sort((a, b) => techOf(a.techId).localeCompare(techOf(b.techId)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, routeSearch, techs])
+
+  /** The selected tech's routes for the cards panel, weekday order. */
+  const techRoutes = useMemo(() => {
+    if (!techFilter) return []
+    return visible
+      .filter((v) => v.route.techId === techFilter)
+      .map((v) => ({ route: v.route, cost: costModel.ofRoute(v.route) }))
+      .sort((a, b) => a.route.weekday - b.route.weekday)
+  }, [visible, techFilter, costModel])
+
+  /** A lone card (one day filtered, or a one-route week) fills the panel. */
+  useEffect(() => {
+    if (techFilter && techRoutes.length === 1) {
+      const only = routeKey(techRoutes[0].route.techId, techRoutes[0].route.weekday)
+      if (tourRoute !== only) setTourRoute(only)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [techFilter, techRoutes])
 
   const selectedInfo = useMemo(() => {
     if (!selected) return null
@@ -1773,144 +1773,173 @@ export function LiveMap({
         </Worklist>
         )}
 
-        {routePanel && (
-          <div className={`pointer-events-auto flex max-h-[62vh] w-[21.5rem] flex-col ${glass}`}>
+        {techFilter && (
+          <div className={`pointer-events-auto flex max-h-[74vh] w-[22.5rem] flex-col ${glass}`}>
             <div className="flex items-center gap-2.5 px-3.5 pt-3">
               <span
                 className="block h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ background: colorOf(routePanel.route.techId) }}
+                style={{ background: colorOf(techFilter) }}
               />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-semibold text-ink">
-                  {techOf(routePanel.route.techId)}
-                </div>
+                <div className="truncate text-[13px] font-semibold text-ink">{techOf(techFilter)}</div>
                 <div className="text-[10px] uppercase tracking-[0.12em] text-ink-mute">
-                  {WEEKDAY_NAMES[routePanel.route.weekday]} route
+                  {techRoutes.length} route{techRoutes.length === 1 ? "" : "s"} this week
                 </div>
               </div>
               <button
                 className="pl-1 text-[13px] leading-none text-ink-mute hover:text-ink"
-                onClick={() => setSelectedRoute(null)}
+                onClick={() => {
+                  setTechFilter(null)
+                  setTourRoute(null)
+                }}
               >
                 ×
               </button>
             </div>
 
-            <RouteLoadBar
-              driveMin={routePanel.cost.weeklyDriveMinutes}
-              serviceMin={routePanel.cost.weeklyServiceMinutes}
-              utilization={routePanel.cost.utilization}
-            />
 
-            {/* Same pins, same day — handing to an empty-handed tech is free. */}
-            <div className="mx-3.5 mt-2 flex items-center gap-1.5">
-              <select
-                className="min-w-0 flex-1 rounded border border-line bg-transparent px-1.5 py-1 text-[10.5px] text-ink-mute focus:text-ink"
-                value=""
-                onChange={(e) => {
-                  const toTechId = e.target.value
-                  if (!toTechId) return
-                  try {
-                    plan.reassignRouteTech(
-                      routePanel.route.techId,
-                      routePanel.route.weekday,
-                      toTechId,
-                    )
-                    setTourRoute(routeKey(toTechId, routePanel.route.weekday))
-                    forceRender((n) => n + 1)
-                  } catch (err) {
-                    alert(String(err instanceof Error ? err.message : err))
-                  }
-                }}
-              >
-                <option value="">hand this route to another tech…</option>
-                {Object.entries(techs)
-                  .filter(([id, name]) => id !== routePanel.route.techId && name.trim())
-                  .sort((a, b) => a[1].localeCompare(b[1]))
-                  .map(([id, name]) => (
-                    <option key={id} value={id} className="bg-[#0b1620]">
-                      {name}
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            <div className="mt-2 min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3.5 pb-3">
-              <div>
-                {routePanel.route.base && (
-                  <TourStopRow color={colorOf(routePanel.route.techId)} hollow>
-                    <div className="flex items-baseline justify-between gap-3 py-1">
-                      <span className="text-[10px] uppercase tracking-[0.12em] text-ink-mute">
-                        office
+            <div className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto overflow-x-hidden px-3.5 pb-3">
+              {techRoutes.map(({ route, cost }) => {
+                const key = routeKey(route.techId, route.weekday)
+                const open = tourRoute === key
+                return (
+                  <div
+                    key={key}
+                    className={`rounded-lg border ${
+                      open ? "border-cyan/40 bg-cyan/[0.06]" : "border-line-soft bg-white/[0.02]"
+                    }`}
+                  >
+                    <button
+                      className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left"
+                      onClick={() => {
+                        setTourRoute(open ? null : key)
+                        setSelectedLeg(null)
+                      }}
+                    >
+                      <span className="w-9 shrink-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-dim">
+                        {WEEKDAY_NAMES[route.weekday]}
                       </span>
-                      <span className="shrink-0 font-mono text-[9.5px] text-ink-mute">
-                        {routePanel.cost.stops} stops
+                      <span className="min-w-0 flex-1 truncate text-[10.5px] text-ink-mute">
+                        {cost.stops} stops ·{" "}
+                        <span className="font-mono num">{Math.round(cost.weeklyDriveMinutes)}m</span>{" "}
+                        drive ·{" "}
+                        <span className="font-mono num">{Math.round(cost.weeklyServiceMinutes)}m</span>{" "}
+                        service
                       </span>
-                    </div>
-                  </TourStopRow>
-                )}
-                {!routePanel.route.base && (
-                  <div className="mb-1 flex justify-end font-mono text-[9.5px] text-ink-mute">
-                    {routePanel.cost.stops} stops
-                  </div>
-                )}
-                {routePanel.rows.map(({ stop, legIn, legId }, i) => (
-                  <Fragment key={`${stop.quotaId}-${i}`}>
-                    {legIn && legId && (
-                      <TourLegRow
-                        leg={legIn}
-                        selected={selectedLeg === legId}
-                        onClick={() => setSelectedLeg(selectedLeg === legId ? null : legId)}
+                      <UtilDonut
+                        driveMin={cost.weeklyDriveMinutes}
+                        serviceMin={cost.weeklyServiceMinutes}
+                        utilization={cost.utilization}
                       />
-                    )}
-                    <TourStopRow color={colorOf(routePanel.route.techId)}>
-                      <button
-                        className={`flex w-full items-baseline gap-2 rounded px-1.5 py-1 text-left transition-colors hover:bg-white/[0.04] ${
-                          stop.quotaId === selected ? "bg-cyan/10" : ""
-                        }`}
-                        onClick={() => setSelected(stop.quotaId === selected ? null : stop.quotaId)}
-                      >
-                        <span className="w-3.5 shrink-0 text-right font-mono text-[9.5px] text-ink-mute">
-                          {i + 1}
-                        </span>
-                        <span
-                          className={`min-w-0 flex-1 truncate text-[11.5px] ${
-                            stop.quotaId === selected ? "text-cyan" : "text-ink-dim"
-                          }`}
-                        >
-                          {nameOf(stop.customerId)}
-                        </span>
-                        <span className="shrink-0 font-mono text-[9.5px] text-ink-mute">
-                          {stop.serviceMinutes ?? "~"}m
-                        </span>
-                      </button>
-                    </TourStopRow>
-                  </Fragment>
-                ))}
-                {routePanel.legOut && routePanel.legOutId && (
-                  <>
-                    <TourLegRow
-                      leg={routePanel.legOut}
-                      selected={selectedLeg === routePanel.legOutId}
-                      onClick={() =>
-                        setSelectedLeg(selectedLeg === routePanel.legOutId ? null : routePanel.legOutId)
-                      }
-                    />
-                    <TourStopRow color={colorOf(routePanel.route.techId)} hollow>
-                      <div className="py-1 text-[10px] uppercase tracking-[0.12em] text-ink-mute">
-                        office
+                    </button>
+
+                    {open && routePanel && (
+                      <div className="border-t border-line-soft px-2.5 pb-2.5">
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          <select
+                            className="min-w-0 flex-1 rounded border border-line bg-transparent px-1.5 py-1 text-[10.5px] text-ink-mute focus:text-ink"
+                            value=""
+                            onChange={(e) => {
+                              const toTechId = e.target.value
+                              if (!toTechId) return
+                              try {
+                                plan.reassignRouteTech(route.techId, route.weekday, toTechId)
+                                setTechFilter(toTechId)
+                                setTourRoute(routeKey(toTechId, route.weekday))
+                                forceRender((n) => n + 1)
+                              } catch (err) {
+                                alert(String(err instanceof Error ? err.message : err))
+                              }
+                            }}
+                          >
+                            <option value="">hand this route to another tech…</option>
+                            {Object.entries(techs)
+                              .filter(([id, name]) => id !== route.techId && name.trim())
+                              .sort((a, b) => a[1].localeCompare(b[1]))
+                              .map(([id, name]) => (
+                                <option key={id} value={id} className="bg-[#0b1620]">
+                                  {name}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        <div className="mt-2 max-h-[40vh] overflow-y-auto overflow-x-hidden">
+                          <div>
+                            {routePanel.route.base && (
+                              <TourStopRow color={colorOf(route.techId)} hollow>
+                                <div className="flex items-baseline justify-between gap-3 py-1">
+                                  <span className="text-[10px] uppercase tracking-[0.12em] text-ink-mute">
+                                    office
+                                  </span>
+                                </div>
+                              </TourStopRow>
+                            )}
+                            {routePanel.rows.map(({ stop, legIn, legId }, i) => (
+                              <Fragment key={`${stop.quotaId}-${i}`}>
+                                {legIn && legId && (
+                                  <TourLegRow
+                                    leg={legIn}
+                                    selected={selectedLeg === legId}
+                                    onClick={() =>
+                                      setSelectedLeg(selectedLeg === legId ? null : legId)
+                                    }
+                                  />
+                                )}
+                                <TourStopRow color={colorOf(route.techId)}>
+                                  <button
+                                    className={`-mx-1 flex w-[calc(100%+8px)] items-baseline gap-2 rounded px-1 py-1 text-left transition-colors hover:bg-white/[0.04] ${
+                                      stop.quotaId === selected ? "bg-cyan/10" : ""
+                                    }`}
+                                    onClick={() =>
+                                      setSelected(stop.quotaId === selected ? null : stop.quotaId)
+                                    }
+                                  >
+                                    <span className="w-3.5 shrink-0 text-right font-mono text-[9.5px] text-ink-mute">
+                                      {i + 1}
+                                    </span>
+                                    <span
+                                      className={`min-w-0 flex-1 truncate text-[11.5px] ${
+                                        stop.quotaId === selected ? "text-cyan" : "text-ink-dim"
+                                      }`}
+                                    >
+                                      {nameOf(stop.customerId)}
+                                    </span>
+                                    <span className="shrink-0 font-mono text-[9.5px] text-ink-mute">
+                                      {stop.serviceMinutes ?? "~"}m
+                                    </span>
+                                  </button>
+                                </TourStopRow>
+                              </Fragment>
+                            ))}
+                            {routePanel.legOut && (
+                              <>
+                                <TourLegRow
+                                  leg={routePanel.legOut}
+                                  selected={selectedLeg === routePanel.legOutId}
+                                  onClick={() =>
+                                    setSelectedLeg(
+                                      selectedLeg === routePanel.legOutId ? null : routePanel.legOutId,
+                                    )
+                                  }
+                                />
+                                <TourStopRow color={colorOf(route.techId)} hollow>
+                                  <div className="py-1 text-[10px] uppercase tracking-[0.12em] text-ink-mute">
+                                    office
+                                  </div>
+                                </TourStopRow>
+                              </>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </TourStopRow>
-                  </>
-                )}
-                {routePanel.unpinned.map((st) => (
-                  <TourStopRow key={st.quotaId} color="#fbbf24" hollow>
-                    <div className="py-1 text-[11px] text-sun/90">
-                      {nameOf(st.customerId)} - no pin, cannot be sequenced
-                    </div>
-                  </TourStopRow>
-                ))}
-              </div>
+                    )}
+                  </div>
+                )
+              })}
+              {techRoutes.length === 0 && (
+                <p className="py-2 text-[11px] text-ink-mute">no routes on the selected days</p>
+              )}
             </div>
           </div>
         )}
@@ -1922,192 +1951,83 @@ export function LiveMap({
           routesOpen ? "max-h-[calc(100%-2rem)]" : ""
         }`}
       >
-        <OptionPills
-          multiple
-          allLabel="All days"
-          size="sm"
-          value={dayScope}
-          onChange={setDayScope}
-          options={WEEKDAY_NAMES.map((n, i) => ({ value: String(i), label: n }))}
-        />
-
-        <div className="mt-2.5 flex items-center gap-2.5 border-t border-line-soft pt-2">
+        <div>
+          <OptionPills
+            multiple
+            allLabel="All days"
+            size="sm"
+            value={dayScope}
+            onChange={setDayScope}
+            options={WEEKDAY_NAMES.map((n, i) => ({ value: String(i), label: n }))}
+          />
+        </div>
+        <div className="mt-2 flex items-center gap-2.5">
           <button
-            className={`text-[10px] uppercase tracking-[0.14em] ${
-              panelMode === "routes" ? "text-ink" : "text-ink-mute hover:text-ink-dim"
-            }`}
-            onClick={() => {
-              setPanelMode("routes")
-              setRoutesOpen(true)
-            }}
-          >
-            Routes ({visible.length})
-          </button>
-          <button
-            className={`text-[10px] uppercase tracking-[0.14em] ${
-              panelMode === "techs" ? "text-ink" : "text-ink-mute hover:text-ink-dim"
-            }`}
-            onClick={() => {
-              setPanelMode("techs")
-              setRoutesOpen(true)
-            }}
+            className="flex-1 text-left text-[10px] uppercase tracking-[0.14em] text-ink-mute"
+            onClick={() => setRoutesOpen((v) => !v)}
           >
             Techs ({techDirectory.length})
           </button>
-          <span className="flex-1" />
-          {selectedRoutes.size > 0 && (
+          {techFilter && (
             <button
               className="text-[10px] text-ink-mute hover:text-cyan"
-              onClick={() => setSelectedRoute(null)}
+              onClick={() => {
+                setTechFilter(null)
+                setTourRoute(null)
+              }}
             >
-              clear ({selectedRoutes.size})
+              clear
             </button>
           )}
           <button className="text-[11px] text-ink-mute" onClick={() => setRoutesOpen((v) => !v)}>
             {routesOpen ? "−" : "+"}
           </button>
         </div>
-
         {routesOpen && (
-          <div className="mt-1.5 flex items-center gap-1.5">
+          <>
             <input
-              className="min-w-0 flex-1 rounded border border-line bg-white/[0.02] px-2 py-1 text-[11px] text-ink placeholder:text-ink-mute/60 outline-none focus:border-cyan/40"
-              placeholder={panelMode === "routes" ? "search routes by tech…" : "search techs…"}
+              className="mt-2 min-w-0 rounded border border-line bg-white/[0.02] px-2 py-1 text-[11px] text-ink placeholder:text-ink-mute/60 outline-none focus:border-cyan/40"
+              placeholder="search techs…"
               value={routeSearch}
               onChange={(e) => setRouteSearch(e.target.value)}
             />
-            {techFilter && (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-cyan/40 bg-cyan/10 px-2 py-0.5 text-[10.5px] text-cyan">
-                {techOf(techFilter)}
-                <button
-                  className="text-cyan/60 hover:text-cyan"
-                  title="clear tech filter"
-                  onClick={() => setTechFilter(null)}
-                >
-                  ×
-                </button>
-              </span>
-            )}
-          </div>
-        )}
-
-        {routesOpen && panelMode === "techs" && (
-        <div className="mt-1 min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-          <ul className="mt-0.5">
-            {techDirectory.map((t) => (
-              <li key={t.techId}>
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-1.5 py-[7px] text-left hover:bg-white/[0.04]"
-                  onClick={() => {
-                    setTechFilter(t.techId)
-                    setPanelMode("routes")
-                    setRouteSearch("")
-                    // Their whole week lands in the optimizer scope — one
-                    // click from the tech view to "optimize this tech".
-                    setSelectedRoutes(
-                      new Set(
-                        visible
-                          .filter((v) => v.route.techId === t.techId)
-                          .map((v) => routeKey(v.route.techId, v.route.weekday)),
-                      ),
-                    )
-                    setSuggestions(null)
-                  }}
-                >
-                  <span
-                    className="block h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ background: colorOf(t.techId) }}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink">
-                    {techOf(t.techId)}
-                  </span>
-                  <span className="font-mono num text-[10.5px] text-ink-mute">
-                    {t.routes} route{t.routes === 1 ? "" : "s"} · {t.stops}
-                  </span>
-                </button>
-              </li>
-            ))}
-            {techDirectory.length === 0 && (
-              <p className="py-2 text-[11px] text-ink-mute">no techs match</p>
-            )}
-          </ul>
-        </div>
-        )}
-
-        {routesOpen && panelMode === "routes" && (
-        <div className="mt-1 min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-          {byDay.map(({ weekday, routes: dayRoutes }) => (
-            <div key={weekday}>
-              {byDay.length > 1 && (
-                <div className="mt-2.5 text-[10px] font-medium uppercase tracking-[0.12em] text-ink-mute/80 first:mt-0.5">
-                  {WEEKDAY_NAMES[weekday]}
-                </div>
-              )}
+            <div className="mt-1 min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
               <ul className="mt-0.5">
-                {dayRoutes.map(({ route, cost }) => {
-                  const key = routeKey(route.techId, route.weekday)
-                  const picked = selectedRoutes.has(key)
-                  const inScope = picked
+                {techDirectory.map((t) => {
+                  const picked = techFilter === t.techId
                   return (
-                    <li key={key} className="group relative">
+                    <li key={t.techId}>
                       <button
-                        className={`flex w-full items-center gap-2 rounded-md px-1.5 py-[7px] pr-7 text-left transition-colors ${
+                        className={`flex w-full items-center gap-2 rounded-md px-1.5 py-[7px] text-left transition-colors ${
                           picked ? "bg-cyan/10 ring-1 ring-inset ring-cyan/30" : "hover:bg-white/[0.04]"
                         }`}
-                        onClick={() => toggleRoute(key)}
-                      >
-                        <span
-                          className="block h-2.5 w-2.5 shrink-0 rounded-full border"
-                          style={{
-                            background: picked ? colorOf(route.techId) : "transparent",
-                            borderColor: colorOf(route.techId),
-                          }}
-                        />
-                        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink">
-                          {techOf(route.techId)}
-                        </span>
-                        <UtilDonut
-                          driveMin={cost.weeklyDriveMinutes}
-                          serviceMin={cost.weeklyServiceMinutes}
-                          utilization={cost.utilization}
-                        />
-                      </button>
-                      {/* Drive lines: one route's tour + panel at a time. */}
-                      <button
-                        className={`absolute right-1.5 top-1/2 flex h-[18px] w-[18px] -translate-y-1/2 items-center justify-center rounded border transition-opacity ${
-                          tourRoute === key
-                            ? "border-cyan/60 bg-cyan/20 text-cyan opacity-100"
-                            : "border-line text-ink-mute opacity-60 hover:text-ink group-hover:opacity-100"
-                        }`}
-                        title={tourRoute === key ? "hide drive lines" : "show drive lines"}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setTourRoute(tourRoute === key ? null : key)
-                          setSelectedLeg(null)
+                        onClick={() => {
+                          setTechFilter(picked ? null : t.techId)
+                          setTourRoute(null)
+                          setSelectedRoutes(new Set())
+                          setSelected(null)
                         }}
                       >
-                        <svg viewBox="0 0 14 14" width="11" height="11" aria-hidden="true">
-                          <path
-                            d="M1.5 12 Q4 9 3.5 6.5 T7 4 T12.5 2"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.6"
-                            strokeLinecap="round"
-                          />
-                          <circle cx="1.5" cy="12" r="1.4" fill="currentColor" />
-                          <circle cx="12.5" cy="2" r="1.4" fill="currentColor" />
-                        </svg>
+                        <span
+                          className="block h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ background: colorOf(t.techId) }}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink">
+                          {techOf(t.techId)}
+                        </span>
+                        <span className="font-mono num text-[10.5px] text-ink-mute">
+                          {t.routes} route{t.routes === 1 ? "" : "s"} · {t.stops}
+                        </span>
                       </button>
                     </li>
                   )
                 })}
+                {techDirectory.length === 0 && (
+                  <p className="py-2 text-[11px] text-ink-mute">no techs match</p>
+                )}
               </ul>
             </div>
-          ))}
-          {visible.length === 0 && (
-            <p className="py-2 text-[11px] text-ink-mute">no routes match this scope</p>
-          )}
-        </div>
+          </>
         )}
       </aside>
 
