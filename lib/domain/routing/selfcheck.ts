@@ -78,6 +78,15 @@ check("I2: the same quota cannot be placed twice on one tech-day", () => {
   assert.equal(q.stops.length, 1)
 })
 
+check("one visit per day: a second stop on the same weekday is refused, any tech", () => {
+  const q = quotaOf("q1", { requiredDays: 2 })
+  q.place("korey", 1 as Weekday)
+  assert.throws(() => q.place("dana", 1 as Weekday), QuotaRuleError)
+  assert.equal(q.refusal("dana", 1 as Weekday), "already served on that day")
+  // the moving stop does not block its own destination day (tech-only move)
+  assert.equal(q.refusal("dana", 1 as Weekday, { techId: "korey", weekday: 1 as Weekday }), null)
+})
+
 check("the same quota may sit on two different tech-days", () => {
   const q = quotaOf("q1", { requiredDays: 2 })
   q.place("korey", 1 as Weekday)

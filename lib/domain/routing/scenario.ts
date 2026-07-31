@@ -262,8 +262,9 @@ export class Scenario {
         skipped.push({ quotaId, reason: "not in this scenario" })
         continue
       }
-      if (quota.stops.some((s) => s.techId === techId && s.weekday === weekday)) {
-        skipped.push({ quotaId, reason: "already served on that day" })
+      const why = quota.refusal(techId, weekday)
+      if (why) {
+        skipped.push({ quotaId, reason: why })
         continue
       }
       this.edit(quotaId, (q) => q.place(techId, weekday))
@@ -280,8 +281,9 @@ export class Scenario {
         skipped.push({ quotaId: sel.quotaId, reason: "already there" })
         continue
       }
-      if (quota.stops.some((s) => s.techId === techId && s.weekday === weekday)) {
-        skipped.push({ quotaId: sel.quotaId, reason: "already served on that day" })
+      const why = quota.refusal(techId, weekday, { techId: sel.techId, weekday: sel.weekday })
+      if (why) {
+        skipped.push({ quotaId: sel.quotaId, reason: why })
         continue
       }
       this.edit(sel.quotaId, (q) =>

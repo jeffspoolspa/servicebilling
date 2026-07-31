@@ -11,6 +11,7 @@ The rules that every doc, script, migration, and route in this repo follows. New
 |---|---|---|
 | [LABELS.md](LABELS.md) | Text-based annotation vocabulary (replaces all emojis) | Every doc, every header |
 | [SCHEMA_OWNERSHIP.md](SCHEMA_OWNERSHIP.md) | Which module owns which schema; cross-schema rules; how `public.*` works | Before adding a table or column |
+| [LAYERING.md](LAYERING.md) | Domain/application/infrastructure/UI boundaries; which writes need an application service; where rules are enforced | Before refactoring a module onto the domain model, or adding a use case |
 | [CONCURRENCY_KEYS.md](CONCURRENCY_KEYS.md) | Registry of `qbo_api`, `gmail_api`, etc. and rules for adding new keys | Before writing a Windmill script that hits an external API |
 
 ## Templates

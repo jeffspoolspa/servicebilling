@@ -84,14 +84,9 @@ export class Optimizer {
           const removal = from.profileOf(stop.quotaId)?.runs[0]?.marginalMi ?? 0
           for (const [toKey, to] of routes) {
             if (toKey === fromKey) continue
-            // A day the quota ALREADY OTHERWISE visits is illegal (I2/I5) —
-            // the stop being moved does not block its own destination day.
-            const collides = quota.stops.some(
-              (s) =>
-                s.weekday === to.weekday &&
-                !(s.techId === from.techId && s.weekday === from.weekday),
-            )
-            if (collides) continue
+            // Legality asked of the aggregate, never re-encoded here: the
+            // stop being moved does not block its own destination day.
+            if (quota.refusal(to.techId, to.weekday, from) !== null) continue
             const pins = this.geometry
               .order(to.heaviest().stops)
               .map((s) => s.pin)

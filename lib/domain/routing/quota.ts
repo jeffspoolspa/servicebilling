@@ -122,9 +122,30 @@ export class Quota {
    * Put this quota on a tech's weekday. The assignment is what makes it a stop
    * (I1); passing neither is unrepresentable because both are required here.
    */
+  /**
+   * Why a placement on (tech, weekday) would be refused — null when legal.
+   * THE single home of placement-refusal knowledge: reassign's skip reasons,
+   * the optimizer's candidate filter, and fit's exclusions all call this
+   * rather than re-encoding fragments of it (the drift Carter flagged).
+   * `ignoring` names a stop being moved, which does not block its own target.
+   */
+  refusal(techId: string, weekday: Weekday, ignoring?: Placement): string | null {
+    if (!techId) return "a stop needs a tech"
+    const isIgnored = (s: Stop) =>
+      ignoring !== undefined && s.techId === ignoring.techId && s.weekday === ignoring.weekday
+    if (this.stops.some((s) => !isIgnored(s) && s.weekday === weekday)) {
+      // One visit per day: same tech-day twice is I2; a second tech the same
+      // day is absurd for a pool and invisible to spacing() when minGap is 0.
+      return "already served on that day"
+    }
+    return null
+  }
+
   place(techId: string, weekday: Weekday): Stop {
     if (!techId) throw new QuotaRuleError("a stop needs a tech")
     const key = keyOf(techId, weekday)
+    const why = this.refusal(techId, weekday)
+    if (why) throw new QuotaRuleError(why)
     if (this.placements.has(key)) {
       throw new QuotaRuleError(`already placed on ${techId} weekday ${weekday}`)
     }
@@ -138,6 +159,8 @@ export class Quota {
     const existing = this.placements.get(keyOf(from.techId, from.weekday))
     if (!existing) throw new QuotaRuleError("no stop to move")
     const targetKey = keyOf(to.techId, to.weekday)
+    const why = this.refusal(to.techId, to.weekday, from)
+    if (why) throw new QuotaRuleError(why)
     if (targetKey !== keyOf(from.techId, from.weekday) && this.placements.has(targetKey)) {
       throw new QuotaRuleError("target already holds a stop for this quota")
     }

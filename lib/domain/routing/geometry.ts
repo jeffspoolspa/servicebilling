@@ -258,12 +258,9 @@ export class RouteGeometry {
     const pin = quota.requirement.pin
     if (!pin) return []
     const { detourFactor, averageMph, minutesPerStop, stopOverheadMinutes, workdayMinutes } = this.policy.drive
-    // Exclude routes on any weekday the quota already visits: with multi-day
-    // minimum gaps, a same-day second visit is always spacing-illegal (I5) —
-    // no point suggesting what the adoption gate must refuse.
-    const occupiedDays = new Set(quota.stops.map((s) => s.weekday))
+    // Legality asked of the aggregate: never suggest what place() must refuse.
     return routes
-      .filter((r) => !occupiedDays.has(r.weekday))
+      .filter((r) => quota.refusal(r.techId, r.weekday) === null)
       .map((r) => {
         const worst = r.heaviest()
         const orderedPins = worst.stops.map((s) => s.pin).filter((p): p is Pin => p !== null)
