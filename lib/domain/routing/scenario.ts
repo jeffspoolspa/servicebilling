@@ -325,10 +325,36 @@ export class Scenario {
    *   Removed(a) … Placed(b)      → Moved(a→b), or nothing when b = a
    *   Placed(b) … Removed(b)      → nothing (placed, then changed our mind)
    *   Moved(a→b) … Removed(b)     → Removed(a)
+   *   Moved(a→b) … Moved(b→c)     → Moved(a→c), or nothing when c = a
+   *   Placed(b) … Moved(b→c)      → Placed(c)
    * An owed pool mid-rebuild still carries its StopRemoved until it lands.
+   * Moving the same stop twice is one change against live, not two: the list
+   * answers "what differs from today", never "what did the user click".
    */
   private record(e: RoutingEvent): void {
     const same = (x: Placement, y: Placement) => x.techId === y.techId && x.weekday === y.weekday
+    if (e.kind === "StopMoved") {
+      for (let i = this.recorded.length - 1; i >= 0; i--) {
+        const prior = this.recorded[i]
+        if (prior.quotaId !== e.quotaId) continue
+        // Re-moving what this scenario already moved: rewrite the one row to
+        // the new destination rather than appending a second hop.
+        if (prior.kind === "StopMoved" && same(prior.to, e.from)) {
+          this.recorded.splice(i, 1)
+          if (!same(prior.from, e.to)) {
+            this.recorded.push({ kind: "StopMoved", quotaId: e.quotaId, from: prior.from, to: e.to })
+          }
+          return
+        }
+        // A stop this scenario placed is still just a placement, wherever it
+        // ends up.
+        if (prior.kind === "StopPlaced" && same(prior.to, e.from)) {
+          this.recorded.splice(i, 1)
+          this.recorded.push({ kind: "StopPlaced", quotaId: e.quotaId, to: e.to })
+          return
+        }
+      }
+    }
     if (e.kind === "StopPlaced") {
       for (let i = this.recorded.length - 1; i >= 0; i--) {
         const prior = this.recorded[i]
