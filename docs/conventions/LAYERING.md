@@ -60,6 +60,16 @@ All rules live on the domain objects. They are enforced in two modes:
    fail; proposal engines consult the same queries so they never suggest
    what the gate must refuse.
 
+**Aggregate or domain service? Ask what the rule READS, not who calls it.**
+A rule that reads one aggregate's own state lives on that aggregate, even
+when its callers are all services (`Quota.refusal` reads one quota's stops).
+A rule that spans state no single aggregate owns is a domain service that
+DELEGATES the single-aggregate part (`Optimizer.verify` asks
+`quota.refusal(...)`, then adds the route-capacity and pool-cap checks -
+plan-level concerns a quota cannot see). An aggregate that needs a service
+to know its own legality is not a consistency boundary; a service holding
+one entity's rules is an anemic model.
+
 **No caller re-encodes a rule.** Anything that needs to ask "would this
 placement be legal?" calls the aggregate's refusal query
 (`Quota.refusal(techId, weekday, ignoring?)`) - reassign's skip reasons,
