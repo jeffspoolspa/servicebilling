@@ -159,9 +159,14 @@ export class Quota {
     const existing = this.placements.get(keyOf(from.techId, from.weekday))
     if (!existing) throw new QuotaRuleError("no stop to move")
     const targetKey = keyOf(to.techId, to.weekday)
+    // Moving a stop to where it already is changes nothing, so it is not an
+    // event. Without this a no-op drag lands in the change list as a
+    // StopMoved from a placement to itself — a row that reads as a change
+    // and publishes as one.
+    if (targetKey === keyOf(from.techId, from.weekday)) return existing
     const why = this.refusal(to.techId, to.weekday, from)
     if (why) throw new QuotaRuleError(why)
-    if (targetKey !== keyOf(from.techId, from.weekday) && this.placements.has(targetKey)) {
+    if (this.placements.has(targetKey)) {
       throw new QuotaRuleError("target already holds a stop for this quota")
     }
     this.placements.delete(keyOf(from.techId, from.weekday))

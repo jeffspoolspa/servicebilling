@@ -11,7 +11,7 @@
  */
 
 import type { Placement, RoutingEvent } from "./events"
-import type { PublishResult, RoutePublisher } from "./ports"
+import type { PublishResult, RoutePublisher, TaskSchedule } from "./ports"
 import { Quota, type Stop, type TransitionReport } from "./quota"
 import { RouteFactory, Route } from "./route-factory"
 import type { Region, Weekday, WeekIndex } from "./values"
@@ -76,6 +76,8 @@ export class Adoption {
   private constructor(
     readonly scenarioId: string,
     readonly changes: readonly RoutingEvent[],
+    /** What to WRITE: one complete standing week per quota the changes touch. */
+    readonly schedules: readonly TaskSchedule[],
   ) {}
 
   static of(scenario: Scenario, scenarioId: string): Adoption {
@@ -83,7 +85,11 @@ export class Adoption {
     if (blockers.length > 0) throw new AdoptionBlocked(blockers)
     const changes = scenario.changes()
     if (changes.length === 0) throw new Error("nothing to adopt: the scenario has no changes")
-    return new Adoption(scenarioId, changes.map((e) => ({ ...e, scenarioId })))
+    return new Adoption(
+      scenarioId,
+      changes.map((e) => ({ ...e, scenarioId })),
+      scenario.schedules(),
+    )
   }
 }
 
@@ -464,6 +470,33 @@ export class Scenario {
     return [...this.recorded]
   }
 
+  /**
+   * What to WRITE, per quota this scenario touched: the COMPLETE standing week,
+   * unchanged stops included.
+   *
+   * The change list is a diff and the system of record is not diff-shaped — ION
+   * holds a task's week as one tech per weekday, so writing only the moved days
+   * would leave the others exactly as they were: a moved stop duplicated, a
+   * removed stop alive. Stating the whole week instead makes the write total and
+   * idempotent. A quota whose stops all went away yields an empty week, which is
+   * the honest instruction to clear it, not a reason to skip it.
+   */
+  schedules(): readonly TaskSchedule[] {
+    const byQuota = new Map<string, RoutingEvent[]>()
+    for (const e of this.recorded) {
+      const list = byQuota.get(e.quotaId) ?? []
+      list.push(e)
+      byQuota.set(e.quotaId, list)
+    }
+    const out: TaskSchedule[] = []
+    for (const [quotaId, changes] of byQuota) {
+      const quota = this.quotas.get(quotaId)
+      if (!quota) continue
+      out.push({ quotaId, stops: quota.stops, changes })
+    }
+    return out
+  }
+
   /** The (tech, weekday) pairs any change touched — the routes worth re-reading. */
   affectedRoutes(): ReadonlyArray<{ techId: string; weekday: Weekday }> {
     const keys = new Map<string, { techId: string; weekday: Weekday }>()
@@ -497,7 +530,10 @@ export class Scenario {
     opts: { dryRun?: boolean } = {},
   ): Promise<PublishResult[]> {
     const adoption = Adoption.of(this, scenarioId)
-    return publisher.publish(adoption.changes, { dryRun: opts.dryRun ?? true })
+    // The publisher receives complete weeks, not the diff: the system of
+    // record stores a task's week whole, so a partial write loses the stops
+    // it did not mention.
+    return publisher.publish(adoption.schedules, { dryRun: opts.dryRun ?? true })
   }
 
   /**

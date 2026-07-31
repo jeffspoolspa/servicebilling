@@ -20,9 +20,13 @@ import {
   WEEKDAY_NAMES,
   type FitCandidate,
   type NearbyQuota,
+  type InvalidChange,
+  type PublishResult,
   type QuotaRepository,
   type QuotaSnapshot,
   type Route,
+  type RoutePublisher,
+  type ScenarioRepository,
   type StopProfile,
   type Weekday,
   type WeekIndex,
@@ -79,6 +83,19 @@ export interface EvaluatedScenario extends StoredScenario {
   readonly appliedCount: number
   /** Changes whose underlying stops moved since the scenario was saved. */
   readonly invalidCount: number
+}
+
+/** The outcome of publishing one scenario — per quota, plus what was skipped. */
+export interface PublishReport {
+  readonly scenarioId: string
+  readonly dryRun: boolean
+  /** True only when a live run was accepted for every quota. */
+  readonly committed: boolean
+  readonly results: readonly PublishResult[]
+  /** Stored changes the live plan has moved out from under — never written. */
+  readonly invalidated: readonly InvalidChange[]
+  /** How many complete weeks the write covered. */
+  readonly published: number
 }
 
 export class RoutingService {
@@ -164,6 +181,53 @@ export class RoutingService {
         invalidCount: restored.invalidated.length,
       }
     })
+  }
+
+  /**
+   * Publish a stored scenario to the system of record.
+   *
+   * The whole use case in one call, so the UI hands over a scenario id and
+   * trusts the rest: restore it over today's plan (which compacts the change
+   * list and invalidates anything the live data moved out from under), refuse
+   * to proceed if the restored plan breaks a quota's own rules, write one
+   * COMPLETE week per touched quota, and mark the scenario committed only when
+   * a live run was accepted for every one of them.
+   *
+   * dryRun defaults to true: a real ION write is always an explicit second
+   * step. A partial live result leaves the scenario pending on purpose —
+   * "some of it landed" is a state a human needs to see, not one to record as
+   * done.
+   */
+  async publishScenario(
+    scenarioId: string,
+    scenarios: ScenarioRepository,
+    publisher: RoutePublisher,
+    opts: { dryRun?: boolean; asOf?: Date } = {},
+  ): Promise<PublishReport> {
+    const dryRun = opts.dryRun ?? true
+    const stored = await scenarios.byId(scenarioId)
+    if (!stored) throw new Error(`no scenario ${scenarioId}`)
+    if (stored.status !== "pending") {
+      throw new Error(`scenario ${scenarioId} is ${stored.status} — only a pending one publishes`)
+    }
+
+    const live = await this.repository.liveIn(weekOf(opts.asOf ?? new Date()))
+    const restored = Scenario.restore(live, stored.changes)
+    const results = await restored.scenario.adopt(publisher, scenarioId, { dryRun })
+
+    const accepted = results.filter((r) => r.accepted).length
+    const committed = !dryRun && results.length > 0 && accepted === results.length
+    if (committed) await scenarios.update(scenarioId, { status: "committed" })
+
+    return {
+      scenarioId,
+      dryRun,
+      committed,
+      results,
+      invalidated: restored.invalidated,
+      // What the write actually said, so a dry run is inspectable.
+      published: restored.scenario.schedules().length,
+    }
   }
 
   async audit(asOf: Date = new Date()): Promise<PlanAudit> {

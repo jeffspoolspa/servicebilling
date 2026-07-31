@@ -458,22 +458,54 @@ check("adopt is double dispatch: gate first, dry-run by default, port receives s
   const scenario = Scenario.from([q])
   scenario.moveStop("q1", { techId: "korey", weekday: 2 as Weekday }, { techId: "dana", weekday: 4 as Weekday })
 
-  const calls: Array<{ n: number; dryRun: boolean; scenarioId?: string }> = []
+  const calls: Array<{ n: number; dryRun: boolean; stops: number }> = []
   const publisher = {
-    async publish(events: readonly import("./events").RoutingEvent[], opts: { dryRun: boolean }) {
-      calls.push({ n: events.length, dryRun: opts.dryRun, scenarioId: events[0]?.scenarioId })
-      return events.map((e) => ({ quotaId: e.quotaId, accepted: true, detail: "fake" }))
+    async publish(schedules: readonly import("./ports").TaskSchedule[], opts: { dryRun: boolean }) {
+      calls.push({ n: schedules.length, dryRun: opts.dryRun, stops: schedules[0]?.stops.length ?? 0 })
+      return schedules.map((s) => ({ quotaId: s.quotaId, accepted: true, detail: "fake" }))
     },
   }
 
   const results = await scenario.adopt(publisher, "reroute-1")
-  assert.deepEqual(calls, [{ n: 1, dryRun: true, scenarioId: "reroute-1" }], "dry run unless told otherwise")
+  assert.deepEqual(
+    calls,
+    [{ n: 1, dryRun: true, stops: 1 }],
+    "dry run unless told otherwise, and the publisher gets the whole week",
+  )
   assert.equal(results[0].accepted, true)
 
   const blocked = Scenario.from([q])
   blocked.unplaceStop("q1", "korey", 2 as Weekday)
   await assert.rejects(() => blocked.adopt(publisher, "reroute-2"), AdoptionBlocked)
   assert.equal(calls.length, 1, "a blocked scenario never reaches the publisher")
+})
+
+check("what publishes is the COMPLETE week per quota, not the diff", () => {
+  // A three-day pool, one stop moved: the write must still carry all three,
+  // or the system of record drops the two we never mentioned.
+  const q = quotaOf("multi", { requiredDays: 3 })
+  q.place("korey", 1 as Weekday)
+  q.place("korey", 3 as Weekday)
+  q.place("korey", 5 as Weekday)
+  q.pullEvents()
+  const s = Scenario.from([q])
+  s.moveStop("multi", { techId: "korey", weekday: 3 as Weekday }, { techId: "dana", weekday: 4 as Weekday })
+
+  assert.equal(s.changes().length, 1, "one stop moved = one change")
+  const schedules = s.schedules()
+  assert.equal(schedules.length, 1, "one quota touched")
+  const week = [...schedules[0].stops]
+    .map((st) => `${st.techId}|${st.weekday}`)
+    .sort()
+  assert.deepEqual(
+    week,
+    ["dana|4", "korey|1", "korey|5"],
+    "the untouched Mon and Fri stops travel with the moved one",
+  )
+  // A quota emptied entirely publishes an empty week — clear it, don't skip it.
+  const gone = Scenario.from([q])
+  for (const st of q.stops) gone.unplaceStop("multi", st.techId, st.weekday)
+  assert.equal(gone.schedules()[0].stops.length, 0, "an emptied week is stated, not omitted")
 })
 
 console.log("\nfitting")

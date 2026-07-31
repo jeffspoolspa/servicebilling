@@ -6,7 +6,7 @@
  * nothing about how.
  */
 
-import type { Quota } from "./quota"
+import type { Quota, Stop } from "./quota"
 import type { RoutingEvent } from "./events"
 import type { WeekIndex } from "./values"
 
@@ -28,9 +28,28 @@ export interface EventLog {
   append(events: readonly RoutingEvent[]): Promise<void>
 }
 
+/**
+ * One quota's COMPLETE standing week — every stop it will have after adoption,
+ * the untouched ones included.
+ *
+ * This is the unit of publication, not the diff, because the system of record
+ * stores a task's week as a whole (ION: one tech select per weekday). Sending
+ * only what changed would leave the days we omitted holding whatever they held
+ * before — a moved stop would be duplicated, and a removed one would survive.
+ * The domain therefore states the destination, never the delta, and the write
+ * is idempotent: publishing the same schedule twice is one outcome.
+ */
+export interface TaskSchedule {
+  readonly quotaId: string
+  /** Every stop, unchanged ones included. Empty means the week is cleared. */
+  readonly stops: readonly Stop[]
+  /** The diff that produced it — for the audit trail, never for the write. */
+  readonly changes: readonly RoutingEvent[]
+}
+
 /** Applies adopted placement changes to the system of record (ION). */
 export interface RoutePublisher {
-  publish(events: readonly RoutingEvent[], opts: { dryRun: boolean }): Promise<PublishResult[]>
+  publish(schedules: readonly TaskSchedule[], opts: { dryRun: boolean }): Promise<PublishResult[]>
 }
 
 export interface PublishResult {
