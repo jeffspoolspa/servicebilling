@@ -1070,8 +1070,16 @@ export function LiveMap({
 
   const applyReassign = (techId: string, weekday: Weekday) => {
     if (!selection || (selection.stops.length === 0 && selection.owed.length === 0)) return
-    setReport(plan.reassign(selection, techId, weekday))
+    const report = plan.reassign(selection, techId, weekday)
     forceRender((n) => n + 1)
+    // Acting on a selection consumes it: the area closes exactly as its ×
+    // would. Skips still get said — their panel is gone with the shape.
+    clearAll()
+    if (report.skipped.length > 0) {
+      alert(
+        `${report.skipped.length} skipped — ${[...new Set(report.skipped.map((x) => x.reason))].join(", ")}`,
+      )
+    }
   }
 
   /* ----------------------------------------------------- stored scenarios */
@@ -2318,7 +2326,7 @@ export function LiveMap({
                       }
                     }
                     forceRender((n) => n + 1)
-                    setReport(null)
+                    clearAll()
                   }}
                 >
                   Unassign
