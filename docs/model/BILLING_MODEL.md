@@ -102,3 +102,79 @@ application services. Rules live once, in the domain, selfchecked.
    customer-month? (Storage can stay; the aggregate defines the boundary.)
 3. Visit.state vocabulary: exact states and who writes each (ingester map
    from ION log flags -> state).
+
+---
+
+# The current process, decomposed into layers
+
+The seven live stages (see [flow-map](../flows/monthly-maintenance-billing/flow-map.md))
+re-expressed as: what is a RULE (domain), what TALKS to something (infrastructure),
+and what ORCHESTRATES one use case (application). The application services are the
+only verbs a UI, an API route, or a Windmill worker ever calls.
+
+**What does NOT change:** the queue/drainer execution model (ADR 008,
+[WORKFLOW_EXECUTION](../conventions/WORKFLOW_EXECUTION.md)). Queues, wakes, and
+drainers stay exactly as built — they become thin CALLERS of application services
+instead of holding logic themselves. We are giving the existing workflow substrate
+a domain to call, not replacing it.
+
+## Stage by stage
+
+| # | Stage today | Rule -> domain | Talks -> infrastructure | Use case -> application |
+|---|---|---|---|---|
+| 1 | Ingest day logs | `Visit` construction; state from ION flags (`completed`/`skipped`/`non_serviceable`); "keep if time_in" | ION scrapers (`list_day_logs`, `get_log_detail`), the log->Visit mapper, visits repository | `ingestServiceLogs(dateRange)` |
+| 2 | Promise build (the SQL upsert) | **`ServiceDay` collapse** (dup logs -> one day, MAX price, exclusions) + **`Pricer`** (flat vs per-visit x days; consumables x catalog) | task + catalog + visit repositories | `accrueMonth(customer, month)` |
+| 3 | ION match | `Invoice` identity match rule (ION number + customer) | `ion_task_transactions` reader | `matchIonInvoices(month)` |
+| 4 | QBO link (trigger) | `BillingMonth.claim(visit, invoiceLine)` — **exclusivity (I-B1)** | `billing.invoices` CDC mirror / qbo_inbox drainer | `linkInvoice(qboInvoice)` |
+| 5 | Preprocess (queued) | `invoice.assertCreditEligible`, `matchCredits` (polymorphic), readiness `checks()` | QBO credit read/apply; autopay roster; payment-method store | `prepareMonth(customer, month)` |
+| 6 | Reconcile (hourly) | **`Reconciler`** -> typed `ReconcileFinding`s; the not-a-mismatch rules (tolerance, tax/discount exclusions) | invoice mirror reader | `reconcileMonth(customer, month)` |
+| 7 | Charge / send | `readyToSend`, `recordCreditApplied`, `recordDelivered`, charge eligibility | QBO payment gateway; `Channel` adapters (email/SMS) | `chargeMonth(...)`, `deliverInvoice(...)` |
+| 8 | (new) Close | **completeness (I-B2)** verdict + `lock()` (I-B3) | -- | `closeMonth(customer, month)` |
+
+## The domain layer, listed
+
+`lib/domain/billing/` + `lib/domain/delivery/` + shared kernel `lib/domain/comms/`
+
+- **Aggregates** — `Visit` (owns readings, consumable usage, checklist; `settle()`),
+  `BillingMonth` (owns claims, completeness, lock), `Invoice` (abstract; lines,
+  balance fold, `readyToSend`, `recordDelivered`, `recordCreditApplied`) with
+  `MaintenanceInvoice` / `ServiceInvoice` subclasses.
+- **Value objects** — `Money`, `BillingMonth` (the period), `Terms`, `ServiceDay`,
+  `Claim`, `ReconcileFinding`, `Message` / `Recipient` / `DeliveryReceipt`.
+- **Domain services** — `Pricer`, `Reconciler`, `CreditAllocator` (only if one memo
+  must span several invoices), `CompletenessCheck`.
+- **Ports (interfaces)** — `VisitRepository`, `BillingMonthRepository`,
+  `InvoiceRepository`, `TaskRepository`, `ConsumableCatalog`, `QboGateway`,
+  `PaymentGateway`, `Channel`, `InvoiceBuilder` (unfilled today: ION builds).
+
+## The infrastructure layer, listed
+
+`lib/infrastructure/billing/`, `.../delivery/`, `.../comms/`
+
+ION scrapers + log mapper; Supabase repositories for visits / months / invoices /
+tasks / catalog; the QBO client (invoice read, credit apply, payment); the
+`billing.invoices` CDC mirror + inbox drainer; channel adapters over
+`f/comms/send_email` and `send_sms`; DB row <-> domain mappers; the composition
+root that wires them.
+
+## Where the rules live TODAY vs after
+
+| Rule | Today | After |
+|---|---|---|
+| billable-day collapse | inside `build_task_billing_periods` SQL | `ServiceDay`, selfchecked |
+| expected labor / consumable pricing | same SQL | `Pricer`, selfchecked |
+| invoice<->promise match | `trg_link_invoice_to_maint_period` | `BillingMonth.claim()` called by `linkInvoice` |
+| gates (chem flag, subtotal, reconcile verdict) | `preprocess_maint_customer_month` + projection fns | `checks()` on the invoice + `Reconciler` |
+| month lock | `lock_through` arg in the builder | `BillingMonth.lock()` invariant (throws) |
+| send eligibility / skip reasons | `_lib/delivery.deliver_invoice` | `invoice.readyToSend()` + `Channel` port |
+
+## Build order (vertical slices, each verifiable)
+
+1. **Pricing slice** — `Visit.state` -> `ServiceDay` -> `Terms` -> `Pricer`.
+   Verified by replaying **May 2026** and reproducing the 473/475 exact reconcile.
+   Nothing else depends on it being right first.
+2. **Claim slice** — `BillingMonth.claim()` + exclusivity; `linkInvoice` replaces
+   the trigger's decision (trigger may remain as the wake).
+3. **Close slice** — completeness verdict + lock; the unclaimed worklist UI.
+4. **Reconcile slice** — `Reconciler` + typed findings replacing the script's diff.
+5. **Money slice** — credits, charge, send through ports.
