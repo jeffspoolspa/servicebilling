@@ -224,7 +224,10 @@ export function DataTable<TData, TValue>({
             : "bg-bg-elev border border-line shadow-card",
         )}
       >
-        <Table>
+        {/* Fixed layout in embedded mode: columns take their percentage
+            widths and long content truncates — the table can never grow
+            wider than its container, so no horizontal scrollbar. */}
+        <Table className={embedded ? "table-fixed" : undefined}>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="hover:bg-transparent">
@@ -232,9 +235,11 @@ export function DataTable<TData, TValue>({
                   <TableHead
                     key={header.id}
                     className={cn(
-                      "px-4 py-2 text-ink-mute font-medium",
+                      embedded ? "px-2 py-2" : "px-4 py-2",
+                      "text-ink-mute font-medium",
                       (header.column.columnDef.meta as ColumnMeta | undefined)?.align ===
                         "right" && "text-right",
+                      (header.column.columnDef.meta as ColumnMeta | undefined)?.widthClass,
                     )}
                   >
                     {header.isPlaceholder
@@ -271,7 +276,7 @@ export function DataTable<TData, TValue>({
                       <TableCell
                         key={cell.id}
                         className={cn(
-                          "px-4 py-2.5",
+                          embedded ? "px-2 py-2.5 overflow-hidden text-ellipsis" : "px-4 py-2.5",
                           (cell.column.columnDef.meta as ColumnMeta | undefined)?.align ===
                             "right" && "text-right",
                         )}
@@ -310,6 +315,9 @@ export function DataTable<TData, TValue>({
 
 interface ColumnMeta {
   align?: "left" | "right"
+  /** Column width class for embedded (table-fixed) mode — use percentages
+   *  (e.g. "w-[24%]") so columns scale with the container, never px. */
+  widthClass?: string
 }
 
 /** Sortable column header — asc/desc toggle with direction indicator. */

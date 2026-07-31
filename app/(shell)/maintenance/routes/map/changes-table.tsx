@@ -44,7 +44,7 @@ const sideText = (day: string | null, tech: string | null) =>
 function Side({ day, tech }: { day: string | null; tech: string | null }) {
   if (!day) return <span className="text-ink-mute">unplaced</span>
   return (
-    <span className="whitespace-nowrap">
+    <span className="block truncate whitespace-nowrap" title={tech ? `${day} · ${tech}` : day}>
       <Chip>{day}</Chip>
       {tech && (
         <>
@@ -193,20 +193,26 @@ export function ChangesTable({
         />
       ),
       enableSorting: false,
+      // Icon column: sized to its content (checkbox + caret), never scales.
+      meta: { widthClass: "w-12" },
     },
     {
       id: "customer",
       accessorFn: (r) => r.customer,
       header: ({ column }) => <DataTableColumnHeader column={column} title="Customer" />,
       cell: ({ row }) => (
-        <span className="block max-w-[11rem] truncate text-ink">{row.original.customer}</span>
+        <span className="block truncate text-ink">{row.original.customer}</span>
       ),
+      meta: { widthClass: "w-[25%]" },
     },
     {
       id: "office",
       accessorFn: (r) => r.office,
       header: ({ column }) => <DataTableColumnHeader column={column} title="Office" />,
-      cell: ({ row }) => <span className="text-ink-dim">{row.original.office}</span>,
+      cell: ({ row }) => (
+        <span className="block truncate text-ink-dim">{row.original.office}</span>
+      ),
+      meta: { widthClass: "w-[13%]" },
     },
     {
       id: "from",
@@ -214,12 +220,14 @@ export function ChangesTable({
       header: "From",
       cell: ({ row }) => <Side day={row.original.fromDay} tech={row.original.fromTech} />,
       enableSorting: false,
+      meta: { widthClass: "w-[21%]" },
     },
     {
       id: "arrow",
       header: "",
       cell: () => <span className="text-ink-mute">&rarr;</span>,
       enableSorting: false,
+      meta: { widthClass: "w-[4%]" },
     },
     {
       id: "to",
@@ -227,6 +235,7 @@ export function ChangesTable({
       header: "To",
       cell: ({ row }) => <Side day={row.original.toDay} tech={row.original.toTech} />,
       enableSorting: false,
+      meta: { widthClass: "w-[21%]" },
     },
     {
       id: "cost",
@@ -234,7 +243,7 @@ export function ChangesTable({
       header: ({ column }) => <DataTableColumnHeader column={column} title="Cost" />,
       cell: ({ row }) =>
         row.original.netMinutes !== null ? <Delta minutes={row.original.netMinutes} /> : null,
-      meta: { align: "right" },
+      meta: { align: "right", widthClass: "w-[11%]" },
     },
     // Facet-only columns (hidden): tech / day of wherever the stop ends up,
     // falling back to where it came from for removals.
