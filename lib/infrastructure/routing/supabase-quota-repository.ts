@@ -223,6 +223,13 @@ export class SupabaseQuotaRepository implements QuotaRepository {
       if (pin) pinByCustomer.set(l.customer_id, pin)
     }
 
+    // A one-day task (starts_on = ends_on) is a dated appointment — week-of
+    // dispatch territory, handled as a Visit — not a standing cadence
+    // obligation. By the glossary a Quota requires a Cadence, so these never
+    // become quotas (they were surfacing as phantom "owed" pools: e.g. a
+    // completed one-time QC visit showing as a coverage failure all week).
+    tasks = tasks.filter((t) => t.starts_on === null || t.starts_on !== t.ends_on)
+
     const slotsByTask = new Map<string, SlotRow[]>()
     for (const s of slots) {
       const bucket = slotsByTask.get(s.task_id)
