@@ -34,6 +34,7 @@ import {
   RouteGeometry,
   Scenario,
   WEEKDAY_NAMES,
+  type Quota,
   type QuotaSnapshot,
   Pin,
   type ReassignReport,
@@ -43,7 +44,7 @@ import {
 } from "@/lib/domain/routing"
 import type { EvaluatedScenario } from "@/lib/application/routing/routing-service"
 
-type Customer = { name: string; office: string | null }
+type Customer = { name: string; office: string | null; commercial: boolean }
 type LatLng = { lat: number; lng: number }
 /** A drawn shape as the two ends of its diameter: the anchor, and where you dragged to. */
 type Span = { anchor: LatLng; edge: LatLng }
@@ -133,6 +134,16 @@ export function LiveMap({
 
   const [officeScope, setOfficeScope] = useState<string[]>([])
   const [dayScope, setDayScope] = useState<string[]>([])
+  /** Res/com and cadence scopes — empty means all, like the office scope. */
+  const [typeScope, setTypeScope] = useState<string[]>([])
+  const [cadenceScope, setCadenceScope] = useState<string[]>([])
+  /** Transient notice (skipped moves etc.) — one per action, self-clearing. */
+  const [toast, setToast] = useState<string | null>(null)
+  useEffect(() => {
+    if (toast === null) return
+    const t = setTimeout(() => setToast(null), 5000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   const [selected, setSelected] = useState<string | null>(null)
   /**
@@ -261,20 +272,39 @@ export function LiveMap({
   const inOffice = (id: number | null) =>
     officeScope.length === 0 || officeScope.includes(officeOf(id) ?? "")
   const inDay = (d: number) => dayScope.length === 0 || dayScope.includes(String(d))
+  const inType = (id: number | null) =>
+    typeScope.length === 0 ||
+    (id !== null && typeScope.includes(customers[id]?.commercial ? "commercial" : "residential"))
+  const inCadence = (intervalWeeks: number) =>
+    cadenceScope.length === 0 || cadenceScope.includes(String(intervalWeeks))
+  /** Customer-level scope (office + res/com) plus the quota's cadence. */
+  const inScope = (q: Quota) =>
+    inOffice(q.requirement.customerId) &&
+    inType(q.requirement.customerId) &&
+    inCadence(q.requirement.intervalWeeks)
+  const quotaById = useMemo(() => new Map(plan.all.map((q) => [q.id, q])), [plan, rev])
 
   /** Routes keep only the stops in scope; a route left with none drops out. */
   const visible = useMemo(
     () =>
       routes
         .filter((r) => inDay(r.weekday))
-        .map((r) => ({ route: r, stops: r.stops.filter((s) => inOffice(s.customerId)) }))
+        .map((r) => ({
+          route: r,
+          stops: r.stops.filter((s) => {
+            const q = quotaById.get(s.quotaId)
+            return q ? inScope(q) : inOffice(s.customerId)
+          }),
+        }))
         .filter((v) => v.stops.length > 0),
-    [routes, dayScope, officeScope, customers],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [routes, dayScope, officeScope, typeScope, cadenceScope, quotaById, customers],
   )
 
   const unplaced = useMemo(
-    () => [...layer.displaced.map((d) => d.quota), ...layer.backlog].filter((q) => inOffice(q.requirement.customerId)),
-    [layer, officeScope, customers],
+    () => [...layer.displaced.map((d) => d.quota), ...layer.backlog].filter(inScope),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layer, officeScope, typeScope, cadenceScope, customers],
   )
 
   const officeCounts = useMemo(() => {
@@ -285,6 +315,29 @@ export function LiveMap({
     }
     return c
   }, [plan, customers])
+
+  const typeCounts = useMemo(() => {
+    let residential = 0
+    let commercial = 0
+    for (const q of plan.all) {
+      const cid = q.requirement.customerId
+      if (cid !== null && customers[cid]?.commercial) commercial++
+      else residential++
+    }
+    return { residential, commercial }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, rev, customers])
+
+  /** The cadences actually present in the plan, as pill options (1w, 2w, …). */
+  const cadenceOptions = useMemo(() => {
+    const counts = new Map<number, number>()
+    for (const q of plan.all)
+      counts.set(q.requirement.intervalWeeks, (counts.get(q.requirement.intervalWeeks) ?? 0) + 1)
+    return [...counts.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([w, n]) => ({ value: String(w), label: `${w}w`, count: n }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, rev])
 
   /**
    * The cost model prices routes for the cards and every pending change for
@@ -378,7 +431,7 @@ export function LiveMap({
     // office filter, tech filter, and a selected route all scope it.
     const officeOk = (quotaId: string) => {
       const q = plan.all.find((x) => x.id === quotaId)
-      return inOffice(q?.requirement.customerId ?? null)
+      return q ? inScope(q) : true
     }
     return {
       stops: caught.stops.filter(
@@ -391,7 +444,7 @@ export function LiveMap({
       owed: caught.owed.filter((id) => !excluded.has(`owed|${id}`) && officeOk(id)),
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shapes, plan, dayScope, rev, excluded, officeScope, techFilter, selectedRoutes, customers])
+  }, [shapes, plan, dayScope, rev, excluded, officeScope, typeScope, cadenceScope, techFilter, selectedRoutes, customers])
 
   const pickedKeys = useMemo(
     () => new Set((selection?.stops ?? []).map(stopKey)),
@@ -418,10 +471,7 @@ export function LiveMap({
     // The office filter scopes the clustering; within the office, members
     // hidden by tech/day/route filters still render (dulled) so a cluster is
     // seen whole.
-    const view = new Planner(geometry).clustersOf(
-      plan.all.filter((q) => inOffice(q.requirement.customerId)),
-      0.5,
-    )
+    const view = new Planner(geometry).clustersOf(plan.all.filter(inScope), 0.5)
     const colour = new Map<string, string>()
     const members = new Map<string, { pin: Pin; techId: string | null }>()
     view.clusters.forEach((c, i) => {
@@ -433,7 +483,7 @@ export function LiveMap({
     })
     return { ...view, colour, members }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clusterLens, plan, rev, officeScope, customers])
+  }, [clusterLens, plan, rev, officeScope, typeScope, cadenceScope, customers])
 
 
   /* ------------------------------------------------------------------ map */
@@ -1118,9 +1168,12 @@ export function LiveMap({
     // Acting on a selection consumes it: the area closes exactly as its ×
     // would. Skips still get said — their panel is gone with the shape.
     clearAll()
+    // Valid pools moved; the invalidated ones stay put and get ONE toast for
+    // the whole action, not an alert per pool.
     if (report.skipped.length > 0) {
-      alert(
-        `${report.skipped.length} skipped — ${[...new Set(report.skipped.map((x) => x.reason))].join(", ")}`,
+      const reasons = [...new Set(report.skipped.map((x) => x.reason))].join(", ")
+      setToast(
+        `${report.skipped.length} pool${report.skipped.length === 1 ? "" : "s"} not moved — ${reasons}`,
       )
     }
   }
@@ -1298,11 +1351,11 @@ export function LiveMap({
           (dayScope.length === 0 || dayScope.includes(String(st.weekday)))
         let sharedLeftInPlace = 0
         const scoped = plan.all.filter((q) => {
-          if (!inOffice(q.requirement.customerId)) return false
+          if (!inScope(q)) return false
           if (q.stops.length === 0) return techFilter.size === 0 && selectedRoutes.size === 0
-          const inScope = q.stops.filter(stopInScope).length
-          if (inScope === 0) return false
-          if (inScope < q.stops.length) {
+          const owned = q.stops.filter(stopInScope).length
+          if (owned === 0) return false
+          if (owned < q.stops.length) {
             sharedLeftInPlace++
             return false
           }
@@ -1482,6 +1535,25 @@ export function LiveMap({
                 onChange={setOfficeScope}
                 counts={officeCounts}
                 size="sm"
+              />
+              <span className="h-4 w-px shrink-0 bg-line-soft" />
+              <OptionPills
+                multiple
+                size="sm"
+                value={typeScope}
+                onChange={setTypeScope}
+                options={[
+                  { value: "residential", label: "Residential", count: typeCounts.residential },
+                  { value: "commercial", label: "Commercial", count: typeCounts.commercial },
+                ]}
+              />
+              <span className="h-4 w-px shrink-0 bg-line-soft" />
+              <OptionPills
+                multiple
+                size="sm"
+                value={cadenceScope}
+                onChange={setCadenceScope}
+                options={cadenceOptions}
               />
               {viewing && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-400/40 bg-violet-400/10 px-2.5 py-0.5 text-[11px] text-violet-300">
@@ -2306,6 +2378,15 @@ export function LiveMap({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Transient notice — one line, self-clearing */}
+      {toast && (
+        <div
+          className={`absolute bottom-20 left-1/2 z-30 max-w-[36rem] -translate-x-1/2 border-sun/40 px-3.5 py-2 text-[12px] text-sun ${glass}`}
+        >
+          {toast}
         </div>
       )}
 

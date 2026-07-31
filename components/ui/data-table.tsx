@@ -170,8 +170,10 @@ export function DataTable<TData, TValue>({
 
   return (
     <div className="space-y-3">
+      {/* Toolbar wraps rather than clips: embedded toolbars sit in a panel
+          narrower than their controls at small widths. */}
       {hasToolbar && (
-        <div className={cn("flex items-center gap-2", embedded ? "flex-nowrap" : "flex-wrap")}>
+        <div className="flex flex-wrap items-center gap-2">
           {searchAccessor && (
             <div
               className={cn(
