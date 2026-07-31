@@ -1,127 +1,104 @@
 # Maintenance billing — domain model worksheet
 
 > Status: [draft]   working doc for modeling the month-end billing refactor.
-> Graduates to a self-contained model doc (and the glossary gets ruled
-> word-by-word) once the shape settles. Layer rules: [LAYERING.md](../conventions/LAYERING.md).
+> Organized by MODULES (DDD packaging of one domain layer: cohesive clusters,
+> named from the language, low coupling between them) — not bounded contexts.
+> Layer rules: [LAYERING.md](../conventions/LAYERING.md). Rulings recorded
+> below are Carter's (2026-07-31).
 
-## Contexts (from the settled four-context map)
+## The goal, as an invariant set
 
-| Context | Owns | Feeds |
+Every billable visit and its consumables lands on exactly one QBO invoice
+that reaches the customer. Stated as invariants the model must enforce:
+
+- I-B1  **exclusivity** — a visit is claimed by at most one invoice
+- I-B2  **completeness** — every billable visit of a closed month is claimed
+- I-B3  **billed is locked** — a claimed visit's billing-relevant facts are
+        immutable; a locked month refuses all mutation
+
+## Modules
+
+### delivery — what happened at the pool
+
+| Block | Kind | Notes |
 |---|---|---|
-| Agreements | Task (terms: billing method, rates), Consumable catalog | terms -> Billing; cadence -> Routing |
-| Service Delivery | Visit and everything inside it — immutable facts once completed | facts -> Billing |
-| Billing | BillingPeriod, Invoice, Payment, CreditMemo, PaymentMethod, charging | money outward (QBO) |
+| Visit | AGGREGATE | owns Readings (VO), ConsumableUsage (entity, references catalog by id), ChecklistItem (VO). One consistency boundary: written together at ingest, immutable together at completion. |
+| Visit.state | attribute | RULED: state is a Delivery FACT — `scheduled / completed / skipped / non_serviceable` (holiday, no-access, DNI). Delivery records what happened; it never prices or judges billability. |
 
-Billing never writes Delivery or Agreements. Delivery never prices anything.
+### agreements — what the customer signed up for
 
-## Building-block census
-
-Carter's brainstorm list, sorted — with the two big corrections marked.
-
-| Candidate | Verdict | Why |
+| Block | Kind | Notes |
 |---|---|---|
-| visit | **AGGREGATE (Delivery)** | Owns readings, consumables-used, checklist items — see below |
-| reading | value object INSIDE Visit | (type, value, unit); no identity or meaning outside its visit |
-| consumable (usage) | entity INSIDE Visit | quantity of a catalog item used on this visit |
-| service checklist item | value object INSIDE Visit | performed/not; no life of its own |
-| consumable (catalog item) | entity (Agreements) | **split from usage** — the priced item master (142 rows); usage references it by id |
-| task | entity (Agreements) | the contract: billing method, rates, QC-ness; referenced by id everywhere |
-| billing_period | **AGGREGATE (Billing)** | accrual + lock + reconcile verdict; the refactor's centerpiece |
-| invoice | AGGREGATE (Billing) | already modeled: ADR-010 event stream; applications are facts, balance is the fold |
-| payment | entity (Billing) | a QBO fact; its applications are events on the invoice stream |
-| credit_memo | entity (Billing) | a QBO fact + our decision record |
-| payment_method | entity (Billing) | lifecycle (active/user-disabled/3-strike); referenced by id from charging |
-| customer | entity (shared reference) | identity + preferences; every context references by id, none owns it here |
+| Task | entity | the contract: billing method, rates, QC-ness; ION-mirrored |
+| ConsumableCatalogItem | entity | the priced item master; usage references it by id |
+| Terms | VO | billing method + rates, snapshotted point-in-time onto promises |
 
-Value objects to name: **Money** (cents, never floats), **BillingMonth**
-(the cycle unit, like Week Index in routing), **Terms** (billing method +
-rates, snapshotted point-in-time), **ServiceDay** (see below),
-**ReconcileFinding** (typed mismatch).
+### billing — turning facts into money
 
-Domain services: **Pricer** (terms + catalog + days -> expected cents; reads
-across task, catalog, and delivery facts, so a service by the
-reads-not-callers rule), **Reconciler** (period vs invoice -> findings),
-**PeriodInvoiceMatcher** (DocNumber + customer -> the 1:1 link). Application
-services own the crossings: ingest, build/accrue, lock, charge.
+| Block | Kind | Notes |
+|---|---|---|
+| BillingMonth | AGGREGATE | RULED: the conceptual unit is the CUSTOMER-month ("July pool maintenance" for this customer). Owns the CLAIMS (visit -> invoice assignments), the completeness verdict, and the month lock. Enforces I-B1/2/3: `claim()` refuses a second claim, `lock()` freezes. |
+| Invoice | entity (external fact) | ION builds ONE PER TASK — an implementation detail forced on us, not our concept. A customer-month with N tasks has N invoices; BillingMonth conceptualizes them together. Mirrored from QBO; ADR-010 event stream owns balance. |
+| billability | domain rule (Billing) | RULED: Billing derives it FROM Delivery state — `non_serviceable`/`skipped` -> not billable; `completed` -> billable, priced by Terms (a QC task's rate of 0 makes its labor $0 without a special case). Delivery states, Billing judges. |
+| Pricer | domain service | Terms + catalog + claimed visits -> expected cents |
+| Reconciler | domain service | expected vs ION-built invoice -> typed findings; gates charging |
 
-## The aggregate-boundary rulings (argued, not assumed)
+### payments — settling the money (already largely modeled)
 
-An aggregate boundary is a CONSISTENCY boundary — "what must be transactionally
-consistent to enforce an invariant" — never "what the UI displays together."
-Cluster only what the parent must control to stay legal; reference everything
-else by id. (Same argument that made Route a read model, not an entity.)
+Payment, CreditMemo, PaymentMethod, charging — the ADR-008/010 machinery.
+Joins this model where BillingMonth's reconciled invoices feed the charge
+queue; not re-modeled here.
 
-**Visit IS an aggregate** — the real composition in the list. Readings,
-consumable usage, and checklist items have no identity outside their visit,
-are written together when the log ingests, and become immutable together
-when the visit completes. One consistency boundary, textbook.
+## The ION constraint, named
 
-**Invoice does NOT aggregate visits.** Test: does any Invoice invariant need
-visit objects to enforce during an invoice mutation? No — the invoice's
-invariants (balance = fold of application events, audit states) never touch
-visits. Visits are EVIDENCE the reconciler reads, not parts of the invoice.
-They also belong to a different context (Delivery), and an aggregate never
-spans contexts. The association is: `visits.billing_period_id` (FK, many->one,
-child points at parent-ish coordinator) and `billing_periods.qbo_invoice_id`
-(the 1:1 link). "The invoice with its visits" is a READ MODEL composed on
-read — like Route: carries data for display/analysis, holds no invariants.
+ION forces invoice construction: one invoice per task, month-end. Today's
+task-billing-period is the per-invoice promise; the customer-month rollup is
+where reconciliation and the customer's reality live. The model keeps ION's
+grain as a FACT (Invoice entity, per task) and our grain as the AGGREGATE
+(BillingMonth, per customer-month) — the promise rows become the claim
+ledger inside it.
 
-**BillingPeriod does NOT aggregate invoices either.** It links 1:1 by id.
-Its own invariants need only its own state: accrual math
-(expected_total = labor + consumables — already a generated column, i.e.
-the derivation discipline enforced by the DB), and the lock (a locked month
-refuses all mutation — the billing twin of routing's adoption gate: open
-months mutate freely, findings gate the charge, lock is the durable commit).
+**Future decision, deliberately deferred:** build invoices ourselves from
+claimed visits instead of letting ION build them (needs tight checks —
+I-B1/2 make it possible). Modeled as a port (`InvoiceBuilder`): today ION
+fills it and we reconcile; someday we fill it and ION is display-only.
+The aggregate does not change either way — that is the point of the port.
 
-## OO on top of a relational DB — the mechanics
-
-The confusion to dissolve: domain objects are NOT a cache of the database,
-and there is no lazy-loading object graph. The pattern (exactly what
-routing does):
-
-1. **The DB is the truth at rest.** Associations are stored the relational
-   way: FK on the many side (`visits.billing_period_id`). No ORM.
-2. **A repository reconstitutes ONE aggregate per use case** — the aggregate
-   and its OWNED children only. Loading a Visit pulls its readings/usage
-   rows into the object (they are inside the boundary). Loading a
-   BillingPeriod does NOT pull visit objects — cross-aggregate references
-   stay ids.
-3. **Aggregates are short-lived guardians.** Instantiated for a use case,
-   they enforce invariants while mutations happen in memory, then the
-   application service persists and they are gone. They are not "the data,
-   loaded" — they are the RULES, temporarily wrapped around the data.
-   (Purely displayed data never needs an aggregate at all — read models and
-   RPC views stay perfect for that; the routing map reads v_* views for
-   pins, and only rehydrates aggregates to EDIT.)
-4. **Composition for the UI is a read-model query**, not object navigation:
-   "period with its visits and its invoice" is one repository read that
-   returns a view shape (like RouteFactory building Routes). The UI gets the
-   composed picture without any aggregate pretending to own another.
-
-Answering the "would invoice hold a list of visit objects?" directly: no.
-If a use case needs both, the APPLICATION layer loads both and hands them to
-the domain service that needs both (`reconciler.reconcile(period, invoice,
-visits)`) — the service composes; the aggregates stay separate.
-
-## Where today's rules move (the refactor's point)
+## Where today's rules move
 
 | Rule today | Lives in | Moves to |
 |---|---|---|
-| billable-day collapse (dup logs, QC, DNI, $0 courtesy) | builder SQL | ServiceDay derivation in Delivery domain, selfchecked |
+| billable-day collapse (dup logs, QC, DNI, $0 courtesy) | builder SQL | Visit.state (Delivery fact) + billability rule (Billing) |
 | expected labor (flat vs per-visit x days) | builder SQL | Pricer |
 | consumable pricing by ion_item_id -> catalog | builder SQL | Pricer |
-| lock skips months | builder script | BillingPeriod invariant (throws) |
-| reconcile diff + not-a-mismatch rules | reconcile script | Reconciler -> typed ReconcileFindings |
-| invoice<->period match | DB trigger | PeriodInvoiceMatcher (trigger calls it or mirrors it — decide) |
+| invoice<->promise match | DB trigger | BillingMonth.claim() via matcher service |
+| lock skips months | builder script | BillingMonth invariant (throws) |
+| reconcile diff + not-a-mismatch rules | reconcile script | Reconciler -> typed findings |
 
-## Open questions (Carter rules these)
+## Implementation ruling
 
-1. Task-month (BillingPeriod) as the aggregate, customer-month (Statement)
-   as a derived read model — confirm or argue.
-2. Who decides `billable` — Delivery (a fact about the log) or Billing
-   (a judgment about money)? One owner.
-3. Glossary to rule word-by-word: Visit, Reading, Service Day, Task,
-   Consumable, Billing Period, Statement, Reconciliation, Lock, Charge.
-4. Does the Python/SQL pipeline stay (Windmill scripts calling into a
-   shared domain lib?) or does the domain live in TS like routing, with
-   scripts as thin callers? (The rules must live once, somewhere.)
+RULED: DDD layers all the way — domain classes in TS (like routing)
+encapsulating the rules, interacting under our control, replacing the
+procedural per-edge-case scripts. Windmill scripts become thin callers of
+application services. Rules live once, in the domain, selfchecked.
+
+## OO on a relational DB (settled mechanics, kept for reference)
+
+- FK on the many side stores associations (`visits.billing_period_id`).
+- A repository reconstitutes one aggregate + its OWNED children only
+  (Visit arrives with its readings; BillingMonth arrives with its claims,
+  never with visit objects — cross-aggregate references stay ids).
+- Aggregates are short-lived rule-guardians per use case, not loaded caches;
+  display data uses read models/views, no aggregate needed.
+- A rule needing two aggregates is a domain service the application layer
+  feeds: `reconciler.reconcile(month, invoices, visits)`.
+
+## Remaining open questions
+
+1. Glossary to rule word-by-word: Visit, Reading, Task, Consumable,
+   Billing Month, Claim, Invoice, Reconciliation, Lock, Charge.
+2. BillingMonth vs today's task-billing-period rows: keep the per-task rows
+   as the claim ledger inside the aggregate (likely), or re-key storage to
+   customer-month? (Storage can stay; the aggregate defines the boundary.)
+3. Visit.state vocabulary: exact states and who writes each (ingester map
+   from ION log flags -> state).
