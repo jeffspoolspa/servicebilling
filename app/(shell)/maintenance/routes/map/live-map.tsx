@@ -15,6 +15,7 @@ import mapboxgl from "mapbox-gl"
 import "mapbox-gl/dist/mapbox-gl.css"
 import { OptionPills } from "@/components/ui/option-pills"
 import { OfficeFilter } from "../_components/office-filter"
+import { ScopeMenu } from "../_components/scope-menu"
 import { ChangesTable, type ChangeRow } from "./changes-table"
 import { TechSelect } from "./tech-select"
 import type { Office } from "@/lib/infrastructure/routing/offices"
@@ -59,6 +60,22 @@ function spanOf(span: Span): Circle | null {
   return a.distanceTo(b) > 0 ? Circle.acrossDiameter(a, b) : null
 }
 const routeKey = (techId: string, weekday: number) => `${techId}|${weekday}`
+
+/**
+ * Cadence scope buckets. The four cadences come from the domain's own
+ * cadenceLabel (weekly / biweekly A / biweekly B / monthly — the A/B split is
+ * anchor-week parity, i.e. WHICH alternating week the pool takes); multi-day
+ * is a separate axis, a pool the contract wants on more than one day a week.
+ */
+const MULTI_DAY = "multi-day"
+const CADENCE_BUCKETS = [
+  { value: "weekly", label: "Weekly" },
+  { value: "biweekly A", label: "Bi-weekly A" },
+  { value: "biweekly B", label: "Bi-weekly B" },
+  { value: "monthly", label: "Monthly" },
+]
+const cadenceBucketOf = (q: Quota) =>
+  cadenceLabel(cadence(q.requirement.intervalWeeks, q.requirement.anchorWeek))
 
 /** One whisper-letter per weekday for inside an 11px dot (Th/Sa/Su need two). */
 const DAY_LETTER = ["Su", "M", "Tu", "W", "Th", "F", "Sa"] as const
@@ -275,13 +292,13 @@ export function LiveMap({
   const inType = (id: number | null) =>
     typeScope.length === 0 ||
     (id !== null && typeScope.includes(customers[id]?.commercial ? "commercial" : "residential"))
-  const inCadence = (intervalWeeks: number) =>
-    cadenceScope.length === 0 || cadenceScope.includes(String(intervalWeeks))
+  const inCadence = (q: Quota) =>
+    cadenceScope.length === 0 ||
+    cadenceScope.includes(cadenceBucketOf(q)) ||
+    (cadenceScope.includes(MULTI_DAY) && q.requirement.requiredDays > 1)
   /** Customer-level scope (office + res/com) plus the quota's cadence. */
   const inScope = (q: Quota) =>
-    inOffice(q.requirement.customerId) &&
-    inType(q.requirement.customerId) &&
-    inCadence(q.requirement.intervalWeeks)
+    inOffice(q.requirement.customerId) && inType(q.requirement.customerId) && inCadence(q)
   const quotaById = useMemo(() => new Map(plan.all.map((q) => [q.id, q])), [plan, rev])
 
   /** Routes keep only the stops in scope; a route left with none drops out. */
@@ -328,14 +345,26 @@ export function LiveMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, rev, customers])
 
-  /** The cadences actually present in the plan, as pill options (1w, 2w, …). */
+  /**
+   * Cadence pills. Multi-day is its own bucket that OVERLAPS the others (a
+   * 2x-weekly pool is weekly cadence served twice), so the pills read as
+   * "show me any of these", same as the office and type scopes.
+   */
   const cadenceOptions = useMemo(() => {
-    const counts = new Map<number, number>()
-    for (const q of plan.all)
-      counts.set(q.requirement.intervalWeeks, (counts.get(q.requirement.intervalWeeks) ?? 0) + 1)
-    return [...counts.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([w, n]) => ({ value: String(w), label: `${w}w`, count: n }))
+    const counts = new Map<string, number>()
+    let multiDay = 0
+    for (const q of plan.all) {
+      const b = cadenceBucketOf(q)
+      counts.set(b, (counts.get(b) ?? 0) + 1)
+      if (q.requirement.requiredDays > 1) multiDay++
+    }
+    return [
+      { value: MULTI_DAY, label: "Multi-day", count: multiDay },
+      ...CADENCE_BUCKETS.filter((b) => counts.has(b.value)).map((b) => ({
+        ...b,
+        count: counts.get(b.value),
+      })),
+    ].filter((o) => (o.count ?? 0) > 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, rev])
 
@@ -1528,7 +1557,7 @@ export function LiveMap({
       <div className="pointer-events-none absolute left-4 right-[26rem] top-4 z-10 flex flex-col items-start gap-2">
         <div className={`pointer-events-auto w-full px-3 py-2 ${glass}`}>
           <div className="flex items-center gap-4">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+            <div className="flex min-w-0 flex-1 items-center gap-x-3">
               <OfficeFilter
                 offices={offices}
                 value={officeScope}
@@ -1537,9 +1566,8 @@ export function LiveMap({
                 size="sm"
               />
               <span className="h-4 w-px shrink-0 bg-line-soft" />
-              <OptionPills
-                multiple
-                size="sm"
+              <ScopeMenu
+                label="Type"
                 value={typeScope}
                 onChange={setTypeScope}
                 options={[
@@ -1547,10 +1575,8 @@ export function LiveMap({
                   { value: "commercial", label: "Commercial", count: typeCounts.commercial },
                 ]}
               />
-              <span className="h-4 w-px shrink-0 bg-line-soft" />
-              <OptionPills
-                multiple
-                size="sm"
+              <ScopeMenu
+                label="Cadence"
                 value={cadenceScope}
                 onChange={setCadenceScope}
                 options={cadenceOptions}

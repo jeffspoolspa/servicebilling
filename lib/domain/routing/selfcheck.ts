@@ -576,6 +576,28 @@ check("the change list is the minimal honest diff — pairs cancel or combine", 
   const only = e.changes()[0]
   assert.equal(only.kind, "StopRemoved")
   assert.equal((only as { from: { techId: string } }).from.techId, "korey", "removal traces to live")
+  // move twice = ONE move against live, from the original spot to the last one
+  const f = mk()
+  f.moveStop("q1", { techId: "korey", weekday: 2 as Weekday }, { techId: "dana", weekday: 4 as Weekday })
+  f.moveStop("q1", { techId: "dana", weekday: 4 as Weekday }, { techId: "sam", weekday: 5 as Weekday })
+  assert.equal(f.changes().length, 1, "two hops read as one change")
+  const hop = f.changes()[0] as { kind: string; from: { techId: string }; to: { techId: string } }
+  assert.equal(hop.kind, "StopMoved")
+  assert.equal(hop.from.techId, "korey", "from stays the LIVE spot")
+  assert.equal(hop.to.techId, "sam", "to is the most recent destination")
+  // moved away and back again = nothing differs from live
+  const g = mk()
+  g.moveStop("q1", { techId: "korey", weekday: 2 as Weekday }, { techId: "dana", weekday: 4 as Weekday })
+  g.moveStop("q1", { techId: "dana", weekday: 4 as Weekday }, { techId: "korey", weekday: 2 as Weekday })
+  assert.equal(g.changes().length, 0, "moved back home — no pending change")
+  // a stop this scenario placed, then moved, is still one placement
+  const h = mk()
+  h.placeStop("q1", "dana", 4 as Weekday)
+  h.moveStop("q1", { techId: "dana", weekday: 4 as Weekday }, { techId: "sam", weekday: 5 as Weekday })
+  assert.equal(h.changes().length, 1)
+  const put = h.changes()[0] as { kind: string; to: { techId: string } }
+  assert.equal(put.kind, "StopPlaced", "a placement moved is still a placement")
+  assert.equal(put.to.techId, "sam")
 })
 
 check("the unplaced layer partitions: displaced quotas keep their memory, backlog stays backlog", () => {
