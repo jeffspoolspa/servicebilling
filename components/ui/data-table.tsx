@@ -143,8 +143,7 @@ export function DataTable<TData, TValue>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey])
 
-  const hasToolbar =
-    searchAccessor || (facetFilters?.length ?? 0) > 0 || toolbarExtra || csvFilename !== false
+  const hasToolbar = searchAccessor || (facetFilters?.length ?? 0) > 0 || toolbarExtra
 
   const downloadCsv = () => {
     // filtered + sorted rows across ALL pages; raw accessor values (not
@@ -201,20 +200,9 @@ export function DataTable<TData, TValue>({
           {facetFilters?.map((f) => (
             <FacetSelect key={f.columnId} table={table} filter={f} />
           ))}
-          <div className="ml-auto flex shrink-0 items-center gap-2">
-            {csvFilename !== false && (
-              <button
-                type="button"
-                onClick={downloadCsv}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-line text-[12px] text-ink-dim hover:text-ink hover:border-line/80 transition-colors"
-                title="Download the filtered rows as CSV"
-              >
-                <Download className="w-3.5 h-3.5" strokeWidth={2} />
-                Download CSV
-              </button>
-            )}
-            {toolbarExtra}
-          </div>
+          {toolbarExtra && (
+            <div className="ml-auto flex shrink-0 items-center gap-2">{toolbarExtra}</div>
+          )}
         </div>
       )}
 
@@ -310,7 +298,24 @@ export function DataTable<TData, TValue>({
         </Table>
       </div>
 
-      <DataTablePagination table={table} />
+      {/* Footer: row counts / paging on the left, export on the right — the
+          export is an end-of-table action, not a filter control. */}
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <DataTablePagination table={table} />
+        </div>
+        {csvFilename !== false && (
+          <button
+            type="button"
+            onClick={downloadCsv}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-line px-2 py-1 text-[11px] text-ink-dim transition-colors hover:border-line/80 hover:text-ink"
+            title="Download the filtered rows as CSV"
+          >
+            <Download className="h-3 w-3" strokeWidth={2} />
+            Download CSV
+          </button>
+        )}
+      </div>
     </div>
   )
 }

@@ -176,8 +176,8 @@ export function ChangesTable({
   rows: ChangeRow[]
   /** Revert these positions in the change list (one for a row ×, many for bulk). */
   onRevert: (indices: number[]) => void
-  /** Right end of the stats row — save-as-scenario lives here, a row away
-   *  from the destructive revert button. */
+  /** Right end of the stats row, inline after Revert selected — save-as-scenario
+   *  lives here. */
   headerExtra?: React.ReactNode
 }) {
   const [selected, setSelected] = useState<ChangeRow[]>([])
@@ -297,7 +297,17 @@ export function ChangesTable({
             <span className="font-mono num text-ink">{n}</span>
           </Stat>
         ))}
-        {headerExtra && <span className="flex items-center gap-1 pl-2">{headerExtra}</span>}
+        <span className="flex items-center gap-1.5 pl-2">
+          <button
+            type="button"
+            className="rounded-full border border-coral/40 bg-coral/10 px-2.5 py-0.5 text-[10.5px] font-medium text-coral hover:bg-coral/20 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={selected.length === 0}
+            onClick={() => onRevert(selected.map((r) => r.index))}
+          >
+            Revert selected ({selected.length})
+          </button>
+          {headerExtra}
+        </span>
       </div>
       <DataTable
       columns={columns}
@@ -313,16 +323,6 @@ export function ChangesTable({
         { columnId: "from", label: "From", options: sideOptions((r) => [r.fromDay, r.fromTech]) },
         { columnId: "to", label: "To", options: sideOptions((r) => [r.toDay, r.toTech]) },
       ]}
-      toolbarExtra={
-        <button
-          type="button"
-          className="rounded-md border border-coral/40 bg-coral/10 px-2.5 py-1.5 text-[12px] font-medium text-coral hover:bg-coral/20 disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={selected.length === 0}
-          onClick={() => onRevert(selected.map((r) => r.index))}
-        >
-          Revert selected ({selected.length})
-        </button>
-      }
       onSelectionChange={setSelected}
       selectOnRowClick
       pageSize={15}
