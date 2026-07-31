@@ -66,12 +66,19 @@ interface DataTableProps<TData, TValue> {
   /** Row click → detail view (modal/sheet). Ignored when renderSubRow is set.
    *  Interactive cell content must stopPropagation. */
   onRowClick?: (row: TData) => void
+  /** Row click toggles the row's selection (checkbox column reflects it).
+   *  Takes precedence over onRowClick; interactive cells must stopPropagation. */
+  selectOnRowClick?: boolean
   rowClassName?: (row: Row<TData>) => string | undefined
   /** Hide columns that exist only to power facet filters. */
   columnVisibility?: VisibilityState
   /** CSV download filename stem (date is appended). Every table exports by
    *  default; pass false to opt out. */
   csvFilename?: string | false
+  /** Embedded in a panel that provides its own chrome: the toolbar stays on
+   *  one line (search flexes, nothing wraps) and the table card drops its
+   *  elevated background/shadow so it reads as part of the host surface. */
+  embedded?: boolean
 }
 
 export function DataTable<TData, TValue>({
@@ -87,9 +94,11 @@ export function DataTable<TData, TValue>({
   onSelectionChange,
   renderSubRow,
   onRowClick,
+  selectOnRowClick = false,
   rowClassName,
   columnVisibility,
   csvFilename = "export",
+  embedded = false,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>(initialSorting)
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
@@ -162,9 +171,14 @@ export function DataTable<TData, TValue>({
   return (
     <div className="space-y-3">
       {hasToolbar && (
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className={cn("flex items-center gap-2", embedded ? "flex-nowrap" : "flex-wrap")}>
           {searchAccessor && (
-            <div className="relative inline-flex items-center w-56">
+            <div
+              className={cn(
+                "relative inline-flex items-center",
+                embedded ? "min-w-[8rem] flex-1" : "w-56",
+              )}
+            >
               <Search
                 className="absolute left-2.5 w-3.5 h-3.5 pointer-events-none text-ink-mute"
                 strokeWidth={2}
@@ -185,7 +199,7 @@ export function DataTable<TData, TValue>({
           {facetFilters?.map((f) => (
             <FacetSelect key={f.columnId} table={table} filter={f} />
           ))}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             {csvFilename !== false && (
               <button
                 type="button"
@@ -202,7 +216,14 @@ export function DataTable<TData, TValue>({
         </div>
       )}
 
-      <div className="bg-bg-elev border border-line rounded-lg shadow-card overflow-hidden">
+      <div
+        className={cn(
+          "rounded-lg overflow-hidden",
+          embedded
+            ? "border border-line-soft/50"
+            : "bg-bg-elev border border-line shadow-card",
+        )}
+      >
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -232,15 +253,18 @@ export function DataTable<TData, TValue>({
                     data-state={row.getIsSelected() && "selected"}
                     className={cn(
                       "border-line-soft/40 hover:bg-white/[0.02]",
-                      (renderSubRow || onRowClick) && "cursor-pointer",
+                      "data-[state=selected]:bg-cyan/[0.07]",
+                      (renderSubRow || onRowClick || selectOnRowClick) && "cursor-pointer",
                       rowClassName?.(row),
                     )}
                     onClick={
                       renderSubRow
                         ? () => row.toggleExpanded()
-                        : onRowClick
-                          ? () => onRowClick(row.original)
-                          : undefined
+                        : selectOnRowClick
+                          ? () => row.toggleSelected()
+                          : onRowClick
+                            ? () => onRowClick(row.original)
+                            : undefined
                     }
                   >
                     {row.getVisibleCells().map((cell) => (

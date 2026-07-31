@@ -15,6 +15,8 @@ import mapboxgl from "mapbox-gl"
 import "mapbox-gl/dist/mapbox-gl.css"
 import { OptionPills } from "@/components/ui/option-pills"
 import { OfficeFilter } from "../_components/office-filter"
+import { ChangesTable, type ChangeRow } from "./changes-table"
+import { TechSelect } from "./tech-select"
 import type { Office } from "@/lib/infrastructure/routing/offices"
 import {
   baseIdOf,
@@ -82,6 +84,7 @@ export function LiveMap({
   bases,
   customers,
   techs,
+  techOffices,
 }: {
   token: string | null
   week: number
@@ -91,6 +94,8 @@ export function LiveMap({
   bases: Record<string, { lat: number; lng: number }>
   customers: Record<number, Customer>
   techs: Record<string, string>
+  /** techId → office label (the tech's branch), for grouping tech pickers. */
+  techOffices: Record<string, string | null>
 }) {
   // The drive matrix loads once per page — every pair pre-measured — so
   // scenario edits and pricing are pure lookups, no trig in the loop.
@@ -140,6 +145,9 @@ export function LiveMap({
   const [shapes, setShapes] = useState<Span[]>([])
   const [drawing, setDrawing] = useState<Span | null>(null)
   const [report, setReport] = useState<ReassignReport | null>(null)
+  /** Tech picked in the area-reassign and stop-pill panels (searchable pickers). */
+  const [reassignTech, setReassignTech] = useState<string | null>(null)
+  const [stopPillTech, setStopPillTech] = useState<string | null>(null)
   /** Stops struck off the selection by hand — the shapes still contain them. */
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
   const [list, setList] = useState<"changes" | "owed" | "scenarios" | "suggested" | null>(null)
@@ -161,7 +169,6 @@ export function LiveMap({
   const [pendingScenarios, setPendingScenarios] = useState<EvaluatedScenario[]>([])
   const [saveName, setSaveName] = useState<string | null>(null) // null = input closed
   const [scenarioBusy, setScenarioBusy] = useState(false)
-  const [changesModal, setChangesModal] = useState(false)
   /**
    * Selected routes (tech|day keys) — ONE set for viewing and optimizing.
    * Clicking rows toggles membership; the map filters to the set; exactly one
@@ -217,11 +224,6 @@ export function LiveMap({
   const nameOf = (id: number | null) => (id !== null ? (customers[id]?.name ?? "—") : "—")
   const officeOf = (id: number | null) => (id !== null ? (customers[id]?.office ?? null) : null)
   const techOf = (id: string) => techs[id] ?? id.slice(0, 8)
-  /** "Matthew Buhlmann" -> "Matthew B" — for dense worklist rows. */
-  const techShort = (id: string) => {
-    const parts = techOf(id).split(" ").filter(Boolean)
-    return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0]}` : (parts[0] ?? "—")
-  }
   /**
    * Assigned over ALL routes, not the visible ones, so a tech keeps their colour
    * when the office or day scope changes.
@@ -230,8 +232,29 @@ export function LiveMap({
     const ids = [...new Set(plan.all.flatMap((q) => q.stops.map((st) => st.techId)))].sort()
     return new Map(ids.map((id, i) => [id, PALETTE[i % PALETTE.length]]))
   }, [plan, rev])
+  /** Hand-picked colours over the palette defaults, kept per browser. Loaded
+   *  after mount so the server render never disagrees with localStorage. */
+  const [techColorOverrides, setTechColorOverrides] = useState<Record<string, string>>({})
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("routing-tech-colors")
+      if (stored) setTechColorOverrides(JSON.parse(stored))
+    } catch {
+      /* corrupt store — palette defaults win */
+    }
+  }, [])
+  const setTechColor = (techId: string, color: string) =>
+    setTechColorOverrides((prev) => {
+      const next = { ...prev, [techId]: color }
+      try {
+        localStorage.setItem("routing-tech-colors", JSON.stringify(next))
+      } catch {
+        /* private mode — the colour still holds for this page */
+      }
+      return next
+    })
   const colorOf = (techId: string | null) =>
-    (techId && techColor.get(techId)) || NO_TECH_COLOR
+    (techId && (techColorOverrides[techId] ?? techColor.get(techId))) || NO_TECH_COLOR
 
   /* ---------------------------------------------------------------- scope */
 
@@ -760,6 +783,28 @@ export function LiveMap({
     }
   }, [costModel, base, changes, week, matrixRev, rev])
 
+  /** The change list flattened for the data table — display strings only. */
+  const changeRows = useMemo<ChangeRow[]>(
+    () =>
+      changes.map((e, i) => {
+        const move = sidesOf(e)
+        const cid = quotaOf(e.quotaId)?.requirement.customerId ?? null
+        return {
+          index: i,
+          customer: nameOf(cid),
+          office: (cid !== null ? customers[cid]?.office : null) ?? "—",
+          fromDay: move.from?.day ?? null,
+          fromTech: move.from?.techId ? techOf(move.from.techId) : null,
+          toDay: move.to?.day ?? null,
+          toTech: move.to?.techId ? techOf(move.to.techId) : null,
+          netMinutes: analysis?.moves[i]?.exactNetMinutes ?? null,
+          netMi: analysis?.moves[i]?.netMi ?? null,
+        }
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [changes, analysis, customers, techs, rev],
+  )
+
   /** The run on view for a route: the tabbed one, else the heaviest. */
   const runOnView = (route: Route) => {
     const runs = route.runs()
@@ -1050,6 +1095,7 @@ export function LiveMap({
     setDrawing(null)
     setReport(null)
     setExcluded(new Set())
+    setReassignTech(null)
   }
 
   const removeShape = (i: number) => {
@@ -1058,13 +1104,10 @@ export function LiveMap({
     setReport(null)
   }
 
-  const revertChange = (index: number) => {
-    setPlan(Scenario.replay(base(), changes.filter((_, i) => i !== index)))
-    setReport(null)
-  }
-
-  const revertAll = () => {
-    setPlan(Scenario.from(base()))
+  /** Revert changes by their position in the list — one index or a bulk set. */
+  const revertChanges = (indices: number[]) => {
+    const drop = new Set(indices)
+    setPlan(Scenario.replay(base(), changes.filter((_, i) => !drop.has(i))))
     setReport(null)
   }
 
@@ -1539,6 +1582,7 @@ export function LiveMap({
           label="unpublished"
           count={changes.length}
           tone="cyan"
+          wide
           open={list === "changes"}
           onToggle={() => setList(list === "changes" ? null : "changes")}
         >
@@ -1547,31 +1591,14 @@ export function LiveMap({
               cost analysis unavailable — reload the page (details in the console)
             </div>
           )}
-          {analysis && (
-            <div className="flex items-center gap-3 pb-1.5 text-[11px]">
-              <Delta minutes={analysis.netMinutes} suffix=" min/wk" />
-              <Delta minutes={analysis.netMi} suffix=" mi/wk" digits={1} />
-              <span className="min-w-0 flex-1 truncate text-ink-mute">
-                {Object.entries(analysis.disruption)
-                  .map(([k, n]) => `${n} ${k.replace("_", "+")}`)
-                  .join(" · ")}
-              </span>
-              {changes.length > 8 && (
-                <button
-                  className="shrink-0 text-[10.5px] text-ink-mute hover:text-cyan"
-                  onClick={() => setChangesModal(true)}
-                >
-                  view all
-                </button>
-              )}
-              <button
-                className="shrink-0 rounded-full border border-line px-2.5 py-0.5 text-[10.5px] text-ink-mute hover:border-coral/40 hover:text-coral"
-                title="revert every unpublished change"
-                onClick={revertAll}
-              >
-                Clear all
-              </button>
-              {saveName === null ? (
+          {/* Remount on every plan revision: rows are index-keyed, so a
+              revert must never meet yesterday's selection. */}
+          <ChangesTable
+            key={rev}
+            rows={changeRows}
+            onRevert={revertChanges}
+            headerExtra={
+              saveName === null ? (
                 <button
                   className="shrink-0 rounded-full border border-violet-400/40 bg-violet-400/10 px-2.5 py-0.5 text-[10.5px] font-medium text-violet-300 hover:bg-violet-400/20 disabled:opacity-50"
                   disabled={scenarioBusy}
@@ -1606,75 +1633,9 @@ export function LiveMap({
                     ×
                   </button>
                 </span>
-              )}
-            </div>
-          )}
-          <table className="w-full text-[11px]">
-            <thead>
-              <tr className="text-[10px] uppercase tracking-[0.1em] text-ink-mute">
-                <th className="py-1 pr-3 text-left font-medium">Customer</th>
-                <th className="py-1 pr-2 text-left font-medium">From</th>
-                <th className="py-1" />
-                <th className="py-1 pr-2 text-left font-medium">To</th>
-                <th className="py-1 pr-2 text-right font-medium">Cost</th>
-                <th className="py-1" />
-              </tr>
-            </thead>
-            <tbody>
-              {changes.map((e, i) => {
-                const move = sidesOf(e)
-                return (
-                  <tr key={i} className="border-t border-line-soft/40">
-                    <td className="max-w-[8.5rem] truncate py-1 pr-2 text-ink-dim">
-                      {nameOf(quotaOf(e.quotaId)?.requirement.customerId ?? null)}
-                    </td>
-                    <td className="whitespace-nowrap py-1 pr-1">
-                      {move.from ? (
-                        <>
-                          <Chip>{move.from.day}</Chip>{" "}
-                          {move.from.techId && <Chip>{techShort(move.from.techId)}</Chip>}
-                        </>
-                      ) : (
-                        <span className="text-ink-mute">unplaced</span>
-                      )}
-                    </td>
-                    <td className="px-0.5 text-center text-ink-mute">&rarr;</td>
-                    <td className="whitespace-nowrap py-1 pr-1">
-                      {move.to ? (
-                        <>
-                          <Chip>{move.to.day}</Chip>{" "}
-                          {move.to.techId && <Chip>{techShort(move.to.techId)}</Chip>}
-                        </>
-                      ) : (
-                        <span className="text-ink-mute">unplaced</span>
-                      )}
-                    </td>
-                    <td
-                      className="whitespace-nowrap py-1 pr-2 text-right"
-                      title={
-                        analysis
-                          ? `legs: −${analysis.moves[i]?.removalGainMi}mi freed, +${analysis.moves[i]?.insertionCostMi}mi paid`
-                          : undefined
-                      }
-                    >
-                      {analysis?.moves[i] && (
-                        <Delta minutes={analysis.moves[i].exactNetMinutes} suffix="m" digits={1} />
-                      )}
-                    </td>
-                    <td className="py-1 text-right">
-                      <button
-                        className="px-1 text-ink-mute hover:text-coral"
-                        title="undo this change"
-                        onClick={() => revertChange(i)}
-                      >
-                        ×
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+              )
+            }
+          />
         </Worklist>
         )}
 
@@ -1940,12 +1901,14 @@ export function LiveMap({
                           />
                         </div>
                         <div className="mt-1.5 flex items-center gap-1.5">
-                          <select
-                            className="min-w-0 flex-1 rounded border border-line bg-transparent px-1.5 py-1 text-[10.5px] text-ink-mute focus:text-ink"
-                            value=""
-                            onChange={(e) => {
-                              const toTechId = e.target.value
-                              if (!toTechId) return
+                          <TechSelect
+                            className="min-w-0 flex-1"
+                            placeholder="hand this route to another tech…"
+                            techs={Object.entries(techs)
+                              .filter(([id, name]) => id !== route.techId && name.trim())
+                              .map(([id, name]) => ({ id, name }))}
+                            officeOf={(id) => techOffices[id] ?? null}
+                            onSelect={(toTechId) => {
                               try {
                                 plan.reassignRouteTech(route.techId, route.weekday, toTechId)
                                 setTechFilter(new Set([toTechId]))
@@ -1955,17 +1918,7 @@ export function LiveMap({
                                 alert(String(err instanceof Error ? err.message : err))
                               }
                             }}
-                          >
-                            <option value="">hand this route to another tech…</option>
-                            {Object.entries(techs)
-                              .filter(([id, name]) => id !== route.techId && name.trim())
-                              .sort((a, b) => a[1].localeCompare(b[1]))
-                              .map(([id, name]) => (
-                                <option key={id} value={id} className="bg-[#0b1620]">
-                                  {name}
-                                </option>
-                              ))}
-                          </select>
+                          />
                         </div>
 
                         <div className="mt-2 max-h-[40vh] overflow-y-auto overflow-x-hidden">
@@ -2136,35 +2089,43 @@ export function LiveMap({
                   const picked = techFilter.has(t.techId)
                   return (
                     <li key={t.techId}>
-                      <button
-                        className={`flex w-full items-center gap-2 rounded-md px-1.5 py-[7px] text-left transition-colors ${
+                      <div
+                        className={`flex w-full items-center gap-2 rounded-md px-1.5 py-[7px] transition-colors ${
                           picked ? "bg-cyan/10 ring-1 ring-inset ring-cyan/30" : "hover:bg-white/[0.04]"
                         }`}
-                        onClick={() => {
-                          setTechFilter((prev) => {
-                            const next = new Set(prev)
-                            if (next.has(t.techId)) next.delete(t.techId)
-                            else next.add(t.techId)
-                            return next
-                          })
-                          setTourRoute(null)
-                          setSelectedRoutes(new Set())
-                          setSelected(null)
-                        }}
                         onMouseEnter={() => setHoverPins({ attr: "tech", values: [t.techId] })}
                         onMouseLeave={() => setHoverPins(null)}
                       >
-                        <span
-                          className="block h-2.5 w-2.5 shrink-0 rounded-full"
-                          style={{ background: colorOf(t.techId) }}
+                        {/* The dot IS the colour picker — the OS wheel opens on click. */}
+                        <input
+                          type="color"
+                          className="tech-dot h-2.5 w-2.5 shrink-0"
+                          value={colorOf(t.techId)}
+                          title="change this tech's colour"
+                          onChange={(e) => setTechColor(t.techId, e.target.value)}
                         />
-                        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink">
-                          {techOf(t.techId)}
-                        </span>
-                        <span className="font-mono num text-[10.5px] text-ink-mute">
-                          {t.routes} route{t.routes === 1 ? "" : "s"} · {t.stops}
-                        </span>
-                      </button>
+                        <button
+                          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                          onClick={() => {
+                            setTechFilter((prev) => {
+                              const next = new Set(prev)
+                              if (next.has(t.techId)) next.delete(t.techId)
+                              else next.add(t.techId)
+                              return next
+                            })
+                            setTourRoute(null)
+                            setSelectedRoutes(new Set())
+                            setSelected(null)
+                          }}
+                        >
+                          <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink">
+                            {techOf(t.techId)}
+                          </span>
+                          <span className="font-mono num text-[10.5px] text-ink-mute">
+                            {t.routes} route{t.routes === 1 ? "" : "s"} · {t.stops}
+                          </span>
+                        </button>
+                      </div>
                     </li>
                   )
                 })}
@@ -2279,18 +2240,15 @@ export function LiveMap({
               </div>
 
               <div className="mt-2.5 flex items-center gap-1.5">
-                <select
-                  className="min-w-0 flex-1 rounded border border-line bg-transparent px-1.5 py-1 text-[11px] text-ink"
-                  defaultValue=""
-                  id="reassign-tech"
-                >
-                  <option value="">move to tech…</option>
-                  {techOptions.map((t) => (
-                    <option key={t.id} value={t.id} className="bg-[#0b1620]">
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
+                <TechSelect
+                  className="min-w-0 flex-1"
+                  placeholder="move to tech…"
+                  techs={techOptions}
+                  officeOf={(id) => techOffices[id] ?? null}
+                  value={reassignTech}
+                  onSelect={setReassignTech}
+                  direction="up"
+                />
                 <select
                   className="rounded border border-line bg-transparent px-1.5 py-1 text-[11px] text-ink"
                   defaultValue=""
@@ -2306,9 +2264,8 @@ export function LiveMap({
                 <button
                   className="rounded border border-cyan/40 bg-cyan/15 px-2.5 py-1 text-[11px] font-medium text-cyan"
                   onClick={() => {
-                    const t = (document.getElementById("reassign-tech") as HTMLSelectElement)?.value
                     const d = (document.getElementById("reassign-day") as HTMLSelectElement)?.value
-                    if (t && d !== "") applyReassign(t, Number(d) as Weekday)
+                    if (reassignTech && d !== "") applyReassign(reassignTech, Number(d) as Weekday)
                   }}
                 >
                   Move
@@ -2349,130 +2306,6 @@ export function LiveMap({
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Every pending change, grouped by destination — the full ledger */}
-      {changesModal && (
-        <div
-          className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-[2px]"
-          onClick={() => setChangesModal(false)}
-        >
-          <div
-            className={`flex max-h-[80vh] w-[46rem] flex-col p-4 ${glass}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-3">
-              <span className="text-[14px] font-semibold text-ink">
-                Pending changes ({changes.length})
-              </span>
-              {analysis && (
-                <>
-                  <Delta minutes={analysis.netMinutes} suffix=" min/wk" />
-                  <Delta minutes={analysis.netMi} suffix=" mi/wk" digits={1} />
-                </>
-              )}
-              <span className="flex-1" />
-              <button
-                className="text-[11px] text-ink-mute hover:text-coral"
-                onClick={() => {
-                  revertAll()
-                  setChangesModal(false)
-                }}
-              >
-                clear all
-              </button>
-              <button
-                className="pl-1 text-[14px] text-ink-mute hover:text-ink"
-                onClick={() => setChangesModal(false)}
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="mt-2 min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-              {(() => {
-                // Group by destination: where the work is landing is the
-                // question a big list is read to answer.
-                const groups = new Map<string, { label: string; items: { e: RoutingEvent; i: number }[] }>()
-                changes.forEach((e, i) => {
-                  const to = sidesOf(e).to
-                  const key = to ? `${to.day}|${to.techId}` : "unplaced"
-                  const label = to
-                    ? `${to.day} · ${to.techId ? techOf(to.techId) : to.day}`
-                    : "unplaced"
-                  const g = groups.get(key) ?? { label, items: [] }
-                  g.items.push({ e, i })
-                  groups.set(key, g)
-                })
-                return [...groups.values()].map((g) => (
-                  <div key={g.label} className="mt-3 first:mt-1">
-                    <div className="flex items-baseline gap-2 border-b border-line-soft pb-1">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-dim">
-                        {g.label}
-                      </span>
-                      <span className="text-[10px] text-ink-mute">
-                        {g.items.length} change{g.items.length === 1 ? "" : "s"}
-                      </span>
-                      {analysis && (
-                        <span className="ml-auto">
-                          <Delta
-                            minutes={g.items.reduce(
-                              (n, it) => n + (analysis.moves[it.i]?.exactNetMinutes ?? 0),
-                              0,
-                            )}
-                            suffix="m"
-                            digits={1}
-                          />
-                        </span>
-                      )}
-                    </div>
-                    {g.items.map(({ e, i }) => {
-                      const move = sidesOf(e)
-                      return (
-                        <div
-                          key={i}
-                          className="flex items-center gap-1.5 border-b border-line-soft/30 py-1.5 text-[11px] last:border-0"
-                        >
-                          <span className="w-44 truncate text-ink-dim">
-                            {nameOf(quotaOf(e.quotaId)?.requirement.customerId ?? null)}
-                          </span>
-                          {move.from ? (
-                            <>
-                              <Chip>{move.from.day}</Chip>
-                              {move.from.techId && <Chip>{techOf(move.from.techId)}</Chip>}
-                            </>
-                          ) : (
-                            <span className="text-ink-mute">unplaced</span>
-                          )}
-                          <span className="text-ink-mute">&rarr;</span>
-                          {move.to ? (
-                            <>
-                              <Chip>{move.to.day}</Chip>
-                              {move.to.techId && <Chip>{techOf(move.to.techId)}</Chip>}
-                            </>
-                          ) : (
-                            <span className="text-ink-mute">unplaced</span>
-                          )}
-                          <span className="flex-1" />
-                          {analysis?.moves[i] && (
-                            <Delta minutes={analysis.moves[i].exactNetMinutes} suffix="m" digits={1} />
-                          )}
-                          <button
-                            className="px-1 text-ink-mute hover:text-coral"
-                            title="undo this change"
-                            onClick={() => revertChange(i)}
-                          >
-                            ×
-                          </button>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ))
-              })()}
-            </div>
-          </div>
         </div>
       )}
 
@@ -2537,21 +2370,17 @@ export function LiveMap({
 
           {/* Move: the first placement (or an owed slot) to a new tech-day. */}
           <div className="flex shrink-0 items-center gap-1.5 border-l border-line-soft pl-3">
-            <select
-              id="stop-pill-tech"
-              className="w-32 rounded border border-line bg-transparent px-1.5 py-1 text-[10.5px] text-ink"
-              defaultValue=""
-            >
-              <option value="">tech…</option>
-              {Object.entries(techs)
+            <TechSelect
+              className="w-36"
+              placeholder="tech…"
+              techs={Object.entries(techs)
                 .filter(([, name]) => name.trim())
-                .sort((a, b) => a[1].localeCompare(b[1]))
-                .map(([id, name]) => (
-                  <option key={id} value={id} className="bg-[#0b1620]">
-                    {name}
-                  </option>
-                ))}
-            </select>
+                .map(([id, name]) => ({ id, name }))}
+              officeOf={(id) => techOffices[id] ?? null}
+              value={stopPillTech}
+              onSelect={setStopPillTech}
+              direction="up"
+            />
             <select
               id="stop-pill-day"
               className="rounded border border-line bg-transparent px-1.5 py-1 text-[10.5px] text-ink"
@@ -2567,7 +2396,7 @@ export function LiveMap({
             <button
               className="rounded border border-cyan/40 bg-cyan/15 px-2 py-1 text-[10.5px] font-medium text-cyan"
               onClick={() => {
-                const t = (document.getElementById("stop-pill-tech") as HTMLSelectElement)?.value
+                const t = stopPillTech
                 const d = (document.getElementById("stop-pill-day") as HTMLSelectElement)?.value
                 if (!t || d === "" || !selectedInfo) return
                 try {
@@ -2855,6 +2684,7 @@ function Worklist({
   label,
   count,
   tone,
+  wide = false,
   open,
   onToggle,
   children,
@@ -2862,21 +2692,30 @@ function Worklist({
   label: string
   count: number
   tone: "cyan" | "sun" | "emerald"
+  /** Room for a full data table rather than a compact list. */
+  wide?: boolean
   open: boolean
   onToggle: () => void
   children: React.ReactNode
 }) {
   const colour =
     tone === "cyan" ? "text-cyan" : tone === "sun" ? "text-sun" : "text-emerald-400"
+  // Wide + open takes a set width so a data table inside gets the full span
+  // to lay out one-line toolbars; collapsed it shrinks back to a chip.
+  const width = wide && open ? "w-[56rem] max-w-[92vw]" : "w-fit max-w-[40rem]"
   return (
-    <div className={`pointer-events-auto w-fit max-w-[40rem] ${glass}`}>
+    <div className={`pointer-events-auto ${width} ${glass}`}>
       <button className="flex w-full items-center gap-2 px-3 py-1.5 text-left" onClick={onToggle}>
         <span className={`font-mono num text-[13px] ${colour}`}>{count}</span>
         <span className="text-[12px] text-ink-dim">{label}</span>
         <span className="pl-1 text-[11px] text-ink-mute">{open ? "−" : "+"}</span>
       </button>
       {open && (
-        <div className="max-h-[60vh] min-w-[17rem] overflow-y-auto overflow-x-hidden border-t border-line-soft px-3 py-1.5 text-[11px]">
+        <div
+          className={`min-w-[17rem] overflow-y-auto overflow-x-hidden border-t border-line-soft px-3 py-1.5 text-[11px] ${
+            wide ? "max-h-[calc(100vh-9rem)]" : "max-h-[60vh]"
+          }`}
+        >
           {children}
         </div>
       )}

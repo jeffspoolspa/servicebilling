@@ -53,11 +53,13 @@ export default async function TerritoryMapPage() {
 
   const { data: employees } = await supabase
     .from("employees")
-    .select("id, first_name, last_name")
+    .select("id, first_name, last_name, branch_id")
     .range(0, 999)
   const techs: Record<string, string> = {}
+  const techOffices: Record<string, string | null> = {}
   for (const t of employees ?? []) {
     techs[t.id as string] = `${t.first_name ?? ""} ${t.last_name ?? ""}`.trim()
+    techOffices[t.id as string] = officeName.get(t.branch_id as string) ?? null
   }
 
   return (
@@ -69,6 +71,7 @@ export default async function TerritoryMapPage() {
       bases={bases}
       customers={customers}
       techs={techs}
+      techOffices={techOffices}
     />
   )
 }

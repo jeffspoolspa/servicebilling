@@ -305,3 +305,50 @@
 ::-webkit-scrollbar-thumb:hover {
   background-color: rgba(148, 163, 184, 0.4);
 }
+
+/* A color input rendered as a tiny round swatch (the routing tech dot). */
+input[type="color"].tech-dot {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 9999px;
+  overflow: hidden;
+  cursor: pointer;
+}
+input[type="color"].tech-dot::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+input[type="color"].tech-dot::-webkit-color-swatch {
+  border: none;
+  border-radius: 9999px;
+}
+
+/* Themed table checkbox — replaces the native look inside data tables. */
+input[type="checkbox"].tbl-check {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgb(148 163 184 / 0.4);
+  border-radius: 4px;
+  background: transparent no-repeat center / 10px;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background-color 0.1s, border-color 0.1s;
+}
+input[type="checkbox"].tbl-check:hover {
+  border-color: rgb(var(--cyan) / 0.6);
+}
+input[type="checkbox"].tbl-check:checked,
+input[type="checkbox"].tbl-check:indeterminate {
+  background-color: rgb(var(--cyan));
+  border-color: rgb(var(--cyan));
+}
+input[type="checkbox"].tbl-check:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%230b1620' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5l3.5 3.5L13 5'/%3E%3C/svg%3E");
+}
+input[type="checkbox"].tbl-check:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%230b1620' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M4 8h8'/%3E%3C/svg%3E");
+}
