@@ -41,6 +41,20 @@ const DAY_ORDER = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "week A", "w
 const sideText = (day: string | null, tech: string | null) =>
   day ? `${day}${tech ? ` · ${tech}` : ""}` : "unplaced"
 
+/** Sort a From/To column by day-of-week first, then tech name. */
+const bySide =
+  (get: (r: ChangeRow) => [string | null, string | null]) =>
+  (a: Row<ChangeRow>, b: Row<ChangeRow>) => {
+    const rank = (r: ChangeRow): [number, string] => {
+      const [d, t] = get(r)
+      const di = d ? DAY_ORDER.indexOf(d) : DAY_ORDER.length
+      return [di < 0 ? DAY_ORDER.length : di, t ?? ""]
+    }
+    const [da, ta] = rank(a.original)
+    const [db, tb] = rank(b.original)
+    return da - db || ta.localeCompare(tb)
+  }
+
 function Side({ day, tech }: { day: string | null; tech: string | null }) {
   if (!day) return <span className="text-ink-mute">unplaced</span>
   return (
@@ -162,8 +176,8 @@ export function ChangesTable({
   rows: ChangeRow[]
   /** Revert these positions in the change list (one for a row ×, many for bulk). */
   onRevert: (indices: number[]) => void
-  /** Right end of the stats row — save-as-scenario lives here, a row away
-   *  from the destructive revert button. */
+  /** Right end of the stats row, inline after Revert selected — save-as-scenario
+   *  lives here. */
   headerExtra?: React.ReactNode
 }) {
   const [selected, setSelected] = useState<ChangeRow[]>([])
@@ -217,9 +231,10 @@ export function ChangesTable({
     {
       id: "from",
       accessorFn: (r) => sideText(r.fromDay, r.fromTech),
-      header: "From",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="From" />,
       cell: ({ row }) => <Side day={row.original.fromDay} tech={row.original.fromTech} />,
-      enableSorting: false,
+      sortingFn: bySide((r) => [r.fromDay, r.fromTech]),
+      filterFn: "equalsString",
       meta: { widthClass: "w-[21%]" },
     },
     {
@@ -232,9 +247,10 @@ export function ChangesTable({
     {
       id: "to",
       accessorFn: (r) => sideText(r.toDay, r.toTech),
-      header: "To",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="To" />,
       cell: ({ row }) => <Side day={row.original.toDay} tech={row.original.toTech} />,
-      enableSorting: false,
+      sortingFn: bySide((r) => [r.toDay, r.toTech]),
+      filterFn: "equalsString",
       meta: { widthClass: "w-[21%]" },
     },
     {
@@ -245,15 +261,24 @@ export function ChangesTable({
         row.original.netMinutes !== null ? <Delta minutes={row.original.netMinutes} /> : null,
       meta: { align: "right", widthClass: "w-[11%]" },
     },
-    // Facet-only columns (hidden): tech / day of wherever the stop ends up,
-    // falling back to where it came from for removals.
-    { id: "tech", accessorFn: (r) => r.toTech ?? r.fromTech ?? "", header: "Tech" },
-    { id: "day", accessorFn: (r) => r.toDay ?? r.fromDay ?? "", header: "Day" },
   ]
 
-  const dayOptions = DAY_ORDER.filter((d) =>
-    rows.some((r) => r.toDay === d || r.fromDay === d),
-  ).map((d) => ({ value: d, label: d }))
+  // Facet options for From/To: the distinct day·tech groupings present in the
+  // rows, ordered day-first so the dropdown reads like a week.
+  const sideOptions = (get: (r: ChangeRow) => [string | null, string | null]) => {
+    const seen = new Map<string, [number, string]>()
+    for (const r of rows) {
+      const [d, t] = get(r)
+      const text = sideText(d, t)
+      if (!seen.has(text)) {
+        const di = d ? DAY_ORDER.indexOf(d) : DAY_ORDER.length
+        seen.set(text, [di < 0 ? DAY_ORDER.length : di, t ?? ""])
+      }
+    }
+    return [...seen.entries()]
+      .sort((a, b) => a[1][0] - b[1][0] || a[1][1].localeCompare(b[1][1]))
+      .map(([v]) => ({ value: v, label: v }))
+  }
 
   return (
     <div className="space-y-2">
@@ -272,7 +297,17 @@ export function ChangesTable({
             <span className="font-mono num text-ink">{n}</span>
           </Stat>
         ))}
-        {headerExtra && <span className="flex items-center gap-1 pl-2">{headerExtra}</span>}
+        <span className="flex items-center gap-1.5 pl-2">
+          <button
+            type="button"
+            className="rounded-full border border-coral/40 bg-coral/10 px-2.5 py-0.5 text-[10.5px] font-medium text-coral hover:bg-coral/20 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={selected.length === 0}
+            onClick={() => onRevert(selected.map((r) => r.index))}
+          >
+            Revert selected ({selected.length})
+          </button>
+          {headerExtra}
+        </span>
       </div>
       <DataTable
       columns={columns}
@@ -285,20 +320,9 @@ export function ChangesTable({
       searchPlaceholder="Search customer, tech, day…"
       facetFilters={[
         { columnId: "office", label: "Office" },
-        { columnId: "tech", label: "Tech" },
-        { columnId: "day", label: "Day", options: dayOptions },
+        { columnId: "from", label: "From", options: sideOptions((r) => [r.fromDay, r.fromTech]) },
+        { columnId: "to", label: "To", options: sideOptions((r) => [r.toDay, r.toTech]) },
       ]}
-      columnVisibility={{ tech: false, day: false }}
-      toolbarExtra={
-        <button
-          type="button"
-          className="rounded-md border border-coral/40 bg-coral/10 px-2.5 py-1.5 text-[12px] font-medium text-coral hover:bg-coral/20 disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={selected.length === 0}
-          onClick={() => onRevert(selected.map((r) => r.index))}
-        >
-          Revert selected ({selected.length})
-        </button>
-      }
       onSelectionChange={setSelected}
       selectOnRowClick
       pageSize={15}

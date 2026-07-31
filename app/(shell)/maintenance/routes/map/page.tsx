@@ -37,16 +37,18 @@ export default async function TerritoryMapPage() {
       snapshot.quotas.map((q) => q.requirement.customerId).filter((id): id is number => id !== null),
     ),
   ]
-  const customers: Record<number, { name: string; office: string | null }> = {}
+  const customers: Record<number, { name: string; office: string | null; commercial: boolean }> = {}
   for (let i = 0; i < ids.length; i += 500) {
     const { data } = await supabase
       .from("Customers")
-      .select("id, display_name, office_id")
+      .select("id, display_name, office_id, company")
       .in("id", ids.slice(i, i + 500))
     for (const c of data ?? []) {
       customers[c.id as number] = {
         name: (c.display_name as string) ?? "—",
         office: officeName.get(c.office_id as string) ?? null,
+        // The QBO rule: company filled = commercial.
+        commercial: Boolean((c.company as string | null)?.trim()),
       }
     }
   }
