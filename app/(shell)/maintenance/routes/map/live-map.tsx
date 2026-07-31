@@ -2700,9 +2700,9 @@ function Worklist({
 }) {
   const colour =
     tone === "cyan" ? "text-cyan" : tone === "sun" ? "text-sun" : "text-emerald-400"
-  // Wide + open takes a set width so a data table inside gets the full span
-  // to lay out one-line toolbars; collapsed it shrinks back to a chip.
-  const width = wide && open ? "w-[56rem] max-w-[92vw]" : "w-fit max-w-[40rem]"
+  // Wide + open fills the worklist strip (up to 56rem) so a data table inside
+  // scales with the viewport; collapsed it shrinks back to a chip.
+  const width = wide && open ? "w-full max-w-[56rem]" : "w-fit max-w-[40rem]"
   return (
     <div className={`pointer-events-auto ${width} ${glass}`}>
       <button className="flex w-full items-center gap-2 px-3 py-1.5 text-left" onClick={onToggle}>
