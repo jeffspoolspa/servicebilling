@@ -2,138 +2,133 @@
 
 > Status: [draft]   for agreement before classes are written.
 > Layer rules: [LAYERING.md](../conventions/LAYERING.md).
-> RULED 2026-07-31 (Carter): **we build the invoices ourselves from visits.**
-> ION becomes a source of service facts only; it no longer bills.
+> RULED (Carter): we build invoices ourselves from visits. ION stays as the
+> source of service facts AND as the pricing referee during migration —
+> reconciliation's new job is "do we agree with ION on labor pricing, and is
+> every billable consumable a line on our invoice."
 
-## What the self-build decision deletes
+## The migration path (two phases, one green light)
 
-Building invoices ourselves removes most of the machinery that existed only to
-audit ION's invoices:
+| Phase | Our invoices | Reconcile against | Purpose |
+|---|---|---|---|
+| 1 | grouped BY TASK — ION's grain | ION invoice with same task_id | prove our builder prices identically |
+| 2 | ONE PER CUSTOMER-MONTH — visits sorted by date, formatted per task billing type | (price-agreement checks continue) | our grain; ION display-only |
 
-| Gone | Why |
-|---|---|
-| task_billing_periods (the write-ahead "promise") | we no longer predict what ION will bill — we bill |
-| Reconciler + ReconcileFinding | nothing to reconcile against |
-| ION invoice matching (`ion_task_transactions`) | no external invoice to match |
-| expected-vs-actual gates | the invoice IS the expectation |
-| one-invoice-per-task | we issue **one invoice per customer-month** |
+Green light between phases = all task-grained invoices match. Grouping and
+format are STRATEGY interfaces on the builder (`TaskGrouping` now,
+`CustomerMonthGrouping` after; format ION-like to start, swappable later —
+we control it, so we can experiment).
 
-That last line is the big one: the reason a separate "billing month" concept was
-needed is that ION split a customer's month across N invoices. When we build,
-**the invoice itself IS "July pool maintenance" for that customer.**
+Invoice number: use ION's; if a task has two ION invoices, the one with more
+visits. (Phase-2 numbering once ION stops billing: open question #3.)
 
 ## The objects
-
-Only two things earn value-object status; everything else is an attribute.
 
 ### delivery module
 
 | Object | Kind | Holds |
 |---|---|---|
-| **Visit** | aggregate root | id, taskId, customerId, date, `state`, minutes, `settled` |
-| ConsumableUsage | entity, inside Visit | itemId, quantity |
-| Reading | **value object**, inside Visit | type, value, unit |
+| **Visit** | aggregate root | id, taskId, customerId, date, `state` (`scheduled` \| `completed` \| `skipped` \| `non_serviceable`), minutes, **claim-backrefs** |
+| ConsumableUsage | entity, inside Visit | itemId, quantity, **claim-backrefs** |
+| Reading | value object, inside Visit | type, value, unit |
 
-`state`: `scheduled` \| `completed` \| `skipped` \| `non_serviceable`.
-A Delivery fact — what happened at the pool. Delivery never prices or judges.
+**Claim-backrefs** (RULED — the tracking backbone): once a visit/usage becomes a
+line, it stores `invoice_id`, `doc_number`, `qbo_line_id` (returned by QBO at
+build). "Where was this billed" is then a column read, never a join hunt.
 
 ### agreements module
 
 | Object | Kind | Holds |
 |---|---|---|
-| **Task** | entity | customerId, billingMethod (`per_visit` \| `flat_monthly`), rate, active window |
+| **Task** | entity | customerId, billingMethod (`per_visit` \| `flat_monthly`), rate, consumables `included` \| `separate`, active window |
 | **CatalogItem** | entity | ionItemId, name, unitPrice |
 
 ### billing module
 
 | Object | Kind | Holds |
 |---|---|---|
-| **Invoice** | aggregate root | id, customerId, period (month), `status`, lines, totals, qboId |
-| InvoiceLine | entity, inside Invoice | kind (`labor` \| `consumable`), sourceId (visitId \| usageId), description, qty, unitPrice, amount |
-| **BillingPeriod** | aggregate root | month, `status` (`open` \| `closed`), closedAt |
-| **Money** | **value object** | cents (integer), arithmetic, never negative |
+| **Invoice** | aggregate root | id, customerId, month, `status`, lines, totals, docNumber, qboId |
+| InvoiceLine | entity, inside Invoice | kind (`labor` \| `consumable`), sourceId (visitId \| usageId), qty, unitPrice, amount, qboLineId |
+| **BillingMonth** | aggregate root | (customerId, month), `flag` state, processing state — the unit of flags, credits, charging (one charge per customer-month, ADR-009) |
+| Variance | entity | visitId, **techId**, kind (`discount` \| `missed_correction`), amount, note — post-send changes, attributed to the tech |
+| Money | value object | integer cents, arithmetic |
 
-`Invoice.status`: `draft` -> `issued` -> `sent` -> `paid` \| `void`.
+`Invoice.status`: `draft` -> `issued` (in QBO) -> `sent` -> `paid` \| `void`.
 
-### domain service
+### domain services
 
-**InvoiceBuilder** — visits + tasks + catalog -> draft Invoices. Every pricing
-rule lives here: the billable-day collapse (duplicate logs on one task-day become
-one line, highest price wins), flat-monthly vs per-visit x days, consumables
-priced by catalog, QC tasks pricing to $0 through the ordinary rate.
+- **InvoiceBuilder** — visits + tasks + catalog -> draft invoices. All pricing
+  rules: billable-day collapse, flat vs per-visit, consumable pricing, QC->$0.
+  Grouping + format via strategies.
+- **Reconciler** (retained, re-aimed) — our draft vs ION's invoice per task:
+  labor price agreement + consumable completeness. Phase-1 gate; price-referee
+  after.
+- **BillChecks** — misbilling checks + high-bill flag. Pure function of visits +
+  terms, so runnable ANY TIME (mid-month early warning, not just at build).
 
-## Associations
+## Two moments, not one (RULED)
 
-```
-Task ◀──taskId── Visit ──referenced by──▶ InvoiceLine ──belongs to──▶ Invoice
-                   │                            ▲                       │
-                   └── ConsumableUsage ──────────┘                  customer + month
-                            │
-                            └──itemId──▶ CatalogItem
+- **Claim** — when a line is added to a draft: the visit/usage is spoken for
+  (exclusivity I-B1, unique index on `invoice_lines.source_id`). Draft edits may
+  still release/re-claim.
+- **Lock** — at **SEND**: `visit.settle()`. After send, any change is a
+  `Variance` (discount or missed correction), tracked by tech and visit — never
+  an edit to settled facts.
 
-BillingPeriod (month) — gates the whole month, references nothing
-```
+Invariants: I-B1 exclusivity (unique index) · I-B2 completeness — month close
+refuses while billable-unclaimed > 0 · I-B3 settled-at-send (variances after).
 
-Every association is an **id reference**, never an object graph. A repository
-reconstitutes one aggregate with its own children only: loading an Invoice brings
-its lines; it never brings Visit objects.
+## The flagged-bill flow (replaces discounts)
 
-## The invariants and who enforces them
-
-| # | Invariant | Enforced by |
-|---|---|---|
-| I-B1 | a visit is billed at most once | **unique index on `invoice_lines.source_id`** — the DB is the only place that sees all invoices; the domain attempts, the constraint is final |
-| I-B2 | every billable visit of a closed month is billed | `BillingPeriod.close()` — refuses while the unbilled-visit query is non-empty |
-| I-B3 | billed facts are frozen | `Visit.settle()` on issue; later ION corrections become **variances** (an adjusting entry), never edits |
+`BillChecks` flags a high BillingMonth -> it lands in the flagged view/table ->
+human, on demand, generates an AI explanation (email or PDF built from the
+month's visit data: what drove it, what to do, or one-time) -> reviews/edits ->
+sends it WITH the invoice, or pushes through without. The generator is an
+application service over an LLM port (infrastructure); the flag rule is domain.
 
 ## Workflow through the layers
 
 ```
-ENTRY        cron, or "Bill July" in the UI
-   │
-   ▼
-APPLICATION  buildMonthlyInvoices(month)
-   │           visits  ← visitRepo.billableIn(month)      [infra]
-   │           tasks   ← taskRepo.activeIn(month)         [infra]
-   │           catalog ← catalogRepo.all()                [infra]
-   │  DOMAIN   drafts  = InvoiceBuilder.build(...)        ← all pricing rules
-   │           invoiceRepo.saveAll(drafts)                [infra] ← unique idx = I-B1
-   ▼
-APPLICATION  issueInvoice(id)
-   │  DOMAIN   invoice.issue()                            ← rules: has lines, period open
-   │           qbo.createInvoice(invoice)                 [infra]
-   │  DOMAIN   invoice.recordIssued(echo)                 ← QBO is authority; we record
-   │           visits.settle(invoice.visitIds())          [domain] ← I-B3
-   ▼
-APPLICATION  deliverInvoice(id)
-   │  DOMAIN   invoice.readyToSend()
-   │           channel.deliver(recipients, message)       [infra] ← Channel port
-   │  DOMAIN   invoice.recordDelivered(receipt)
-   ▼
-APPLICATION  chargeInvoice(id)   (autopay roster)
-   │  DOMAIN   invoice.assertChargeable()
-   │           payments.charge(...)                       [infra]
-   │  DOMAIN   invoice.recordPayment(echo)
-   ▼
-APPLICATION  closeMonth(month)
-      DOMAIN   period.close(unbilled)                     ← refuses if unbilled > 0
+ingestServiceLogs(range)        ION -> Visit aggregates                [daily]
+buildInvoices(month)            visits+tasks+catalog -> InvoiceBuilder -> drafts
+                                claims recorded; RE-RUNNABLE on open months
+reconcile(month)                drafts vs ION invoices -> findings     [phase 1 gate]
+checkBills(month)               misbilling + high flags -> BillingMonth.flag  [any time]
+issueInvoice(id)                invoice.issue() -> qbo.create -> recordIssued(echo:
+                                qboId, docNumber, per-line qboLineId) -> backrefs onto visits
+explainFlag(customerMonth)      AI doc from visit data -> human review -> attach
+processMonth(customer, month)   credit check -> autopay charge -> SEND
+                                send => visit.settle() (lock); after: variances only
+closeMonth(month)               refuses while unclaimed billable visits exist
 ```
 
-Six application services. That is the entire surface a UI or Windmill worker calls.
+Ordering rule (RULED): everything through reconcile/checks is **re-runnable**;
+processing moves money and is **irreversible** — it comes last and only after
+the model underneath is solid.
 
 ## Ports
 
 `VisitRepository` · `TaskRepository` · `CatalogRepository` · `InvoiceRepository` ·
-`BillingPeriodRepository` · `QboGateway` · `PaymentGateway` · `Channel`
+`BillingMonthRepository` · `QboGateway` · `PaymentGateway` · `Channel` ·
+`LlmPort` (flag explanations)
 
-## Open for agreement
+## Build order
 
-1. **One invoice per customer-month** — confirm. (A customer with 3 tasks gets one
-   invoice listing all of it, rather than 3.)
-2. **BillingPeriod is global per month**, not per customer — confirm. Matches how
-   `lock_through` works today and how a close actually happens.
-3. **Draft invoices live in our DB before QBO** — an invoice exists as `draft`
-   locally, is reviewed, then `issue()` creates it in QBO. Confirm that review step
-   is wanted (it replaces today's reconcile gate).
-4. Glossary word-by-word: Visit, Invoice, Invoice Line, Billing Period, Settle,
-   Issue, Variance.
+1. **Model core** — Visit, Invoice, BillingMonth, Variance + associations and
+   backrefs, selfchecked. The tracking backbone comes first.
+2. **buildInvoices + reconcile** (phase 1, task-grained) — re-runnable, verified
+   against ION invoice matching; May-2026 replay as the fixture.
+3. **checkBills + flagged view + explainFlag.**
+4. **Phase 2 grouping** (customer-month) after the green light.
+5. **processMonth** — credits, autopay, send — last, once everything under it
+   is proven.
+
+## Open questions
+
+1. BillingMonth vs global month close: close per customer-month, plus a
+   month-wide "all closed" rollup — confirm.
+2. Draft review step before `issue()` pushes to QBO — human gate or automatic
+   once checks pass?
+3. Phase-2 invoice numbering once ION stops billing (our own sequence?).
+4. Glossary word-by-word: Visit, Claim, Settle, Issue, Variance, Billing Month,
+   Flag.
