@@ -68,6 +68,7 @@
   <a href="#phases">Migration phases</a>
   <a href="#flow">Workflow by layer</a>
   <a href="#flags">Flagged bills</a>
+  <a href="#schema">Schema fit</a>
   <a href="#open">Open questions</a>
 </nav>
 <main>
@@ -108,12 +109,12 @@
     <text x="147" y="80" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
     <text x="147" y="97" font-size="15" font-weight="700" text-anchor="middle">Visit</text>
     <line x1="34" y1="106" x2="260" y2="106" stroke="#e4e3df"/>
-    <text x="46" y="124" font-size="12" fill="#3a3a36">taskId &#183; customerId</text>
-    <text x="46" y="140" font-size="12" fill="#3a3a36">date &#183; minutes</text>
-    <text x="46" y="156" font-size="12" fill="#3a3a36">state: sched|compl|skip|non_serv</text>
-    <text x="46" y="172" font-size="12" fill="#3a3a36">settled: bool</text>
-    <text x="46" y="188" font-size="12" fill="#6b6b66">backrefs: invoiceId, docNo, qboLineId</text>
-    <text x="46" y="204" font-size="12" fill="#6b6b66">usage: Usage[*] &#183; readings: Reading[*]</text>
+    <text x="46" y="124" font-size="12" fill="#3a3a36">task_id &#183; customer_id &#183; visit_date</text>
+    <text x="46" y="140" font-size="12" fill="#3a3a36">started_at &#183; ended_at &#183; actual_tech_id</text>
+    <text x="46" y="156" font-size="12" fill="#3a3a36">state &#8592; gen(status, is_serviceable)</text>
+    <text x="46" y="172" font-size="12" fill="#d4761f">settled_at  [add]</text>
+    <text x="46" y="188" font-size="12" fill="#d4761f">invoice_id &#183; doc_number &#183; qbo_line_id  [add]</text>
+    <text x="46" y="204" font-size="12" fill="#6b6b66">readings[*] &#183; checklist[*] &#183; usage[*]</text>
     <line x1="34" y1="214" x2="260" y2="214" stroke="#e4e3df"/>
     <text x="46" y="232" font-size="12" fill="#3a3a36">settle()</text>
 
@@ -122,37 +123,38 @@
     <text x="147" y="304" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
     <text x="147" y="320" font-size="14.5" font-weight="700" text-anchor="middle">ConsumableUsage</text>
     <line x1="34" y1="328" x2="260" y2="328" stroke="#e4e3df"/>
-    <text x="46" y="346" font-size="12" fill="#3a3a36">itemId &#183; quantity</text>
-    <text x="46" y="362" font-size="12" fill="#6b6b66">backrefs: invoiceId, qboLineId</text>
+    <text x="46" y="346" font-size="12" fill="#3a3a36">ion_item_id &#183; quantity &#183; base_quantity</text>
+    <text x="46" y="362" font-size="12" fill="#d4761f">invoice_id &#183; qbo_line_id  [add]</text>
 
     <!-- ============ Reading ============ -->
     <rect x="34" y="406" width="226" height="74" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.2" stroke-dasharray="4 3"/>
     <text x="147" y="424" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;value object&#187;</text>
     <text x="147" y="440" font-size="14" font-weight="700" text-anchor="middle">Reading</text>
     <line x1="34" y1="448" x2="260" y2="448" stroke="#e4e3df"/>
-    <text x="46" y="466" font-size="12" fill="#3a3a36">type &#183; value &#183; unit</text>
+    <text x="46" y="466" font-size="12" fill="#3a3a36">name &#183; value &#183; reading_id &#8594; definition</text>
 
     <!-- compositions: Visit owns its children -->
     <line x1="147" y1="286" x2="147" y2="246" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
     <path d="M34 443 L26 443 L26 240 L33 240" fill="none" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
 
     <!-- ============ Task ============ -->
-    <rect x="320" y="62" width="206" height="124" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <rect x="320" y="62" width="206" height="140" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
     <text x="423" y="80" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
     <text x="423" y="97" font-size="15" font-weight="700" text-anchor="middle">Task</text>
     <line x1="320" y1="106" x2="526" y2="106" stroke="#e4e3df"/>
-    <text x="332" y="124" font-size="12" fill="#3a3a36">customerId</text>
-    <text x="332" y="140" font-size="12" fill="#3a3a36">billingMethod: per_visit | flat</text>
-    <text x="332" y="156" font-size="12" fill="#3a3a36">rate &#183; consumables: incl | sep</text>
-    <text x="332" y="172" font-size="12" fill="#3a3a36">active window</text>
+    <text x="332" y="124" font-size="12" fill="#3a3a36">customer_id &#183; ion_task_id &#183; status</text>
+    <text x="332" y="140" font-size="12" fill="#3a3a36">billing_method: per_visit | flat</text>
+    <text x="332" y="156" font-size="12" fill="#3a3a36">price_per_visit&#162; &#183; flat_monthly&#162;</text>
+    <text x="332" y="172" font-size="12" fill="#3a3a36">starts_on &#183; ends_on</text>
+    <text x="332" y="188" font-size="12" fill="#d4761f">consumables_mode  [add]</text>
 
     <!-- ============ CatalogItem ============ -->
     <rect x="320" y="226" width="206" height="92" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
     <text x="423" y="244" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
     <text x="423" y="260" font-size="14.5" font-weight="700" text-anchor="middle">CatalogItem</text>
     <line x1="320" y1="268" x2="526" y2="268" stroke="#e4e3df"/>
-    <text x="332" y="286" font-size="12" fill="#3a3a36">ionItemId &#183; name</text>
-    <text x="332" y="302" font-size="12" fill="#3a3a36">unitPrice</text>
+    <text x="332" y="286" font-size="12" fill="#3a3a36">ion_item_id &#183; item_name &#183; category</text>
+    <text x="332" y="302" font-size="12" fill="#3a3a36">unit_price_cents &#183; qbo_item_id</text>
 
     <!-- ============ domain services ============ -->
     <rect x="320" y="470" width="206" height="148" rx="8" fill="#faf7fd" stroke="#8a4fb0" stroke-width="1.2"/>
@@ -168,9 +170,10 @@
     <rect x="586" y="62" width="260" height="184" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
     <text x="716" y="80" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
     <text x="716" y="97" font-size="15" font-weight="700" text-anchor="middle">Invoice</text>
+    <text x="838" y="80" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW TABLE</text>
     <line x1="586" y1="106" x2="846" y2="106" stroke="#e4e3df"/>
-    <text x="598" y="124" font-size="12" fill="#3a3a36">customerId &#183; month</text>
-    <text x="598" y="140" font-size="12" fill="#3a3a36">docNumber (ION's) &#183; qboId</text>
+    <text x="598" y="124" font-size="12" fill="#3a3a36">customer_id &#183; month</text>
+    <text x="598" y="140" font-size="12" fill="#3a3a36">doc_number (ION's) &#183; qbo_invoice_id</text>
     <text x="598" y="156" font-size="12" fill="#3a3a36">status: draft&#8594;issued&#8594;sent&#8594;paid|void</text>
     <text x="598" y="172" font-size="12" fill="#6b6b66">lines: InvoiceLine[*]</text>
     <line x1="586" y1="182" x2="846" y2="182" stroke="#e4e3df"/>
@@ -182,20 +185,22 @@
     <rect x="586" y="286" width="260" height="122" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
     <text x="716" y="304" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
     <text x="716" y="320" font-size="14.5" font-weight="700" text-anchor="middle">InvoiceLine</text>
+    <text x="838" y="304" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW TABLE</text>
     <line x1="586" y1="328" x2="846" y2="328" stroke="#e4e3df"/>
     <text x="598" y="346" font-size="12" fill="#3a3a36">kind: labor | consumable</text>
-    <text x="598" y="362" font-size="12" fill="#3a3a36">sourceId (visit | usage &#8212; UNIQUE)</text>
-    <text x="598" y="378" font-size="12" fill="#3a3a36">qty &#183; unitPrice &#183; amount</text>
-    <text x="598" y="394" font-size="12" fill="#6b6b66">qboLineId (echoed at issue)</text>
+    <text x="598" y="362" font-size="12" fill="#3a3a36">source_id (visit | usage &#8212; UNIQUE)</text>
+    <text x="598" y="378" font-size="12" fill="#3a3a36">qty &#183; unit_price_cents &#183; amount_cents</text>
+    <text x="598" y="394" font-size="12" fill="#6b6b66">qbo_line_id (echoed at issue)</text>
     <line x1="716" y1="286" x2="716" y2="246" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
 
     <!-- ============ BillingMonth ============ -->
     <rect x="586" y="448" width="260" height="118" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
     <text x="716" y="466" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
     <text x="716" y="482" font-size="15" font-weight="700" text-anchor="middle">BillingMonth</text>
+    <text x="838" y="466" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW TABLE</text>
     <line x1="586" y1="490" x2="846" y2="490" stroke="#e4e3df"/>
-    <text x="598" y="508" font-size="12" fill="#3a3a36">customerId &#183; month</text>
-    <text x="598" y="524" font-size="12" fill="#3a3a36">flag &#183; processing state</text>
+    <text x="598" y="508" font-size="12" fill="#3a3a36">customer_id &#183; month &#183; closed_at</text>
+    <text x="598" y="524" font-size="12" fill="#3a3a36">flag &#183; processing_status</text>
     <line x1="586" y1="534" x2="846" y2="534" stroke="#e4e3df"/>
     <text x="598" y="552" font-size="12" fill="#3a3a36">close() &#8212; refuses while unbilled &gt; 0</text>
 
@@ -203,21 +208,22 @@
     <rect x="586" y="606" width="260" height="94" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
     <text x="716" y="624" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
     <text x="716" y="640" font-size="14.5" font-weight="700" text-anchor="middle">Variance</text>
+    <text x="838" y="624" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW TABLE</text>
     <line x1="586" y1="648" x2="846" y2="648" stroke="#e4e3df"/>
-    <text x="598" y="666" font-size="12" fill="#3a3a36">visitId &#183; techId</text>
-    <text x="598" y="682" font-size="12" fill="#3a3a36">kind: discount | missed_corr &#183; amount</text>
+    <text x="598" y="666" font-size="12" fill="#3a3a36">visit_id &#183; tech_id</text>
+    <text x="598" y="682" font-size="12" fill="#3a3a36">kind: discount | missed_corr &#183; amount_cents</text>
 
     <!-- reference arrows: anchored at the attribute holding the id -->
     <line x1="260" y1="120" x2="320" y2="120" stroke="#6b6b66" stroke-width="1.3" marker-end="url(#ref)" stroke-dasharray="5 4"/>
-    <text x="290" y="112" font-size="10.5" text-anchor="middle" fill="#6b6b66">taskId</text>
+    <text x="290" y="112" font-size="10.5" text-anchor="middle" fill="#6b6b66">task_id</text>
     <path d="M260 342 C 292 342 292 282 320 282" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
-    <text x="290" y="322" font-size="10.5" text-anchor="middle" fill="#6b6b66">itemId</text>
+    <text x="290" y="322" font-size="10.5" text-anchor="middle" fill="#6b6b66">ion_item_id</text>
     <path d="M586 358 C 440 358 340 220 262 195" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
-    <text x="402" y="330" font-size="10.5" fill="#6b6b66">sourceId &#8594; visit | usage</text>
+    <text x="402" y="330" font-size="10.5" fill="#6b6b66">source_id &#8594; visit | usage</text>
     <path d="M586 662 C 300 730 20 650 20 330 C 20 270 26 248 33 236" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
-    <text x="300" y="712" font-size="10.5" fill="#6b6b66">visitId</text>
+    <text x="300" y="712" font-size="10.5" fill="#6b6b66">visit_id</text>
     <path d="M846 150 C 864 150 864 190 864 300 L 864 460 C 864 490 856 500 846 500" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
-    <text x="861" y="380" font-size="10.5" text-anchor="end" fill="#6b6b66">(customerId, month)</text>
+    <text x="861" y="380" font-size="10.5" text-anchor="end" fill="#6b6b66">(customer_id, month)</text>
   </svg>
   <div class="legend">
     <span><span class="sw" style="background:#0b6e6e"></span><b>aggregate root</b></span>
@@ -294,6 +300,31 @@
   <p>High-bill flag &#8594; flagged view/table &#8594; on demand, AI drafts the explanation
   from the month's visits (what drove it, what to do, or one-time) &#8594; human
   review/edit &#8594; sent with the invoice, or pushed through without.</p>
+
+  <h2 id="schema">Schema fit — model vs the live database</h2>
+  <p>Every box above was checked against the live schema. Delivery and agreements
+  already fit; billing needs four small additions and three new tables. Orange
+  <b>[add]</b> / <b>NEW TABLE</b> marks in the diagram are exactly this list.</p>
+  <table>
+    <tr><th>Model object</th><th>Lives today</th><th>Delta needed</th></tr>
+    <tr><td>Visit</td><td><code>maintenance.visits</code> (rich: state facts split across <code>status</code> + <code>is_serviceable</code> + <code>failure_reason</code>)</td>
+        <td>generated <code>state</code> column; <code>settled_at</code>; claim backrefs <code>invoice_id</code>, <code>doc_number</code>, <code>qbo_line_id</code></td></tr>
+    <tr><td>Reading / Checklist / Usage</td><td><code>visit_readings</code> · <code>visit_tasks</code> · <code>consumables_usage</code> (tall, alias-resolved)</td>
+        <td>usage gets <code>invoice_id</code> + <code>qbo_line_id</code> backrefs</td></tr>
+    <tr><td>Task</td><td><code>maintenance.tasks</code> (billing_method, both rates, window)</td>
+        <td><code>consumables_mode</code> (incl | separate) — today implied by ION invoice type, never stored</td></tr>
+    <tr><td>CatalogItem</td><td><code>maintenance.consumables</code> (142 rows; already has <code>qbo_item_id</code> — needed to build QBO lines)</td><td>none</td></tr>
+    <tr><td>Invoice + InvoiceLine</td><td><b>nothing</b> — <code>billing.invoices</code> is the QBO MIRROR (text qbo id, jsonb line snapshot, sync machinery); it cannot hold drafts</td>
+        <td>new <code>billing.maintenance_invoices</code> + <code>billing.maintenance_invoice_lines</code> (UNIQUE <code>source_id</code> = I-B1)</td></tr>
+    <tr><td>BillingMonth</td><td>closest is <code>billing_audit.task_billing_periods</code> — task-grained, promise-era; wrong grain, wrong job</td>
+        <td>new <code>billing.billing_months</code>; the promise table retires after phase 2</td></tr>
+    <tr><td>Variance</td><td><b>nothing</b></td><td>new <code>billing.variances</code></td></tr>
+  </table>
+  <div class="call brk"><span class="tag">Two invoice tables, on purpose</span>
+  Our <code>maintenance_invoices</code> is the AGGREGATE (drafts, claims, status).
+  <code>billing.invoices</code> stays the QBO mirror — the echo target after
+  <code>issue()</code>, where payments/credits machinery already lives. The
+  aggregate links to the mirror by <code>qbo_invoice_id</code>; nothing merges.</div>
 
   <h2 id="open">Open questions</h2>
   <table>
