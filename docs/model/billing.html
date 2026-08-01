@@ -208,17 +208,17 @@
     <text x="598" y="440" font-size="12" fill="#3a3a36">qty</text>
     <text x="598" y="456" font-size="12" fill="#3a3a36">unit_price_cents</text>
     <text x="598" y="472" font-size="12" fill="#3a3a36">amount_cents</text>
-    <text x="598" y="488" font-size="12" fill="#6b6b66">invoice_id (null until grouped)</text>
+    <text x="598" y="488" font-size="12" fill="#6b6b66">qbo_invoice_id (null until issued)</text>
     <text x="598" y="504" font-size="12" fill="#6b6b66">qbo_line_id (echoed at issue)</text>
     <rect x="586" y="548" width="260" height="180" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
-    <text x="716" y="566" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="716" y="566" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity &#183; draft in memory&#187;</text>
     <text x="716" y="583" font-size="15" font-weight="700" text-anchor="middle">Invoice</text>
     <line x1="586" y1="592" x2="846" y2="592" stroke="#e4e3df"/>
-    <text x="598" y="604" font-size="12" fill="#6b6b66">= billing_audit.maintenance_invoices</text>
-    <text x="598" y="620" font-size="12" fill="#d4761f">billing_month_id  [add]</text>
-    <text x="598" y="636" font-size="12" fill="#3a3a36">doc_number (OURS, minted)</text>
-    <text x="598" y="652" font-size="12" fill="#3a3a36">qbo_invoice_id</text>
-    <text x="598" y="668" font-size="12" fill="#d4761f">status: draft&#8594;&#8230;&#8594;paid  [add]</text>
+    <text x="598" y="604" font-size="12" fill="#6b6b66">= billing.invoices (QBO mirror)</text>
+    <text x="598" y="620" font-size="12" fill="#d4761f">draft: IN MEMORY, never stored</text>
+    <text x="598" y="636" font-size="12" fill="#3a3a36">doc_number (OURS, minted at issue)</text>
+    <text x="598" y="652" font-size="12" fill="#3a3a36">qbo_invoice_id (key after issue)</text>
+    <text x="598" y="668" font-size="12" fill="#3a3a36">status: derived (v_invoice_state)</text>
     <line x1="586" y1="682" x2="846" y2="682" stroke="#e4e3df"/>
     <text x="598" y="696" font-size="12" fill="#3a3a36">readyToSend()</text>
     <text x="598" y="712" font-size="12" fill="#3a3a36">recordDelivered() &#8658; settles visits</text>
@@ -256,7 +256,7 @@
     <path d="M586 408 C 556 408 556 362 530 362" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
     <text x="560" y="424" font-size="10.5" text-anchor="middle" fill="#6b6b66">task_id</text>
     <path d="M846 494 C 858 494 858 618 846 618" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
-    <text x="864" y="558" font-size="10.5" text-anchor="end" fill="#6b6b66">invoice_id</text>
+    <text x="864" y="558" font-size="10.5" text-anchor="end" fill="#6b6b66">grouped &#8594; (memory)</text>
     <path d="M530 722 C 558 722 558 818 586 818" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
     <text x="556" y="716" font-size="10.5" text-anchor="middle" fill="#6b6b66">consumes</text>
     <path d="M586 946 C 300 1016 20 866 20 420 C 20 340 26 320 33 310" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
@@ -353,18 +353,20 @@
     <tr><td>CatalogItem</td><td><code>maintenance.consumables</code> (has <code>qbo_item_id</code>)</td><td>none</td></tr>
     <tr><td>BillingMonth</td><td>&#8212;</td><td>new <code>billing.billing_months</code> (customer_id, month UNIQUE; flag; processing_status; closed_at)</td></tr>
     <tr><td>BillableItem</td><td>&#8212; (nearest ancestor: the promise's jsonb consumables)</td><td>new <code>billing.billable_items</code> &#8212; <code>billing_month_id</code>, UNIQUE <code>source_id</code>, task_id, kind, qty, unit_price_cents, amount_cents, invoice_id NULL, qbo_line_id</td></tr>
-    <tr><td>Invoice</td><td><b><code>billing_audit.maintenance_invoices</code></b> &#8212; already has uuid id, doc_number, qbo_invoice_id, billing_month, send_status/sent_at (+ line-items sibling)</td><td>add <code>billing_month_id</code> FK + <code>status</code>; its audit/send columns carry straight into the model. NOT a new table.</td></tr>
+    <tr><td>Invoice</td><td><b><code>billing.invoices</code></b> &#8212; the real QBO mirror, where sent/paid/credit machinery already lives</td><td><b>none.</b> Drafts are DERIVED state &#8212; in memory, rebuilt from the month whenever needed. <code>issue()</code> writes QBO; the echo lands in the mirror (existing sync). Status derives via <code>v_invoice_state</code>.</td></tr>
     <tr><td>IonInvoice</td><td><code>billing_audit.ion_task_transactions</code></td><td>none &#8212; consumed as facts by the Reconciler</td></tr>
     <tr><td>Variance</td><td>&#8212;</td><td>new <code>billing.variances</code></td></tr>
   </table>
-  <div class="call brk"><span class="tag">Two invoice tables, on purpose</span>
-  <code>billing_audit.maintenance_invoices</code> (existing, evolved) holds the
-  aggregate's children &#8212; drafts, grouping, status, send state.
-  <code>billing.invoices</code> stays the QBO mirror &#8212; the echo target after
-  <code>issue()</code>, where payments/credits machinery already lives. Linked by
-  <code>qbo_invoice_id</code>; nothing merges. <code>task_billing_periods</code>
-  and <code>maintenance_invoice_line_items</code> retire after phase 2
-  (billable_items supersedes the line snapshot).</div>
+  <div class="call brk"><span class="tag">One invoice table: the mirror. Drafts are never stored.</span>
+  A draft invoice is a pure function of the month &#8212; items + grouping
+  strategy &#8212; so it lives in memory and is rebuilt on demand, exactly like
+  routes and the routing Optimal draft (derived state gets no table). The only
+  durable invoice row is <code>billing.invoices</code>, the QBO mirror, written
+  by the echo when <code>issue()</code> creates the real thing. The durable
+  record of grouping is on the ITEMS: <code>qbo_invoice_id</code> +
+  <code>qbo_line_id</code>, stamped at issue. <code>task_billing_periods</code>,
+  <code>billing_audit.maintenance_invoices</code>, and
+  <code>maintenance_invoice_line_items</code> all retire after phase 2.</div>
 
   <div class="call why"><span class="tag">Parents hold objects, never id lists</span>
   BillingMonth has no <code>invoice_ids</code> attribute. In memory it holds the
