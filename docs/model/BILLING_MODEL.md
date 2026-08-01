@@ -22,7 +22,20 @@ we control it, so we can experiment).
 Invoice number: use ION's; if a task has two ION invoices, the one with more
 visits. (Phase-2 numbering once ION stops billing: open question #3.)
 
-## The objects
+## REVISED SHAPE (2026-08-01) — see billing.html for the current model
+
+Rulings that superseded the tables below: **BillingMonth is the aggregate root**
+and the billing<->maintenance module interface; it OWNS **BillableItems**
+(billing's translation of visits/usage — priced, claimable, `source_id` UNIQUE,
+`invoice_id` null until grouped) and OWNS **Invoice** (demoted to child entity,
+1..N per month, OUR doc numbers). **IonInvoice = value object** (immutable
+per-task fact `{ion_task_id, number, amount}` from `ion_task_transactions`),
+consumed by the Reconciler. Reconcile = month's items summed BY TASK vs ION
+facts — decoupled from our invoice grouping, so phase 1 is shadow-build with
+any grouping. Visit needs NO invoice backrefs (the item row is the tracking
+record); visits add only generated `state` + `settled_at`.
+
+## The objects (historical — superseded above)
 
 ### delivery module
 

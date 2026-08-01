@@ -72,22 +72,24 @@
   <a href="#open">Open questions</a>
 </nav>
 <main>
-  <div class="kicker">Domain model · draft for agreement</div>
+  <div class="kicker">Domain model &#183; draft for agreement</div>
   <h1>Billing: visits to money</h1>
-  <p class="lead">We build the invoices ourselves from visits. ION remains the source
-  of service facts and the pricing referee during migration; QuickBooks holds the
-  issued invoice and returns the line ids we track back onto every visit.</p>
+  <p class="lead">We build the invoices ourselves from visits. BillingMonth is the
+  interface between the billing and maintenance modules: it turns delivery facts
+  into billable items, groups them into invoices, and answers to ION only through
+  the per-task reconcile. QuickBooks holds issued invoices and echoes line ids back.</p>
 
   <h2 id="decision">The decision and what it deletes</h2>
   <div class="call why"><span class="tag">Ruled</span>
   Self-build. The old write-ahead promise, ION invoice matching, and
-  expected-vs-actual gates existed only to audit ION's invoices — gone. The
-  Reconciler survives with a new job: <b>do we agree with ION on labor pricing,
-  and is every billable consumable a line on our invoice.</b></div>
+  expected-vs-actual gates existed only to audit ION's invoices &#8212; gone. The
+  Reconciler survives with one job: <b>sum the month's billable items by task and
+  agree with ION's per-task invoice facts on labor pricing and consumable
+  completeness.</b> Our invoice grouping never enters that comparison.</div>
 
   <h2 id="uml">Object model</h2>
   <div class="uml">
-  <svg viewBox="0 0 880 866" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Inter,sans-serif">
+  <svg viewBox="0 0 880 982" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Inter,sans-serif">
     <defs>
       <marker id="ref" markerWidth="11" markerHeight="9" refX="10" refY="4.5" orient="auto">
         <path d="M0,0 L10,4.5 L0,9" fill="none" stroke="#6b6b66" stroke-width="1.4"/>
@@ -96,14 +98,14 @@
         <path d="M1,5 L7,1.5 L13,5 L7,8.5 Z" fill="#1c1c1a"/>
       </marker>
     </defs>
-    <rect x="12" y="14" width="270" height="840" rx="12" fill="#f4f7f6" stroke="#dfe7e5"/>
+    <rect x="12" y="14" width="270" height="956" rx="12" fill="#f4f7f6" stroke="#dfe7e5"/>
     <text x="26" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#0b6e6e">DELIVERY</text>
-    <rect x="298" y="14" width="250" height="840" rx="12" fill="#f5f5f9" stroke="#e2e2ec"/>
-    <text x="312" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#3b6fd4">AGREEMENTS</text>
-    <rect x="564" y="14" width="304" height="840" rx="12" fill="#faf6f2" stroke="#ece2d8"/>
+    <rect x="298" y="14" width="250" height="956" rx="12" fill="#f5f5f9" stroke="#e2e2ec"/>
+    <text x="312" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#3b6fd4">AGREEMENTS &#183; SHARED</text>
+    <rect x="564" y="14" width="304" height="956" rx="12" fill="#faf6f2" stroke="#ece2d8"/>
     <text x="578" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#d4761f">BILLING</text>
 
-    <rect x="34" y="62" width="226" height="308" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
+    <rect x="34" y="62" width="226" height="260" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
     <text x="147" y="80" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
     <text x="147" y="97" font-size="15" font-weight="700" text-anchor="middle">Visit</text>
     <line x1="34" y1="106" x2="260" y2="106" stroke="#e4e3df"/>
@@ -113,127 +115,150 @@
     <text x="46" y="166" font-size="12" fill="#3a3a36">started_at</text>
     <text x="46" y="182" font-size="12" fill="#3a3a36">ended_at</text>
     <text x="46" y="198" font-size="12" fill="#3a3a36">actual_tech_id</text>
-    <text x="46" y="214" font-size="12" fill="#3a3a36">state &#8592; gen(status, serviceable)</text>
+    <text x="46" y="214" font-size="12" fill="#d4761f">state &#8592; gen(status, serviceable)</text>
     <text x="46" y="230" font-size="12" fill="#d4761f">settled_at  [add]</text>
-    <text x="46" y="246" font-size="12" fill="#d4761f">invoice_id  [add]</text>
-    <text x="46" y="262" font-size="12" fill="#d4761f">doc_number  [add]</text>
-    <text x="46" y="278" font-size="12" fill="#d4761f">qbo_line_id  [add]</text>
-    <text x="46" y="294" font-size="12" fill="#6b6b66">readings: Reading[*]</text>
-    <text x="46" y="310" font-size="12" fill="#6b6b66">checklist: ChecklistItem[*]</text>
-    <text x="46" y="326" font-size="12" fill="#6b6b66">usage: ConsumableUsage[*]</text>
-    <line x1="34" y1="340" x2="260" y2="340" stroke="#e4e3df"/>
-    <text x="46" y="354" font-size="12" fill="#3a3a36">settle()</text>
-    <rect x="34" y="400" width="226" height="134" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
-    <text x="147" y="418" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
-    <text x="147" y="435" font-size="15" font-weight="700" text-anchor="middle">ConsumableUsage</text>
-    <line x1="34" y1="444" x2="260" y2="444" stroke="#e4e3df"/>
-    <text x="46" y="456" font-size="12" fill="#3a3a36">ion_item_id</text>
-    <text x="46" y="472" font-size="12" fill="#3a3a36">quantity</text>
-    <text x="46" y="488" font-size="12" fill="#3a3a36">base_quantity</text>
-    <text x="46" y="504" font-size="12" fill="#d4761f">invoice_id  [add]</text>
-    <text x="46" y="520" font-size="12" fill="#d4761f">qbo_line_id  [add]</text>
-    <rect x="34" y="564" width="226" height="102" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.2" stroke-dasharray="4 3"/>
-    <text x="147" y="582" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;value object&#187;</text>
-    <text x="147" y="599" font-size="15" font-weight="700" text-anchor="middle">Reading</text>
-    <line x1="34" y1="608" x2="260" y2="608" stroke="#e4e3df"/>
-    <text x="46" y="620" font-size="12" fill="#3a3a36">name</text>
-    <text x="46" y="636" font-size="12" fill="#3a3a36">value</text>
-    <text x="46" y="652" font-size="12" fill="#3a3a36">reading_id &#8594; definition</text>
-    <line x1="147" y1="400" x2="147" y2="370" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
-    <path d="M34 601 L26 601 L26 360 L33 360" fill="none" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
+    <text x="46" y="246" font-size="12" fill="#6b6b66">readings: Reading[*]</text>
+    <text x="46" y="262" font-size="12" fill="#6b6b66">checklist: ChecklistItem[*]</text>
+    <text x="46" y="278" font-size="12" fill="#6b6b66">usage: ConsumableUsage[*]</text>
+    <line x1="34" y1="292" x2="260" y2="292" stroke="#e4e3df"/>
+    <text x="46" y="306" font-size="12" fill="#3a3a36">settle()</text>
+    <rect x="34" y="352" width="226" height="102" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="147" y="370" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="147" y="387" font-size="15" font-weight="700" text-anchor="middle">ConsumableUsage</text>
+    <line x1="34" y1="396" x2="260" y2="396" stroke="#e4e3df"/>
+    <text x="46" y="408" font-size="12" fill="#3a3a36">ion_item_id</text>
+    <text x="46" y="424" font-size="12" fill="#3a3a36">quantity</text>
+    <text x="46" y="440" font-size="12" fill="#3a3a36">base_quantity</text>
+    <rect x="34" y="484" width="226" height="102" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.2" stroke-dasharray="4 3"/>
+    <text x="147" y="502" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;value object&#187;</text>
+    <text x="147" y="519" font-size="15" font-weight="700" text-anchor="middle">Reading</text>
+    <line x1="34" y1="528" x2="260" y2="528" stroke="#e4e3df"/>
+    <text x="46" y="540" font-size="12" fill="#3a3a36">name</text>
+    <text x="46" y="556" font-size="12" fill="#3a3a36">value</text>
+    <text x="46" y="572" font-size="12" fill="#3a3a36">reading_id &#8594; definition</text>
+    <line x1="147" y1="352" x2="147" y2="322" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
+    <path d="M34 521 L26 521 L26 312 L33 312" fill="none" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
 
-    <rect x="320" y="62" width="206" height="198" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <rect x="320" y="62" width="206" height="150" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
     <text x="423" y="80" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
-    <text x="423" y="97" font-size="15" font-weight="700" text-anchor="middle">Task</text>
+    <text x="423" y="97" font-size="15" font-weight="700" text-anchor="middle">Customer</text>
     <line x1="320" y1="106" x2="526" y2="106" stroke="#e4e3df"/>
-    <text x="332" y="118" font-size="12" fill="#3a3a36">customer_id</text>
-    <text x="332" y="134" font-size="12" fill="#3a3a36">ion_task_id</text>
-    <text x="332" y="150" font-size="12" fill="#3a3a36">status</text>
-    <text x="332" y="166" font-size="12" fill="#3a3a36">billing_method: per_visit | flat</text>
-    <text x="332" y="182" font-size="12" fill="#3a3a36">price_per_visit_cents</text>
-    <text x="332" y="198" font-size="12" fill="#3a3a36">flat_rate_monthly_cents</text>
-    <text x="332" y="214" font-size="12" fill="#3a3a36">starts_on</text>
-    <text x="332" y="230" font-size="12" fill="#3a3a36">ends_on</text>
-    <text x="332" y="246" font-size="12" fill="#d4761f">consumables_mode  [add]</text>
-    <rect x="320" y="290" width="206" height="134" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
-    <text x="423" y="308" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
-    <text x="423" y="325" font-size="15" font-weight="700" text-anchor="middle">CatalogItem</text>
-    <line x1="320" y1="334" x2="526" y2="334" stroke="#e4e3df"/>
-    <text x="332" y="346" font-size="12" fill="#3a3a36">ion_item_id</text>
-    <text x="332" y="362" font-size="12" fill="#3a3a36">item_name</text>
-    <text x="332" y="378" font-size="12" fill="#3a3a36">category</text>
-    <text x="332" y="394" font-size="12" fill="#3a3a36">unit_price_cents</text>
-    <text x="332" y="410" font-size="12" fill="#3a3a36">qbo_item_id</text>
-    <rect x="320" y="454" width="206" height="148" rx="8" fill="#faf7fd" stroke="#8a4fb0" stroke-width="1.2"/>
-    <text x="423" y="473" font-size="11" text-anchor="middle" fill="#8a4fb0">&#171;domain services&#187;</text>
-    <text x="332" y="495" font-size="13.5" font-weight="700" fill="#3a3a36">InvoiceBuilder</text>
-    <text x="332" y="510" font-size="11.5" fill="#6b6b66">grouping + format strategies</text>
-    <text x="332" y="532" font-size="13.5" font-weight="700" fill="#3a3a36">Reconciler</text>
-    <text x="332" y="547" font-size="11.5" fill="#6b6b66">ours vs ION &#183; price agreement</text>
-    <text x="332" y="569" font-size="13.5" font-weight="700" fill="#3a3a36">BillChecks</text>
-    <text x="332" y="584" font-size="11.5" fill="#6b6b66">misbilling + high-bill flag, any time</text>
+    <text x="332" y="118" font-size="12" fill="#3a3a36">id</text>
+    <text x="332" y="134" font-size="12" fill="#3a3a36">display_name</text>
+    <text x="332" y="150" font-size="12" fill="#3a3a36">qbo_customer_id</text>
+    <text x="332" y="166" font-size="12" fill="#3a3a36">ion_cust_id</text>
+    <text x="332" y="182" font-size="12" fill="#3a3a36">office_id</text>
+    <text x="332" y="198" font-size="12" fill="#3a3a36">preferred_payment_type</text>
+    <rect x="320" y="242" width="206" height="198" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="423" y="260" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="423" y="277" font-size="15" font-weight="700" text-anchor="middle">Task</text>
+    <line x1="320" y1="286" x2="526" y2="286" stroke="#e4e3df"/>
+    <text x="332" y="298" font-size="12" fill="#3a3a36">customer_id</text>
+    <text x="332" y="314" font-size="12" fill="#3a3a36">ion_task_id</text>
+    <text x="332" y="330" font-size="12" fill="#3a3a36">status</text>
+    <text x="332" y="346" font-size="12" fill="#3a3a36">billing_method: per_visit | flat</text>
+    <text x="332" y="362" font-size="12" fill="#3a3a36">price_per_visit_cents</text>
+    <text x="332" y="378" font-size="12" fill="#3a3a36">flat_rate_monthly_cents</text>
+    <text x="332" y="394" font-size="12" fill="#3a3a36">starts_on</text>
+    <text x="332" y="410" font-size="12" fill="#3a3a36">ends_on</text>
+    <text x="332" y="426" font-size="12" fill="#d4761f">consumables_mode  [add]</text>
+    <rect x="320" y="470" width="206" height="134" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="423" y="488" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="423" y="505" font-size="15" font-weight="700" text-anchor="middle">CatalogItem</text>
+    <line x1="320" y1="514" x2="526" y2="514" stroke="#e4e3df"/>
+    <text x="332" y="526" font-size="12" fill="#3a3a36">ion_item_id</text>
+    <text x="332" y="542" font-size="12" fill="#3a3a36">item_name</text>
+    <text x="332" y="558" font-size="12" fill="#3a3a36">category</text>
+    <text x="332" y="574" font-size="12" fill="#3a3a36">unit_price_cents</text>
+    <text x="332" y="590" font-size="12" fill="#3a3a36">qbo_item_id</text>
+    <rect x="320" y="634" width="206" height="148" rx="8" fill="#faf7fd" stroke="#8a4fb0" stroke-width="1.2"/>
+    <text x="423" y="653" font-size="11" text-anchor="middle" fill="#8a4fb0">&#171;domain services&#187;</text>
+    <text x="332" y="675" font-size="13.5" font-weight="700" fill="#3a3a36">InvoiceBuilder</text>
+    <text x="332" y="690" font-size="11.5" fill="#6b6b66">grouping + format strategies</text>
+    <text x="332" y="712" font-size="13.5" font-weight="700" fill="#3a3a36">Reconciler</text>
+    <text x="332" y="727" font-size="11.5" fill="#6b6b66">items by task vs IonInvoice</text>
+    <text x="332" y="749" font-size="13.5" font-weight="700" fill="#3a3a36">BillChecks</text>
+    <text x="332" y="764" font-size="11.5" fill="#6b6b66">misbilling + high-bill flag, any time</text>
 
-    <rect x="586" y="62" width="260" height="244" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
+    <rect x="586" y="62" width="260" height="212" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
     <text x="716" y="80" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
-    <text x="716" y="97" font-size="15" font-weight="700" text-anchor="middle">Invoice</text>
+    <text x="716" y="97" font-size="15" font-weight="700" text-anchor="middle">BillingMonth</text>
     <text x="838" y="80" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW TABLE</text>
     <line x1="586" y1="106" x2="846" y2="106" stroke="#e4e3df"/>
     <text x="598" y="118" font-size="12" fill="#3a3a36">customer_id</text>
     <text x="598" y="134" font-size="12" fill="#3a3a36">month</text>
-    <text x="598" y="150" font-size="12" fill="#3a3a36">doc_number (ION's)</text>
-    <text x="598" y="166" font-size="12" fill="#3a3a36">qbo_invoice_id</text>
-    <text x="598" y="182" font-size="12" fill="#3a3a36">status: draft&#8594;issued&#8594;sent&#8594;paid|void</text>
-    <text x="598" y="198" font-size="12" fill="#6b6b66">lines: InvoiceLine[*]</text>
-    <line x1="586" y1="212" x2="846" y2="212" stroke="#e4e3df"/>
-    <text x="598" y="226" font-size="12" fill="#3a3a36">issue()</text>
-    <text x="598" y="242" font-size="12" fill="#3a3a36">readyToSend()</text>
-    <text x="598" y="258" font-size="12" fill="#3a3a36">recordDelivered() &#8658; settles visits</text>
-    <text x="598" y="274" font-size="12" fill="#3a3a36">recordPayment()</text>
-    <text x="598" y="290" font-size="12" fill="#3a3a36">recordCredit()</text>
-    <rect x="586" y="336" width="260" height="150" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
-    <text x="716" y="354" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
-    <text x="716" y="371" font-size="15" font-weight="700" text-anchor="middle">InvoiceLine</text>
-    <text x="838" y="354" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW TABLE</text>
-    <line x1="586" y1="380" x2="846" y2="380" stroke="#e4e3df"/>
+    <text x="598" y="150" font-size="12" fill="#3a3a36">flag</text>
+    <text x="598" y="166" font-size="12" fill="#3a3a36">processing_status</text>
+    <text x="598" y="182" font-size="12" fill="#3a3a36">closed_at</text>
+    <line x1="586" y1="196" x2="846" y2="196" stroke="#e4e3df"/>
+    <text x="598" y="210" font-size="12" fill="#3a3a36">accrue(visits) &#8594; items</text>
+    <text x="598" y="226" font-size="12" fill="#3a3a36">regroup(strategy)</text>
+    <text x="598" y="242" font-size="12" fill="#3a3a36">issue(invoice)</text>
+    <text x="598" y="258" font-size="12" fill="#3a3a36">close() &#8212; refuses gaps</text>
+    <rect x="586" y="304" width="260" height="182" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="716" y="322" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="716" y="339" font-size="15" font-weight="700" text-anchor="middle">BillableItem</text>
+    <text x="838" y="322" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW TABLE</text>
+    <line x1="586" y1="348" x2="846" y2="348" stroke="#e4e3df"/>
+    <text x="598" y="360" font-size="12" fill="#3a3a36">source_id (visit | usage &#8212; UNIQUE)</text>
+    <text x="598" y="376" font-size="12" fill="#3a3a36">task_id</text>
     <text x="598" y="392" font-size="12" fill="#3a3a36">kind: labor | consumable</text>
-    <text x="598" y="408" font-size="12" fill="#3a3a36">source_id (visit | usage &#8212; UNIQUE)</text>
-    <text x="598" y="424" font-size="12" fill="#3a3a36">qty</text>
-    <text x="598" y="440" font-size="12" fill="#3a3a36">unit_price_cents</text>
-    <text x="598" y="456" font-size="12" fill="#3a3a36">amount_cents</text>
+    <text x="598" y="408" font-size="12" fill="#3a3a36">qty</text>
+    <text x="598" y="424" font-size="12" fill="#3a3a36">unit_price_cents</text>
+    <text x="598" y="440" font-size="12" fill="#3a3a36">amount_cents</text>
+    <text x="598" y="456" font-size="12" fill="#6b6b66">invoice_id (null until grouped)</text>
     <text x="598" y="472" font-size="12" fill="#6b6b66">qbo_line_id (echoed at issue)</text>
-    <line x1="716" y1="336" x2="716" y2="306" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
-    <rect x="586" y="516" width="260" height="164" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
-    <text x="716" y="534" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
-    <text x="716" y="551" font-size="15" font-weight="700" text-anchor="middle">BillingMonth</text>
+    <rect x="586" y="516" width="260" height="148" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="716" y="534" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="716" y="551" font-size="15" font-weight="700" text-anchor="middle">Invoice</text>
     <text x="838" y="534" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW TABLE</text>
     <line x1="586" y1="560" x2="846" y2="560" stroke="#e4e3df"/>
-    <text x="598" y="572" font-size="12" fill="#3a3a36">customer_id</text>
-    <text x="598" y="588" font-size="12" fill="#3a3a36">month</text>
-    <text x="598" y="604" font-size="12" fill="#3a3a36">flag</text>
-    <text x="598" y="620" font-size="12" fill="#3a3a36">processing_status</text>
-    <text x="598" y="636" font-size="12" fill="#3a3a36">closed_at</text>
-    <line x1="586" y1="650" x2="846" y2="650" stroke="#e4e3df"/>
-    <text x="598" y="664" font-size="12" fill="#3a3a36">close() &#8212; refuses while unbilled &gt; 0</text>
-    <rect x="586" y="710" width="260" height="118" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
-    <text x="716" y="728" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
-    <text x="716" y="745" font-size="15" font-weight="700" text-anchor="middle">Variance</text>
-    <text x="838" y="728" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW TABLE</text>
-    <line x1="586" y1="754" x2="846" y2="754" stroke="#e4e3df"/>
-    <text x="598" y="766" font-size="12" fill="#3a3a36">visit_id</text>
-    <text x="598" y="782" font-size="12" fill="#3a3a36">tech_id</text>
-    <text x="598" y="798" font-size="12" fill="#3a3a36">kind: discount | missed_corr</text>
-    <text x="598" y="814" font-size="12" fill="#3a3a36">amount_cents</text>
+    <text x="598" y="572" font-size="12" fill="#3a3a36">doc_number (OURS, minted)</text>
+    <text x="598" y="588" font-size="12" fill="#3a3a36">qbo_invoice_id</text>
+    <text x="598" y="604" font-size="12" fill="#3a3a36">status: draft&#8594;issued&#8594;sent&#8594;paid|void</text>
+    <line x1="586" y1="618" x2="846" y2="618" stroke="#e4e3df"/>
+    <text x="598" y="632" font-size="12" fill="#3a3a36">readyToSend()</text>
+    <text x="598" y="648" font-size="12" fill="#3a3a36">recordDelivered() &#8658; settles visits</text>
+    <rect x="586" y="694" width="260" height="102" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.2" stroke-dasharray="4 3"/>
+    <text x="716" y="712" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;value object &#183; ION fact&#187;</text>
+    <text x="716" y="729" font-size="15" font-weight="700" text-anchor="middle">IonInvoice</text>
+    <line x1="586" y1="738" x2="846" y2="738" stroke="#e4e3df"/>
+    <text x="598" y="750" font-size="12" fill="#3a3a36">ion_task_id</text>
+    <text x="598" y="766" font-size="12" fill="#3a3a36">ion_invoice_number</text>
+    <text x="598" y="782" font-size="12" fill="#3a3a36">amount_cents</text>
+    <rect x="586" y="826" width="260" height="118" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="716" y="844" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="716" y="861" font-size="15" font-weight="700" text-anchor="middle">Variance</text>
+    <text x="838" y="844" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW TABLE</text>
+    <line x1="586" y1="870" x2="846" y2="870" stroke="#e4e3df"/>
+    <text x="598" y="882" font-size="12" fill="#3a3a36">visit_id</text>
+    <text x="598" y="898" font-size="12" fill="#3a3a36">tech_id</text>
+    <text x="598" y="914" font-size="12" fill="#3a3a36">kind: discount | missed_corr</text>
+    <text x="598" y="930" font-size="12" fill="#3a3a36">amount_cents</text>
+    <line x1="716" y1="304" x2="716" y2="274" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
+    <path d="M846 560 L860 560 L860 258 L847 258" fill="none" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
 
-    <line x1="260" y1="114" x2="320" y2="114" stroke="#6b6b66" stroke-width="1.3" marker-end="url(#ref)" stroke-dasharray="5 4"/>
-    <text x="290" y="106" font-size="10.5" text-anchor="middle" fill="#6b6b66">task_id</text>
-    <path d="M260 452 C 292 452 292 340 320 340" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
-    <text x="290" y="444" font-size="10.5" text-anchor="middle" fill="#6b6b66">ion_item_id</text>
-    <path d="M586 404 C 440 404 330 260 262 220" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
-    <text x="398" y="438" font-size="10.5" fill="#6b6b66">source_id &#8594; visit | usage</text>
-    <path d="M586 762 C 300 832 20 702 20 420 C 20 330 26 300 33 290" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
-    <text x="300" y="804" font-size="10.5" fill="#6b6b66">visit_id</text>
-    <path d="M846 130 C 862 130 862 170 862 300 L862 556 C 862 571 854 578 846 581" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
-    <text x="858" y="326" font-size="10.5" text-anchor="end" fill="#6b6b66">(customer_id, month)</text>
+    <!-- references -->
+    <path d="M260 110 C 292 110 292 290 320 290" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="288" y="212" font-size="10.5" text-anchor="middle" fill="#6b6b66">task_id</text>
+    <path d="M260 126 C 292 126 292 100 320 100" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="288" y="96" font-size="10.5" text-anchor="middle" fill="#6b6b66">customer_id</text>
+    <line x1="423" y1="242" x2="423" y2="221" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="432" y="232" font-size="10.5" fill="#6b6b66">customer_id</text>
+    <line x1="586" y1="112" x2="530" y2="112" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="558" y="104" font-size="10.5" text-anchor="middle" fill="#6b6b66">customer_id</text>
+    <path d="M260 408 C 292 408 292 540 320 540" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="288" y="476" font-size="10.5" text-anchor="middle" fill="#6b6b66">ion_item_id</text>
+    <path d="M586 360 C 460 360 420 227 262 190" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="400" y="223" font-size="10.5" fill="#6b6b66">source_id &#8594; visit | usage</text>
+    <path d="M586 376 C 556 376 556 362 530 362" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="560" y="392" font-size="10.5" text-anchor="middle" fill="#6b6b66">task_id</text>
+    <path d="M846 462 C 858 462 858 586 846 586" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="864" y="526" font-size="10.5" text-anchor="end" fill="#6b6b66">invoice_id</text>
+    <path d="M530 722 C 558 722 558 754 586 754" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="556" y="716" font-size="10.5" text-anchor="middle" fill="#6b6b66">consumes</text>
+    <path d="M586 882 C 300 952 20 802 20 420 C 20 340 26 320 33 310" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="300" y="926" font-size="10.5" fill="#6b6b66">visit_id</text>
   </svg>
   <div class="legend">
     <span><span class="sw" style="background:#0b6e6e"></span><b>aggregate root</b></span>
@@ -244,35 +269,36 @@
   </div>
   </div>
 
-  <div class="call why"><span class="tag">How object references work in code</span>
-  Two different mechanisms, and the diagram distinguishes them. <b>Composition
-  (filled diamond):</b> the owner's attribute holds the child objects themselves —
-  <code>Invoice.lines</code> is an in-memory array of <code>InvoiceLine</code>
-  instances (real pointers), loaded together by the repository as one aggregate.
-  <b>Reference (dashed arrow):</b> the attribute holds ONLY the id, as plain data —
-  <code>visit.taskId</code> is a string. There is no live pointer to a Task object;
-  when a use case needs the Task, the application layer asks
-  <code>taskRepository.load(visit.taskId)</code>. Same storage either way (rows +
-  FKs); the difference is purely what gets reconstituted into memory together.</div>
+  <div class="call why"><span class="tag">The shape, in one paragraph</span>
+  <b>BillingMonth</b> (customer &#215; month) is the aggregate root and the module
+  boundary: billing's own representation of a month of delivered service. It OWNS
+  the <b>BillableItems</b> (billing's translation of visits/usage &#8212; priced,
+  claimable; <code>source_id</code> references delivery by id only) and OWNS the
+  <b>Invoices</b> (1..N &#8212; normally one, splits allowed; each provably covering
+  the month because the aggregate closes over all of them). <b>IonInvoice</b> is
+  demoted to a value object: an immutable external fact
+  <code>{ion_task_id, number, amount}</code> consumed by the Reconciler for the
+  per-task check. ION doc numbers live only there; our invoices mint our own.</div>
 
-  <div class="call brk"><span class="tag">Backrefs are the tracking backbone</span>
-  When a line is added and later issued, QBO's echo (<code>invoiceId</code>,
-  <code>docNumber</code>, <code>qboLineId</code>) is written back onto the visit /
-  usage. "Where was this billed" is a column read — never a join hunt.</div>
+  <div class="call brk"><span class="tag">The billable item is the tracking backbone</span>
+  One row per billed thing: <code>source_id</code> (UNIQUE &#8212; exclusivity I-B1),
+  <code>task_id</code> (the reconcile grain), <code>invoice_id</code> (grouping),
+  <code>qbo_line_id</code> (QBO's echo at issue). "Where was this visit billed" is
+  one indexed lookup; the visit itself carries only <code>settled_at</code>.</div>
 
-  <h2 id="moments">Claim vs settle — two moments, not one</h2>
+  <h2 id="moments">Claim vs settle &#8212; two moments, not one</h2>
   <table>
-    <tr><th></th><th>Claim (line added to draft)</th><th>Settle (SEND)</th></tr>
-    <tr><th>Means</th><td>visit/usage is spoken for — no other invoice may take it</td><td>facts frozen forever</td></tr>
-    <tr><th>Enforced by</th><td>unique index on <code>invoice_lines.source_id</code> (only the DB sees all invoices)</td><td><code>visit.settle()</code>; edits refused</td></tr>
-    <tr><th>Reversible?</th><td>yes — draft edits release/re-claim</td><td>no — changes become <b>Variance</b> rows (discount / missed correction), attributed to the tech</td></tr>
+    <tr><th></th><th>Claim (BillableItem created)</th><th>Settle (SEND)</th></tr>
+    <tr><th>Means</th><td>the month owns this visit/usage &#8212; no other item may take it</td><td>facts frozen forever</td></tr>
+    <tr><th>Enforced by</th><td>aggregate refuses a duplicate source within the month; unique index on <code>billable_items.source_id</code> backstops across months</td><td><code>visit.settle()</code>; edits refused</td></tr>
+    <tr><th>Reversible?</th><td>yes &#8212; items re-price on accrue; regrouping between invoices is free while drafts</td><td>no &#8212; changes become <b>Variance</b> rows, attributed to the tech</td></tr>
   </table>
 
-  <h2 id="phases">Migration phases</h2>
+  <h2 id="phases">Migration phases (reconcile is decoupled from grouping)</h2>
   <table>
-    <tr><th>Phase</th><th>Our invoices</th><th>Check</th></tr>
-    <tr><td><b>1 — mirror ION's grain</b></td><td>grouped BY TASK; ION's doc number (two ION invoices &#8594; the one with more visits)</td><td>Reconciler: exact match per task_id = the <b>green light</b></td></tr>
-    <tr><td><b>2 — our grain</b></td><td>ONE per customer-month; visits date-sorted; format per billing type, ION-like at first (strategy interface — we can experiment)</td><td>price-agreement checks continue</td></tr>
+    <tr><th>Phase</th><th>What runs</th><th>Check</th></tr>
+    <tr><td><b>1 &#8212; shadow</b></td><td>accrue + group + draft only; ION still bills</td><td>Reconciler: items summed by task vs IonInvoice facts &#8212; exact match per task = the <b>green light</b>. Our grouping is irrelevant to the check, so any strategy can run from day one.</td></tr>
+    <tr><td><b>2 &#8212; issue</b></td><td>one invoice per customer-month (builder policy, not invariant); our doc numbers; ION display-only</td><td>price-agreement checks continue while ION still prices tasks</td></tr>
   </table>
 
   <h2 id="flow">Workflow through the layers</h2>
@@ -281,29 +307,33 @@
       <div class="row"><span class="chip inf">infra</span>ION day logs &#8594; mapper</div>
       <div class="row"><span class="chip dom">domain</span>Visit construction, state from ION flags</div></div></div>
     <div class="arrowdown">&#8595;</div>
-    <div class="step"><div class="name">buildInvoices<span>re-runnable on open months</span></div><div class="body">
-      <div class="row"><span class="chip inf">infra</span>load visits, tasks, catalog</div>
-      <div class="row"><span class="chip dom">domain</span>InvoiceBuilder &#8594; drafts; claims recorded (unique index = exclusivity)</div></div></div>
+    <div class="step"><div class="name">accrueMonth<span>continuous; re-runnable</span></div><div class="body">
+      <div class="row"><span class="chip inf">infra</span>load visits, tasks, catalog, month</div>
+      <div class="row"><span class="chip dom">domain</span>month.accrue(): billability + pricing &#8594; BillableItems; expected total is LIVE mid-month</div></div></div>
+    <div class="arrowdown">&#8595;</div>
+    <div class="step"><div class="name">groupInvoices<span>re-arrangeable while draft</span></div><div class="body">
+      <div class="row"><span class="chip dom">domain</span>InvoiceBuilder strategy assigns items &#8594; draft Invoice(s)</div></div></div>
     <div class="arrowdown">&#8595;</div>
     <div class="step"><div class="name">reconcile + checkBills<span>any time; phase-1 gate</span></div><div class="body">
-      <div class="row"><span class="chip dom">domain</span>Reconciler vs ION · BillChecks &#8594; misbilling findings, high-bill flags</div></div></div>
+      <div class="row"><span class="chip inf">infra</span>load IonInvoice facts (ion_task_transactions)</div>
+      <div class="row"><span class="chip dom">domain</span>items by task vs ION &#183; misbilling findings &#183; high-bill flags</div></div></div>
     <div class="arrowdown">&#8595;</div>
     <div class="step"><div class="name">issueInvoice<span>creates it in QBO</span></div><div class="body">
-      <div class="row"><span class="chip dom">domain</span>invoice.issue() — has lines, month open</div>
-      <div class="row"><span class="chip inf">infra</span>qbo.create &#8594; echo: qboId, docNumber, line ids</div>
-      <div class="row"><span class="chip dom">domain</span>recordIssued(echo) &#8594; backrefs onto visits</div></div></div>
+      <div class="row"><span class="chip dom">domain</span>month.issue(invoice) &#8212; has items, month open</div>
+      <div class="row"><span class="chip inf">infra</span>qbo.create &#8594; echo: qbo_invoice_id, line ids</div>
+      <div class="row"><span class="chip dom">domain</span>echo lands on items (qbo_line_id)</div></div></div>
     <div class="arrowdown">&#8595;</div>
     <div class="step"><div class="name">explainFlag<span>human on demand</span></div><div class="body">
       <div class="row"><span class="chip inf">infra</span>LLM port: email/PDF from the month's visit data</div>
-      <div class="row">human reviews, edits, attaches — or pushes through without</div></div></div>
+      <div class="row">human reviews, edits, attaches &#8212; or pushes through without</div></div></div>
     <div class="arrowdown">&#8595;</div>
-    <div class="step"><div class="name">processMonth<span>IRREVERSIBLE — money moves</span></div><div class="body">
-      <div class="row"><span class="chip dom">domain</span>credit eligibility (polymorphic match) · chargeable checks</div>
+    <div class="step"><div class="name">processMonth<span>IRREVERSIBLE &#8212; money moves</span></div><div class="body">
+      <div class="row"><span class="chip dom">domain</span>credit eligibility (polymorphic match) &#183; chargeable checks</div>
       <div class="row"><span class="chip inf">infra</span>QBO credits &#8226; autopay charge &#8226; Channel send</div>
-      <div class="row"><span class="chip dom">domain</span>SEND &#8658; visit.settle() — after this, variances only</div></div></div>
+      <div class="row"><span class="chip dom">domain</span>SEND &#8658; visit.settle() &#8212; after this, variances only</div></div></div>
     <div class="arrowdown">&#8595;</div>
     <div class="step"><div class="name">closeMonth<span>completeness gate</span></div><div class="body">
-      <div class="row"><span class="chip dom">domain</span>refuses while billable-unclaimed &gt; 0</div></div></div>
+      <div class="row"><span class="chip dom">domain</span>refuses while a billable visit lacks an item, or an item lacks an invoice</div></div></div>
   </div>
 
   <h2 id="flags">Flagged bills (replaces discounts)</h2>
@@ -311,37 +341,41 @@
   from the month's visits (what drove it, what to do, or one-time) &#8594; human
   review/edit &#8594; sent with the invoice, or pushed through without.</p>
 
-  <h2 id="schema">Schema fit — model vs the live database</h2>
-  <p>Every box above was checked against the live schema. Delivery and agreements
-  already fit; billing needs four small additions and three new tables. Orange
-  <b>[add]</b> / <b>NEW TABLE</b> marks in the diagram are exactly this list.</p>
+  <h2 id="schema">Schema fit &#8212; model vs the live database</h2>
   <table>
     <tr><th>Model object</th><th>Lives today</th><th>Delta needed</th></tr>
-    <tr><td>Visit</td><td><code>maintenance.visits</code> (rich: state facts split across <code>status</code> + <code>is_serviceable</code> + <code>failure_reason</code>)</td>
-        <td>generated <code>state</code> column; <code>settled_at</code>; claim backrefs <code>invoice_id</code>, <code>doc_number</code>, <code>qbo_line_id</code></td></tr>
-    <tr><td>Reading / Checklist / Usage</td><td><code>visit_readings</code> · <code>visit_tasks</code> · <code>consumables_usage</code> (tall, alias-resolved)</td>
-        <td>usage gets <code>invoice_id</code> + <code>qbo_line_id</code> backrefs</td></tr>
-    <tr><td>Task</td><td><code>maintenance.tasks</code> (billing_method, both rates, window)</td>
-        <td><code>consumables_mode</code> (incl | separate) — today implied by ION invoice type, never stored</td></tr>
-    <tr><td>CatalogItem</td><td><code>maintenance.consumables</code> (142 rows; already has <code>qbo_item_id</code> — needed to build QBO lines)</td><td>none</td></tr>
-    <tr><td>Invoice + InvoiceLine</td><td><b>nothing</b> — <code>billing.invoices</code> is the QBO MIRROR (text qbo id, jsonb line snapshot, sync machinery); it cannot hold drafts</td>
-        <td>new <code>billing.maintenance_invoices</code> + <code>billing.maintenance_invoice_lines</code> (UNIQUE <code>source_id</code> = I-B1)</td></tr>
-    <tr><td>BillingMonth</td><td>closest is <code>billing_audit.task_billing_periods</code> — task-grained, promise-era; wrong grain, wrong job</td>
-        <td>new <code>billing.billing_months</code>; the promise table retires after phase 2</td></tr>
-    <tr><td>Variance</td><td><b>nothing</b></td><td>new <code>billing.variances</code></td></tr>
+    <tr><td>Customer</td><td><code>public."Customers"</code> (QBO mirror + ion_cust_id, office, payment prefs)</td><td>none</td></tr>
+    <tr><td>Visit + children</td><td><code>maintenance.visits</code>, <code>visit_readings</code>, <code>visit_tasks</code>, <code>consumables_usage</code></td>
+        <td>generated <code>state</code>; <code>settled_at</code>. Backrefs NOT needed &#8212; the BillableItem row is the tracking record.</td></tr>
+    <tr><td>Task</td><td><code>maintenance.tasks</code></td><td><code>consumables_mode</code> (incl | separate)</td></tr>
+    <tr><td>CatalogItem</td><td><code>maintenance.consumables</code> (has <code>qbo_item_id</code>)</td><td>none</td></tr>
+    <tr><td>BillingMonth</td><td>&#8212;</td><td>new <code>billing.billing_months</code> (customer_id, month UNIQUE; flag; processing_status; closed_at)</td></tr>
+    <tr><td>BillableItem</td><td>&#8212; (nearest ancestor: the promise's jsonb consumables)</td><td>new <code>billing.billable_items</code> &#8212; <code>billing_month_id</code>, UNIQUE <code>source_id</code>, task_id, kind, qty, unit_price_cents, amount_cents, invoice_id NULL, qbo_line_id</td></tr>
+    <tr><td>Invoice</td><td><code>billing.invoices</code> is the QBO MIRROR &#8212; cannot hold drafts</td><td>new <code>billing.maintenance_invoices</code> (billing_month_id FK, our doc_number sequence, qbo_invoice_id, status)</td></tr>
+    <tr><td>IonInvoice</td><td><code>billing_audit.ion_task_transactions</code></td><td>none &#8212; consumed as facts by the Reconciler</td></tr>
+    <tr><td>Variance</td><td>&#8212;</td><td>new <code>billing.variances</code></td></tr>
   </table>
   <div class="call brk"><span class="tag">Two invoice tables, on purpose</span>
-  Our <code>maintenance_invoices</code> is the AGGREGATE (drafts, claims, status).
-  <code>billing.invoices</code> stays the QBO mirror — the echo target after
-  <code>issue()</code>, where payments/credits machinery already lives. The
-  aggregate links to the mirror by <code>qbo_invoice_id</code>; nothing merges.</div>
+  Our <code>maintenance_invoices</code> holds the aggregate's children (drafts,
+  grouping, status). <code>billing.invoices</code> stays the QBO mirror &#8212; the
+  echo target after <code>issue()</code>, where payments/credits machinery already
+  lives. Linked by <code>qbo_invoice_id</code>; nothing merges.
+  <code>billing_audit.task_billing_periods</code> retires after phase 2.</div>
+
+  <div class="call why"><span class="tag">How object references work in code</span>
+  <b>Composition (filled diamond):</b> the owner's attribute holds the child
+  objects &#8212; <code>month.items</code> is an in-memory array of BillableItem
+  instances, loaded and saved with the month as one unit. <b>Reference (dashed
+  arrow):</b> the attribute holds ONLY the id as plain data &#8212;
+  <code>item.source_id</code> is a string; turning it into a Visit is a separate
+  act through a repository. Same storage either way (rows + FKs); the difference
+  is what gets reconstituted into memory together.</div>
 
   <h2 id="open">Open questions</h2>
   <table>
-    <tr><td>1</td><td>Close per customer-month + month-wide rollup — confirm</td></tr>
+    <tr><td>1</td><td>Doc-number sequence for our invoices (format, per-office or global)</td></tr>
     <tr><td>2</td><td>Human gate before <code>issue()</code> pushes to QBO, or automatic once checks pass?</td></tr>
-    <tr><td>3</td><td>Phase-2 doc numbering once ION stops billing</td></tr>
-    <tr><td>4</td><td>Glossary word-by-word: Visit · Claim · Settle · Issue · Variance · Billing Month · Flag</td></tr>
+    <tr><td>3</td><td>Glossary word-by-word: Visit &#183; Billable Item &#183; Claim &#183; Settle &#183; Issue &#183; Variance &#183; Billing Month &#183; Flag</td></tr>
   </table>
 </main>
 </div>
