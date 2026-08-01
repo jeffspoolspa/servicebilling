@@ -5,7 +5,7 @@
  * The domain never queries; this is the only file that knows the tables.
  */
 import { BillingMonth } from "@/lib/domain/billing"
-import type { BillableItem, Catalog, TaskTerms, VisitFact } from "@/lib/domain/billing"
+import type { BillableItem, Catalog, IonInvoiceFact, TaskTerms, VisitFact } from "@/lib/domain/billing"
 
 interface Query extends PromiseLike<{ data: unknown; error: { message: string } | null }> {
   select(columns: string): Query
@@ -137,6 +137,45 @@ export class SupabaseBillingRepository {
       })),
       terms,
     }
+  }
+
+  /** Every billable item of a month, across customers — the reconcile substrate. */
+  async itemsForMonth(month: string): Promise<BillableItem[]> {
+    const monthIds = await all<{ id: string }>((a, b) =>
+      this.billing().from("billing_months").select("id").eq("month", month).order("id").range(a, b))
+    const out: BillableItem[] = []
+    for (let i = 0; i < monthIds.length; i += 100) {
+      type Row = { source_kind: string; source_id: string | null; task_id: string; kind: string; service_date: string | null; item_name: string | null; qty: number; unit_price_cents: number | null; amount_cents: number | null }
+      const rows = await all<Row>((a, b) =>
+        this.billing().from("billable_items")
+          .select("source_kind, source_id, task_id, kind, service_date, item_name, qty, unit_price_cents, amount_cents")
+          .in("billing_month_id", monthIds.slice(i, i + 100).map((m) => m.id)).order("id").range(a, b))
+      out.push(...rows.map((r) => ({
+        sourceKind: r.source_kind as BillableItem["sourceKind"], sourceId: r.source_id,
+        taskId: r.task_id, kind: r.kind as BillableItem["kind"], serviceDate: r.service_date,
+        itemName: r.item_name, qty: Number(r.qty), unitPriceCents: r.unit_price_cents, amountCents: r.amount_cents,
+      })))
+    }
+    return out
+  }
+
+  /** ION's per-task invoice facts for a month (the pulled transactions report). */
+  async ionFactsFor(month: string): Promise<IonInvoiceFact[]> {
+    const rows = await all<{ ion_task_id: string; amt_cents: number; customer: string | null }>((a, b) =>
+      this.client.schema("billing_audit").from("ion_task_transactions")
+        .select("ion_task_id, amt_cents, customer").eq("month", month).order("transaction_id").range(a, b))
+    return rows.map((r) => ({ ionTaskId: r.ion_task_id, amountCents: r.amt_cents, customer: r.customer }))
+  }
+
+  /** task uuid -> ion_task_id, for the tasks named. */
+  async ionTaskBridge(taskIds: readonly string[]): Promise<Map<string, string>> {
+    const bridge = new Map<string, string>()
+    for (let i = 0; i < taskIds.length; i += 200) {
+      const rows = await all<{ id: string; ion_task_id: string | null }>((a, b) =>
+        this.maint().from("tasks").select("id, ion_task_id").in("id", taskIds.slice(i, i + 200)).order("id").range(a, b))
+      for (const t of rows) if (t.ion_task_id) bridge.set(t.id, t.ion_task_id)
+    }
+    return bridge
   }
 
   private catalogMemo: Catalog | null = null

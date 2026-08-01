@@ -3,6 +3,8 @@
  * use case (docs/conventions/LAYERING.md). Load -> domain -> persist; the
  * decisions are all downstairs.
  */
+import { Reconciler } from "@/lib/domain/billing"
+import type { ReconcileReport } from "@/lib/domain/billing"
 import { SupabaseBillingRepository } from "@/lib/infrastructure/billing/supabase-billing-repository"
 
 export interface AccrualSummary {
@@ -43,5 +45,19 @@ export class BillingService {
       expectedTotalCents: exp.reduce((n, e) => n + e.laborCents + e.consumableCents, 0),
       removed,
     }
+  }
+
+  /**
+   * The phase-1 gate: the month's items (from the table — the substrate)
+   * rolled up per task and diffed against ION's pulled invoice facts.
+   * Read-only and cheap; run any time after a report pull.
+   */
+  async reconcileMonth(month: string): Promise<ReconcileReport> {
+    const [items, facts] = await Promise.all([
+      this.repository.itemsForMonth(month),
+      this.repository.ionFactsFor(month),
+    ])
+    const bridge = await this.repository.ionTaskBridge([...new Set(items.map((i) => i.taskId))])
+    return new Reconciler().reconcile(month, items, facts, bridge)
   }
 }
