@@ -139,10 +139,14 @@ export class SupabaseBillingRepository {
     }
   }
 
+  private catalogMemo: Catalog | null = null
+
   async catalog(): Promise<Catalog> {
+    if (this.catalogMemo) return this.catalogMemo
     const rows = await all<{ ion_item_id: string; unit_price_cents: number | null }>((a, b) =>
       this.maint().from("consumables").select("ion_item_id, unit_price_cents").order("ion_item_id").range(a, b))
-    return new Map(rows.map((r) => [r.ion_item_id, r.unit_price_cents]))
+    this.catalogMemo = new Map(rows.map((r) => [r.ion_item_id, r.unit_price_cents]))
+    return this.catalogMemo
   }
 
   /**
