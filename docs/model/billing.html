@@ -86,7 +86,7 @@
 
   <h2 id="uml">Object model</h2>
   <div class="uml">
-  <svg viewBox="0 0 880 620" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Inter,sans-serif">
+  <svg viewBox="0 0 880 745" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Inter,sans-serif">
     <defs>
       <marker id="ref" markerWidth="11" markerHeight="9" refX="10" refY="4.5" orient="auto">
         <path d="M0,0 L10,4.5 L0,9" fill="none" stroke="#6b6b66" stroke-width="1.4"/>
@@ -96,134 +96,148 @@
       </marker>
     </defs>
     <!-- module lanes -->
-    <rect x="12" y="14" width="270" height="590" rx="12" fill="#f4f7f6" stroke="#dfe7e5"/>
+    <rect x="12" y="14" width="270" height="716" rx="12" fill="#f4f7f6" stroke="#dfe7e5"/>
     <text x="26" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#0b6e6e">DELIVERY</text>
-    <rect x="298" y="14" width="250" height="590" rx="12" fill="#f5f5f9" stroke="#e2e2ec"/>
+    <rect x="298" y="14" width="250" height="716" rx="12" fill="#f5f5f9" stroke="#e2e2ec"/>
     <text x="312" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#3b6fd4">AGREEMENTS</text>
-    <rect x="564" y="14" width="304" height="590" rx="12" fill="#faf6f2" stroke="#ece2d8"/>
+    <rect x="564" y="14" width="304" height="716" rx="12" fill="#faf6f2" stroke="#ece2d8"/>
     <text x="578" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#d4761f">BILLING</text>
 
-    <!-- Visit -->
-    <g>
-      <rect x="34" y="62" width="226" height="140" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
-      <text x="147" y="82" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
-      <text x="147" y="99" font-size="15" font-weight="700" text-anchor="middle">Visit</text>
-      <line x1="34" y1="108" x2="260" y2="108" stroke="#e4e3df"/>
-      <text x="46" y="126" font-size="12.5" fill="#3a3a36">state: scheduled | completed |</text>
-      <text x="102" y="141" font-size="12.5" fill="#3a3a36">skipped | non_serviceable</text>
-      <text x="46" y="159" font-size="12.5" fill="#3a3a36">date · minutes · settled</text>
-      <text x="46" y="177" font-size="12.5" fill="#6b6b66">backrefs: invoiceId, docNo, qboLineId</text>
-      <text x="46" y="193" font-size="12.5" fill="#3a3a36">settle()</text>
-    </g>
-    <!-- ConsumableUsage -->
-    <g>
-      <rect x="34" y="252" width="226" height="86" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
-      <text x="147" y="271" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
-      <text x="147" y="288" font-size="14.5" font-weight="700" text-anchor="middle">ConsumableUsage</text>
-      <line x1="34" y1="296" x2="260" y2="296" stroke="#e4e3df"/>
-      <text x="46" y="314" font-size="12.5" fill="#3a3a36">itemId &#8594; CatalogItem · quantity</text>
-      <text x="46" y="330" font-size="12.5" fill="#6b6b66">backrefs: invoiceId, qboLineId</text>
-    </g>
-    <!-- Reading -->
-    <g>
-      <rect x="34" y="372" width="226" height="64" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.2" stroke-dasharray="4 3"/>
-      <text x="147" y="391" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;value object&#187;</text>
-      <text x="147" y="408" font-size="14" font-weight="700" text-anchor="middle">Reading</text>
-      <text x="147" y="426" font-size="12.5" text-anchor="middle" fill="#3a3a36">type · value · unit</text>
-    </g>
-    <!-- composition: Visit owns usage + reading -->
-    <line x1="147" y1="252" x2="147" y2="202" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
-    <line x1="90" y1="372" x2="90" y2="202" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
+    <!-- ============ Visit ============ -->
+    <rect x="34" y="62" width="226" height="184" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
+    <text x="147" y="80" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
+    <text x="147" y="97" font-size="15" font-weight="700" text-anchor="middle">Visit</text>
+    <line x1="34" y1="106" x2="260" y2="106" stroke="#e4e3df"/>
+    <text x="46" y="124" font-size="12" fill="#3a3a36">taskId &#183; customerId</text>
+    <text x="46" y="140" font-size="12" fill="#3a3a36">date &#183; minutes</text>
+    <text x="46" y="156" font-size="12" fill="#3a3a36">state: sched|compl|skip|non_serv</text>
+    <text x="46" y="172" font-size="12" fill="#3a3a36">settled: bool</text>
+    <text x="46" y="188" font-size="12" fill="#6b6b66">backrefs: invoiceId, docNo, qboLineId</text>
+    <text x="46" y="204" font-size="12" fill="#6b6b66">usage: Usage[*] &#183; readings: Reading[*]</text>
+    <line x1="34" y1="214" x2="260" y2="214" stroke="#e4e3df"/>
+    <text x="46" y="232" font-size="12" fill="#3a3a36">settle()</text>
 
-    <!-- Task -->
-    <g>
-      <rect x="320" y="62" width="206" height="118" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
-      <text x="423" y="81" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
-      <text x="423" y="98" font-size="15" font-weight="700" text-anchor="middle">Task</text>
-      <line x1="320" y1="106" x2="526" y2="106" stroke="#e4e3df"/>
-      <text x="332" y="124" font-size="12.5" fill="#3a3a36">billingMethod: per_visit | flat</text>
-      <text x="332" y="140" font-size="12.5" fill="#3a3a36">rate · consumables incl | sep</text>
-      <text x="332" y="156" font-size="12.5" fill="#3a3a36">active window</text>
-    </g>
-    <!-- CatalogItem -->
-    <g>
-      <rect x="320" y="252" width="206" height="76" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
-      <text x="423" y="271" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
-      <text x="423" y="288" font-size="14.5" font-weight="700" text-anchor="middle">CatalogItem</text>
-      <line x1="320" y1="296" x2="526" y2="296" stroke="#e4e3df"/>
-      <text x="332" y="314" font-size="12.5" fill="#3a3a36">ionItemId · name · unitPrice</text>
-    </g>
-    <!-- services -->
-    <g>
-      <rect x="320" y="422" width="206" height="150" rx="8" fill="#faf7fd" stroke="#8a4fb0" stroke-width="1.2"/>
-      <text x="423" y="441" font-size="11" text-anchor="middle" fill="#8a4fb0">&#171;domain services&#187;</text>
-      <text x="332" y="463" font-size="13.5" font-weight="700" fill="#3a3a36">InvoiceBuilder</text>
-      <text x="332" y="479" font-size="12" fill="#6b6b66">grouping + format strategies</text>
-      <text x="332" y="501" font-size="13.5" font-weight="700" fill="#3a3a36">Reconciler</text>
-      <text x="332" y="517" font-size="12" fill="#6b6b66">ours vs ION · price agreement</text>
-      <text x="332" y="539" font-size="13.5" font-weight="700" fill="#3a3a36">BillChecks</text>
-      <text x="332" y="555" font-size="12" fill="#6b6b66">misbilling + high-bill flag, any time</text>
-    </g>
+    <!-- ============ ConsumableUsage ============ -->
+    <rect x="34" y="286" width="226" height="90" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="147" y="304" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="147" y="320" font-size="14.5" font-weight="700" text-anchor="middle">ConsumableUsage</text>
+    <line x1="34" y1="328" x2="260" y2="328" stroke="#e4e3df"/>
+    <text x="46" y="346" font-size="12" fill="#3a3a36">itemId &#183; quantity</text>
+    <text x="46" y="362" font-size="12" fill="#6b6b66">backrefs: invoiceId, qboLineId</text>
 
-    <!-- Invoice -->
-    <g>
-      <rect x="586" y="62" width="260" height="128" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
-      <text x="716" y="81" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
-      <text x="716" y="98" font-size="15" font-weight="700" text-anchor="middle">Invoice</text>
-      <line x1="586" y1="106" x2="846" y2="106" stroke="#e4e3df"/>
-      <text x="598" y="124" font-size="12.5" fill="#3a3a36">customer · month · docNumber (ION's)</text>
-      <text x="598" y="140" font-size="12.5" fill="#3a3a36">status: draft&#8594;issued&#8594;sent&#8594;paid | void</text>
-      <text x="598" y="158" font-size="12.5" fill="#3a3a36">issue() · readyToSend() · recordPayment()</text>
-      <text x="598" y="174" font-size="12.5" fill="#3a3a36">recordDelivered() &#8592; send = settle visits</text>
-    </g>
-    <!-- InvoiceLine -->
-    <g>
-      <rect x="586" y="240" width="260" height="104" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
-      <text x="716" y="259" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
-      <text x="716" y="276" font-size="14.5" font-weight="700" text-anchor="middle">InvoiceLine</text>
-      <line x1="586" y1="284" x2="846" y2="284" stroke="#e4e3df"/>
-      <text x="598" y="302" font-size="12.5" fill="#3a3a36">kind: labor | consumable · qty · amount</text>
-      <text x="598" y="318" font-size="12.5" fill="#3a3a36">sourceId  (visit or usage — UNIQUE)</text>
-      <text x="598" y="334" font-size="12.5" fill="#3a3a36">qboLineId  (echoed at issue)</text>
-    </g>
-    <line x1="716" y1="240" x2="716" y2="190" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
+    <!-- ============ Reading ============ -->
+    <rect x="34" y="406" width="226" height="74" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.2" stroke-dasharray="4 3"/>
+    <text x="147" y="424" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;value object&#187;</text>
+    <text x="147" y="440" font-size="14" font-weight="700" text-anchor="middle">Reading</text>
+    <line x1="34" y1="448" x2="260" y2="448" stroke="#e4e3df"/>
+    <text x="46" y="466" font-size="12" fill="#3a3a36">type &#183; value &#183; unit</text>
 
-    <!-- BillingMonth -->
-    <g>
-      <rect x="586" y="394" width="260" height="96" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
-      <text x="716" y="413" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
-      <text x="716" y="430" font-size="15" font-weight="700" text-anchor="middle">BillingMonth</text>
-      <line x1="586" y1="438" x2="846" y2="438" stroke="#e4e3df"/>
-      <text x="598" y="456" font-size="12.5" fill="#3a3a36">(customer, month) · flag · processing</text>
-      <text x="598" y="472" font-size="12.5" fill="#3a3a36">close() — refuses while unbilled &gt; 0</text>
-    </g>
-    <!-- Variance -->
-    <g>
-      <rect x="586" y="516" width="260" height="76" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
-      <text x="716" y="535" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
-      <text x="716" y="552" font-size="14.5" font-weight="700" text-anchor="middle">Variance</text>
-      <line x1="586" y1="560" x2="846" y2="560" stroke="#e4e3df"/>
-      <text x="598" y="578" font-size="12.5" fill="#3a3a36">visitId · techId · discount | missed_corr</text>
-    </g>
+    <!-- compositions: Visit owns its children -->
+    <line x1="147" y1="286" x2="147" y2="246" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
+    <path d="M34 443 L26 443 L26 240 L33 240" fill="none" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
 
-    <!-- references -->
+    <!-- ============ Task ============ -->
+    <rect x="320" y="62" width="206" height="124" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="423" y="80" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="423" y="97" font-size="15" font-weight="700" text-anchor="middle">Task</text>
+    <line x1="320" y1="106" x2="526" y2="106" stroke="#e4e3df"/>
+    <text x="332" y="124" font-size="12" fill="#3a3a36">customerId</text>
+    <text x="332" y="140" font-size="12" fill="#3a3a36">billingMethod: per_visit | flat</text>
+    <text x="332" y="156" font-size="12" fill="#3a3a36">rate &#183; consumables: incl | sep</text>
+    <text x="332" y="172" font-size="12" fill="#3a3a36">active window</text>
+
+    <!-- ============ CatalogItem ============ -->
+    <rect x="320" y="226" width="206" height="92" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="423" y="244" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="423" y="260" font-size="14.5" font-weight="700" text-anchor="middle">CatalogItem</text>
+    <line x1="320" y1="268" x2="526" y2="268" stroke="#e4e3df"/>
+    <text x="332" y="286" font-size="12" fill="#3a3a36">ionItemId &#183; name</text>
+    <text x="332" y="302" font-size="12" fill="#3a3a36">unitPrice</text>
+
+    <!-- ============ domain services ============ -->
+    <rect x="320" y="470" width="206" height="148" rx="8" fill="#faf7fd" stroke="#8a4fb0" stroke-width="1.2"/>
+    <text x="423" y="489" font-size="11" text-anchor="middle" fill="#8a4fb0">&#171;domain services&#187;</text>
+    <text x="332" y="511" font-size="13.5" font-weight="700" fill="#3a3a36">InvoiceBuilder</text>
+    <text x="332" y="526" font-size="11.5" fill="#6b6b66">grouping + format strategies</text>
+    <text x="332" y="548" font-size="13.5" font-weight="700" fill="#3a3a36">Reconciler</text>
+    <text x="332" y="563" font-size="11.5" fill="#6b6b66">ours vs ION &#183; price agreement</text>
+    <text x="332" y="585" font-size="13.5" font-weight="700" fill="#3a3a36">BillChecks</text>
+    <text x="332" y="600" font-size="11.5" fill="#6b6b66">misbilling + high-bill flag, any time</text>
+
+    <!-- ============ Invoice ============ -->
+    <rect x="586" y="62" width="260" height="184" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
+    <text x="716" y="80" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
+    <text x="716" y="97" font-size="15" font-weight="700" text-anchor="middle">Invoice</text>
+    <line x1="586" y1="106" x2="846" y2="106" stroke="#e4e3df"/>
+    <text x="598" y="124" font-size="12" fill="#3a3a36">customerId &#183; month</text>
+    <text x="598" y="140" font-size="12" fill="#3a3a36">docNumber (ION's) &#183; qboId</text>
+    <text x="598" y="156" font-size="12" fill="#3a3a36">status: draft&#8594;issued&#8594;sent&#8594;paid|void</text>
+    <text x="598" y="172" font-size="12" fill="#6b6b66">lines: InvoiceLine[*]</text>
+    <line x1="586" y1="182" x2="846" y2="182" stroke="#e4e3df"/>
+    <text x="598" y="200" font-size="12" fill="#3a3a36">issue() &#183; readyToSend()</text>
+    <text x="598" y="216" font-size="12" fill="#3a3a36">recordDelivered() &#8658; settles visits</text>
+    <text x="598" y="232" font-size="12" fill="#3a3a36">recordPayment() &#183; recordCredit()</text>
+
+    <!-- ============ InvoiceLine ============ -->
+    <rect x="586" y="286" width="260" height="122" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="716" y="304" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="716" y="320" font-size="14.5" font-weight="700" text-anchor="middle">InvoiceLine</text>
+    <line x1="586" y1="328" x2="846" y2="328" stroke="#e4e3df"/>
+    <text x="598" y="346" font-size="12" fill="#3a3a36">kind: labor | consumable</text>
+    <text x="598" y="362" font-size="12" fill="#3a3a36">sourceId (visit | usage &#8212; UNIQUE)</text>
+    <text x="598" y="378" font-size="12" fill="#3a3a36">qty &#183; unitPrice &#183; amount</text>
+    <text x="598" y="394" font-size="12" fill="#6b6b66">qboLineId (echoed at issue)</text>
+    <line x1="716" y1="286" x2="716" y2="246" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
+
+    <!-- ============ BillingMonth ============ -->
+    <rect x="586" y="448" width="260" height="118" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
+    <text x="716" y="466" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
+    <text x="716" y="482" font-size="15" font-weight="700" text-anchor="middle">BillingMonth</text>
+    <line x1="586" y1="490" x2="846" y2="490" stroke="#e4e3df"/>
+    <text x="598" y="508" font-size="12" fill="#3a3a36">customerId &#183; month</text>
+    <text x="598" y="524" font-size="12" fill="#3a3a36">flag &#183; processing state</text>
+    <line x1="586" y1="534" x2="846" y2="534" stroke="#e4e3df"/>
+    <text x="598" y="552" font-size="12" fill="#3a3a36">close() &#8212; refuses while unbilled &gt; 0</text>
+
+    <!-- ============ Variance ============ -->
+    <rect x="586" y="606" width="260" height="94" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="716" y="624" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="716" y="640" font-size="14.5" font-weight="700" text-anchor="middle">Variance</text>
+    <line x1="586" y1="648" x2="846" y2="648" stroke="#e4e3df"/>
+    <text x="598" y="666" font-size="12" fill="#3a3a36">visitId &#183; techId</text>
+    <text x="598" y="682" font-size="12" fill="#3a3a36">kind: discount | missed_corr &#183; amount</text>
+
+    <!-- reference arrows: anchored at the attribute holding the id -->
     <line x1="260" y1="120" x2="320" y2="120" stroke="#6b6b66" stroke-width="1.3" marker-end="url(#ref)" stroke-dasharray="5 4"/>
     <text x="290" y="112" font-size="10.5" text-anchor="middle" fill="#6b6b66">taskId</text>
-    <line x1="260" y1="290" x2="320" y2="290" stroke="#6b6b66" stroke-width="1.3" marker-end="url(#ref)" stroke-dasharray="5 4"/>
-    <text x="290" y="282" font-size="10.5" text-anchor="middle" fill="#6b6b66">itemId</text>
-    <path d="M586 300 C 480 300 320 210 262 190" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
-    <text x="430" y="238" font-size="10.5" fill="#6b6b66">sourceId &#8594; visit | usage</text>
-    <path d="M586 566 C 420 610 180 520 150 442" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
-    <text x="330" y="596" font-size="10.5" fill="#6b6b66">visitId</text>
+    <path d="M260 342 C 292 342 292 282 320 282" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="290" y="322" font-size="10.5" text-anchor="middle" fill="#6b6b66">itemId</text>
+    <path d="M586 358 C 440 358 340 220 262 195" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="402" y="330" font-size="10.5" fill="#6b6b66">sourceId &#8594; visit | usage</text>
+    <path d="M586 662 C 300 730 20 650 20 330 C 20 270 26 248 33 236" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="300" y="712" font-size="10.5" fill="#6b6b66">visitId</text>
+    <path d="M846 150 C 864 150 864 190 864 300 L 864 460 C 864 490 856 500 846 500" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="861" y="380" font-size="10.5" text-anchor="end" fill="#6b6b66">(customerId, month)</text>
   </svg>
   <div class="legend">
-    <span><span class="sw" style="background:#0b6e6e"></span><b>aggregate root</b> — consistency boundary</span>
+    <span><span class="sw" style="background:#0b6e6e"></span><b>aggregate root</b></span>
     <span><span class="sw" style="background:#3b6fd4"></span><b>entity</b></span>
     <span><span class="sw" style="background:#7a7a72"></span><b>value object</b> (dashed)</span>
     <span><span class="sw" style="background:#8a4fb0"></span><b>domain service</b></span>
-    <span>&#9670;&#8212; composition (owned child) &nbsp;&nbsp; - - &#8594; id reference, never an object graph</span>
+    <span>box = name | attributes | operations &nbsp;&#183;&nbsp; &#9670;&#8212; composition: the attribute holds the child OBJECTS &nbsp;&#183;&nbsp; - -&#8594; reference: the attribute holds only an ID</span>
   </div>
   </div>
+
+  <div class="call why"><span class="tag">How object references work in code</span>
+  Two different mechanisms, and the diagram distinguishes them. <b>Composition
+  (filled diamond):</b> the owner's attribute holds the child objects themselves —
+  <code>Invoice.lines</code> is an in-memory array of <code>InvoiceLine</code>
+  instances (real pointers), loaded together by the repository as one aggregate.
+  <b>Reference (dashed arrow):</b> the attribute holds ONLY the id, as plain data —
+  <code>visit.taskId</code> is a string. There is no live pointer to a Task object;
+  when a use case needs the Task, the application layer asks
+  <code>taskRepository.load(visit.taskId)</code>. Same storage either way (rows +
+  FKs); the difference is purely what gets reconstituted into memory together.</div>
 
   <div class="call brk"><span class="tag">Backrefs are the tracking backbone</span>
   When a line is added and later issued, QBO's echo (<code>invoiceId</code>,
