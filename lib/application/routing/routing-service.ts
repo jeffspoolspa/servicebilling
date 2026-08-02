@@ -102,6 +102,13 @@ export interface PublishReport {
   readonly cached: readonly { quotaId: string; slots: number }[]
   /** History appended for confirmed writes; `failed` never undoes a write. */
   readonly facts: { written: number; failed: string[] }
+  /** What the freshness precondition had to correct before writing. */
+  readonly refreshed: {
+    alreadyFresh: number
+    read: number
+    slotsChanged: number
+    skipped: { taskId: string; reason: string }[]
+  } | null
 }
 
 export class RoutingService {
@@ -213,6 +220,21 @@ export class RoutingService {
       asOf?: Date
       cache?: PlacementCache
       events?: { append(facts: readonly MaintenanceFact[]): Promise<{ written: number; failed: string[] }> }
+      /**
+       * Guarantees our copy of these tasks matches ION before anything is
+       * written. A separate, reusable action — publishing does not verify per
+       * write, it REQUIRES freshness and asks for it once. The cost of the
+       * question is one indexed query; only genuinely stale tasks touch ION.
+       */
+      freshness?: {
+        refresh(taskIds: readonly string[], maxAgeMinutes?: number): Promise<{
+          alreadyFresh: number
+          read: number
+          slotsChanged: number
+          skipped: { taskId: string; reason: string }[]
+        }>
+      }
+      maxCacheAgeMinutes?: number
     } = {},
   ): Promise<PublishReport> {
     const dryRun = opts.dryRun ?? true
@@ -220,6 +242,15 @@ export class RoutingService {
     if (!stored) throw new Error(`no scenario ${scenarioId}`)
     if (stored.status !== "pending") {
       throw new Error(`scenario ${scenarioId} is ${stored.status} — only a pending one publishes`)
+    }
+
+    // Freshness FIRST, as a precondition. If our picture of these tasks is
+    // old, correct it now — cheaply, and only for the ones that are actually
+    // stale — rather than discovering it one refused write at a time.
+    let refreshed: { alreadyFresh: number; read: number; slotsChanged: number; skipped: { taskId: string; reason: string }[] } | null = null
+    if (opts.freshness) {
+      const taskIds = [...new Set(stored.changes.map((c) => c.quotaId))]
+      refreshed = await opts.freshness.refresh(taskIds, opts.maxCacheAgeMinutes ?? 60)
     }
 
     const live = await this.repository.liveIn(weekOf(opts.asOf ?? new Date()))
@@ -284,6 +315,7 @@ export class RoutingService {
       published: restored.scenario.schedules().length,
       cached,
       facts,
+      refreshed,
     }
   }
 

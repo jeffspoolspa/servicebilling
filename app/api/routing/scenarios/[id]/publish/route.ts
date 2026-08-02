@@ -12,6 +12,7 @@ import {
 import { IonRoutePublisher } from "@/lib/infrastructure/routing/ion-route-publisher"
 import { SupabasePlacementCache } from "@/lib/infrastructure/routing/supabase-placement-cache"
 import { SupabaseMaintenanceEventLog } from "@/lib/infrastructure/maintenance/supabase-event-log"
+import { TaskCacheRefresher } from "@/lib/infrastructure/maintenance/task-cache-refresher"
 import { triggerScriptSync } from "@/lib/windmill"
 
 /**
@@ -47,12 +48,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   // lying before the next ION sync catches up.
   const cache = new SupabasePlacementCache(sb as unknown as QueryClient)
   // History: one fact per schedule ION accepts (ADR 010).
+  // Freshness is its own action, asked for once as a precondition.
+  const freshness = new TaskCacheRefresher(sb as unknown as QueryClient, {
+    run: (path, args) => triggerScriptSync(path, args, { timeoutMs: 300000 }),
+  })
   const events = new SupabaseMaintenanceEventLog(
     sb as unknown as ConstructorParameters<typeof SupabaseMaintenanceEventLog>[0],
   )
 
   try {
-    const report = await service.publishScenario(id, scenarios, publisher, { dryRun, cache, events })
+    const report = await service.publishScenario(id, scenarios, publisher, { dryRun, cache, events, freshness })
     return NextResponse.json(report)
   } catch (err) {
     return NextResponse.json(
