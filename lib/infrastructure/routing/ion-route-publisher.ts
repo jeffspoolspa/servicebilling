@@ -49,6 +49,7 @@ interface TaskIdentityRow {
   id: string
   ion_task_id: string | null
   customer_id: number | null
+  frequency: string | null
 }
 
 export class IonRoutePublisher implements RoutePublisher {
@@ -137,7 +138,7 @@ export class IonRoutePublisher implements RoutePublisher {
       this.client
         .schema("maintenance")
         .from("tasks")
-        .select("id, ion_task_id, customer_id")
+        .select("id, ion_task_id, customer_id, frequency")
         .in("id", quotaIds)
         .range(0, PAGE),
       techIds.length > 0
@@ -210,6 +211,20 @@ export class IonRoutePublisher implements RoutePublisher {
       }
       if (!task.ion_task_id) {
         out.set(schedule.quotaId, { reason: "task has no ion_task_id — it does not exist in ION" })
+        continue
+      }
+      // ONLY weekly tasks carry a day picker in ION. For biweekly and monthly
+      // the serviced day is derived from StartsOn -- which also fixes the A/B
+      // parity (which of the alternating weeks it takes). Writing day1..day7
+      // at one of those is meaningless at best; moving one means moving its
+      // start date, which is a different write we have not built. Refuse
+      // loudly rather than leaning on the staleness guard to catch it.
+      if (task.frequency && task.frequency !== "weekly") {
+        out.set(schedule.quotaId, {
+          reason:
+            `${task.frequency} task — ION derives its day from StartsOn, not the day picker, ` +
+            `so a day-field write cannot move it (start-date writes not implemented)`,
+        })
         continue
       }
       const ionCustId = task.customer_id !== null ? ionCustById.get(task.customer_id) : null

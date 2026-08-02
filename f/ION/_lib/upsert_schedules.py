@@ -208,15 +208,30 @@ def sync_schedules(rows, supabase_connection, dry_run=True, full_reconcile=False
                     )
                     stats["slots_deactivated"] += cur.rowcount
 
-                if full_reconcile:
-                    for s in own_active:
-                        if s["dow"] is not None and s["dow"] not in desired:
-                            cur.execute(
-                                """UPDATE maintenance.task_schedules SET active=false, updated_at=now()
-                                   WHERE ion_task_id=%s AND day_of_week=%s""",
-                                (ion_task_id, s["dow"]),
-                            )
-                            stats["slots_deactivated"] += cur.rowcount
+                # A day ION no longer serves is a day we must stand down --
+                # ALWAYS, not only under full_reconcile.
+                #
+                # This used to be gated, so reconciliation ran forward only: we
+                # added days ION reported and never removed days it dropped, and
+                # a task that moved Tue->Thu->Tue accumulated the union. Those
+                # ghost slots were merely untidy while routing was read-only.
+                # They are dangerous now that routing writes the COMPLETE week
+                # back to ION: publishing from a picture containing a ghost
+                # re-adds the day and doubles a customer's service (found live
+                # on Roper, David -- weekly Tuesday here, Tue+Thu in our cache).
+                #
+                # Safe to do unconditionally: `desired` is this ION task's own
+                # active days and is guaranteed non-empty above, and the UPDATE
+                # is scoped to this ion_task_id, so it can only ever retire a
+                # day this same report just told us is gone.
+                for s in own_active:
+                    if s["dow"] is not None and s["dow"] not in desired:
+                        cur.execute(
+                            """UPDATE maintenance.task_schedules SET active=false, updated_at=now()
+                               WHERE ion_task_id=%s AND day_of_week=%s""",
+                            (ion_task_id, s["dow"]),
+                        )
+                        stats["slots_deactivated"] += cur.rowcount
 
         if dry_run:
             conn.rollback()
