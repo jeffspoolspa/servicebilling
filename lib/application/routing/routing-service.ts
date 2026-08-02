@@ -32,6 +32,7 @@ import {
   type Weekday,
   type WeekIndex,
 } from "@/lib/domain/routing"
+import type { MaintenanceFact } from "@/lib/infrastructure/maintenance/supabase-event-log"
 
 export interface CoverageFinding {
   readonly quotaId: string
@@ -99,6 +100,8 @@ export interface PublishReport {
   readonly published: number
   /** Quotas whose cached slots were refreshed from a confirmed write. */
   readonly cached: readonly { quotaId: string; slots: number }[]
+  /** History appended for confirmed writes; `failed` never undoes a write. */
+  readonly facts: { written: number; failed: string[] }
 }
 
 export class RoutingService {
@@ -205,7 +208,12 @@ export class RoutingService {
     scenarioId: string,
     scenarios: ScenarioRepository,
     publisher: RoutePublisher,
-    opts: { dryRun?: boolean; asOf?: Date; cache?: PlacementCache } = {},
+    opts: {
+      dryRun?: boolean
+      asOf?: Date
+      cache?: PlacementCache
+      events?: { append(facts: readonly MaintenanceFact[]): Promise<{ written: number; failed: string[] }> }
+    } = {},
   ): Promise<PublishReport> {
     const dryRun = opts.dryRun ?? true
     const stored = await scenarios.byId(scenarioId)
@@ -232,6 +240,35 @@ export class RoutingService {
       )
     }
 
+    // History: a fact per schedule ION ACCEPTED. Facts are things that
+    // happened — a refused write changed nothing, so it produces none. Failing
+    // to record history must not undo the write that already landed, so the
+    // log reports what it could not append rather than throwing.
+    let facts = { written: 0, failed: [] as string[] }
+    if (!dryRun && opts.events && accepted > 0) {
+      const landed = new Set(results.filter((r) => r.accepted).map((r) => r.quotaId))
+      facts = await opts.events.append(
+        restored.scenario
+          .schedules()
+          .filter((s) => landed.has(s.quotaId))
+          .map((s) => ({
+            aggregate: "task" as const,
+            aggregateId: s.quotaId,
+            type: "ScheduleChanged",
+            actor: "routing_publish",
+            participants: [
+              `scenario:${scenarioId}`,
+              ...new Set(s.stops.map((st) => `tech:${st.techId}`)),
+            ],
+            payload: {
+              scenarioId,
+              week: s.stops.map((st) => ({ weekday: st.weekday, techId: st.techId })),
+              changes: s.changes,
+            },
+          })),
+      )
+    }
+
     // Closing belongs here, not to any single edit: only the batch knows it
     // finished. A partial run stays pending on purpose — "some of it landed"
     // is a state a human must see.
@@ -246,6 +283,7 @@ export class RoutingService {
       // What the write actually said, so a dry run is inspectable.
       published: restored.scenario.schedules().length,
       cached,
+      facts,
     }
   }
 
