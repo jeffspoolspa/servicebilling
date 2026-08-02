@@ -7,8 +7,8 @@ import {
   type WorkbenchInvoice,
   type WorkbenchVisit,
   type UsualItem,
-  type BillAnalysis,
 } from "../../../_components/review-workbench"
+import type { InitialLetter } from "../../../_components/letter-panel"
 
 export const metadata = { title: "Maintenance · Bill review" }
 export const dynamic = "force-dynamic"
@@ -32,17 +32,20 @@ export default async function BillReviewPage({
   const monthDate = `${month}-01`
 
   const supabase = await createSupabaseServer()
-  const [periods, usual, visitsRes, analysisRes, historyRes, mediansRes, cm] = await Promise.all([
+  const [periods, usual, visitsRes, letterRes, historyRes, mediansRes, cm] = await Promise.all([
     listBillingPeriods(monthDate),
     listFlagItems(customerId, monthDate).catch(() => [] as UsualItem[]),
     supabase.rpc("maint_billing_review_visits", {
       p_customer_id: customerId,
       p_month: monthDate,
     }),
-    supabase.rpc("maint_billing_bill_analysis", {
-      p_customer_id: customerId,
-      p_month: monthDate,
-    }),
+    supabase
+      .schema("billing")
+      .from("customer_letters")
+      .select("letter, reviewer_context, updated_at")
+      .eq("customer_id", customerId)
+      .eq("billing_month", monthDate)
+      .maybeSingle(),
     supabase.rpc("maint_billing_customer_chem_history", {
       p_customer_id: customerId,
       p_through: monthDate,
@@ -129,7 +132,7 @@ export default async function BillReviewPage({
         invoices={invoices}
         visits={(visitsRes.data ?? []) as WorkbenchVisit[]}
         usual={usual as UsualItem[]}
-        initialAnalysis={((analysisRes.data ?? [])[0] ?? null) as BillAnalysis | null}
+        initialLetter={(letterRes.data ?? null) as InitialLetter | null}
         queue={queue}
         watchlist={(watchlistRes.data ?? []) as never}
         watchReasons={(reasonsRes.data ?? []) as never}

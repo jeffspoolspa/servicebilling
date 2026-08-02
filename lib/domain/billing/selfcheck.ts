@@ -5,16 +5,28 @@ import { strict as assert } from "node:assert"
 import { BillingMonth, BillingRuleError } from "./month"
 import { laborPolicyFor, consumablesPolicyFor } from "./policies"
 import { Customer } from "./customer"
+import { PaymentMethod } from "./payments"
+import {
+  MaintenanceInvoice, MaintenanceInvoiceBuilder, AutopayCollection, ManualCollection, processInvoices,
+} from "./invoice"
+import { requiresIonEdit } from "./variance"
 import { EffectiveHistory } from "./effective"
 import type { PriceBook } from "./effective"
 import type { TaskTerms, VisitFact } from "./types"
 
 let passed = 0
-function check(name: string, fn: () => void) {
-  fn()
+const pending: Promise<void>[] = []
+function check(name: string, fn: () => void | Promise<void>) {
+  const r = fn()
+  if (r instanceof Promise) {
+    // async checks settle before the process exits; a rejection fails the run
+    pending.push(r.then(() => { passed++; console.log(`  ok  ${name}`) }))
+    return
+  }
   passed++
   console.log(`  ok  ${name}`)
 }
+process.on("beforeExit", async () => { await Promise.all(pending) })
 
 const terms = (id: string, o: Partial<TaskTerms> = {}): TaskTerms => ({
   id, customerId: 1,
@@ -458,4 +470,97 @@ check("a filled company name means commercial; blank/whitespace means residentia
   assert.equal(new Customer(3, "Smith, Jane", "   ").residential, true, "whitespace is not a company")
   assert.equal(new Customer(4, "The Farm HOA", "The Farm HOA").residential, false)
   assert.equal(new Customer(4, "The Farm HOA", "The Farm HOA").commercial, true)
+})
+
+/* ---------------------------------------------------- invoices + collection */
+console.log("\ninvoices — one loop, dynamic dispatch, no branches")
+
+const cust = new Customer(1, "Smith, Jane", null)
+const method = (chargeable: boolean) =>
+  new PaymentMethod("pm1", "card", "Visa", "4242", chargeable, chargeable)
+const itemsFor = (cents: number): BillableItem[] => [
+  { sourceKind: "visit", sourceId: "v1", taskId: "t1", kind: "labor",
+    serviceDate: "2026-07-07", itemName: "WEEKLY MAINT", qty: 1, unitPriceCents: cents, amountCents: cents },
+]
+const fakePorts = () => {
+  const calls: string[] = []
+  return {
+    calls,
+    ports: {
+      gateway: { charge: async () => { calls.push("charge"); return { ok: true } } },
+      channel: { kind: "email" as const, deliver: async () => { calls.push("deliver") } },
+    },
+  }
+}
+
+check("autopay charges BEFORE delivering; manual only delivers — same loop", async () => {
+  const build = new MaintenanceInvoiceBuilder()
+  const auto = build.build({ month: "2026-07-01", items: itemsFor(10000) }, cust, new AutopayCollection(method(true)))
+  const manual = build.build({ month: "2026-07-01", items: itemsFor(20000) }, cust, new ManualCollection())
+  auto.issue("qbo1", "1001", "2026-08-01")
+  manual.issue("qbo2", "1002", "2026-08-01")
+  const { calls, ports } = fakePorts()
+  const done = await processInvoices(
+    [{ invoice: auto, to: "a@x.com" }, { invoice: manual, to: "b@x.com" }], ports)
+  assert.deepEqual(calls, ["charge", "deliver", "deliver"], "autopay resolves off the list before sending")
+  assert.equal(done[0].outcome.action, "charged_and_receipted")
+  assert.equal(done[1].outcome.action, "delivered_for_payment")
+})
+
+check("an unchargeable method HOLDS instead of failing loudly mid-batch", async () => {
+  const inv = new MaintenanceInvoiceBuilder()
+    .build({ month: "2026-07-01", items: itemsFor(10000) }, cust, new AutopayCollection(method(false)))
+  inv.issue("qbo3", "1003", "2026-08-01")
+  const { ports } = fakePorts()
+  const [r] = await processInvoices([{ invoice: inv, to: "a@x.com" }], ports)
+  assert.equal(r.outcome.action, "held")
+})
+
+check("lifecycle guards: empty draft cannot issue; payment cannot land on a draft", () => {
+  const empty = new MaintenanceInvoice(cust, "2026-07-01", [], new ManualCollection())
+  assert.throws(() => empty.issue("q", "1", "2026-08-01"), /empty/)
+  const inv = new MaintenanceInvoiceBuilder()
+    .build({ month: "2026-07-01", items: itemsFor(5000) }, cust, new ManualCollection())
+  assert.throws(() => inv.applyPayment({ qboPaymentId: "p1", appliedCents: 5000, appliedAt: "2026-08-01" }, "q"), /draft/)
+})
+
+check("payment fold: settled falls out of arithmetic; events record the trail", () => {
+  const inv = new MaintenanceInvoiceBuilder()
+    .build({ month: "2026-07-01", items: itemsFor(10000) }, cust, new ManualCollection())
+  inv.issue("qbo4", "1004", "2026-08-01T00:00:00Z")
+  inv.applyPayment({ qboPaymentId: "p1", appliedCents: 6000, appliedAt: "2026-08-02" }, "qbo4")
+  assert.equal(inv.status, "issued", "partial payment does not settle")
+  assert.equal(inv.balanceCents, 4000)
+  inv.applyPayment({ qboPaymentId: "p2", appliedCents: 4000, appliedAt: "2026-08-03" }, "qbo4")
+  assert.equal(inv.status, "settled")
+  const types = inv.pullEvents().map((e) => e.type)
+  assert.deepEqual(types, ["invoice_issued", "payment_applied", "payment_applied"])
+  assert.equal(inv.pullEvents().length, 0, "pulling clears — a retried save cannot double-append")
+})
+
+check("builder refuses unpriced items and rolls up by item name round-once", () => {
+  const b = new MaintenanceInvoiceBuilder()
+  assert.throws(() => b.build({ month: "2026-07-01", items: [
+    { sourceKind: "usage", sourceId: "u1", taskId: "t", kind: "consumable",
+      serviceDate: "2026-07-07", itemName: "MYSTERY", qty: 1, unitPriceCents: null, amountCents: null },
+  ] }, cust, new ManualCollection()), /unpriced/)
+  const inv = b.build({ month: "2026-07-01", items: [
+    ...itemsFor(10000),
+    { sourceKind: "usage", sourceId: "u1", taskId: "t1", kind: "consumable",
+      serviceDate: "2026-07-07", itemName: "TABS", qty: 2, unitPriceCents: 450, amountCents: 900 },
+    { sourceKind: "usage", sourceId: "u2", taskId: "t1", kind: "consumable",
+      serviceDate: "2026-07-14", itemName: "TABS", qty: 1, unitPriceCents: 450, amountCents: 450 },
+  ] }, cust, new ManualCollection())
+  assert.equal(inv.lines.length, 2)
+  const tabs = inv.lines.find((l) => l.itemName === "TABS")!
+  assert.equal(tabs.qty, 3)
+  assert.equal(tabs.amountCents, 1350)
+  assert.deepEqual(tabs.sourceItemIds, ["u1", "u2"], "the claim trail back to usages survives rollup")
+})
+
+check("variance: the ruled split — log corrections need ION, accommodations never", () => {
+  assert.equal(requiresIonEdit({ visitId: "v", techId: null, kind: "remove_consumable", payload: {} }), true)
+  assert.equal(requiresIonEdit({ visitId: "v", techId: null, kind: "quantity_correction", payload: {} }), true)
+  assert.equal(requiresIonEdit({ visitId: "v", techId: null, kind: "discount", payload: {} }), false)
+  assert.equal(requiresIonEdit({ visitId: "v", techId: null, kind: "missed_correction", payload: {} }), false)
 })

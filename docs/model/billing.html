@@ -288,6 +288,153 @@
   <code>qbo_line_id</code> (QBO's echo at issue). "Where was this visit billed" is
   one indexed lookup; the visit itself carries only <code>settled_at</code>.</div>
 
+
+  <h2 id="processing">Processing model &#8212; one loop, composed policies</h2>
+  <div class="uml">
+  <svg viewBox="0 0 880 710" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Inter,sans-serif">
+    <defs>
+      <marker id="gen" markerWidth="14" markerHeight="12" refX="12" refY="6" orient="auto">
+        <path d="M1,1 L12,6 L1,11 Z" fill="#fff" stroke="#3a3a36" stroke-width="1.2"/>
+      </marker>
+    </defs>
+    <rect x="12" y="14" width="286" height="682" rx="12" fill="#faf6f2" stroke="#ece2d8"/>
+    <text x="26" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#d4761f">THE DOCUMENT</text>
+    <rect x="314" y="14" width="272" height="682" rx="12" fill="#f4f7f6" stroke="#dfe7e5"/>
+    <text x="328" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#0b6e6e">COLLECTION &#183; PORTS</text>
+    <rect x="602" y="14" width="266" height="682" rx="12" fill="#f5f5f9" stroke="#e2e2ec"/>
+    <text x="616" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#3b6fd4">MONEY &#183; QBO MIRRORS</text>
+    <rect x="34" y="62" width="242" height="212" rx="8" fill="#fff" stroke="#d4761f" stroke-width="1.3"/>
+    <text x="155.0" y="80" font-size="11" text-anchor="middle" fill="#d4761f">&#171;abstract &#183; entity&#187;</text>
+    <text x="155.0" y="97" font-size="15" font-weight="700" text-anchor="middle">Invoice</text>
+    <line x1="34" y1="106" x2="276" y2="106" stroke="#e4e3df"/>
+    <text x="46" y="118" font-size="12" fill="#3a3a36">customer: Customer</text>
+    <text x="46" y="134" font-size="12" fill="#3a3a36">month</text>
+    <text x="46" y="150" font-size="12" fill="#3a3a36">lines: InvoiceLine[*]</text>
+    <text x="46" y="166" font-size="12" fill="#3a3a36">status: draft&#8594;&#8230;&#8594;settled</text>
+    <text x="46" y="182" font-size="12" fill="#3a3a36">collection: CollectionPolicy</text>
+    <text x="46" y="198" font-size="12" fill="#6b6b66">events: recorded, pulled at save</text>
+    <line x1="34" y1="208" x2="276" y2="208" stroke="#e4e3df"/>
+    <text x="46" y="222" font-size="12" fill="#3a3a36">issue() &#8212; refuses empty</text>
+    <text x="46" y="238" font-size="12" fill="#3a3a36">markDelivered(via)</text>
+    <text x="46" y="254" font-size="12" fill="#3a3a36">applyPayment() &#8212; fold; settles at 0</text>
+    <rect x="34" y="320" width="242" height="86" rx="8" fill="#fff" stroke="#d4761f" stroke-width="1.3"/>
+    <text x="155.0" y="338" font-size="11" text-anchor="middle" fill="#d4761f">&#171;entity&#187;</text>
+    <text x="155.0" y="355" font-size="15" font-weight="700" text-anchor="middle">MaintenanceInvoice</text>
+    <line x1="34" y1="364" x2="276" y2="364" stroke="#e4e3df"/>
+    <text x="46" y="376" font-size="12" fill="#3a3a36">source: BillingMonth items</text>
+    <text x="46" y="392" font-size="12" fill="#6b6b66">builder: rollup, round-once</text>
+    <rect x="34" y="426" width="242" height="86" rx="8" fill="#fff" stroke="#d4761f" stroke-width="1.3"/>
+    <text x="155.0" y="444" font-size="11" text-anchor="middle" fill="#d4761f">&#171;entity&#187;</text>
+    <text x="155.0" y="461" font-size="15" font-weight="700" text-anchor="middle">ServiceInvoice</text>
+    <line x1="34" y1="470" x2="276" y2="470" stroke="#e4e3df"/>
+    <text x="46" y="482" font-size="12" fill="#3a3a36">source: work order</text>
+    <text x="46" y="498" font-size="12" fill="#3a3a36">work_order_number</text>
+    <path d="M155,320 L155,288" fill="none" stroke="#3a3a36" stroke-width="1.4" marker-end="url(#gen)"/>
+    <path d="M70,426 L70,282 L155,282" fill="none" stroke="#3a3a36" stroke-width="1.4"/>
+    <rect x="34" y="538" width="242" height="118" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="155.0" y="556" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="155.0" y="573" font-size="15" font-weight="700" text-anchor="middle">Variance</text>
+    <line x1="34" y1="582" x2="276" y2="582" stroke="#e4e3df"/>
+    <text x="46" y="594" font-size="12" fill="#3a3a36">visit_id / tech_id</text>
+    <text x="46" y="610" font-size="12" fill="#3a3a36">kind: remove_consumable |</text>
+    <text x="46" y="626" font-size="12" fill="#3a3a36">&#160;&#160;qty_correction | discount | missed</text>
+    <text x="46" y="642" font-size="12" fill="#6b6b66">requiresIonEdit() &#8594; the ruled split</text>
+    <rect x="336" y="62" width="228" height="84" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="450.0" y="80" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;interface&#187;</text>
+    <text x="450.0" y="97" font-size="15" font-weight="700" text-anchor="middle">CollectionPolicy</text>
+    <line x1="336" y1="106" x2="564" y2="106" stroke="#e4e3df"/>
+    <line x1="336" y1="112" x2="564" y2="112" stroke="#e4e3df"/>
+    <text x="348" y="126" font-size="12" fill="#3a3a36">collect(invoice, to, ports)</text>
+    <rect x="336" y="186" width="228" height="116" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.3"/>
+    <text x="450.0" y="204" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;policy&#187;</text>
+    <text x="450.0" y="221" font-size="15" font-weight="700" text-anchor="middle">AutopayCollection</text>
+    <line x1="336" y1="230" x2="564" y2="230" stroke="#e4e3df"/>
+    <text x="348" y="242" font-size="12" fill="#3a3a36">method: PaymentMethod</text>
+    <line x1="336" y1="252" x2="564" y2="252" stroke="#e4e3df"/>
+    <text x="348" y="266" font-size="12" fill="#3a3a36">collect: charge FIRST,</text>
+    <text x="348" y="282" font-size="12" fill="#3a3a36">&#160;then receipt; decline &#8658; HELD</text>
+    <rect x="336" y="322" width="228" height="84" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.3"/>
+    <text x="450.0" y="340" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;policy&#187;</text>
+    <text x="450.0" y="357" font-size="15" font-weight="700" text-anchor="middle">ManualCollection</text>
+    <line x1="336" y1="366" x2="564" y2="366" stroke="#e4e3df"/>
+    <line x1="336" y1="372" x2="564" y2="372" stroke="#e4e3df"/>
+    <text x="348" y="386" font-size="12" fill="#3a3a36">collect: deliver + wait</text>
+    <path d="M450,186 L450,158" fill="none" stroke="#0b6e6e" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#gen)"/>
+    <path d="M370,322 L370,152 L450,152" fill="none" stroke="#0b6e6e" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <rect x="336" y="440" width="228" height="100" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="450.0" y="458" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;interface &#183; outlet&#187;</text>
+    <text x="450.0" y="475" font-size="15" font-weight="700" text-anchor="middle">DeliveryChannel</text>
+    <line x1="336" y1="484" x2="564" y2="484" stroke="#e4e3df"/>
+    <line x1="336" y1="490" x2="564" y2="490" stroke="#e4e3df"/>
+    <text x="348" y="504" font-size="12" fill="#3a3a36">deliver(invoice, to, pdf?)</text>
+    <text x="348" y="520" font-size="12" fill="#6b6b66">EmailChannel / SmsChannel plug in</text>
+    <rect x="336" y="560" width="228" height="84" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="450.0" y="578" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;interface &#183; outlet&#187;</text>
+    <text x="450.0" y="595" font-size="15" font-weight="700" text-anchor="middle">PaymentGateway</text>
+    <line x1="336" y1="604" x2="564" y2="604" stroke="#e4e3df"/>
+    <line x1="336" y1="610" x2="564" y2="610" stroke="#e4e3df"/>
+    <text x="348" y="624" font-size="12" fill="#3a3a36">charge(method, cents, ref)</text>
+    <rect x="336" y="664" width="228" height="116" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="450.0" y="682" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;interface &#183; outlet&#187;</text>
+    <text x="450.0" y="699" font-size="15" font-weight="700" text-anchor="middle">IonLogEditor</text>
+    <line x1="336" y1="708" x2="564" y2="708" stroke="#e4e3df"/>
+    <line x1="336" y1="714" x2="564" y2="714" stroke="#e4e3df"/>
+    <text x="348" y="728" font-size="12" fill="#3a3a36">removeConsumable(log, item)</text>
+    <text x="348" y="744" font-size="12" fill="#3a3a36">setConsumableQuantity(&#8230;)</text>
+    <text x="348" y="760" font-size="12" fill="#6b6b66">script pending: update_log_items</text>
+    <rect x="624" y="62" width="222" height="148" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="735.0" y="80" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;value object &#183; mirror&#187;</text>
+    <text x="735.0" y="97" font-size="15" font-weight="700" text-anchor="middle">PaymentMethod</text>
+    <line x1="624" y1="106" x2="846" y2="106" stroke="#e4e3df"/>
+    <text x="636" y="118" font-size="12" fill="#3a3a36">qbo_payment_method_id</text>
+    <text x="636" y="134" font-size="12" fill="#3a3a36">kind: card | bank</text>
+    <text x="636" y="150" font-size="12" fill="#3a3a36">brand / last_four</text>
+    <text x="636" y="166" font-size="12" fill="#3a3a36">active, autopay_enrolled</text>
+    <line x1="624" y1="176" x2="846" y2="176" stroke="#e4e3df"/>
+    <text x="636" y="190" font-size="12" fill="#3a3a36">chargeable() &#8212; the loop&#8217;s one rule</text>
+    <rect x="624" y="234" width="222" height="102" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="735.0" y="252" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;fact &#183; mirror&#187;</text>
+    <text x="735.0" y="269" font-size="15" font-weight="700" text-anchor="middle">Payment</text>
+    <line x1="624" y1="278" x2="846" y2="278" stroke="#e4e3df"/>
+    <text x="636" y="290" font-size="12" fill="#3a3a36">qbo_payment_id</text>
+    <text x="636" y="306" font-size="12" fill="#3a3a36">amount_cents / txn_date</text>
+    <text x="636" y="322" font-size="12" fill="#3a3a36">was_charged (autopay?)</text>
+    <rect x="624" y="360" width="222" height="102" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="735.0" y="378" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;fact &#183; mirror&#187;</text>
+    <text x="735.0" y="395" font-size="15" font-weight="700" text-anchor="middle">PaymentApplication</text>
+    <line x1="624" y1="404" x2="846" y2="404" stroke="#e4e3df"/>
+    <text x="636" y="416" font-size="12" fill="#3a3a36">qbo_payment_id</text>
+    <text x="636" y="432" font-size="12" fill="#3a3a36">applied_cents</text>
+    <text x="636" y="448" font-size="12" fill="#3a3a36">applied_at</text>
+    <rect x="624" y="486" width="222" height="132" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="735.0" y="504" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;base &#183; ADR 010&#187;</text>
+    <text x="735.0" y="521" font-size="15" font-weight="700" text-anchor="middle">EventRecorder</text>
+    <line x1="624" y1="530" x2="846" y2="530" stroke="#e4e3df"/>
+    <text x="636" y="542" font-size="12" fill="#6b6b66">uncommitted: DomainEvent[*]</text>
+    <line x1="624" y1="552" x2="846" y2="552" stroke="#e4e3df"/>
+    <text x="636" y="566" font-size="12" fill="#3a3a36">record(fact)</text>
+    <text x="636" y="582" font-size="12" fill="#3a3a36">pullEvents() &#8212; clears; repo</text>
+    <text x="636" y="598" font-size="12" fill="#3a3a36">&#160;appends to billing.events</text>
+    <path d="M276,150 L336,110" fill="none" stroke="#6b6b66" stroke-width="1.3" marker-end="url(#ref)"/>
+    <text x="279" y="122" font-size="10.5" fill="#6b6b66">collection</text>
+    <path d="M564,216 L624,186" fill="none" stroke="#6b6b66" stroke-width="1.3" marker-end="url(#ref)"/>
+    <text x="566" y="196" font-size="10.5" fill="#6b6b66">method</text>
+  </svg>
+  </div>
+
+  <p class="note">Fallback: abstract <b>Invoice</b> (lines, lifecycle, payment fold,
+  event recording) is extended by <b>MaintenanceInvoice</b> (built from a
+  BillingMonth&#8217;s items) and <b>ServiceInvoice</b> (from a work order). Payment
+  handling is NOT a subclass &#8212; it is a composed <b>CollectionPolicy</b>:
+  <code>AutopayCollection</code> charges the stored <b>PaymentMethod</b> first (a
+  decline HOLDS, the delivery becomes a receipt); <code>ManualCollection</code>
+  delivers and waits. The processing loop calls
+  <code>invoice.collection.collect(&#8230;)</code> &#8212; dynamic dispatch, no
+  if-statements, no {kind} &#215; {autopay} class explosion. Outlets (ports):
+  <b>DeliveryChannel</b> (email/SMS plugs), <b>PaymentGateway</b>,
+  <b>IonLogEditor</b> (the Variance edit path; Windmill script pending).
+  Money objects are views of the existing QBO mirrors &#8212; no new tables.</p>
+
   <h2 id="moments">Claim vs settle &#8212; two moments, not one</h2>
   <table>
     <tr><th></th><th>Claim (BillableItem created)</th><th>Settle (SEND)</th></tr>

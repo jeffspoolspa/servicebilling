@@ -3,8 +3,8 @@
  * use case (docs/conventions/LAYERING.md). Load -> domain -> persist; the
  * decisions are all downstairs.
  */
-import { Reconciler, runChecks, LOG_CORRECTION_CHECKS, BILL_REVIEW_CHECKS } from "@/lib/domain/billing"
-import type { BillingCheckFinding, ReconcileReport } from "@/lib/domain/billing"
+import { Reconciler, requiresIonEdit, runChecks, LOG_CORRECTION_CHECKS, BILL_REVIEW_CHECKS } from "@/lib/domain/billing"
+import type { BillingCheckFinding, IonLogEditor, ReconcileReport, Variance } from "@/lib/domain/billing"
 import { SupabaseBillingRepository } from "@/lib/infrastructure/billing/supabase-billing-repository"
 
 export interface AccrualSummary {
@@ -45,6 +45,30 @@ export class BillingService {
       expectedTotalCents: exp.reduce((n, e) => n + e.laborCents + e.consumableCents, 0),
       removed,
     }
+  }
+
+  /**
+   * Apply a variance. Log corrections fix REALITY: edit ION, re-ingest that
+   * log, re-accrue and re-reconcile the customer — in that order, and only
+   * then may the bill proceed. Bill accommodations (discount / explanation)
+   * never touch ION; they adjust the bill and are recorded as findings work.
+   */
+  async applyVariance(
+    v: Variance,
+    ctx: { customerId: number; month: string; ionLogId: string },
+    editor: IonLogEditor,
+    reingest: (ionLogId: string) => Promise<void>,
+  ): Promise<{ ionEdited: boolean }> {
+    if (!requiresIonEdit(v)) return { ionEdited: false }
+    if (v.kind === "remove_consumable") {
+      await editor.removeConsumable(ctx.ionLogId, String(v.payload.ion_item_id))
+    } else {
+      await editor.setConsumableQuantity(
+        ctx.ionLogId, String(v.payload.ion_item_id), Number(v.payload.quantity))
+    }
+    await reingest(ctx.ionLogId)
+    await this.accrueMonth(ctx.customerId, ctx.month)
+    return { ionEdited: true }
   }
 
   /**

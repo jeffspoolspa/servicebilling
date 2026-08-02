@@ -1,5 +1,19 @@
 export { BillingMonth, BillingRuleError } from "./month"
 export { Customer } from "./customer"
+export { EventRecorder } from "./events"
+export type { DomainEvent } from "./events"
+export { PaymentMethod } from "./payments"
+export type { Payment, PaymentApplication } from "./payments"
+export {
+  Invoice, MaintenanceInvoice, ServiceInvoice, InvoiceRuleError,
+  AutopayCollection, ManualCollection, MaintenanceInvoiceBuilder, processInvoices,
+} from "./invoice"
+export type {
+  InvoiceLine, InvoiceStatus, CollectionPolicy, CollectionOutcome, CollectionPorts,
+  DeliveryChannel, PaymentGateway, InvoiceBuilder, ProcessedInvoice,
+} from "./invoice"
+export { requiresIonEdit } from "./variance"
+export type { Variance, VarianceKind, IonLogEditor } from "./variance"
 export { EffectiveHistory } from "./effective"
 export type { Effective, PriceBook } from "./effective"
 export { Reconciler, rollupByTask, RECONCILE_TOLERANCE_CENTS } from "./reconciler"

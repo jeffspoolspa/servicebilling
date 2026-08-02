@@ -133,6 +133,71 @@ Ordering rule (RULED): everything through reconcile/checks is **re-runnable**;
 processing moves money and is **irreversible** — it comes last and only after
 the model underneath is solid.
 
+## Invoice processing (designed 2026-08-02)
+
+Abstract `Invoice` (domain, `lib/domain/billing/invoice.ts`): lines, lifecycle
+(draft -> issued -> delivered -> settled | void), payment fold (settled falls
+out of arithmetic, never set by hand), event recording. Two concrete kinds
+carry what genuinely differs by KIND:
+
+- `MaintenanceInvoice` — built from a BillingMonth's billable items
+  (`MaintenanceInvoiceBuilder`: rollup by item name, round-once, refuses
+  unpriced items, keeps the sourceItemIds claim trail back to visits).
+- `ServiceInvoice` — built from a work order (builder lands with the service
+  module refactor).
+
+**Autopay is NOT a subclass.** {maintenance, service} x {autopay, manual}
+would be four classes and eight the day a third axis arrives — the same
+explosion the labor/consumables policy split avoided. Payment handling is a
+composed `CollectionPolicy`:
+
+    for (const { invoice, to } of batch)
+      await invoice.collection.collect(invoice, to, ports)
+
+One loop, no if-statements. `AutopayCollection.collect` charges the stored
+`PaymentMethod` FIRST (resolving off the list before sending — the delivery is
+then a receipt); a decline HOLDS the invoice instead of failing the batch.
+`ManualCollection.collect` just delivers and waits. Dynamic binding through
+the interface does the branching.
+
+`PaymentMethod` / `Payment` / `PaymentApplication` (`payments.ts`) are the
+domain's view of the EXISTING QBO mirrors (`billing.customer_payment_methods`,
+`billing.customer_payments`, `billing.payment_invoice_links`,
+`billing.autopay_customers`) — no new tables. `PaymentMethod.chargeable` =
+active AND autopay-enrolled is the one rule the loop asks.
+
+## Variance and the ION edit path
+
+`Variance` (`variance.ts`) carries the ruled split in its type:
+`requiresIonEdit()` — `remove_consumable` / `quantity_correction` fix REALITY
+(edit ION -> re-ingest that log -> re-accrue -> re-reconcile, in that order,
+via `BillingService.applyVariance`); `discount` / `missed_correction` are bill
+accommodations that never touch ION. The `IonLogEditor` port's implementation
+(`WindmillIonLogGateway`) calls `f/ION/api/update_log_items` — **that script
+is not built yet** (ION log-edit form automation, pending); the gateway
+throws a clear error until it exists.
+
+## Events (ADR 010 alignment)
+
+Aggregates extend `EventRecorder` (`events.ts`): mutators `record()` facts,
+the application service `pullEvents()` after a successful save and the
+repository appends them to `billing.events` in the same transaction — pulling
+clears the buffer so a retried save cannot double-append. State tables become
+rebuildable projections. Event `type` names MUST be registered in
+`docs/conventions/EVENT_VOCABULARY.md` before emit wiring goes live; the
+draft names used by Invoice (`invoice_issued`, `invoice_delivered`,
+`payment_applied`) go through that checklist when phase 2 lands.
+
+## The customer letter (replaces the AI analysis panel)
+
+For a flagged month the reviewer drafts a CUSTOMER-FACING letter:
+`f/billing/draft_customer_letter` (Claude) writes from billable items +
+visits + open findings + the reviewer's framing (the workbench modal);
+iteration passes the thread back so the model refines rather than restarts;
+latest draft persists in `billing.customer_letters`; Print/PDF accompanies
+the invoice. UI: `letter-panel.tsx` in the review workbench, route
+`/api/billing/letter` (trigger + poll).
+
 ## Ports
 
 `VisitRepository` · `TaskRepository` · `CatalogRepository` · `InvoiceRepository` ·
