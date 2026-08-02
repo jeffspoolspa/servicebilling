@@ -284,11 +284,23 @@ export class SupabaseQuotaRepository implements QuotaRepository {
     for (const task of tasks) {
       intervalByTask.set(task.id, intervalOf(slotsByTask.get(task.id) ?? []))
     }
-    const periodVisits = await this.visitsThisPeriod(
-      week,
-      (taskId) => intervalByTask.get(taskId) ?? 1,
-      tasks.map((t) => t.id),
-    )
+    // No id filter: PostgREST puts `in.(...)` in the URL, and 500 uuids
+    // overflows the header (serviceMedians omits it for the same reason).
+    // 28 days of visits is a small, bounded read.
+    // Continuity is ADVISORY, so its input must never be able to break a read
+    // that publishing depends on. If the visit count cannot be loaded we carry
+    // on with none, which reads as "nothing yet this period" -- the permissive
+    // direction, and the same default as a caller that never supplied it.
+    let periodVisits = new Map<string, number>()
+    try {
+      periodVisits = await this.visitsThisPeriod(
+        week,
+        (taskId) => intervalByTask.get(taskId) ?? 1,
+        tasks.length <= 50 ? tasks.map((t) => t.id) : undefined,
+      )
+    } catch (err) {
+      console.error("visitsThisPeriod unavailable — continuity will read 0:", err)
+    }
 
     const quotas: Quota[] = []
     for (const task of tasks) {
