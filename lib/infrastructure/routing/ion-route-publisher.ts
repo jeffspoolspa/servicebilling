@@ -132,23 +132,42 @@ export class IonRoutePublisher implements RoutePublisher {
     schedules: readonly TaskSchedule[],
   ): Promise<Map<string, IonWriteTarget | { reason: string }>> {
     const quotaIds = schedules.map((s) => s.quotaId)
-    const techIds = [...new Set(schedules.flatMap((s) => s.stops.map((st) => st.techId)))]
 
-    const [{ data: tasks }, { data: techs }] = await Promise.all([
+    // Tasks and the slots we currently believe, together — the slots are read
+    // BEFORE techs because the tech we are moving AWAY from only appears there.
+    // Looking up ION ids for the desired stops alone silently drops the current
+    // tech from `believed`, which then reads as "ION has someone, we have
+    // nobody" and fabricates drift on every ordinary reassignment.
+    const [{ data: tasks }, { data: slots }] = await Promise.all([
       this.client
         .schema("maintenance")
         .from("tasks")
         .select("id, ion_task_id, customer_id, frequency")
         .in("id", quotaIds)
         .range(0, PAGE),
-      techIds.length > 0
-        ? this.client
-            .from("employees")
-            .select("id, ion_employee_id")
-            .in("id", techIds)
-            .range(0, PAGE)
-        : Promise.resolve({ data: [] as unknown[], error: null }),
+      this.client
+        .schema("maintenance")
+        .from("task_schedules")
+        .select("task_id, day_of_week, tech_employee_id, active")
+        .in("task_id", quotaIds)
+        .range(0, PAGE),
     ])
+
+    const currentSlots = (slots ?? []) as {
+      task_id: string
+      day_of_week: number | null
+      tech_employee_id: string | null
+      active: boolean
+    }[]
+    const techIds = [
+      ...new Set([
+        ...schedules.flatMap((s) => s.stops.map((st) => st.techId)),
+        ...currentSlots.filter((r) => r.active && r.tech_employee_id).map((r) => r.tech_employee_id!),
+      ]),
+    ]
+    const { data: techs } = techIds.length
+      ? await this.client.from("employees").select("id, ion_employee_id").in("id", techIds).range(0, PAGE)
+      : { data: [] as unknown[] }
 
     const taskById = new Map(
       ((tasks ?? []) as TaskIdentityRow[]).map((t) => [t.id, t]),
@@ -160,24 +179,19 @@ export class IonRoutePublisher implements RoutePublisher {
       ]),
     )
 
-    // What our cache says is live TODAY — the picture we are asking ION to
-    // confirm before it accepts a complete-week write.
-    const { data: slots } = await this.client
-      .schema("maintenance")
-      .from("task_schedules")
-      .select("task_id, day_of_week, tech_employee_id, active")
-      .in("task_id", quotaIds)
-      .range(0, PAGE)
+    // What our cache says is live TODAY — the picture we ask ION to confirm.
     const believed = new Map<string, Record<string, string>>()
-    for (const row of (slots ?? []) as {
-      task_id: string
-      day_of_week: number | null
-      tech_employee_id: string | null
-      active: boolean
-    }[]) {
+    const unresolvableTech = new Set<string>()
+    for (const row of currentSlots) {
       if (!row.active || row.day_of_week === null || !row.tech_employee_id) continue
       const ionTech = ionTechById.get(row.tech_employee_id)
-      if (!ionTech) continue
+      if (!ionTech) {
+        // We hold a tech we cannot name in ION. Omitting the day would read as
+        // "ION has someone, we have nobody" and refuse for the wrong reason, so
+        // say plainly that we cannot state our own picture.
+        unresolvableTech.add(row.task_id)
+        continue
+      }
       const m = believed.get(row.task_id) ?? {}
       m[String(row.day_of_week)] = ionTech
       believed.set(row.task_id, m)
@@ -224,6 +238,12 @@ export class IonRoutePublisher implements RoutePublisher {
           reason:
             `${task.frequency} task — ION derives its day from StartsOn, not the day picker, ` +
             `so a day-field write cannot move it (start-date writes not implemented)`,
+        })
+        continue
+      }
+      if (unresolvableTech.has(schedule.quotaId)) {
+        out.set(schedule.quotaId, {
+          reason: "a tech on this task has no ion_employee_id — cannot state our current picture",
         })
         continue
       }
