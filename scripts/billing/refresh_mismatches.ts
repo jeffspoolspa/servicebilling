@@ -49,11 +49,17 @@ async function main() {
     const t0 = Date.now()
     for (;;) {
       await new Promise((res) => setTimeout(res, 15000))
-      const jr = await fetch(
-        `https://app.windmill.dev/api/w/jps-internal/jobs_u/completed/get_result_maybe/${jobId}`,
-        { headers: { Authorization: `Bearer ${env.WINDMILL_TOKEN}` } },
-      )
-      const j = (await jr.json()) as { completed: boolean; success?: boolean; result?: unknown }
+      // a transient poll failure must not orphan a running hour-long job
+      let j: { completed: boolean; success?: boolean; result?: unknown }
+      try {
+        const jr = await fetch(
+          `https://app.windmill.dev/api/w/jps-internal/jobs_u/completed/get_result_maybe/${jobId}`,
+          { headers: { Authorization: `Bearer ${env.WINDMILL_TOKEN}` } },
+        )
+        j = (await jr.json()) as { completed: boolean; success?: boolean; result?: unknown }
+      } catch {
+        continue
+      }
       if (j.completed) {
         if (j.success === false) throw new Error(`ingest job failed: ${JSON.stringify(j.result).slice(0, 400)}`)
         console.log(`  ingest done in ${Math.round((Date.now() - t0) / 60000)} min`)
