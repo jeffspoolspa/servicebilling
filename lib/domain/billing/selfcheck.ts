@@ -154,7 +154,10 @@ console.log(`\n${passed} checks passed`)
 
 /* ------------------------------------------------------- reconciler + checks */
 import { Reconciler, rollupByTask } from "./reconciler"
-import { runChecks, STANDARD_CHECKS, HighChemBillCheck } from "./checks"
+import {
+  runChecks, LOG_CORRECTION_CHECKS, BILL_REVIEW_CHECKS,
+  QuantityOutlierCheck, HighChemVsPeerCheck,
+} from "./checks"
 import type { MonthContext } from "./checks"
 import type { BillableItem } from "./types"
 
@@ -213,40 +216,83 @@ check("rollup rounds once on summed qty per item name", () => {
   assert.equal(totals.get("t1"), 500)
 })
 
-console.log("\nmisbilling checks")
+console.log("\nchecks — phase A: log correction (fix in ION)")
 
 const baseCtx = (over: Partial<MonthContext>): MonthContext => ({
   customerId: 1, month: "2026-07-01", items: [], visits: [], terms: [],
-  customerProvidesChems: false, peerChemMedianCents: null, ...over,
+  residential: true, itemProfiles: new Map(), customerProvidesChems: false,
+  peerChemMedianCents: null, selfChemMedianCents: null, ...over,
+})
+const cons = (id: string, name: string, qty: number, cents: number): BillableItem => ({
+  sourceKind: "usage", sourceId: id, taskId: "t1", kind: "consumable",
+  serviceDate: "2026-07-07", itemName: name, qty, unitPriceCents: cents, amountCents: Math.round(qty * cents),
 })
 
-check("the sworn list runs as objects; adding a rule is appending to the list", () => {
-  assert.equal(STANDARD_CHECKS.length, 7)
-  assert.deepEqual(runChecks(baseCtx({}), STANDARD_CHECKS), [])
+check("the two suites are separate lists with separate remedies", () => {
+  assert.equal(LOG_CORRECTION_CHECKS.length, 7)
+  assert.equal(BILL_REVIEW_CHECKS.length, 3)
+  assert.ok(LOG_CORRECTION_CHECKS.every((c) => c.phase === "log_correction"))
+  assert.ok(BILL_REVIEW_CHECKS.every((c) => c.phase === "bill_review"))
 })
 
-check("expired task with accrual -> error; provides-own-chems with chem items -> error", () => {
-  const items: BillableItem[] = [
-    { sourceKind: "visit", sourceId: "v1", taskId: "dead", kind: "labor", serviceDate: "2026-07-07", itemName: null, qty: 1, unitPriceCents: 5000, amountCents: 5000 },
-    { sourceKind: "usage", sourceId: "u1", taskId: "dead", kind: "consumable", serviceDate: "2026-07-07", itemName: "TABS", qty: 2, unitPriceCents: 450, amountCents: 900 },
-  ]
+check("bulk item on a RESIDENTIAL pool flags; the same item on commercial does not", () => {
+  const profiles = new Map([["50", { name: "CAL HYPO 50LB", bulk: true, category: "chemical", typicalQty: 1 }]])
+  const items = [cons("u1", "CAL HYPO 50LB", 1, 8000)]
+  const res = runChecks(baseCtx({ items, itemProfiles: profiles, residential: true }), LOG_CORRECTION_CHECKS)
+  assert.equal(res.filter((f) => f.rule === "bulk_item_on_residential").length, 1)
+  assert.equal(res[0].sourceId, "u1", "points at the offending usage row — fixable in ION")
+  const com = runChecks(baseCtx({ items, itemProfiles: profiles, residential: false }), LOG_CORRECTION_CHECKS)
+  assert.equal(com.filter((f) => f.rule === "bulk_item_on_residential").length, 0)
+})
+
+check("fat-finger quantity flags above the multiplier; normal quantities stay silent", () => {
+  const profiles = new Map([["9", { name: "SALT CELL", bulk: false, category: "part", typicalQty: 1 }]])
+  const hot = runChecks(baseCtx({ items: [cons("u1", "SALT CELL", 10, 20000)], itemProfiles: profiles }), LOG_CORRECTION_CHECKS)
+  assert.equal(hot.filter((f) => f.rule === "quantity_outlier").length, 1)
+  const ok = runChecks(baseCtx({ items: [cons("u2", "SALT CELL", 2, 20000)], itemProfiles: profiles }), LOG_CORRECTION_CHECKS)
+  assert.equal(ok.filter((f) => f.rule === "quantity_outlier").length, 0)
+  const loose = runChecks(baseCtx({ items: [cons("u1", "SALT CELL", 10, 20000)], itemProfiles: profiles }), [new QuantityOutlierCheck(20)])
+  assert.equal(loose.length, 0, "retuned by construction — no logic edited")
+})
+
+check("an unknown item profile never guesses", () => {
+  const found = runChecks(baseCtx({ items: [cons("u1", "MYSTERY", 99, 100)] }), LOG_CORRECTION_CHECKS)
+  assert.equal(found.filter((f) => f.rule === "quantity_outlier").length, 0)
+})
+
+check("expired task with accrual is a log-correction error", () => {
   const found = runChecks(baseCtx({
-    items,
-    customerProvidesChems: true,
-    terms: [{ id: "dead", customerId: 1, billingMethod: "per_visit", perVisitCents: 5000, flatMonthlyCents: 0, active: false, startsOn: "2026-01-01", endsOn: "2026-06-15" }],
-  }))
-  assert.ok(found.some((f) => f.rule === "expired_task_billed" && f.severity === "error"))
-  assert.ok(found.some((f) => f.rule === "customer_provides_chems" && f.cents === 900))
+    items: [cons("u1", "TABS", 2, 450)],
+    terms: [{ id: "t1", customerId: 1, billingMethod: "per_visit", perVisitCents: 5000, flatMonthlyCents: 0, active: false, startsOn: "2026-01-01", endsOn: "2026-06-15" }],
+  }), LOG_CORRECTION_CHECKS)
+  const f = found.find((x) => x.rule === "expired_task_billed")!
+  assert.equal(f.phase, "log_correction")
+  assert.equal(f.severity, "error")
 })
 
-check("high-chem flag: fires only above BOTH the multiplier and the floor; thresholds are constructor args", () => {
-  const items: BillableItem[] = [
-    { sourceKind: "usage", sourceId: "u1", taskId: "t", kind: "consumable", serviceDate: "2026-07-07", itemName: "TABS", qty: 40, unitPriceCents: 450, amountCents: 18000 },
-  ]
-  const hot = runChecks(baseCtx({ items, peerChemMedianCents: 8000 }), [new HighChemBillCheck()])
-  assert.equal(hot.length, 1)
-  const coldFloor = runChecks(baseCtx({ items, peerChemMedianCents: 8000 }), [new HighChemBillCheck(2, 20000)])
-  assert.equal(coldFloor.length, 0, "same data, retuned floor — no logic edited")
-  const noMedian = runChecks(baseCtx({ items }), [new HighChemBillCheck()])
-  assert.equal(noMedian.length, 0, "unknown peer median stays silent, never guesses")
+console.log("\nchecks — phase B: bill review (explain / discount)")
+
+check("provides-own-chems bills flag for review, never for a log fix", () => {
+  const found = runChecks(baseCtx({ items: [cons("u1", "TABS", 2, 450)], customerProvidesChems: true }), BILL_REVIEW_CHECKS)
+  assert.equal(found.length, 1)
+  assert.equal(found[0].phase, "bill_review")
+  assert.equal(found[0].cents, 900)
+})
+
+check("high vs PEER and high vs SELF are separate rules, both silent without a baseline", () => {
+  const items = [cons("u1", "TABS", 40, 450)] // $180
+  assert.equal(runChecks(baseCtx({ items }), BILL_REVIEW_CHECKS).length, 0, "no baselines -> no guesses")
+  const peer = runChecks(baseCtx({ items, peerChemMedianCents: 8000 }), BILL_REVIEW_CHECKS)
+  assert.deepEqual(peer.map((f) => f.rule), ["high_chem_vs_peer"])
+  const self = runChecks(baseCtx({ items, selfChemMedianCents: 5000 }), BILL_REVIEW_CHECKS)
+  assert.deepEqual(self.map((f) => f.rule), ["high_chem_vs_self"])
+  const both = runChecks(baseCtx({ items, peerChemMedianCents: 8000, selfChemMedianCents: 5000 }), BILL_REVIEW_CHECKS)
+  assert.equal(both.length, 2, "a month can be high on both axes")
+})
+
+check("thresholds are constructor args — same data, retuned floor, no finding", () => {
+  const items = [cons("u1", "TABS", 40, 450)]
+  const ctx = baseCtx({ items, peerChemMedianCents: 8000 })
+  assert.equal(runChecks(ctx, [new HighChemVsPeerCheck()]).length, 1)
+  assert.equal(runChecks(ctx, [new HighChemVsPeerCheck(2, 20000)]).length, 0)
 })
