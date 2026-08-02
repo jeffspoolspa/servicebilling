@@ -61,6 +61,22 @@ export const ROUTING_POLICY = {
    */
   maxPoolsPerRoute: 10,
 
+  /**
+   * Continuity — every cadence period gets exactly the contracted number of
+   * visits across a schedule edit: none doubled, none skipped.
+   *
+   * ADVISORY for now, like moveResistance below: the calculation runs and
+   * reports from day one, but does not block adoption until it has been
+   * watched against real scenarios. Flip blocksAdoption to make it binding —
+   * that is the only change needed, because the gate reads this and the
+   * calculation does not decide its own severity.
+   */
+  continuity: {
+    blocksAdoption: false,
+    /** Extra visits tolerated in a period. 0 = a double visit is a violation. */
+    extraVisitsAllowed: 0,
+  },
+
   moveResistance: {
     place: 0,
     unplace: 0,

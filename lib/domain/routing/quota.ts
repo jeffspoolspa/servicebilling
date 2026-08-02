@@ -21,6 +21,7 @@ import {
   firesOn,
   lastFiringOnOrBefore,
   nextFiringOnOrAfter,
+  nextOccurrence,
   type CadenceInterval,
   type OrderingConstraint,
   type Pin,
@@ -74,6 +75,27 @@ export interface SpacingResult {
   readonly met: boolean
   readonly minimumDays: number
   readonly gapsDays: readonly number[]
+}
+
+/**
+ * Whether this quota's CURRENT cadence period still ends up with exactly the
+ * contracted number of visits, counting what has already happened.
+ *
+ * Only the current period can be wrong. History is fixed, and every future
+ * period is guaranteed by coverage — the standing pattern is validated, so it
+ * produces the right count by construction. The seam an edit opens is one
+ * period wide.
+ */
+export interface ContinuityResult {
+  readonly met: boolean
+  readonly required: number
+  /** Visits already made in this period, serviceable or not — we were there. */
+  readonly alreadyVisited: number
+  /** Days still ahead this period that the generator will serve. */
+  readonly stillScheduled: number
+  readonly projected: number
+  /** 'doubled' costs us a visit; 'skipped' costs the customer one. */
+  readonly fault: "doubled" | "skipped" | null
 }
 
 export class QuotaRuleError extends Error {}
@@ -174,6 +196,42 @@ export class Quota {
     this.placements.set(targetKey, moved)
     this.events.push({ kind: "StopMoved", quotaId: this.id, from: existing, to: moved })
     return moved
+  }
+
+  /**
+   * Project this period's visit count across an edit.
+   *
+   * `alreadyVisited` counts every visit made in this period INCLUDING
+   * non-serviceable ones: the question is "were we there", not "did we perform
+   * a service". A locked gate consumed the slot, and ignoring it would read a
+   * healthy schedule as a skipped week.
+   *
+   * Note what is NOT measured: elapsed days. Weekly Monday moved to Friday is
+   * ten days between visits and perfectly correct, because each week still
+   * gets one. Spacing governs within a period, this governs across them.
+   */
+  continuity(asOfWeek: WeekIndex, asOfWeekday: number, alreadyVisited: number): ContinuityResult {
+    const c = cadence(this.req.intervalWeeks, this.req.anchorWeek)
+    // The firing week of the period we are in. If it is behind us, everything
+    // this period was going to serve has already been served.
+    const firingWeek = lastFiringOnOrBefore(c, asOfWeek)
+    const stillScheduled =
+      firingWeek === asOfWeek
+        ? [...this.placements.values()].filter(
+            (s) => nextOccurrence(c, s.weekday, asOfWeek, asOfWeekday).week === asOfWeek,
+          ).length
+        : 0
+
+    const required = this.req.requiredDays
+    const projected = alreadyVisited + stillScheduled
+    return {
+      met: projected === required,
+      required,
+      alreadyVisited,
+      stillScheduled,
+      projected,
+      fault: projected === required ? null : projected > required ? "doubled" : "skipped",
+    }
   }
 
   /**

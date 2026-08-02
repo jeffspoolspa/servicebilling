@@ -26,6 +26,7 @@ import {
   QuotaRuleError,
   RouteGeometry,
   cadence,
+  nextOccurrence,
   dayIndex,
   type CadenceInterval,
   type OrderingConstraint,
@@ -506,6 +507,68 @@ check("what publishes is the COMPLETE week per quota, not the diff", () => {
   const gone = Scenario.from([q])
   for (const st of q.stops) gone.unplaceStop("multi", st.techId, st.weekday)
   assert.equal(gone.schedules()[0].stops.length, 0, "an emptied week is stated, not omitted")
+})
+
+check("continuity: the generator serves days that have not passed this period", () => {
+  // Carter's live ION finding, modelled: a serviced day still ahead in a
+  // firing week gets generated; one already past waits for the next cycle.
+  const weekly = cadence(1, 0)
+  // Wednesday(3), moving to Thursday(4): Thursday is ahead -> served THIS week.
+  assert.equal(nextOccurrence(weekly, 4 as Weekday, 10, 3).week, 10, "Thu is still ahead on Wed")
+  // Friday(5), same target: Thursday has passed -> next week.
+  assert.equal(nextOccurrence(weekly, 4 as Weekday, 10, 5).week, 11, "Thu has passed by Fri")
+  // Same day counts as passed — whether ION already generated it is a race.
+  assert.equal(nextOccurrence(weekly, 4 as Weekday, 10, 4).week, 11, "today is spoken for")
+  // Biweekly only lands in a firing week: anchor 0 fires on even weeks.
+  const biweekly = cadence(2, 0)
+  assert.equal(nextOccurrence(biweekly, 4 as Weekday, 11, 1).week, 12, "week 11 does not fire")
+  assert.equal(nextOccurrence(biweekly, 4 as Weekday, 10, 1).week, 10, "week 10 does")
+})
+
+check("continuity: a mid-week move that would double a visit is caught", () => {
+  const q = quotaOf("c1", { requiredDays: 1 })
+  q.place("korey", 2 as Weekday) // Tuesday
+  // It is Wednesday(3) and Tuesday's visit already happened this week.
+  q.move({ techId: "korey", weekday: 2 as Weekday }, { techId: "korey", weekday: 4 as Weekday })
+  const bad = q.continuity(10, 3, 1)
+  assert.equal(bad.met, false)
+  assert.equal(bad.fault, "doubled", "Tue served, Thu still ahead = two visits")
+  assert.equal(bad.projected, 2)
+
+  // The same edit made on Friday(5) is fine: Thursday has passed.
+  const ok = q.continuity(10, 5, 1)
+  assert.equal(ok.met, true, "one visit this period, next lands next week")
+  assert.equal(ok.stillScheduled, 0)
+})
+
+check("continuity: Monday to Friday is 10 days apart and perfectly valid", () => {
+  // The invariant is visits PER PERIOD, never days between them. This is the
+  // case that proves the day-gap framing wrong.
+  const q = quotaOf("c2", { requiredDays: 1 })
+  q.place("korey", 5 as Weekday) // now Friday, after Monday was served
+  const r = q.continuity(10, 5, 1) // Monday's visit happened, today is Friday
+  assert.equal(r.met, true, "week 10 got its one visit; Friday falls in week 11")
+  assert.equal(r.fault, null)
+})
+
+check("continuity: a period short of visits reports skipped, not doubled", () => {
+  const q = quotaOf("c3", { requiredDays: 2 })
+  q.place("korey", 1 as Weekday)
+  q.place("korey", 4 as Weekday)
+  // Friday(5): both days behind us, but only one visit happened.
+  const r = q.continuity(10, 5, 1)
+  assert.equal(r.met, false)
+  assert.equal(r.fault, "skipped", "the customer is owed one")
+  assert.equal(r.stillScheduled, 0)
+})
+
+check("continuity: outside its firing week a biweekly quota schedules nothing more", () => {
+  const q = quotaOf("c4", { requiredDays: 1, intervalWeeks: 2 })
+  q.place("korey", 4 as Weekday)
+  // Week 11 does not fire for anchor 0, so nothing is served regardless of day.
+  const r = q.continuity(11, 1, 1)
+  assert.equal(r.stillScheduled, 0, "not this quota's week")
+  assert.equal(r.met, true, "its visit came in week 10")
 })
 
 console.log("\nfitting")

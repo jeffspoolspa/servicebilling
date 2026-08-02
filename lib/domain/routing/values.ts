@@ -102,6 +102,36 @@ export function nextFiringOnOrAfter(c: Cadence, week: WeekIndex): WeekIndex {
   return offset === 0 ? week : week + (c.intervalWeeks - offset)
 }
 
+/** A future service: which week it lands in, and on which day. */
+export interface Occurrence {
+  readonly week: WeekIndex
+  readonly weekday: Weekday
+}
+
+/**
+ * When a stop on this weekday will NEXT be served — the system of record's
+ * generator, modelled.
+ *
+ * ION schedules any serviced day that has not passed yet in a week the cadence
+ * fires. That single behaviour is why a mid-week edit can double a visit: move
+ * Tuesday to Thursday on a Wednesday and Tuesday is already served while
+ * Thursday is still ahead, so both happen. Make the same move on a Friday and
+ * Thursday has passed, so the next one falls in the following cycle.
+ *
+ * Same-day counts as PASSED. Whether ION has already generated today's visit
+ * depends on when its job ran, so treating today as still-available would be a
+ * race; the safe reading is that today is spoken for.
+ */
+export function nextOccurrence(
+  c: Cadence,
+  weekday: Weekday,
+  fromWeek: WeekIndex,
+  fromWeekday: number,
+): Occurrence {
+  if (firesOn(c, fromWeek) && weekday > fromWeekday) return { week: fromWeek, weekday }
+  return { week: nextFiringOnOrAfter(c, fromWeek + 1), weekday }
+}
+
 export function cadenceLabel(c: Cadence): string {
   if (c.intervalWeeks === 1) return "weekly"
   if (c.intervalWeeks === 4) return "monthly"
