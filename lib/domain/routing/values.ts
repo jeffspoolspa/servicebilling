@@ -134,6 +134,16 @@ export function positionInWeek(weekday: number): number {
   return (weekday + 6) % 7
 }
 
+/** The calendar date of a weekday in a given week (weeks run Mon..Sun). */
+export function dateOf(week: WeekIndex, weekday: Weekday): Date {
+  return new Date(weekStart(week).getTime() + positionInWeek(weekday) * 86400000)
+}
+
+/** YYYY-MM-DD, which is what the system of record wants for a start date. */
+export function isoDateOf(week: WeekIndex, weekday: Weekday): string {
+  return dateOf(week, weekday).toISOString().slice(0, 10)
+}
+
 export function nextOccurrence(
   c: Cadence,
   weekday: Weekday,

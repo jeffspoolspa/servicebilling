@@ -18,7 +18,17 @@
  * write path per ADR 002, dry-run first. Nothing here talks to ION directly.
  */
 
-import type { PublishResult, RoutePublisher, TaskSchedule } from "@/lib/domain/routing"
+import {
+  cadence,
+  isoDateOf,
+  nextOccurrence,
+  positionInWeek,
+  weekOf,
+  type PublishResult,
+  type RoutePublisher,
+  type TaskSchedule,
+  type Weekday,
+} from "@/lib/domain/routing"
 import type { QueryClient } from "./supabase-quota-repository"
 
 /** Sun..Sat — the ION form's day field names, by weekday index. */
@@ -26,6 +36,23 @@ const DAY_FIELD = ["day1", "day2", "day3", "day4", "day5", "day6", "day7"] as co
 /** One page is plenty: a scenario touching 1000+ tasks is not a thing. */
 const PAGE = 999
 const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+/**
+ * Our frequency vocabulary as a cadence. Non-weekly tasks carry no day picker
+ * in ION — their day AND their A/B parity both come from StartsOn — so moving
+ * one means writing a start date, not day fields.
+ */
+// Verified against live data: `multi_week` is a task with SEVERAL WEEKLY days
+// (its slots are all `weekly`), so it uses the day picker like any weekly task.
+// The task row says `biweekly`; which alternating week it takes is on the SLOT
+// (biweekly_a / biweekly_b), so the anchor is read from there, not from here.
+const INTERVAL_OF: Record<string, 1 | 2 | 4 | undefined> = {
+  weekly: 1,
+  multi_week: 1,
+  daily: 1,
+  biweekly: 2,
+  monthly: 4,
+}
 
 export interface IonWriteTarget {
   ionTaskId: string
@@ -65,36 +92,73 @@ export class IonRoutePublisher implements RoutePublisher {
   ): Promise<PublishResult[]> {
     if (schedules.length === 0) return []
     const targets = await this.resolve(schedules)
-    const results: PublishResult[] = []
 
-    for (const schedule of schedules) {
-      const target = targets.get(schedule.quotaId) ?? { reason: "not resolved" }
-      if ("reason" in target) {
-        // Unresolvable identity is a refusal, not a silent skip: publishing
-        // some of a scenario and quietly dropping the rest is the one outcome
-        // nobody can reconcile afterwards.
-        results.push({ quotaId: schedule.quotaId, accepted: false, detail: target.reason })
-        continue
+    // PREFLIGHT. Anything unwritable fails the WHOLE batch before a single
+    // POST, because a scenario is one decision: publishing 40 tasks and then
+    // discovering the 41st was never publishable leaves a reroute half-applied,
+    // which is the state nobody can reconcile afterwards.
+    const unresolvable = schedules
+      .map((s) => ({ quotaId: s.quotaId, t: targets.get(s.quotaId) }))
+      .filter((x) => !x.t || "reason" in x.t)
+    if (unresolvable.length > 0) {
+      const why = unresolvable
+        .map((x) => `${x.quotaId.slice(0, 8)}: ${(x.t as { reason: string })?.reason ?? "not resolved"}`)
+        .slice(0, 5)
+        .join("; ")
+      return schedules.map((s) => ({
+        quotaId: s.quotaId,
+        accepted: false,
+        detail: `batch refused — ${unresolvable.length} of ${schedules.length} cannot be written (${why}${unresolvable.length > 5 ? "; …" : ""})`,
+      }))
+    }
+
+    // A live run rehearses first: every task is dry-run, and only if ION accepts
+    // all of them does anything get written. This is also the only way to
+    // preflight staleness, which only ION can answer.
+    if (!opts.dryRun) {
+      const rehearsal = await this.attempt(schedules, targets, true)
+      const refused = rehearsal.filter((r) => !r.accepted)
+      if (refused.length > 0) {
+        return schedules.map((s) => {
+          const own = rehearsal.find((r) => r.quotaId === s.quotaId)
+          return {
+            quotaId: s.quotaId,
+            accepted: false,
+            detail:
+              own && !own.accepted
+                ? own.detail
+                : `batch refused — ${refused.length} of ${schedules.length} failed the rehearsal, nothing was written`,
+          }
+        })
       }
+    }
+
+    return this.attempt(schedules, targets, opts.dryRun)
+  }
+
+  /** One pass over the batch. Assumes every target already resolved. */
+  private async attempt(
+    schedules: readonly TaskSchedule[],
+    targets: Map<string, IonWriteTarget | { reason: string }>,
+    dryRun: boolean,
+  ): Promise<PublishResult[]> {
+    const results: PublishResult[] = []
+    for (const schedule of schedules) {
+      const target = targets.get(schedule.quotaId) as IonWriteTarget
       try {
         const res = await this.windmill.run<{
           committed?: boolean
-          dry_run?: boolean
           changed?: unknown[]
           refused?: string
           drift?: { weekday: string; ion: string | null; expected: string | null }[]
-        }>(
-          this.scriptPath,
-          {
-            ionTaskId: target.ionTaskId,
-            ionCustId: target.ionCustId,
-            changes: target.changes,
-            dry_run: opts.dryRun,
-            expect_days: target.expectDays,
-          },
-        )
-        // A stale picture is never "accepted", dry run or not: the dry run
-        // exists to tell you the write is unsafe BEFORE you fire it.
+        }>(this.scriptPath, {
+          ionTaskId: target.ionTaskId,
+          ionCustId: target.ionCustId,
+          changes: target.changes,
+          dry_run: dryRun,
+          // Only weekly tasks expose a day picker to compare against.
+          expect_days: target.expectDays,
+        })
         if (res.refused === "stale_picture") {
           const drift = (res.drift ?? [])
             .map((d) => `${WEEKDAY[Number(d.weekday)] ?? d.weekday}: ION ${d.ion ?? "none"} vs ours ${d.expected ?? "none"}`)
@@ -106,14 +170,14 @@ export class IonRoutePublisher implements RoutePublisher {
           })
           continue
         }
-        const changedCount = Array.isArray(res.changed) ? res.changed.length : 0
+        const n = Array.isArray(res.changed) ? res.changed.length : 0
         results.push({
           quotaId: schedule.quotaId,
-          accepted: opts.dryRun ? true : res.committed === true,
-          detail: opts.dryRun
-            ? `dry run: ${changedCount} field(s) would change on ION task ${target.ionTaskId}`
+          accepted: dryRun ? true : res.committed === true,
+          detail: dryRun
+            ? `dry run: ${n} field(s) would change on ION task ${target.ionTaskId}`
             : res.committed === true
-              ? `wrote ${changedCount} field(s) to ION task ${target.ionTaskId}`
+              ? `wrote ${n} field(s) to ION task ${target.ionTaskId}`
               : `ION refused the write to task ${target.ionTaskId}`,
         })
       } catch (err) {
@@ -148,7 +212,7 @@ export class IonRoutePublisher implements RoutePublisher {
       this.client
         .schema("maintenance")
         .from("task_schedules")
-        .select("task_id, day_of_week, tech_employee_id, active")
+        .select("task_id, day_of_week, tech_employee_id, active, frequency")
         .in("task_id", quotaIds)
         .range(0, PAGE),
     ])
@@ -158,7 +222,13 @@ export class IonRoutePublisher implements RoutePublisher {
       day_of_week: number | null
       tech_employee_id: string | null
       active: boolean
+      frequency: string | null
     }[]
+    // A/B parity is a property of the slots.
+    const anchorOf = (taskId: string) =>
+      currentSlots.some((r) => r.task_id === taskId && r.active && r.frequency === "biweekly_b")
+        ? 1
+        : 0
     const techIds = [
       ...new Set([
         ...schedules.flatMap((s) => s.stops.map((st) => st.techId)),
@@ -227,20 +297,6 @@ export class IonRoutePublisher implements RoutePublisher {
         out.set(schedule.quotaId, { reason: "task has no ion_task_id — it does not exist in ION" })
         continue
       }
-      // ONLY weekly tasks carry a day picker in ION. For biweekly and monthly
-      // the serviced day is derived from StartsOn -- which also fixes the A/B
-      // parity (which of the alternating weeks it takes). Writing day1..day7
-      // at one of those is meaningless at best; moving one means moving its
-      // start date, which is a different write we have not built. Refuse
-      // loudly rather than leaning on the staleness guard to catch it.
-      if (task.frequency && task.frequency !== "weekly") {
-        out.set(schedule.quotaId, {
-          reason:
-            `${task.frequency} task — ION derives its day from StartsOn, not the day picker, ` +
-            `so a day-field write cannot move it (start-date writes not implemented)`,
-        })
-        continue
-      }
       if (unresolvableTech.has(schedule.quotaId)) {
         out.set(schedule.quotaId, {
           reason: "a tech on this task has no ion_employee_id — cannot state our current picture",
@@ -253,9 +309,16 @@ export class IonRoutePublisher implements RoutePublisher {
         continue
       }
 
-      // Every day stated: the served ones carry their tech, the rest are blank.
-      const changes: Record<string, string> = {}
-      for (const field of DAY_FIELD) changes[field] = ""
+      const interval = INTERVAL_OF[task.frequency ?? "weekly"]
+      if (!interval) {
+        out.set(schedule.quotaId, {
+          reason: `unknown cadence "${task.frequency}" — cannot decide how to write its schedule`,
+        })
+        continue
+      }
+      const isWeekly = interval === 1
+
+      const named: { weekday: Weekday; ionTech: string }[] = []
       let unmapped: string | null = null
       for (const stop of schedule.stops) {
         const ionTech = ionTechById.get(stop.techId)
@@ -263,7 +326,7 @@ export class IonRoutePublisher implements RoutePublisher {
           unmapped = stop.techId
           break
         }
-        changes[DAY_FIELD[stop.weekday]] = ionTech
+        named.push({ weekday: stop.weekday, ionTech })
       }
       if (unmapped) {
         out.set(schedule.quotaId, {
@@ -271,11 +334,42 @@ export class IonRoutePublisher implements RoutePublisher {
         })
         continue
       }
+
+      const changes: Record<string, string> = {}
+      if (isWeekly) {
+        // Every day stated: served days carry their tech, the rest are blank.
+        for (const field of DAY_FIELD) changes[field] = ""
+        for (const n of named) changes[DAY_FIELD[n.weekday]] = n.ionTech
+      } else {
+        // Non-weekly: ION renders no day picker. The serviced day AND the A/B
+        // parity both come from StartsOn, so a move is a start-date write.
+        // Chosen date = the NEXT occurrence of that weekday in a week this
+        // cadence fires, so the change takes effect going forward rather than
+        // rewriting a contract that has been running for months.
+        if (named.length !== 1) {
+          out.set(schedule.quotaId, {
+            reason: `${task.frequency} task with ${named.length} days — ION states one start date, so it cannot express this`,
+          })
+          continue
+        }
+        const now = new Date()
+        const occ = nextOccurrence(
+          cadence(interval, anchorOf(schedule.quotaId)),
+          named[0].weekday,
+          weekOf(now),
+          now.getDay(),
+        )
+        changes["StartsOn"] = isoDateOf(occ.week, occ.weekday)
+        changes["AssignedTo"] = named[0].ionTech
+      }
+
       out.set(schedule.quotaId, {
         ionTaskId: task.ion_task_id,
         ionCustId,
         changes,
-        expectDays: believed.get(schedule.quotaId) ?? {},
+        // Only weekly tasks expose days for ION to confirm; comparing a picker
+        // that does not render would refuse every non-weekly write.
+        expectDays: isWeekly ? (believed.get(schedule.quotaId) ?? {}) : {},
       })
     }
     return out
