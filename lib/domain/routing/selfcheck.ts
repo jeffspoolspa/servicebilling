@@ -519,6 +519,11 @@ check("continuity: the generator serves days that have not passed this period", 
   assert.equal(nextOccurrence(weekly, 4 as Weekday, 10, 5).week, 11, "Thu has passed by Fri")
   // Same day counts as passed — whether ION already generated it is a race.
   assert.equal(nextOccurrence(weekly, 4 as Weekday, 10, 4).week, 11, "today is spoken for")
+  // Weeks run MONDAY to Sunday even though weekdays are numbered 0 = Sun.
+  // Sunday is the LAST day of its week, not the first: on a Sunday nothing is
+  // still ahead, and from a Monday, Sunday is still to come.
+  assert.equal(nextOccurrence(weekly, 0 as Weekday, 10, 1).week, 10, "Sun is ahead of Mon")
+  assert.equal(nextOccurrence(weekly, 1 as Weekday, 10, 0).week, 11, "Mon has passed by Sun")
   // Biweekly only lands in a firing week: anchor 0 fires on even weeks.
   const biweekly = cadence(2, 0)
   assert.equal(nextOccurrence(biweekly, 4 as Weekday, 11, 1).week, 12, "week 11 does not fire")

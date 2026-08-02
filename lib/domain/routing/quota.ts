@@ -59,6 +59,14 @@ export interface Requirement {
    * so a flat assumption misprices exactly the routes that matter (Q9).
    */
   readonly serviceMinutes: number | null
+  /**
+   * Visits already made in the CURRENT cadence period — a Service Delivery
+   * fact attached on read, like serviceMinutes. Counts non-serviceable visits
+   * too: continuity asks "were we there", not "did we service it". Defaults to
+   * 0 for callers that do not supply it, which reads as "nothing yet this
+   * period" — the permissive direction, since continuity is advisory.
+   */
+  readonly visitsThisPeriod?: number
   readonly orderingConstraint: OrderingConstraint
   readonly startWeek: WeekIndex
   /** null means open-ended, which is the normal case. */
@@ -210,7 +218,11 @@ export class Quota {
    * ten days between visits and perfectly correct, because each week still
    * gets one. Spacing governs within a period, this governs across them.
    */
-  continuity(asOfWeek: WeekIndex, asOfWeekday: number, alreadyVisited: number): ContinuityResult {
+  continuity(
+    asOfWeek: WeekIndex,
+    asOfWeekday: number,
+    alreadyVisited: number = this.req.visitsThisPeriod ?? 0,
+  ): ContinuityResult {
     const c = cadence(this.req.intervalWeeks, this.req.anchorWeek)
     // The firing week of the period we are in. If it is behind us, everything
     // this period was going to serve has already been served.

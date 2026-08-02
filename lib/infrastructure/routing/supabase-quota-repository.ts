@@ -118,7 +118,7 @@ export class SupabaseQuotaRepository implements QuotaRepository {
       this.serviceMedians(),
     ])
 
-    return this.hydrate(tasks, slots, locations, week, medians)
+    return await this.hydrate(tasks, slots, locations, week, medians)
   }
 
   /**
@@ -168,7 +168,47 @@ export class SupabaseQuotaRepository implements QuotaRepository {
       ),
     ])
     const medians = await this.serviceMedians(tasks.map((t) => t.id))
-    return this.hydrate(tasks, slots, locations, week, medians)
+    return await this.hydrate(tasks, slots, locations, week, medians)
+  }
+
+  /**
+   * Visits already made in each task's CURRENT cadence period.
+   *
+   * Counts EVERY visit, serviceable or not: continuity asks whether we were
+   * there, because a locked gate still consumed the slot and a second visit
+   * that week would still be a double.
+   *
+   * The period is the cadence cycle containing today — one week for a weekly
+   * task, two for a biweekly, four for a monthly — so we look back at most 28
+   * days and bucket by each task's own interval.
+   */
+  private async visitsThisPeriod(
+    week: WeekIndex,
+    intervalOf: (taskId: string) => number,
+    taskIds?: readonly string[],
+  ): Promise<Map<string, number>> {
+    const since = new Date(Date.now() - 28 * 86400e3).toISOString().slice(0, 10)
+    let query = this.client
+      .schema("maintenance")
+      .from("visits")
+      .select("task_id, visit_date")
+      .gte("visit_date", since)
+    if (taskIds) query = query.in("task_id", taskIds)
+    const rows = await fetchAll<{ task_id: string | null; visit_date: string }>(
+      query,
+      "visits(current period)",
+    )
+
+    const counts = new Map<string, number>()
+    for (const r of rows) {
+      if (r.task_id === null) continue
+      const visitWeek = weekOf(new Date(r.visit_date + "T12:00:00Z"))
+      const interval = intervalOf(r.task_id)
+      // Same cycle as today? Compare the cycle each week belongs to.
+      if (Math.floor(visitWeek / interval) !== Math.floor(week / interval)) continue
+      counts.set(r.task_id, (counts.get(r.task_id) ?? 0) + 1)
+    }
+    return counts
   }
 
   /**
@@ -208,13 +248,13 @@ export class SupabaseQuotaRepository implements QuotaRepository {
     return medians
   }
 
-  private hydrate(
+  private async hydrate(
     tasks: TaskRow[],
     slots: SlotRow[],
     locations: LocationRow[],
     week: WeekIndex,
     serviceMedians: Map<string, number>,
-  ): Quota[] {
+  ): Promise<Quota[]> {
     const pinByCustomer = new Map<number, Pin>()
     for (const l of locations) {
       if (l.latitude === null || l.longitude === null) continue
@@ -237,6 +277,19 @@ export class SupabaseQuotaRepository implements QuotaRepository {
       else slotsByTask.set(s.task_id, [s])
     }
 
+    // Visits already made this period, per task — the fact continuity needs.
+    // Computed here because it depends on each task's own cadence, which is
+    // only known once its slots are in hand.
+    const intervalByTask = new Map<string, number>()
+    for (const task of tasks) {
+      intervalByTask.set(task.id, intervalOf(slotsByTask.get(task.id) ?? []))
+    }
+    const periodVisits = await this.visitsThisPeriod(
+      week,
+      (taskId) => intervalByTask.get(taskId) ?? 1,
+      tasks.map((t) => t.id),
+    )
+
     const quotas: Quota[] = []
     for (const task of tasks) {
       const taskSlots = slotsByTask.get(task.id) ?? []
@@ -258,6 +311,7 @@ export class SupabaseQuotaRepository implements QuotaRepository {
         // translate ION's day roster into it. Until then this mirrors the
         // placements, so coverage only catches quotas with no stops at all.
         requiredDays: Math.max(placed.length, 1),
+        visitsThisPeriod: periodVisits.get(task.id) ?? 0,
         serviceMinutes: serviceMedians.get(task.id) ?? null,
         orderingConstraint: "none" as OrderingConstraint,
         startWeek,

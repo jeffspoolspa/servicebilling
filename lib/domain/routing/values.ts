@@ -122,13 +122,26 @@ export interface Occurrence {
  * depends on when its job ran, so treating today as still-available would be a
  * race; the safe reading is that today is spoken for.
  */
+/**
+ * Where a weekday sits inside a MONDAY-start week: Mon 0 .. Sun 6.
+ *
+ * Weekday NUMBERS are ION's (day1..day7 = Sun..Sat, so 0 = Sun) but weeks RUN
+ * Monday to Sunday — see weekStart. Those are two different things and mixing
+ * them makes Sunday look like the first day of the week instead of the last,
+ * which silently inverts every "has this day passed yet" question.
+ */
+export function positionInWeek(weekday: number): number {
+  return (weekday + 6) % 7
+}
+
 export function nextOccurrence(
   c: Cadence,
   weekday: Weekday,
   fromWeek: WeekIndex,
   fromWeekday: number,
 ): Occurrence {
-  if (firesOn(c, fromWeek) && weekday > fromWeekday) return { week: fromWeek, weekday }
+  const passed = positionInWeek(weekday) <= positionInWeek(fromWeekday)
+  if (firesOn(c, fromWeek) && !passed) return { week: fromWeek, weekday }
   return { week: nextFiringOnOrAfter(c, fromWeek + 1), weekday }
 }
 
