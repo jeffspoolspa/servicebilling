@@ -103,31 +103,57 @@ export class SupabaseBillingRepository {
       else byVisit.set(u.visit_id, [u])
     }
 
-    type TRow = { id: string; customer_id: number | null; billing_method: string | null; consumables_mode: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; status: string | null; starts_on: string | null; ends_on: string | null }
+    type TRow = { id: string; customer_id: number | null; status: string | null; starts_on: string | null; ends_on: string | null }
     const taskIds = [...new Set(visits.map((v) => v.task_id))]
     const owned = await all<TRow>((a, b) =>
-      this.maint().from("tasks")
-        .select("id, customer_id, billing_method, consumables_mode, price_per_visit_cents, flat_rate_monthly_cents, status, starts_on, ends_on")
+      this.maint().from("tasks").select("id, customer_id, status, starts_on, ends_on")
         .eq("customer_id", customerId).order("id").range(a, b))
     const extraIds = taskIds.filter((id) => !owned.some((t) => t.id === id))
     const extra = extraIds.length
       ? await all<TRow>((a, b) =>
-          this.maint().from("tasks")
-            .select("id, customer_id, billing_method, consumables_mode, price_per_visit_cents, flat_rate_monthly_cents, status, starts_on, ends_on")
+          this.maint().from("tasks").select("id, customer_id, status, starts_on, ends_on")
             .in("id", extraIds).order("id").range(a, b))
       : []
+    const rows = [...owned, ...extra]
 
-    const terms: TaskTerms[] = [...owned, ...extra].map((t) => ({
-      id: t.id,
-      customerId: t.customer_id,
-      laborPolicy: laborPolicyFor(t.billing_method),
-      consumablesPolicy: consumablesPolicyFor(t.consumables_mode),
-      perVisitCents: t.price_per_visit_cents ?? 0,
-      flatMonthlyCents: t.flat_rate_monthly_cents ?? 0,
-      active: t.status === "active",
-      startsOn: t.starts_on,
-      endsOn: t.ends_on,
-    }))
+    // Terms are EFFECTIVE DATED: resolve the ones in force for this billing
+    // month, never today's. ION applies a mid-month rate change to the whole
+    // month (the Winters note), so the month is the governing instant.
+    type TTRow = {
+      task_id: string; billing_method: string | null; consumables_mode: string | null
+      price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null
+      valid_from: string; valid_to: string | null
+    }
+    const termRows: TTRow[] = []
+    const ids = rows.map((t) => t.id)
+    for (let i = 0; i < ids.length; i += 200) {
+      termRows.push(...await all<TTRow>((a, b) =>
+        this.maint().from("task_terms")
+          .select("task_id, billing_method, consumables_mode, price_per_visit_cents, flat_rate_monthly_cents, valid_from, valid_to")
+          .in("task_id", ids.slice(i, i + 200)).order("task_id").range(a, b)))
+    }
+    const historyOf = new Map<string, Effective<TTRow>[]>()
+    for (const r of termRows) {
+      const e = { from: r.valid_from, to: r.valid_to, value: r }
+      const l = historyOf.get(r.task_id)
+      if (l) l.push(e)
+      else historyOf.set(r.task_id, [e])
+    }
+
+    const terms: TaskTerms[] = rows.map((t) => {
+      const inForce = new EffectiveHistory(historyOf.get(t.id) ?? []).on(month)
+      return {
+        id: t.id,
+        customerId: t.customer_id,
+        laborPolicy: laborPolicyFor(inForce?.billing_method ?? null),
+        consumablesPolicy: consumablesPolicyFor(inForce?.consumables_mode ?? null),
+        perVisitCents: inForce?.price_per_visit_cents ?? 0,
+        flatMonthlyCents: inForce?.flat_rate_monthly_cents ?? 0,
+        active: t.status === "active",
+        startsOn: t.starts_on,
+        endsOn: t.ends_on,
+      }
+    })
     return {
       visits: visits.map((v) => ({
         id: v.id, taskId: v.task_id, customerId: v.customer_id,
