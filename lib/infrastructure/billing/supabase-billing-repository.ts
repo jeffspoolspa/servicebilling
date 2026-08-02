@@ -4,7 +4,7 @@
  *
  * The domain never queries; this is the only file that knows the tables.
  */
-import { BillingMonth, EffectiveHistory, laborPolicyFor, consumablesPolicyFor } from "@/lib/domain/billing"
+import { BillingMonth, Customer, EffectiveHistory, laborPolicyFor, consumablesPolicyFor } from "@/lib/domain/billing"
 import type { Effective } from "@/lib/domain/billing"
 import type {
   BillableItem, BillingCheckFinding, Catalog, IonInvoiceFact, IonTaskConfig,
@@ -185,10 +185,21 @@ export class SupabaseBillingRepository {
 
     // Residential vs commercial: a filled company field means commercial
     // (QBO is the source; account_type is stale).
-    const { data: cust } = await this.client.from("Customers")
-      .select("company, provides_chems").eq("id", customerId).maybeSingle()
-    const c = cust as { company: string | null; provides_chems: boolean | null } | null
-    const residential = !(c?.company ?? "").trim()
+    const { data: cust, error: custErr } = await this.client.from("Customers")
+      .select("display_name, company").eq("id", customerId).maybeSingle()
+    // A failed lookup must not silently make every customer residential —
+    // that quietly doubled the visit-value findings (90 -> 220) by pulling
+    // commercial pools into a residential-only rule.
+    if (custErr) throw new Error(`customer ${customerId}: ${custErr.message}`)
+    const c = cust as { display_name: string | null; company: string | null } | null
+    if (!c) throw new Error(`customer ${customerId} not found — cannot judge residential`)
+    const customer = new Customer(customerId, c.display_name, c.company)
+
+    // provides-own-chems lives on the TASK, not the customer.
+    const providesRows = await all<{ customer_provides_chems: boolean | null }>((a, b) =>
+      this.maint().from("tasks").select("customer_provides_chems")
+        .eq("customer_id", customerId).order("id").range(a, b))
+    const providesChems = providesRows.some((r) => r.customer_provides_chems === true)
 
     const itemProfiles = await this.itemProfiles()
 
@@ -209,10 +220,10 @@ export class SupabaseBillingRepository {
     void monthEnd
 
     return {
-      residential,
+      customer,
       itemProfiles,
-      customerProvidesChems: c?.provides_chems === true,
-      peerChemMedianCents: await this.peerChemMedian(month, residential),
+      customerProvidesChems: providesChems,
+      peerChemMedianCents: await this.peerChemMedian(month, customerId),
       selfChemMedianCents: selfTotals.length
         ? [...selfTotals].sort((a, b) => a - b)[Math.floor(selfTotals.length / 2)]
         : null,
@@ -255,19 +266,35 @@ export class SupabaseBillingRepository {
   }
 
   private peerMemo = new Map<string, number | null>()
+  private peerGroupMemo: Map<number, string> | null = null
 
-  /** Median chem bill among same-kind customers for the month — the peer baseline. */
-  private async peerChemMedian(month: string, residential: boolean): Promise<number | null> {
-    const key = `${month}|${residential}`
+  /** Carter's peer groups — weekly_residential / high_freq_residential / low_freq / commercial. */
+  private async peerGroups(): Promise<Map<number, string>> {
+    if (this.peerGroupMemo) return this.peerGroupMemo
+    const rows = await all<{ customer_id: number; peer_group: string }>((a, b) =>
+      this.client.schema("billing_audit").from("customer_peer_group")
+        .select("customer_id, peer_group").order("customer_id").range(a, b))
+    this.peerGroupMemo = new Map(rows.map((r) => [r.customer_id, r.peer_group]))
+    return this.peerGroupMemo
+  }
+
+  /**
+   * Median chem bill within the customer's OWN peer group for the month.
+   * Reuses the established peer-group definition (frequency + customer kind)
+   * rather than a crude residential/commercial split, computed over our
+   * billable items so the baseline and the measured value share a source.
+   */
+  private async peerChemMedian(month: string, customerId: number): Promise<number | null> {
+    const groups = await this.peerGroups()
+    const mine = groups.get(customerId)
+    if (!mine) return null
+    const key = `${month}|${mine}`
     if (this.peerMemo.has(key)) return this.peerMemo.get(key) ?? null
-    const { data: months } = await this.billing().from("billing_months").select("id, customer_id").eq("month", month)
+
+    const { data: months } = await this.billing().from("billing_months")
+      .select("id, customer_id").eq("month", month)
     const rows = (months ?? []) as { id: string; customer_id: number }[]
-    if (!rows.length) { this.peerMemo.set(key, null); return null }
-    const { data: custs } = await this.client.from("Customers")
-      .select("id, company").in("id", rows.map((r) => r.customer_id))
-    const isResidential = new Map(((custs ?? []) as { id: number; company: string | null }[])
-      .map((c) => [c.id, !(c.company ?? "").trim()]))
-    const peerIds = rows.filter((r) => isResidential.get(r.customer_id) === residential).map((r) => r.id)
+    const peerIds = rows.filter((r) => groups.get(r.customer_id) === mine).map((r) => r.id)
     const totals = new Map<string, number>()
     for (let i = 0; i < peerIds.length; i += 100) {
       const items = await all<{ billing_month_id: string; amount_cents: number | null }>((a, b) =>

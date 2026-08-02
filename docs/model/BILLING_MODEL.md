@@ -7,6 +7,20 @@
 > reconciliation's new job is "do we agree with ION on labor pricing, and is
 > every billable consumable a line on our invoice."
 
+## Workflow order (RULED 2026-08-02, Carter)
+
+All human judgment happens BEFORE the invoice exists:
+
+    accrue -> checkMonth (misbilling + flags TOGETHER) -> review the month,
+    fix logs in ION, re-accrue, generate the customer PDF for flagged months
+      -> THEN build/issue the invoice
+      -> hand off to credits -> autopay -> send (mechanical, irreversible)
+
+Rationale: once the invoice is built it should need no judgment — it is
+handed to the money pipeline. Both check suites therefore run at the same
+point; the phase field routes findings to the right worklist and remedy
+(log_correction = fix in ION and re-accrue; bill_review = explain/discount).
+
 ## The migration path (two phases, one green light)
 
 | Phase | Our invoices | Reconcile against | Purpose |

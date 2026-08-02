@@ -19,6 +19,7 @@
  * Adding a rule = appending a class to a suite; tuning one = constructing it
  * with different thresholds. No method is ever edited (Open/Closed).
  */
+import type { Customer } from "./customer"
 import type { BillableItem, TaskTerms, VisitFact } from "./types"
 
 export type Severity = "error" | "warning" | "info"
@@ -55,8 +56,8 @@ export interface MonthContext {
   readonly items: readonly BillableItem[]
   readonly visits: readonly VisitFact[]
   readonly terms: readonly TaskTerms[]
-  /** Residential pools should not see bulk packages. */
-  readonly residential: boolean
+  /** The customer — `residential` is derived in its constructor, not here. */
+  readonly customer: Customer
   readonly itemProfiles: ReadonlyMap<string, ItemProfile>
   readonly customerProvidesChems: boolean
   /** Clean-peer median of chem billing for this customer's peer group (cents). */
@@ -100,20 +101,42 @@ const chemCents = (ctx: MonthContext) =>
 
 /* ══════════════════ PHASE A — log correction (fix in ION, re-ingest) ══════════════════ */
 
-/** A bulk package logged at a residential pool — almost always the wrong SKU picked. */
-export class BulkItemOnResidentialCheck implements BillingCheck {
-  readonly name = "bulk_item_on_residential"
+/**
+ * A residential visit whose chemicals cost more than a pool visit should.
+ * Carter's framing: rather than hunt specific SKUs (a 50lb bucket IS wrong on
+ * a residential pool, but enumerating wrong items is endless), judge the VISIT
+ * by value — the wrong SKU, the fat finger, and the mis-keyed pool all show up
+ * as a visit that costs too much. A visit = one task on one service day.
+ *
+ * Threshold from live data: residential visits median $30 and p95 $110, so
+ * $100 catches the top ~6% (90 of 1,385 in July 2026). Commercial pools
+ * legitimately run far higher and are not checked here.
+ */
+export class HighValueResidentialVisitCheck implements BillingCheck {
+  readonly name = "high_value_residential_visit"
   readonly phase = "log_correction" as const
+  constructor(private readonly thresholdCents: number = 10000) {}
+
   evaluate(ctx: MonthContext): BillingCheckFinding[] {
-    if (!ctx.residential) return []
-    return ctx.items
-      .filter((i) => {
-        if (i.kind !== "consumable" || i.sourceId === null) return false
-        const p = i.itemName ? [...ctx.itemProfiles.values()].find((x) => x.name === i.itemName) : undefined
-        return p?.bulk === true
-      })
-      .map((i) => emit(this, "error", ctx, i.taskId, i.sourceId,
-        `bulk item "${i.itemName}" x${i.qty} logged at a residential pool — wrong SKU?`, i.amountCents))
+    if (!ctx.customer.residential) return []
+    const byVisit = new Map<string, { cents: number; items: BillableItem[] }>()
+    for (const i of ctx.items) {
+      if (i.kind !== "consumable" || i.serviceDate === null) continue
+      const key = `${i.taskId}|${i.serviceDate}`
+      const held = byVisit.get(key)
+      if (held) { held.cents += i.amountCents ?? 0; held.items.push(i) }
+      else byVisit.set(key, { cents: i.amountCents ?? 0, items: [i] })
+    }
+    const out: BillingCheckFinding[] = []
+    for (const [key, v] of byVisit) {
+      if (v.cents <= this.thresholdCents) continue
+      const [taskId, date] = key.split("|")
+      const worst = [...v.items].sort((a, b) => (b.amountCents ?? 0) - (a.amountCents ?? 0))[0]
+      out.push(emit(this, "error", ctx, taskId, worst.sourceId,
+        `residential visit ${date} used $${(v.cents / 100).toFixed(0)} of chemicals ` +
+        `(largest: ${worst.itemName} x${worst.qty}) — wrong SKU or quantity?`, v.cents))
+    }
+    return out
   }
 }
 
@@ -308,7 +331,7 @@ export class HighChemVsSelfCheck implements BillingCheck {
 /** BEFORE invoicing: drive these to zero by fixing ION and re-ingesting. */
 export const LOG_CORRECTION_CHECKS: readonly BillingCheck[] = [
   new TaskConfigDriftCheck(),
-  new BulkItemOnResidentialCheck(),
+  new HighValueResidentialVisitCheck(),
   new QuantityOutlierCheck(),
   new UnpricedConsumableCheck(),
   new ExpiredTaskCheck(),

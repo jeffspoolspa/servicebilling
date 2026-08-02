@@ -4,6 +4,7 @@
 import { strict as assert } from "node:assert"
 import { BillingMonth, BillingRuleError } from "./month"
 import { laborPolicyFor, consumablesPolicyFor } from "./policies"
+import { Customer } from "./customer"
 import { EffectiveHistory } from "./effective"
 import type { PriceBook } from "./effective"
 import type { TaskTerms, VisitFact } from "./types"
@@ -164,7 +165,7 @@ console.log(`\n${passed} checks passed`)
 import { Reconciler, rollupByTask } from "./reconciler"
 import {
   runChecks, LOG_CORRECTION_CHECKS, BILL_REVIEW_CHECKS,
-  QuantityOutlierCheck, HighChemVsPeerCheck,
+  QuantityOutlierCheck, HighChemVsPeerCheck, HighValueResidentialVisitCheck,
 } from "./checks"
 import type { MonthContext } from "./checks"
 import type { BillableItem } from "./types"
@@ -228,7 +229,7 @@ console.log("\nchecks — phase A: log correction (fix in ION)")
 
 const baseCtx = (over: Partial<MonthContext>): MonthContext => ({
   customerId: 1, month: "2026-07-01", items: [], visits: [], terms: [],
-  residential: true, itemProfiles: new Map(), customerProvidesChems: false,
+  customer: new Customer(1, "Test", null), itemProfiles: new Map(), customerProvidesChems: false,
   peerChemMedianCents: null, selfChemMedianCents: null, ionConfig: new Map(), ...over,
 })
 const cons = (id: string, name: string, qty: number, cents: number): BillableItem => ({
@@ -243,14 +244,30 @@ check("the two suites are separate lists with separate remedies", () => {
   assert.ok(BILL_REVIEW_CHECKS.every((c) => c.phase === "bill_review"))
 })
 
-check("bulk item on a RESIDENTIAL pool flags; the same item on commercial does not", () => {
-  const profiles = new Map([["50", { name: "CAL HYPO 50LB", bulk: true, category: "chemical", typicalQty: 1 }]])
-  const items = [cons("u1", "CAL HYPO 50LB", 1, 8000)]
-  const res = runChecks(baseCtx({ items, itemProfiles: profiles, residential: true }), LOG_CORRECTION_CHECKS)
-  assert.equal(res.filter((f) => f.rule === "bulk_item_on_residential").length, 1)
-  assert.equal(res[0].sourceId, "u1", "points at the offending usage row — fixable in ION")
-  const com = runChecks(baseCtx({ items, itemProfiles: profiles, residential: false }), LOG_CORRECTION_CHECKS)
-  assert.equal(com.filter((f) => f.rule === "bulk_item_on_residential").length, 0)
+check("a residential visit over the threshold flags; commercial is not checked", () => {
+  const heavy = [cons("u1", "CAL HYPO 50LB", 1, 24599), cons("u2", "TABS", 2, 450)]
+  const res = runChecks(baseCtx({ items: heavy, customer: new Customer(1, "R", null) }), LOG_CORRECTION_CHECKS)
+  const f = res.filter((x) => x.rule === "high_value_residential_visit")
+  assert.equal(f.length, 1)
+  assert.ok(f[0].message.includes("CAL HYPO 50LB"), "names the largest line — the thing to fix")
+  assert.equal(runChecks(baseCtx({ items: heavy, customer: new Customer(2, "C", "Acme HOA") }), LOG_CORRECTION_CHECKS)
+    .filter((x) => x.rule === "high_value_residential_visit").length, 0)
+})
+
+check("a normal residential visit stays silent; the threshold is a constructor arg", () => {
+  const normal = [cons("u1", "TABS", 4, 450)] // $18
+  assert.equal(runChecks(baseCtx({ items: normal }), LOG_CORRECTION_CHECKS)
+    .filter((x) => x.rule === "high_value_residential_visit").length, 0)
+  assert.equal(runChecks(baseCtx({ items: normal }), [new HighValueResidentialVisitCheck(1000)]).length, 1)
+})
+
+check("value is summed PER VISIT (one task-day), not per month", () => {
+  const twoDays = [
+    { ...cons("u1", "TABS", 12, 450), serviceDate: "2026-07-07" },
+    { ...cons("u2", "TABS", 12, 450), serviceDate: "2026-07-14" },
+  ]
+  assert.equal(runChecks(baseCtx({ items: twoDays }), [new HighValueResidentialVisitCheck()])
+    .length, 0, "$54 twice is two normal visits, not one $108 problem")
 })
 
 check("fat-finger quantity flags above the multiplier; normal quantities stay silent", () => {
@@ -430,4 +447,15 @@ check("boundaries are half-open: valid_to is exclusive", () => {
   ])
   assert.equal(h.on("2026-06-30"), 100)
   assert.equal(h.on("2026-07-01"), 200, "the change day belongs to the NEW price")
+})
+
+/* ------------------------------------------------------------- customer */
+console.log("\ncustomer — residential is a rule, derived once")
+
+check("a filled company name means commercial; blank/whitespace means residential", () => {
+  assert.equal(new Customer(1, "Smith, Jane", null).residential, true)
+  assert.equal(new Customer(2, "Smith, Jane", "").residential, true)
+  assert.equal(new Customer(3, "Smith, Jane", "   ").residential, true, "whitespace is not a company")
+  assert.equal(new Customer(4, "The Farm HOA", "The Farm HOA").residential, false)
+  assert.equal(new Customer(4, "The Farm HOA", "The Farm HOA").commercial, true)
 })

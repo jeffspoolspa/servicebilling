@@ -1,11 +1,12 @@
 export { BillingMonth, BillingRuleError } from "./month"
+export { Customer } from "./customer"
 export { EffectiveHistory } from "./effective"
 export type { Effective, PriceBook } from "./effective"
 export { Reconciler, rollupByTask, RECONCILE_TOLERANCE_CENTS } from "./reconciler"
 export type { IonInvoiceFact, ReconcileReport, TaskDiff } from "./reconciler"
 export {
   LOG_CORRECTION_CHECKS, BILL_REVIEW_CHECKS, runChecks,
-  BulkItemOnResidentialCheck, QuantityOutlierCheck, UnpricedConsumableCheck,
+  HighValueResidentialVisitCheck, QuantityOutlierCheck, UnpricedConsumableCheck,
   TaskConfigDriftCheck, ExpiredTaskCheck, NonServiceableBilledCheck, ZeroRateCheck, FlatZeroVisitsCheck,
   CustomerProvidesChemsCheck, HighChemVsPeerCheck, HighChemVsSelfCheck,
 } from "./checks"
