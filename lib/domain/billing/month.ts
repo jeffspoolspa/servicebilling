@@ -107,10 +107,10 @@ export class BillingMonth {
   }
 
   /**
-   * Per-task rollup in the BUILDER'S arithmetic — labor = rate x days (or
-   * flat), consumables = round(sum(qty) x unit) per item name, rounded once.
-   * This is what the Reconciler compares against IonInvoice facts, and what
-   * the replay holds against the proven May-2026 numbers.
+   * Per-task rollup — labor = rate x days (or flat), consumables =
+   * round(sum(qty) x unit) per item, rounded once: the empirically best
+   * arithmetic vs ION. Residual cents come from ION's SUB-CENT unit prices,
+   * not rounding (Sparks: all-integer quantities, still 1c off).
    */
   expectations(): readonly TaskExpectation[] {
     const tasks = new Map<string, { days: number; labor: number; qtyByItem: Map<string, { qty: number; unit: number | null }> }>()

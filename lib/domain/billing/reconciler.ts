@@ -45,6 +45,8 @@ export interface ReconcileReport {
   readonly month: string
   readonly exact: number
   readonly withinTolerance: number
+  /** Nonzero diffs inside the tolerance — cent-level price-precision residue, ALWAYS listed. */
+  readonly cents: readonly TaskDiff[]
   readonly mismatches: readonly TaskDiff[]
   /** We accrued money for a task ION never invoiced. */
   readonly oursOnly: readonly { taskId: string; oursCents: number }[]
@@ -61,7 +63,15 @@ export interface ReconcileReport {
 /** $1, the established labor tolerance from the audit era. */
 export const RECONCILE_TOLERANCE_CENTS = 100
 
-/** Per-task composition in the billed arithmetic: labor summed; consumables round ONCE on summed qty per item. */
+/**
+ * Per-task composition: labor summed; consumables round ONCE on the summed
+ * qty per item — the empirically BEST arithmetic against ION (July 2026:
+ * 499/505 exact vs 468 for per-row rounding and 483 for exact-accumulate).
+ * The remaining cent-level residue is NOT rounding: Sparks has all-integer
+ * quantities yet ION is 1c higher — ION's unit prices carry SUB-CENT
+ * precision (dose-calc pricing) that our integer-cent catalog flattens.
+ * Those rows surface in `cents` below, never silently absorbed.
+ */
 export function rollupByTask(items: readonly BillableItem[]): Map<string, TaskRollup> {
   const tasks = new Map<string, { labor: number; days: number; flat: boolean; byItem: Map<string, { qty: number; unit: number | null }> }>()
   for (const it of items) {
@@ -114,6 +124,7 @@ export class Reconciler {
 
     let exact = 0
     let withinTolerance = 0
+    const cents: TaskDiff[] = []
     const mismatches: TaskDiff[] = []
     const chemPending: TaskDiff[] = []
     const oursOnly: { taskId: string; oursCents: number }[] = []
@@ -131,7 +142,7 @@ export class Reconciler {
       const diff = oursCents - fact.amt
       const row = { taskId, ionTaskId: ionTaskId!, oursCents, ionCents: fact.amt, diffCents: diff, customer: fact.customer, ours: rollup }
       if (diff === 0) exact++
-      else if (Math.abs(diff) <= this.toleranceCents) withinTolerance++
+      else if (Math.abs(diff) <= this.toleranceCents) { withinTolerance++; cents.push(row) }
       else if (
         consumablesPolicyOf.get(taskId)?.interpret(
           diff, rollup.consumables.reduce((n, l) => n + l.cents, 0)) === "chem_invoice_pending"
@@ -142,7 +153,8 @@ export class Reconciler {
       .filter(([id]) => !seen.has(id))
       .map(([ionTaskId, f]) => ({ ionTaskId, ionCents: f.amt, customer: f.customer }))
     mismatches.sort((a, b) => Math.abs(b.diffCents) - Math.abs(a.diffCents))
-    return { month, exact, withinTolerance, mismatches, oursOnly, ionOnly, chemPending }
+    cents.sort((a, b) => Math.abs(b.diffCents) - Math.abs(a.diffCents))
+    return { month, exact, withinTolerance, cents, mismatches, oursOnly, ionOnly, chemPending }
   }
 }
 

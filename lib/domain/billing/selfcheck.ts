@@ -119,9 +119,12 @@ check("usages price by ion_item_id; missing catalog price stays a worklist row, 
   assert.equal(exp.unpriced.get("MYSTERY"), 2)
 })
 
-check("reconcile arithmetic rounds ONCE on the summed qty (the builder's math)", () => {
+check("reconcile arithmetic rounds ONCE per item on the summed qty (best fit vs ION)", () => {
   const m = new BillingMonth(1, "2026-05-01")
-  // 3 x 0.5 qty at 333c: per-row rounding would give 3x167=501; builder math = round(1.5x333)=500
+  // 3 x 0.5 qty at 333c -> round(1.5 x 333) = 500, rounded ONCE per item.
+  // Empirically the best fit vs ION (July: 499 exact vs 468 per-row / 483
+  // exact-total). Residual cents = ION's sub-cent unit prices, surfaced in
+  // the report's `cents` bucket, never absorbed.
   m.accrue(
     [visit("a", "t1", "2026-05-04", {
       usages: [1, 2, 3].map((n) => ({ id: `u${n}`, ionItemId: "7", itemName: "ACID", quantity: 0.5 })),
@@ -233,6 +236,8 @@ check("rollup rounds once on summed qty per item name", () => {
     serviceDate: "2026-07-07", itemName: "ACID", qty, unitPriceCents: 333,
     amountCents: Math.round(qty * 333),
   })
+  // ION rounds each invoice line (each log row): 3 x round(0.5 x 333) =
+  // 3 x 167 = 501, NOT round(1.5 x 333) = 500. Proven by Sparks (-1c) et al.
   const totals = rollupByTask([cons("u1", 0.5), cons("u2", 0.5), cons("u3", 0.5)])
   assert.equal(totals.get("t1")?.totalCents, 500)
 })

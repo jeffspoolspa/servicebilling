@@ -28,6 +28,8 @@ async function main() {
   console.log(`reconcile ${MONTH}`)
   console.log(`exact: ${r.exact} · within $1: ${r.withinTolerance} · chem-invoice-pending: ${r.chemPending.length} · MISMATCH: ${r.mismatches.length}`)
   console.log(`ours-with-no-ION-invoice: ${r.oursOnly.length} · ION-with-no-items: ${r.ionOnly.length}`)
+  for (const c of r.cents)
+    console.log(`  cents: task ${c.ionTaskId}  ours ${(c.oursCents / 100).toFixed(2)}  ion ${(c.ionCents / 100).toFixed(2)}  diff ${c.diffCents}c  ${c.customer ?? ""}`)
   for (const c of r.chemPending)
     console.log(`  pending chems  task ${c.ionTaskId}  ours ${(c.oursCents / 100).toFixed(2)}  ion labor-only ${(c.ionCents / 100).toFixed(2)}  ${c.customer ?? ""}`)
   const usd = (c: number) => (c / 100).toFixed(2)
