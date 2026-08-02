@@ -118,7 +118,7 @@ export class BillingService {
    */
   async refreshMismatches(
     month: string,
-    ingestDays: (days: readonly string[]) => Promise<void>,
+    ingestRange: (startIso: string, endIso: string) => Promise<void>,
   ): Promise<{
     attempted: number
     skippedAlreadyTried: number
@@ -140,7 +140,14 @@ export class BillingService {
       month, evidence, targets.map((t) => ({ taskId: t.taskId as string, diffBefore: t.diffCents })))
     const { customerIds, days } = await this.repository.refreshScope(taskIds, month)
 
-    await ingestDays(days)
+    // The WHOLE month window, not just the days we hold rows for (ruled):
+    // the diff must catch a visit ADDED on a day we know nothing about and a
+    // log DELETED from one we do. The ingester is the differ — upsert covers
+    // additions and edits, deletion reconciliation covers removals — so
+    // handing it the full month is the per-task month diff.
+    const [y, m] = month.split("-").map(Number)
+    const monthEnd = `${month.slice(0, 7)}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`
+    await ingestRange(month, monthEnd)
     for (const c of customerIds) await this.accrueMonth(c, month)
 
     const after = await this.reconcileMonth(month)

@@ -31,10 +31,8 @@ async function main() {
   const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
   const service = new BillingService(new SupabaseBillingRepository(sb as unknown as BillingClient))
 
-  const ingestDays = async (days: readonly string[]) => {
-    if (!days.length) return
-    const start = days[0], end = days[days.length - 1]
-    console.log(`re-ingesting day grid ${start}..${end} (${days.length} service days in scope)...`)
+  const ingestRange = async (start: string, end: string) => {
+    console.log(`re-ingesting day grid ${start}..${end} (full month — the two-way diff window)...`)
     const r = await fetch(
       "https://app.windmill.dev/api/w/jps-internal/jobs/run/p/f/ION/ingest_day_logs?tag=chromium",
       {
@@ -69,9 +67,10 @@ async function main() {
     }
   }
 
-  const r = await service.refreshMismatches(MONTH, ingestDays)
+  const r = await service.refreshMismatches(MONTH, ingestRange)
   console.log(`\nbefore: ${r.before.exact} exact · ${r.before.mismatches.length} mismatches`)
   console.log(`attempted ${r.attempted} refresh(es) · ${r.skippedAlreadyTried} already tried against this report pull`)
+  void r.days
   if (r.after) {
     console.log(`after:  ${r.after.exact} exact · ${r.after.chemPending.length} chem-pending · ${r.after.mismatches.length} mismatches`)
     for (const m of r.after.mismatches.slice(0, 20))
