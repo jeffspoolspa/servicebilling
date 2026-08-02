@@ -122,4 +122,82 @@ check("rehydrate reconstitutes without validating or recording", () => {
   assert.equal(t.isNew, false)
 })
 
-console.log(`\n${checks} checks passed\n`)
+check("one task recurs on one cadence — mixed frequencies are two contracts", () => {
+  // ION carries a single ServiceRepeat per task, and the price lives on the
+  // header, so a weekly Monday + biweekly Thursday cannot be written down.
+  assert.throws(
+    () =>
+      Task.open(1, {
+        ...terms(),
+        slots: [
+          { weekday: 1 as Weekday, techId: "a", frequency: "weekly" },
+          { weekday: 4 as Weekday, techId: "a", frequency: "biweekly_a" },
+        ],
+      }),
+    TaskRuleError,
+  )
+})
+
+console.log("\nthe use case, driven through fake ports")
+
+async function serviceCheck() {
+  // No database and no ION — the service is pure sequencing, so fakes prove
+  // the whole path. This is the shape a UI, a script, or an agent would drive.
+  const { TaskService } = await import("../../application/maintenance/task-service")
+  const saved: Task[] = []
+  const posted: Record<string, string>[] = []
+  let minted = 0
+
+  const repo = {
+    async byId() {
+      return null
+    },
+    async openTaskFor(customerId: number) {
+      // Customer 99 already has an open contract.
+      return customerId === 99 ? Task.rehydrate("existing", 99, "600", terms(), "active") : null
+    },
+    async save(t: Task) {
+      saved.push(t)
+    },
+    async history() {
+      return []
+    },
+  }
+  const gateway = {
+    async create(week: { days: ReadonlyMap<Weekday, string | null> }, o: { dryRun: boolean }) {
+      posted.push(Object.fromEntries([...week.days].map(([d, t]) => [String(d), t ?? ""])))
+      return o.dryRun
+        ? { accepted: true, detail: "dry run" }
+        : { accepted: true, ionTaskId: `ion-${++minted}`, detail: "created" }
+    },
+    async update() {
+      return { accepted: true, detail: "updated" }
+    },
+  }
+
+  const service = new TaskService(repo as never, gateway as never)
+  const results = await service.addMany(
+    [
+      { customerId: 1, terms: terms() },
+      { customerId: 99, terms: terms() }, // already has an open task
+      { customerId: 2, terms: terms({ slots: [] }) }, // invalid: no serviced day
+    ],
+    { dryRun: false },
+  )
+
+  assert.deepEqual(results.map((r) => r.ok), [true, false, false], "one lands, two refuse")
+  assert.match(results[1].detail, /already has an open task/)
+  assert.match(results[2].detail, /never generate a visit/, "the FACTORY refused, not the service")
+  assert.equal(saved.length, 1, "only the created task is recorded")
+  assert.equal(saved[0].ionTaskId, "ion-1", "identity minted outward is stamped on the aggregate")
+  assert.equal(
+    saved[0].pullEvents()[0].taskId !== null,
+    true,
+    "the opening fact carries the id by the time it is saved",
+  )
+  assert.equal(posted.length, 1, "a refused row never reaches ION")
+  checks++
+  console.log("  ok  a list walks through the service: valid rows land, the rest say why")
+}
+
+serviceCheck().then(() => console.log(`\n${checks} checks passed\n`))

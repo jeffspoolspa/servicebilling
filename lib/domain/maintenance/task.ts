@@ -79,6 +79,8 @@ export interface DesiredWeek {
   readonly priceCents: number | null
   readonly startsOn: string
   readonly endsOn: string | null
+  /** The one cadence the whole task recurs on (see the uniform-frequency rule). */
+  readonly frequency: Frequency
   /** weekday -> techId, absent where the task is not serviced. */
   readonly days: ReadonlyMap<Weekday, string | null>
   readonly note: string
@@ -156,6 +158,16 @@ export class Task {
       }
       days.add(s.weekday)
     }
+    // One cadence per task. The system of record carries a single ServiceRepeat
+    // for the whole task, so a task whose Monday is weekly and whose Thursday is
+    // biweekly cannot be written down — it is two contracts, and since the price
+    // also lives on the header, it is two tasks.
+    const cadences = new Set(terms.slots.map((s) => s.frequency))
+    if (cadences.size > 1) {
+      throw new TaskRuleError(
+        `one task recurs on one cadence, got [${[...cadences].join(", ")}] — that is two tasks`,
+      )
+    }
   }
 
   /* ---------------------------------------------------------------- reads */
@@ -207,6 +219,8 @@ export class Task {
       priceCents: this._terms.priceCents,
       startsOn: this._terms.startsOn,
       endsOn: this._terms.endsOn,
+      // Safe by the uniform-frequency rule: every slot shares this cadence.
+      frequency: this._terms.slots[0]?.frequency ?? "weekly",
       days,
       note: this._terms.note ?? "",
     }
