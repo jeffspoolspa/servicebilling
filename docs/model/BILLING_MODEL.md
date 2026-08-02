@@ -133,6 +133,21 @@ Ordering rule (RULED): everything through reconcile/checks is **re-runnable**;
 processing moves money and is **irreversible** — it comes last and only after
 the model underneath is solid.
 
+## Pricing moment (RULED 2026-08-02, Carter)
+
+The visit records WHAT was sold (item + quantity). The PRICE is set at
+BUILD TIME — the catalog in force when accrue runs — not by the service
+date. Rebuilds re-price freely; the price locks when the item is claimed by
+an issued invoice (qbo_line_id — saveAccrual never touches claimed rows).
+This matches ION's own behavior (it prices at invoice build). The
+effective-dated tables (consumable_prices, task_terms) remain the record of
+WHEN values changed; task terms still resolve per billing month because ION
+applies a mid-month rate change to the whole month.
+
+An unrecognized or unpriceable consumable line becomes a null-priced
+worklist item — NEVER silently skipped (the LaHood hole: a new ION item
+absent from our catalog hid a $34.99 line).
+
 ## Invoice processing (designed 2026-08-02)
 
 Abstract `Invoice` (domain, `lib/domain/billing/invoice.ts`): lines, lifecycle

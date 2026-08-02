@@ -44,14 +44,21 @@ export class BillingMonth {
    *   the rate — one ION contract = one rate — so a QC task's rate of 0 makes
    *   $0 items with no special case.
    *
-   * CONSUMABLES (bucket by visit_date): one item per usage row, priced by
-   *   ion_item_id -> the catalog IN FORCE ON THE SERVICE DATE. No price ->
- *   unitPriceCents null — a
-   *   finite worklist, never a silent 0. Per-item amounts round per row;
-   *   the invoice LINE (and the reconcile) round ONCE on the summed qty —
-   *   see expectations().
+   * CONSUMABLES (bucket by visit_date): one item per usage row. The visit
+   *   contributes only WHAT WAS SOLD (item + quantity); the PRICE is set at
+   *   BUILD TIME — the catalog in force when accrue runs (RULED 2026-08-02:
+   *   "accrue is what sets the price based on the catalogue whenever it
+   *   runs"). Rebuilds re-price freely until the item is claimed by an
+   *   issued invoice (qbo_line_id — saveAccrual never touches those rows).
+   *   No price, or an UNRECOGNIZED line (no item name) -> unitPriceCents
+   *   null — a finite worklist, never a silent 0 and NEVER a silent skip.
+   *   Per-item amounts round per row; the invoice LINE (and the reconcile)
+   *   round ONCE on the summed qty — see expectations().
    */
-  accrue(visits: readonly VisitFact[], terms: readonly TaskTerms[], catalog: Catalog): readonly BillableItem[] {
+  accrue(
+    visits: readonly VisitFact[], terms: readonly TaskTerms[], catalog: Catalog,
+    asOf: string = new Date().toISOString().slice(0, 10),
+  ): readonly BillableItem[] {
     if (this.closedAt) throw new BillingRuleError(`month ${this.month} is closed — accrual refused`)
     const termsOf = new Map(terms.map((t) => [t.id, t]))
     const monthEnd = monthEndOf(this.month)
@@ -75,9 +82,10 @@ export class BillingMonth {
       // A do-not-invoice task bills nothing at all — labor or chemicals.
       if (termsOf.get(v.taskId)?.laborPolicy.key === "do_not_invoice") continue
       for (const u of v.usages) {
-        if (u.itemName === null) continue
-        // Priced by the catalog in force on the SERVICE DATE, never by today.
-        const unit = u.ionItemId !== null ? (catalog.get(u.ionItemId)?.on(bucket) ?? null) : null
+        // Build-time pricing: the catalog as of THIS accrue run. An
+        // unrecognized or unpriced line becomes a null-priced worklist item —
+        // skipping it would silently under-bill (the LaHood hole).
+        const unit = u.ionItemId !== null ? (catalog.get(u.ionItemId)?.on(asOf) ?? null) : null
         items.push({
           sourceKind: "usage", sourceId: u.id, taskId: v.taskId, kind: "consumable",
           serviceDate: bucket, itemName: u.itemName, qty: u.quantity,

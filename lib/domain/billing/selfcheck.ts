@@ -430,19 +430,30 @@ check("only tasks actually billing this month are checked", () => {
 /* ------------------------------------------------------- effective dating */
 console.log("\neffective dating — a price change must not rewrite history")
 
-check("the CAL HYPO case: June prices at the old rate, July at the new one", () => {
+check("pricing moment is BUILD time: same visit re-prices when rebuilt after a change (until invoice lock)", () => {
   const book: PriceBook = new Map([["1431047", new EffectiveHistory<number | null>([
     { from: "2000-01-01", to: "2026-07-01", value: 26196 },
     { from: "2026-07-01", to: null, value: 24599 },
   ])]])
-  const use = (m: string, d: string) => {
-    const bm = new BillingMonth(1, m)
-    bm.accrue([visit("v", "t1", d, { usages: [{ id: `u-${d}`, ionItemId: "1431047", itemName: "CAL HYPO 50LB", quantity: 1 }] })],
-      [perVisit("t1", 0)], book)
+  const build = (asOf: string) => {
+    const bm = new BillingMonth(1, "2026-06-01")
+    bm.accrue([visit("v", "t1", "2026-06-15", { usages: [{ id: "u1", ionItemId: "1431047", itemName: "CAL HYPO 50LB", quantity: 1 }] })],
+      [perVisit("t1", 0)], book, asOf)
     return bm.items.find((i) => i.kind === "consumable")!.amountCents
   }
-  assert.equal(use("2026-06-01", "2026-06-15"), 26196, "June bills the price in force in June")
-  assert.equal(use("2026-07-01", "2026-07-15"), 24599, "July bills the new price")
+  assert.equal(build("2026-06-20"), 26196, "built before the change: old price")
+  assert.equal(build("2026-08-02"), 24599, "REBUILT after the change: today's catalog wins — the visit only says what was sold")
+})
+
+check("an unrecognized consumable line SURFACES as unpriced — never silently skipped (the LaHood hole)", () => {
+  const bm = new BillingMonth(1, "2026-07-01")
+  bm.accrue([visit("v", "t1", "2026-07-09", { usages: [{ id: "u1", ionItemId: null, itemName: null, quantity: 1 }] })],
+    [perVisit("t1", 0)], new Map())
+  const cons = bm.items.filter((i) => i.kind === "consumable")
+  assert.equal(cons.length, 1, "the line exists as a worklist item")
+  assert.equal(cons[0].unitPriceCents, null)
+  const exp = bm.expectations()[0]
+  assert.equal(exp.unpriced.size, 1, "and it shows in the unpriced rollup")
 })
 
 check("a date with no covering entry prices as unknown, never as a guess", () => {
