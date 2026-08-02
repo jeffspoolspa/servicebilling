@@ -170,19 +170,37 @@ export class TaskCacheRefresher {
     return { alreadyFresh, read: readable.length, slotsChanged, skipped, verifiedAt }
   }
 
+  /**
+   * Every write PROVES what it changed.
+   *
+   * A row-level-security policy filters an UPDATE to zero rows and PostgREST
+   * calls that success — "updated nothing" is not an error. That is the same
+   * class of defect as a stale read: it reports success while changing nothing,
+   * and it hid a completely non-functional cache refresh for two runs. So each
+   * write selects back what it touched and refuses to be believed otherwise.
+   */
   private async update(id: string, patch: Record<string, unknown>): Promise<void> {
     const c = this.client as unknown as {
       schema(s: string): {
         from(t: string): {
-          update(v: Record<string, unknown>): { eq(c: string, v: unknown): PromiseLike<unknown> }
+          update(v: Record<string, unknown>): {
+            eq(c: string, v: unknown): { select(cols: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+          }
         }
       }
     }
-    await c
+    const { data, error } = await c
       .schema("maintenance")
       .from("task_schedules")
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq("id", id)
+      .select("id")
+    if (error) throw new Error(`task_schedules update failed: ${JSON.stringify(error).slice(0, 200)}`)
+    if (!data || data.length === 0) {
+      throw new Error(
+        `task_schedules update touched NO rows (slot ${id}) — the write was filtered, not applied`,
+      )
+    }
   }
 
   private async insert(
@@ -192,26 +210,51 @@ export class TaskCacheRefresher {
     techId: string | null,
   ): Promise<void> {
     const c = this.client as unknown as {
-      schema(s: string): { from(t: string): { insert(v: Record<string, unknown>): PromiseLike<unknown> } }
+      schema(s: string): {
+        from(t: string): {
+          insert(v: Record<string, unknown>): { select(cols: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+        }
+      }
     }
-    await c.schema("maintenance").from("task_schedules").insert({
-      task_id: taskId,
-      ion_task_id: ionTaskId,
-      day_of_week: weekday,
-      tech_employee_id: techId,
-      active: true,
-      external_source: "ion_verify",
-    })
+    const { data, error } = await c
+      .schema("maintenance")
+      .from("task_schedules")
+      .insert({
+        task_id: taskId,
+        ion_task_id: ionTaskId,
+        day_of_week: weekday,
+        tech_employee_id: techId,
+        active: true,
+        external_source: "ion_verify",
+      })
+      .select("id")
+    if (error) throw new Error(`task_schedules insert failed: ${JSON.stringify(error).slice(0, 200)}`)
+    if (!data || data.length === 0) throw new Error("task_schedules insert touched NO rows")
   }
 
   private async stamp(taskIds: string[], at: string): Promise<void> {
     const c = this.client as unknown as {
       schema(s: string): {
         from(t: string): {
-          update(v: Record<string, unknown>): { in(c: string, v: unknown[]): PromiseLike<unknown> }
+          update(v: Record<string, unknown>): {
+            in(c: string, v: unknown[]): { select(cols: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+          }
         }
       }
     }
-    await c.schema("maintenance").from("tasks").update({ ion_verified_at: at }).in("id", taskIds)
+    const { data, error } = await c
+      .schema("maintenance")
+      .from("tasks")
+      .update({ ion_verified_at: at })
+      .in("id", taskIds)
+      .select("id")
+    if (error) throw new Error(`ion_verified_at stamp failed: ${JSON.stringify(error).slice(0, 200)}`)
+    if (!data || data.length !== taskIds.length) {
+      // Stamping fewer than we verified means the next run re-reads them from
+      // ION — wasteful but honest. Stamping NONE means the write is filtered.
+      throw new Error(
+        `ion_verified_at stamped ${data?.length ?? 0} of ${taskIds.length} — the write was filtered, not applied`,
+      )
+    }
   }
 }

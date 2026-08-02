@@ -74,33 +74,49 @@ export class SupabasePlacementCache implements PlacementCache {
     return out
   }
 
+  /** Writes prove what they touched — a filtered UPDATE reports success. */
   private async update(id: string, patch: Record<string, unknown>): Promise<void> {
     const c = this.client as unknown as {
       schema(s: string): {
         from(t: string): {
-          update(v: Record<string, unknown>): { eq(col: string, val: unknown): PromiseLike<unknown> }
+          update(v: Record<string, unknown>): {
+            eq(col: string, val: unknown): { select(cols: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+          }
         }
       }
     }
-    await c
+    const { data, error } = await c
       .schema("maintenance")
       .from("task_schedules")
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq("id", id)
+      .select("id")
+    if (error) throw new Error(`placement cache update failed: ${JSON.stringify(error).slice(0, 160)}`)
+    if (!data || data.length === 0) {
+      throw new Error(`placement cache update touched NO rows (slot ${id}) — filtered, not applied`)
+    }
   }
 
   private async insert(taskId: string, weekday: number, techId: string): Promise<void> {
     const c = this.client as unknown as {
       schema(s: string): {
-        from(t: string): { insert(v: Record<string, unknown>): PromiseLike<unknown> }
+        from(t: string): {
+          insert(v: Record<string, unknown>): { select(cols: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+        }
       }
     }
-    await c.schema("maintenance").from("task_schedules").insert({
-      task_id: taskId,
-      day_of_week: weekday,
-      tech_employee_id: techId,
-      active: true,
-      external_source: "routing_publish",
-    })
+    const { data, error } = await c
+      .schema("maintenance")
+      .from("task_schedules")
+      .insert({
+        task_id: taskId,
+        day_of_week: weekday,
+        tech_employee_id: techId,
+        active: true,
+        external_source: "routing_publish",
+      })
+      .select("id")
+    if (error) throw new Error(`placement cache insert failed: ${JSON.stringify(error).slice(0, 160)}`)
+    if (!data || data.length === 0) throw new Error("placement cache insert touched NO rows")
   }
 }

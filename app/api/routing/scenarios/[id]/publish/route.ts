@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { createSupabaseServer } from "@/lib/supabase/server"
+import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { RoutingService } from "@/lib/application/routing/routing-service"
 import {
   SupabaseQuotaRepository,
@@ -38,6 +39,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const body = (await req.json().catch(() => ({}))) as { dry_run?: boolean }
   const dryRun = body.dry_run !== false
 
+  // System writes use the service-role client. Reconciling our cache with ION
+  // is the system correcting itself, not a user action — it must not inherit
+  // whatever row-level permissions the person clicking happens to hold. Reads
+  // stay on the user's session.
+  const sys = createSupabaseAdmin()
+
   const service = new RoutingService(new SupabaseQuotaRepository(sb as unknown as QueryClient))
   const scenarios = new SupabaseScenarioRepository(sb as unknown as ScenarioClient)
   const publisher = new IonRoutePublisher(sb as unknown as QueryClient, {
@@ -46,14 +53,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   })
   // Our copy is refreshed only for writes ION confirmed, so the map stops
   // lying before the next ION sync catches up.
-  const cache = new SupabasePlacementCache(sb as unknown as QueryClient)
+  const cache = new SupabasePlacementCache(sys as unknown as QueryClient)
   // History: one fact per schedule ION accepts (ADR 010).
   // Freshness is its own action, asked for once as a precondition.
-  const freshness = new TaskCacheRefresher(sb as unknown as QueryClient, {
+  const freshness = new TaskCacheRefresher(sys as unknown as QueryClient, {
     run: (path, args) => triggerScriptSync(path, args, { timeoutMs: 300000 }),
   })
   const events = new SupabaseMaintenanceEventLog(
-    sb as unknown as ConstructorParameters<typeof SupabaseMaintenanceEventLog>[0],
+    sys as unknown as ConstructorParameters<typeof SupabaseMaintenanceEventLog>[0],
   )
 
   try {
