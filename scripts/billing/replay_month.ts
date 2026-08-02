@@ -42,6 +42,7 @@ async function main() {
     maint.from("visits")
       .select("id, task_id, customer_id, scheduled_date, visit_date, is_serviceable")
       .not("task_id", "is", null)
+      .is("ion_deleted_at", null)
       .or(`and(scheduled_date.gte.${MONTH},scheduled_date.lte.${monthEnd}),and(visit_date.gte.${MONTH},visit_date.lte.${monthEnd})`)
       .order("id").range(a, b),
   )

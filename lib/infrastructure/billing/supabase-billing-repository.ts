@@ -92,6 +92,7 @@ export class SupabaseBillingRepository {
       this.maint()
         .from("visits")
         .select("id, task_id, customer_id, scheduled_date, visit_date, is_serviceable")
+        .is("ion_deleted_at", null)
         .eq("customer_id", customerId)
         .not("task_id", "is", null)
         .or(`and(scheduled_date.gte.${month},scheduled_date.lte.${end}),and(visit_date.gte.${month},visit_date.lte.${end})`)
