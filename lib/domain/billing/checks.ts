@@ -63,6 +63,22 @@ export interface MonthContext {
   readonly peerChemMedianCents: number | null
   /** This customer's OWN trailing median chem bill (cents) — their normal. */
   readonly selfChemMedianCents: number | null
+  /**
+   * What ION says about each task billing this month, and when we last read it
+   * DIRECTLY from ION. Absent key = never verified. The active-roster sync
+   * cannot see expired tasks, so silence here is a finding, not a pass.
+   */
+  readonly ionConfig: ReadonlyMap<string, IonTaskConfig>
+}
+
+/** A task's config as verified against ION itself. */
+export interface IonTaskConfig {
+  readonly verifiedAt: string
+  readonly laborKey: string
+  readonly consumablesKey: string
+  readonly perVisitCents: number
+  readonly flatMonthlyCents: number
+  readonly endsOn: string | null
 }
 
 export interface BillingCheck {
@@ -192,6 +208,56 @@ export class FlatZeroVisitsCheck implements BillingCheck {
   }
 }
 
+/**
+ * Task config must be VERIFIED against ION, not merely present. Three
+ * assertions, because two of them fail silently on their own:
+ *   1. drift        — our terms disagree with what ION reports
+ *   2. unverified   — a task is billing that we have never read from ION
+ *   3. stale        — the last direct read is older than the window
+ * (2) and (3) are the absence-of-evidence traps: the roster sync is blind to
+ * expired tasks, so "no drift found" on an unread task means nothing.
+ */
+export class TaskConfigDriftCheck implements BillingCheck {
+  readonly name = "task_config_drift"
+  readonly phase = "log_correction" as const
+  constructor(private readonly maxAgeDays: number = 7) {}
+
+  evaluate(ctx: MonthContext): BillingCheckFinding[] {
+    const out: BillingCheckFinding[] = []
+    const billing = new Set(ctx.items.map((i) => i.taskId))
+    for (const t of ctx.terms) {
+      if (!billing.has(t.id)) continue
+      const ion = ctx.ionConfig.get(t.id)
+
+      if (!ion) {
+        out.push(emit(this, "warning", ctx, t.id, null,
+          "task is billing but its config was never verified against ION", null))
+        continue
+      }
+
+      const ageDays = (Date.parse(ctx.month) - Date.parse(ion.verifiedAt)) / 86_400_000
+      if (ageDays > this.maxAgeDays) {
+        out.push(emit(this, "warning", ctx, t.id, null,
+          `ION config last verified ${Math.round(ageDays)}d before this month — re-read before billing`, null))
+      }
+
+      const diffs: string[] = []
+      if (ion.laborKey !== t.laborPolicy.key) diffs.push(`billing method ION=${ion.laborKey} ours=${t.laborPolicy.key}`)
+      if (ion.consumablesKey !== t.consumablesPolicy.key)
+        diffs.push(`consumables ION=${ion.consumablesKey} ours=${t.consumablesPolicy.key}`)
+      if (ion.perVisitCents !== t.perVisitCents)
+        diffs.push(`per-visit ION=${(ion.perVisitCents / 100).toFixed(2)} ours=${(t.perVisitCents / 100).toFixed(2)}`)
+      if (ion.flatMonthlyCents !== t.flatMonthlyCents)
+        diffs.push(`flat ION=${(ion.flatMonthlyCents / 100).toFixed(2)} ours=${(t.flatMonthlyCents / 100).toFixed(2)}`)
+      if ((ion.endsOn ?? null) !== (t.endsOn ?? null)) diffs.push(`ends ION=${ion.endsOn ?? "-"} ours=${t.endsOn ?? "-"}`)
+
+      if (diffs.length)
+        out.push(emit(this, "error", ctx, t.id, null, `config drift — ${diffs.join("; ")}`, null))
+    }
+    return out
+  }
+}
+
 /* ══════════════ PHASE B — bill review (explain / discount, never edit) ══════════════ */
 
 /** Chems billed to a customer who supplies their own. */
@@ -241,6 +307,7 @@ export class HighChemVsSelfCheck implements BillingCheck {
 
 /** BEFORE invoicing: drive these to zero by fixing ION and re-ingesting. */
 export const LOG_CORRECTION_CHECKS: readonly BillingCheck[] = [
+  new TaskConfigDriftCheck(),
   new BulkItemOnResidentialCheck(),
   new QuantityOutlierCheck(),
   new UnpricedConsumableCheck(),

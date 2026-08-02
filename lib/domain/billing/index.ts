@@ -4,11 +4,11 @@ export type { IonInvoiceFact, ReconcileReport, TaskDiff } from "./reconciler"
 export {
   LOG_CORRECTION_CHECKS, BILL_REVIEW_CHECKS, runChecks,
   BulkItemOnResidentialCheck, QuantityOutlierCheck, UnpricedConsumableCheck,
-  ExpiredTaskCheck, NonServiceableBilledCheck, ZeroRateCheck, FlatZeroVisitsCheck,
+  TaskConfigDriftCheck, ExpiredTaskCheck, NonServiceableBilledCheck, ZeroRateCheck, FlatZeroVisitsCheck,
   CustomerProvidesChemsCheck, HighChemVsPeerCheck, HighChemVsSelfCheck,
 } from "./checks"
 export type {
-  BillingCheck, BillingCheckFinding, CheckPhase, ItemProfile, MonthContext, Severity,
+  BillingCheck, BillingCheckFinding, CheckPhase, IonTaskConfig, ItemProfile, MonthContext, Severity,
 } from "./checks"
 export {
   LABOR_POLICIES, CONSUMABLES_POLICIES, laborPolicyFor, consumablesPolicyFor,

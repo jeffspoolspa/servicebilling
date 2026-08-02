@@ -223,7 +223,7 @@ console.log("\nchecks — phase A: log correction (fix in ION)")
 const baseCtx = (over: Partial<MonthContext>): MonthContext => ({
   customerId: 1, month: "2026-07-01", items: [], visits: [], terms: [],
   residential: true, itemProfiles: new Map(), customerProvidesChems: false,
-  peerChemMedianCents: null, selfChemMedianCents: null, ...over,
+  peerChemMedianCents: null, selfChemMedianCents: null, ionConfig: new Map(), ...over,
 })
 const cons = (id: string, name: string, qty: number, cents: number): BillableItem => ({
   sourceKind: "usage", sourceId: id, taskId: "t1", kind: "consumable",
@@ -231,7 +231,7 @@ const cons = (id: string, name: string, qty: number, cents: number): BillableIte
 })
 
 check("the two suites are separate lists with separate remedies", () => {
-  assert.equal(LOG_CORRECTION_CHECKS.length, 7)
+  assert.equal(LOG_CORRECTION_CHECKS.length, 8)
   assert.equal(BILL_REVIEW_CHECKS.length, 3)
   assert.ok(LOG_CORRECTION_CHECKS.every((c) => c.phase === "log_correction"))
   assert.ok(BILL_REVIEW_CHECKS.every((c) => c.phase === "bill_review"))
@@ -337,4 +337,57 @@ check("separate-consumables reads a chem-sized shortfall as pending, not a misma
   assert.equal(sep.interpret(12345, 90000), "compare_combined", "any other gap is a real diff")
   assert.equal(consFor("listed").interpret(90000, 90000), "compare_combined")
   assert.equal(consFor(null).key, "listed", "unset defaults to listed")
+})
+
+/* ------------------------------------------------- task config verification */
+import { TaskConfigDriftCheck } from "./checks"
+import type { IonTaskConfig } from "./checks"
+
+console.log("\ntask config — verified, not merely present")
+
+const billingItem = (taskId: string): BillableItem => ({
+  sourceKind: "visit", sourceId: `v-${taskId}`, taskId, kind: "labor",
+  serviceDate: "2026-07-07", itemName: null, qty: 1, unitPriceCents: 60000, amountCents: 60000,
+})
+const ionCfg = (o: Partial<IonTaskConfig> = {}): IonTaskConfig => ({
+  verifiedAt: "2026-07-05", laborKey: "flat_rate_monthly", consumablesKey: "listed",
+  perVisitCents: 0, flatMonthlyCents: 60000, endsOn: null, ...o,
+})
+const winters = terms("t1", {
+  laborPolicy: LABOR_POLICIES.flat_rate_monthly, flatMonthlyCents: 60000, endsOn: null,
+})
+
+check("the Winters case: ION says $300 and expired, we say $600 — drift is an ERROR", () => {
+  const found = runChecks(baseCtx({
+    items: [billingItem("t1")], terms: [winters],
+    ionConfig: new Map([["t1", ionCfg({ flatMonthlyCents: 30000, endsOn: "2026-07-15" })]]),
+  }), [new TaskConfigDriftCheck()])
+  assert.equal(found.length, 1)
+  assert.equal(found[0].severity, "error")
+  assert.ok(found[0].message.includes("flat ION=300.00 ours=600.00"))
+  assert.ok(found[0].message.includes("ends ION=2026-07-15"))
+})
+
+check("a task billing with NO ION verification is a finding, never a silent pass", () => {
+  const found = runChecks(baseCtx({
+    items: [billingItem("t1")], terms: [winters], ionConfig: new Map(),
+  }), [new TaskConfigDriftCheck()])
+  assert.equal(found.length, 1)
+  assert.ok(found[0].message.includes("never verified"))
+})
+
+check("verification older than the window is flagged even when nothing drifted", () => {
+  const agreeing = new Map([["t1", ionCfg({ verifiedAt: "2026-01-01" })]])
+  const found = runChecks(baseCtx({ items: [billingItem("t1")], terms: [winters], ionConfig: agreeing }),
+    [new TaskConfigDriftCheck(7)])
+  assert.equal(found.length, 1)
+  assert.ok(found[0].message.includes("re-read before billing"))
+  const fresh = runChecks(baseCtx({ items: [billingItem("t1")], terms: [winters],
+    ionConfig: new Map([["t1", ionCfg({ verifiedAt: "2026-06-28" })]]) }), [new TaskConfigDriftCheck(7)])
+  assert.equal(fresh.length, 0, "fresh and agreeing -> silent")
+})
+
+check("only tasks actually billing this month are checked", () => {
+  const found = runChecks(baseCtx({ items: [], terms: [winters], ionConfig: new Map() }), [new TaskConfigDriftCheck()])
+  assert.equal(found.length, 0)
 })
