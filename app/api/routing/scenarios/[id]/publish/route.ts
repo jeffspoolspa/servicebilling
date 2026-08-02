@@ -10,6 +10,7 @@ import {
   type ScenarioClient,
 } from "@/lib/infrastructure/routing/supabase-scenario-repository"
 import { IonRoutePublisher } from "@/lib/infrastructure/routing/ion-route-publisher"
+import { SupabasePlacementCache } from "@/lib/infrastructure/routing/supabase-placement-cache"
 import { triggerScriptSync } from "@/lib/windmill"
 
 /**
@@ -41,9 +42,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     // ION work runs through chromium when the session is stale, so give it room.
     run: (path, args) => triggerScriptSync(path, args, { timeoutMs: 180000 }),
   })
+  // Our copy is refreshed only for writes ION confirmed, so the map stops
+  // lying before the next ION sync catches up.
+  const cache = new SupabasePlacementCache(sb as unknown as QueryClient)
 
   try {
-    const report = await service.publishScenario(id, scenarios, publisher, { dryRun })
+    const report = await service.publishScenario(id, scenarios, publisher, { dryRun, cache })
     return NextResponse.json(report)
   } catch (err) {
     return NextResponse.json(

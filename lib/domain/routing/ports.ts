@@ -52,6 +52,21 @@ export interface RoutePublisher {
   publish(schedules: readonly TaskSchedule[], opts: { dryRun: boolean }): Promise<PublishResult[]>
 }
 
+/**
+ * Our own copy of where the work sits — a projection of the system of record,
+ * not the truth itself.
+ *
+ * ION reflects a write back on its own schedule (the recurring_tasks /
+ * schedule_slots sync), so between a confirmed write and the next sync our
+ * cache is knowingly stale: the map would still show the old day. This exists
+ * to close that window by applying what we just proved landed. It is only ever
+ * called with CONFIRMED writes — guessing ahead of ION would make the cache a
+ * second source of truth, which is the thing the sync exists to prevent.
+ */
+export interface PlacementCache {
+  apply(schedules: readonly TaskSchedule[]): Promise<{ quotaId: string; slots: number }[]>
+}
+
 export interface PublishResult {
   readonly quotaId: string
   readonly accepted: boolean

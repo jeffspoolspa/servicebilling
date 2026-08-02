@@ -21,6 +21,7 @@ import {
   type FitCandidate,
   type NearbyQuota,
   type InvalidChange,
+  type PlacementCache,
   type PublishResult,
   type QuotaRepository,
   type QuotaSnapshot,
@@ -96,6 +97,8 @@ export interface PublishReport {
   readonly invalidated: readonly InvalidChange[]
   /** How many complete weeks the write covered. */
   readonly published: number
+  /** Quotas whose cached slots were refreshed from a confirmed write. */
+  readonly cached: readonly { quotaId: string; slots: number }[]
 }
 
 export class RoutingService {
@@ -202,7 +205,7 @@ export class RoutingService {
     scenarioId: string,
     scenarios: ScenarioRepository,
     publisher: RoutePublisher,
-    opts: { dryRun?: boolean; asOf?: Date } = {},
+    opts: { dryRun?: boolean; asOf?: Date; cache?: PlacementCache } = {},
   ): Promise<PublishReport> {
     const dryRun = opts.dryRun ?? true
     const stored = await scenarios.byId(scenarioId)
@@ -217,6 +220,21 @@ export class RoutingService {
 
     const accepted = results.filter((r) => r.accepted).length
     const committed = !dryRun && results.length > 0 && accepted === results.length
+
+    // Refresh our own copy for the writes ION ACCEPTED — not the whole batch.
+    // A refused quota must keep showing where it really is, or the map would
+    // claim a move that never happened.
+    let cached: { quotaId: string; slots: number }[] = []
+    if (!dryRun && opts.cache && accepted > 0) {
+      const landed = new Set(results.filter((r) => r.accepted).map((r) => r.quotaId))
+      cached = await opts.cache.apply(
+        restored.scenario.schedules().filter((s) => landed.has(s.quotaId)),
+      )
+    }
+
+    // Closing belongs here, not to any single edit: only the batch knows it
+    // finished. A partial run stays pending on purpose — "some of it landed"
+    // is a state a human must see.
     if (committed) await scenarios.update(scenarioId, { status: "committed" })
 
     return {
@@ -227,6 +245,7 @@ export class RoutingService {
       invalidated: restored.invalidated,
       // What the write actually said, so a dry run is inspectable.
       published: restored.scenario.schedules().length,
+      cached,
     }
   }
 

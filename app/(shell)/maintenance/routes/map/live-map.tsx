@@ -11,6 +11,7 @@
  */
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import mapboxgl from "mapbox-gl"
 import "mapbox-gl/dist/mapbox-gl.css"
 import { OptionPills } from "@/components/ui/option-pills"
@@ -156,6 +157,8 @@ export function LiveMap({
   const [cadenceScope, setCadenceScope] = useState<string[]>([])
   /** Transient notice (skipped moves etc.) — one per action, self-clearing. */
   const [toast, setToast] = useState<string | null>(null)
+  const [publishBusy, setPublishBusy] = useState(false)
+  const router = useRouter()
   useEffect(() => {
     if (toast === null) return
     const t = setTimeout(() => setToast(null), 5000)
@@ -1225,6 +1228,86 @@ export function LiveMap({
   }, [])
 
   /** Save the pending changes as a scenario (or update the one being viewed). */
+  /**
+   * Commit the unpublished changes to ION.
+   *
+   * Publishing always goes through a scenario, even for ad-hoc edits: the
+   * scenario IS the record of what was sent, so saving one first means every
+   * published change has a name, a timestamp and a history entry rather than
+   * vanishing into ION unattributed. The server closes it out on success.
+   */
+  const publishToIon = async () => {
+    if (changes.length === 0 || publishBusy) return
+    const count = changes.length
+    if (
+      !window.confirm(
+        `Write ${count} change${count === 1 ? "" : "s"} to ION?\n\n` +
+          `This edits the live schedule. Each affected task is rewritten with its ` +
+          `complete week, so unchanged days are preserved.`,
+      )
+    ) {
+      return
+    }
+    setPublishBusy(true)
+    try {
+      // Make sure there is a scenario to publish and to close out afterwards.
+      let scenarioId = viewing?.id ?? null
+      if (scenarioId) {
+        const patch = await fetch(`/api/routing/scenarios/${scenarioId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ changes }),
+        })
+        if (!patch.ok) throw new Error(`could not update the scenario (${patch.status})`)
+      } else {
+        const made = await fetch("/api/routing/scenarios", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: `published ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
+            changes,
+          }),
+        })
+        if (!made.ok) throw new Error(`could not record the scenario (${made.status})`)
+        scenarioId = ((await made.json()) as { scenario: { id: string } }).scenario.id
+      }
+
+      const res = await fetch(`/api/routing/scenarios/${scenarioId}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dry_run: false }),
+      })
+      const report = (await res.json()) as {
+        error?: string
+        committed?: boolean
+        results?: { accepted: boolean; detail: string }[]
+        cached?: unknown[]
+      }
+      if (!res.ok) throw new Error(report.error ?? `publish failed (${res.status})`)
+
+      const accepted = (report.results ?? []).filter((r) => r.accepted).length
+      const refused = (report.results ?? []).length - accepted
+      setToast(
+        report.committed
+          ? `Published ${accepted} task${accepted === 1 ? "" : "s"} to ION — scenario closed`
+          : `Published ${accepted}, ${refused} refused — scenario left pending. ${
+              (report.results ?? []).find((r) => !r.accepted)?.detail ?? ""
+            }`,
+      )
+      // Our cache was refreshed for whatever landed, so re-read the plan
+      // rather than trusting the in-memory scenario.
+      setPlan(Scenario.from(base()))
+      setViewing(null)
+      setRestoreNote(null)
+      await refreshScenarios()
+      router.refresh()
+    } catch (err) {
+      setToast(`Publish failed — ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setPublishBusy(false)
+    }
+  }
+
   const saveScenario = async (name: string) => {
     if (changes.length === 0) return
     setScenarioBusy(true)
@@ -1696,7 +1779,16 @@ export function LiveMap({
             rows={changeRows}
             onRevert={revertChanges}
             headerExtra={
-              saveName === null ? (
+              <>
+                <button
+                  className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-[10.5px] font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
+                  title="write these changes to ION — each task is rewritten with its complete week"
+                  disabled={publishBusy || scenarioBusy}
+                  onClick={() => void publishToIon()}
+                >
+                  {publishBusy ? "Publishing…" : "Publish to ION"}
+                </button>
+                {saveName === null ? (
                 <button
                   className="shrink-0 rounded-full border border-violet-400/40 bg-violet-400/10 px-2.5 py-0.5 text-[10.5px] font-medium text-violet-300 hover:bg-violet-400/20 disabled:opacity-50"
                   disabled={scenarioBusy}
@@ -1731,7 +1823,8 @@ export function LiveMap({
                     ×
                   </button>
                 </span>
-              )
+                )}
+              </>
             }
           />
         </Worklist>
