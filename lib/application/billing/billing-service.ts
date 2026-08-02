@@ -113,7 +113,11 @@ export class BillingService {
       this.repository.itemsForMonth(month),
       this.repository.ionFactsFor(month),
     ])
-    const bridge = await this.repository.ionTaskBridge([...new Set(items.map((i) => i.taskId))])
-    return new Reconciler().reconcile(month, items, facts, bridge)
+    const taskIds = [...new Set(items.map((i) => i.taskId))]
+    const [bridge, policies] = await Promise.all([
+      this.repository.ionTaskBridge(taskIds),
+      this.repository.consumablesPolicies(taskIds),
+    ])
+    return new Reconciler().reconcile(month, items, facts, bridge, policies)
   }
 }

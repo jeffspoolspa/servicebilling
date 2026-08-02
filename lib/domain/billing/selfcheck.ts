@@ -564,3 +564,20 @@ check("variance: the ruled split — log corrections need ION, accommodations ne
   assert.equal(requiresIonEdit({ visitId: "v", techId: null, kind: "discount", payload: {} }), false)
   assert.equal(requiresIonEdit({ visitId: "v", techId: null, kind: "missed_correction", payload: {} }), false)
 })
+
+check("reconciler: a separate-consumables task over by exactly its chems is PENDING, not a mismatch", () => {
+  const items: BillableItem[] = [
+    { sourceKind: "flat", sourceId: null, taskId: "t1", kind: "labor", serviceDate: null,
+      itemName: null, qty: 1, unitPriceCents: 0, amountCents: 0 },
+    { sourceKind: "usage", sourceId: "u1", taskId: "t1", kind: "consumable", serviceDate: "2026-07-07",
+      itemName: "TABS", qty: 2, unitPriceCents: 4178, amountCents: 8356 },
+  ]
+  const facts = [{ ionTaskId: "i1", amountCents: 0, customer: "SPIKES" }]
+  const bridge = new Map([["t1", "i1"]])
+  const withPolicy = new Reconciler().reconcile("2026-07-01", items, facts, bridge,
+    new Map([["t1", consumablesPolicyFor("separate")]]))
+  assert.equal(withPolicy.chemPending.length, 1, "the SPIKES shape classifies as pending")
+  assert.equal(withPolicy.mismatches.length, 0)
+  const withoutPolicy = new Reconciler().reconcile("2026-07-01", items, facts, bridge)
+  assert.equal(withoutPolicy.mismatches.length, 1, "a listed task with the same numbers stays a real mismatch")
+})

@@ -7,7 +7,7 @@
 import { BillingMonth, Customer, EffectiveHistory, laborPolicyFor, consumablesPolicyFor } from "@/lib/domain/billing"
 import type { Effective } from "@/lib/domain/billing"
 import type {
-  BillableItem, BillingCheckFinding, Catalog, IonInvoiceFact, IonTaskConfig,
+  BillableItem, BillingCheckFinding, Catalog, ConsumablesPolicy, IonInvoiceFact, IonTaskConfig,
   ItemProfile, MonthContext, TaskTerms, VisitFact,
 } from "@/lib/domain/billing"
 
@@ -384,6 +384,18 @@ export class SupabaseBillingRepository {
       taskId: r.task_id, kind: r.kind as BillableItem["kind"], serviceDate: r.service_date,
       itemName: r.item_name, qty: Number(r.qty), unitPriceCents: r.unit_price_cents, amountCents: r.amount_cents,
     }))
+  }
+
+  /** Each task's consumables policy — resolved once, for the reconciler's interpret. */
+  async consumablesPolicies(taskIds: readonly string[]): Promise<Map<string, ConsumablesPolicy>> {
+    const out = new Map<string, ConsumablesPolicy>()
+    for (let i = 0; i < taskIds.length; i += 200) {
+      const rows = await all<{ id: string; consumables_mode: string | null }>((a, b) =>
+        this.maint().from("tasks").select("id, consumables_mode")
+          .in("id", taskIds.slice(i, i + 200)).order("id").range(a, b))
+      for (const r of rows) out.set(r.id, consumablesPolicyFor(r.consumables_mode))
+    }
+    return out
   }
 
   /** ION's per-task invoice facts for a month (the pulled transactions report). */
