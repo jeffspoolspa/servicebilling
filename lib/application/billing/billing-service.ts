@@ -3,8 +3,8 @@
  * use case (docs/conventions/LAYERING.md). Load -> domain -> persist; the
  * decisions are all downstairs.
  */
-import { Reconciler } from "@/lib/domain/billing"
-import type { ReconcileReport } from "@/lib/domain/billing"
+import { Reconciler, runChecks, LOG_CORRECTION_CHECKS, BILL_REVIEW_CHECKS } from "@/lib/domain/billing"
+import type { BillingCheckFinding, ReconcileReport } from "@/lib/domain/billing"
 import { SupabaseBillingRepository } from "@/lib/infrastructure/billing/supabase-billing-repository"
 
 export interface AccrualSummary {
@@ -44,6 +44,38 @@ export class BillingService {
       unpricedItems: items.filter((i) => i.kind === "consumable" && i.unitPriceCents === null).length,
       expectedTotalCents: exp.reduce((n, e) => n + e.laborCents + e.consumableCents, 0),
       removed,
+    }
+  }
+
+  /**
+   * Run both check suites over one customer-month and persist the findings.
+   * Pure rules, loaded context: log-correction findings are fix-in-ION work
+   * that must clear BEFORE invoicing; bill-review findings are the flag /
+   * explain / discount path once the logs are trusted.
+   */
+  async checkMonth(customerId: number, month: string): Promise<{
+    findings: BillingCheckFinding[]
+    logCorrection: number
+    billReview: number
+  }> {
+    const { month: aggregate, storedId } = await this.repository.monthOf(customerId, month)
+    if (!storedId) return { findings: [], logCorrection: 0, billReview: 0 }
+    const [{ visits, terms }, items] = await Promise.all([
+      this.repository.factsFor(customerId, month),
+      this.repository.itemsForMonthCustomer(storedId),
+    ])
+    void aggregate
+    const rest = await this.repository.checkContextFor(customerId, month, items, visits, terms)
+    const ctx = { customerId, month, items, visits, terms, ...rest }
+    const findings = [
+      ...runChecks(ctx, LOG_CORRECTION_CHECKS),
+      ...runChecks(ctx, BILL_REVIEW_CHECKS),
+    ]
+    await this.repository.saveFindings(storedId, findings)
+    return {
+      findings,
+      logCorrection: findings.filter((f) => f.phase === "log_correction").length,
+      billReview: findings.filter((f) => f.phase === "bill_review").length,
     }
   }
 

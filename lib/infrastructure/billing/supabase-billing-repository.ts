@@ -6,7 +6,10 @@
  */
 import { BillingMonth, EffectiveHistory, laborPolicyFor, consumablesPolicyFor } from "@/lib/domain/billing"
 import type { Effective } from "@/lib/domain/billing"
-import type { BillableItem, Catalog, IonInvoiceFact, TaskTerms, VisitFact } from "@/lib/domain/billing"
+import type {
+  BillableItem, BillingCheckFinding, Catalog, IonInvoiceFact, IonTaskConfig,
+  ItemProfile, MonthContext, TaskTerms, VisitFact,
+} from "@/lib/domain/billing"
 
 interface Query extends PromiseLike<{ data: unknown; error: { message: string } | null }> {
   select(columns: string): Query
@@ -19,7 +22,8 @@ interface Query extends PromiseLike<{ data: unknown; error: { message: string } 
   is(column: string, value: unknown): Query
   not(column: string, op: string, value: unknown): Query
   or(filters: string): Query
-  order(column: string): Query
+  order(column: string, opts?: { ascending?: boolean }): Query
+  lt(column: string, value: unknown): Query
   range(from: number, to: number): Query
   single(): Query
   maybeSingle(): Query
@@ -27,6 +31,7 @@ interface Query extends PromiseLike<{ data: unknown; error: { message: string } 
 
 export interface BillingClient {
   schema(name: string): { from(table: string): Query }
+  from(table: string): Query
 }
 
 const monthEndOf = (month: string): string => {
@@ -167,6 +172,159 @@ export class SupabaseBillingRepository {
     }
   }
 
+  /**
+   * Everything the check suites may look at, for one customer-month. Loaded
+   * here so the rules stay pure: item profiles (bulk + typical quantity from
+   * history), residential-vs-commercial, provides-own-chems, the peer and
+   * self chem baselines, and what ION says about each task's config.
+   */
+  async checkContextFor(
+    customerId: number, month: string, items: readonly BillableItem[], visits: readonly VisitFact[], terms: readonly TaskTerms[],
+  ): Promise<Omit<MonthContext, "customerId" | "month" | "items" | "visits" | "terms">> {
+    const monthEnd = monthEndOf(month)
+
+    // Residential vs commercial: a filled company field means commercial
+    // (QBO is the source; account_type is stale).
+    const { data: cust } = await this.client.from("Customers")
+      .select("company, provides_chems").eq("id", customerId).maybeSingle()
+    const c = cust as { company: string | null; provides_chems: boolean | null } | null
+    const residential = !(c?.company ?? "").trim()
+
+    const itemProfiles = await this.itemProfiles()
+
+    // Chem baselines: this customer's own trailing normal, and the peer
+    // median across customers of the same kind for the same month.
+    const { data: selfRows } = await this.billing().from("billing_months")
+      .select("id, month").eq("customer_id", customerId).lt("month", month)
+    const selfIds = ((selfRows ?? []) as { id: string; month: string }[]).map((r) => r.id)
+    const selfTotals: number[] = []
+    if (selfIds.length) {
+      const rows = await all<{ billing_month_id: string; amount_cents: number | null }>((a, b) =>
+        this.billing().from("billable_items").select("billing_month_id, amount_cents")
+          .eq("kind", "consumable").in("billing_month_id", selfIds).order("id").range(a, b))
+      const byMonth = new Map<string, number>()
+      for (const r of rows) byMonth.set(r.billing_month_id, (byMonth.get(r.billing_month_id) ?? 0) + (r.amount_cents ?? 0))
+      selfTotals.push(...byMonth.values())
+    }
+    void monthEnd
+
+    return {
+      residential,
+      itemProfiles,
+      customerProvidesChems: c?.provides_chems === true,
+      peerChemMedianCents: await this.peerChemMedian(month, residential),
+      selfChemMedianCents: selfTotals.length
+        ? [...selfTotals].sort((a, b) => a - b)[Math.floor(selfTotals.length / 2)]
+        : null,
+      ionConfig: await this.ionConfigFor(terms.map((t) => t.id)),
+    }
+  }
+
+  private itemProfileMemo: Map<string, ItemProfile> | null = null
+
+  /** Global item profiles — bulk flag from the package size, typical qty from history. */
+  private async itemProfiles(): Promise<Map<string, ItemProfile>> {
+    if (this.itemProfileMemo) return this.itemProfileMemo
+    type PRow = { ion_item_id: string; item_name: string | null; category: string | null }
+    const catRows = await all<PRow>((a, b) =>
+      this.maint().from("consumables").select("ion_item_id, item_name, category").order("ion_item_id").range(a, b))
+    type QRow = { ion_item_id: string | null; quantity: number }
+    const qtyRows = await all<QRow>((a, b) =>
+      this.maint().from("consumables_usage").select("ion_item_id, quantity")
+        .not("ion_item_id", "is", null).order("id").range(a, b))
+    const byItem = new Map<string, number[]>()
+    for (const q of qtyRows) {
+      if (!q.ion_item_id) continue
+      const l = byItem.get(q.ion_item_id)
+      if (l) l.push(Number(q.quantity))
+      else byItem.set(q.ion_item_id, [Number(q.quantity)])
+    }
+    const med = (xs: number[]) => {
+      if (!xs.length) return null
+      const t = [...xs].sort((a, b) => a - b)
+      return t[Math.floor(t.length / 2)]
+    }
+    const BULK = /\b(50\s?LB|40\s?LB|25\s?LB|DRUM|BUCKET|5\s?GAL|55\s?GAL)\b/i
+    this.itemProfileMemo = new Map(catRows.map((r) => [r.ion_item_id, {
+      name: r.item_name ?? r.ion_item_id,
+      bulk: BULK.test(r.item_name ?? ""),
+      category: r.category,
+      typicalQty: med(byItem.get(r.ion_item_id) ?? []),
+    }]))
+    return this.itemProfileMemo
+  }
+
+  private peerMemo = new Map<string, number | null>()
+
+  /** Median chem bill among same-kind customers for the month — the peer baseline. */
+  private async peerChemMedian(month: string, residential: boolean): Promise<number | null> {
+    const key = `${month}|${residential}`
+    if (this.peerMemo.has(key)) return this.peerMemo.get(key) ?? null
+    const { data: months } = await this.billing().from("billing_months").select("id, customer_id").eq("month", month)
+    const rows = (months ?? []) as { id: string; customer_id: number }[]
+    if (!rows.length) { this.peerMemo.set(key, null); return null }
+    const { data: custs } = await this.client.from("Customers")
+      .select("id, company").in("id", rows.map((r) => r.customer_id))
+    const isResidential = new Map(((custs ?? []) as { id: number; company: string | null }[])
+      .map((c) => [c.id, !(c.company ?? "").trim()]))
+    const peerIds = rows.filter((r) => isResidential.get(r.customer_id) === residential).map((r) => r.id)
+    const totals = new Map<string, number>()
+    for (let i = 0; i < peerIds.length; i += 100) {
+      const items = await all<{ billing_month_id: string; amount_cents: number | null }>((a, b) =>
+        this.billing().from("billable_items").select("billing_month_id, amount_cents")
+          .eq("kind", "consumable").in("billing_month_id", peerIds.slice(i, i + 100)).order("id").range(a, b))
+      for (const it of items)
+        totals.set(it.billing_month_id, (totals.get(it.billing_month_id) ?? 0) + (it.amount_cents ?? 0))
+    }
+    const vals = [...totals.values()].filter((v) => v > 0).sort((a, b) => a - b)
+    const med = vals.length ? vals[Math.floor(vals.length / 2)] : null
+    this.peerMemo.set(key, med)
+    return med
+  }
+
+  /** What ION says about these tasks, and when we last read it directly. */
+  private async ionConfigFor(taskIds: readonly string[]): Promise<Map<string, IonTaskConfig>> {
+    const out = new Map<string, IonTaskConfig>()
+    for (let i = 0; i < taskIds.length; i += 200) {
+      const rows = await all<{
+        id: string; ion_verified_at: string | null; ion_invoice_type: string | null
+        billing_method: string | null; consumables_mode: string | null
+        price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; ends_on: string | null
+      }>((a, b) =>
+        this.maint().from("tasks")
+          .select("id, ion_verified_at, ion_invoice_type, billing_method, consumables_mode, price_per_visit_cents, flat_rate_monthly_cents, ends_on")
+          .in("id", taskIds.slice(i, i + 200)).order("id").range(a, b))
+      for (const r of rows) {
+        if (!r.ion_verified_at) continue
+        out.set(r.id, {
+          verifiedAt: r.ion_verified_at,
+          laborKey: r.billing_method ?? "per_visit",
+          consumablesKey: r.consumables_mode ?? "listed",
+          perVisitCents: r.price_per_visit_cents ?? 0,
+          flatMonthlyCents: r.flat_rate_monthly_cents ?? 0,
+          endsOn: r.ends_on,
+        })
+      }
+    }
+    return out
+  }
+
+  /** Replace this month's findings with a fresh run. */
+  async saveFindings(billingMonthId: string, findings: readonly BillingCheckFinding[]): Promise<number> {
+    const { error: delErr } = await this.billing().from("findings")
+      .delete().eq("billing_month_id", billingMonthId).is("resolved_at", null)
+    if (delErr) throw new Error(delErr.message)
+    if (!findings.length) return 0
+    const rows = findings.map((f) => ({
+      billing_month_id: billingMonthId, phase: f.phase, rule: f.rule, severity: f.severity,
+      customer_id: f.customerId, task_id: f.taskId, source_id: f.sourceId,
+      message: f.message, cents: f.cents,
+    }))
+    const { error } = await this.billing().from("findings").insert(rows)
+    if (error) throw new Error(error.message)
+    return rows.length
+  }
+
   /** Every billable item of a month, across customers — the reconcile substrate. */
   async itemsForMonth(month: string): Promise<BillableItem[]> {
     const monthIds = await all<{ id: string }>((a, b) =>
@@ -185,6 +343,20 @@ export class SupabaseBillingRepository {
       })))
     }
     return out
+  }
+
+  /** One stored month's items. */
+  async itemsForMonthCustomer(billingMonthId: string): Promise<BillableItem[]> {
+    type Row = { source_kind: string; source_id: string | null; task_id: string; kind: string; service_date: string | null; item_name: string | null; qty: number; unit_price_cents: number | null; amount_cents: number | null }
+    const rows = await all<Row>((a, b) =>
+      this.billing().from("billable_items")
+        .select("source_kind, source_id, task_id, kind, service_date, item_name, qty, unit_price_cents, amount_cents")
+        .eq("billing_month_id", billingMonthId).order("id").range(a, b))
+    return rows.map((r) => ({
+      sourceKind: r.source_kind as BillableItem["sourceKind"], sourceId: r.source_id,
+      taskId: r.task_id, kind: r.kind as BillableItem["kind"], serviceDate: r.service_date,
+      itemName: r.item_name, qty: Number(r.qty), unitPriceCents: r.unit_price_cents, amountCents: r.amount_cents,
+    }))
   }
 
   /** ION's per-task invoice facts for a month (the pulled transactions report). */
