@@ -64,6 +64,7 @@
   <div class="brand">JPS · Billing model</div>
   <a href="#decision">The decision</a>
   <a href="#uml">Object model</a>
+  <a href="#checks">Checks &amp; the gate</a>
   <a href="#moments">Claim vs settle</a>
   <a href="#phases">Migration phases</a>
   <a href="#flow">Workflow by layer</a>
@@ -434,6 +435,229 @@
   <b>DeliveryChannel</b> (email/SMS plugs), <b>PaymentGateway</b>,
   <b>IonLogEditor</b> (the Variance edit path; Windmill script pending).
   Money objects are views of the existing QBO mirrors &#8212; no new tables.</p>
+
+
+  <h2 id="checks">Checks, the gate, and how an invoice gets made</h2>
+  <p>The question this section settles: <b>what tells the system a month is
+  good to invoice</b> &#8212; and the answer is nothing stamps a status. Checks
+  write FACTS (findings). Readiness is a rule the aggregate evaluates over
+  those facts, at the moment of issuing. Same discipline as everywhere else:
+  derive, never stamp.</p>
+
+  <div class="uml">
+  <svg viewBox="0 0 880 704" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Inter,sans-serif">
+    <defs>
+      <marker id="ref" markerWidth="11" markerHeight="9" refX="10" refY="4.5" orient="auto">
+        <path d="M0,0 L10,4.5 L0,9" fill="none" stroke="#6b6b66" stroke-width="1.4"/>
+      </marker>
+      <marker id="comp" markerWidth="14" markerHeight="10" refX="1" refY="5" orient="auto">
+        <path d="M1,5 L7,1.5 L13,5 L7,8.5 Z" fill="#1c1c1a"/>
+      </marker>
+    </defs>
+    <rect x="12" y="14" width="284" height="676" rx="12" fill="#f4f7f6" stroke="#dfe7e5"/>
+    <text x="26" y="34" font-size="12" font-weight="700" letter-spacing="1.5" fill="#0b6e6e">THE MONTH &#183; aggregate</text>
+    <rect x="304" y="14" width="290" height="676" rx="12" fill="#f7f2fa" stroke="#ece0f3"/>
+    <text x="318" y="34" font-size="12" font-weight="700" letter-spacing="1.5" fill="#8a4fb0">CHECKS &#183; domain services</text>
+    <rect x="602" y="14" width="266" height="676" rx="12" fill="#faf6f2" stroke="#ece2d8"/>
+    <text x="616" y="34" font-size="12" font-weight="700" letter-spacing="1.5" fill="#d4761f">GATE &#8594; ISSUE</text>
+    <rect x="24" y="68" width="248" height="212" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
+    <text x="148.0" y="86" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
+    <text x="148.0" y="103" font-size="15" font-weight="700" text-anchor="middle">BillingMonth</text>
+    <line x1="24" y1="112" x2="272" y2="112" stroke="#e4e3df"/>
+    <text x="36" y="124" font-size="12" fill="#3a3a36">customer_id</text>
+    <text x="36" y="140" font-size="12" fill="#3a3a36">month</text>
+    <text x="36" y="156" font-size="12" fill="#3a3a36">closed_at</text>
+    <text x="36" y="172" font-size="12" fill="#6b6b66">items: BillableItem[*]</text>
+    <text x="36" y="188" font-size="12" fill="#6b6b66">findings: Finding[*]</text>
+    <line x1="24" y1="198" x2="272" y2="198" stroke="#e4e3df"/>
+    <text x="36" y="212" font-size="12" fill="#3a3a36">accrue(visits, terms, catalog)</text>
+    <text x="36" y="228" font-size="12" fill="#3a3a36">expectations()</text>
+    <text x="36" y="244" font-size="12" fill="#d4761f">gate(findings) &#8594; GateVerdict</text>
+    <text x="36" y="260" font-size="12" fill="#3a3a36">close(unbilled)</text>
+    <rect x="24" y="294" width="248" height="166" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="148.0" y="312" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="148.0" y="329" font-size="15" font-weight="700" text-anchor="middle">BillableItem</text>
+    <line x1="24" y1="338" x2="272" y2="338" stroke="#e4e3df"/>
+    <text x="36" y="350" font-size="12" fill="#3a3a36">source_id  UNIQUE = the claim</text>
+    <text x="36" y="366" font-size="12" fill="#3a3a36">task_id</text>
+    <text x="36" y="382" font-size="12" fill="#3a3a36">kind: labor | consumable</text>
+    <text x="36" y="398" font-size="12" fill="#3a3a36">qty</text>
+    <text x="36" y="414" font-size="12" fill="#3a3a36">amount_cents</text>
+    <text x="36" y="430" font-size="12" fill="#3a3a36">qbo_invoice_id  (null till issue)</text>
+    <text x="36" y="446" font-size="12" fill="#3a3a36">qbo_line_id  (the LOCK)</text>
+    <rect x="24" y="490" width="248" height="150" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="148.0" y="508" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="148.0" y="525" font-size="15" font-weight="700" text-anchor="middle">Finding</text>
+    <line x1="24" y1="534" x2="272" y2="534" stroke="#e4e3df"/>
+    <text x="36" y="546" font-size="12" fill="#3a3a36">phase: log_correction | bill_review</text>
+    <text x="36" y="562" font-size="12" fill="#3a3a36">rule</text>
+    <text x="36" y="578" font-size="12" fill="#3a3a36">severity: error | warning | info</text>
+    <text x="36" y="594" font-size="12" fill="#3a3a36">source_id</text>
+    <text x="36" y="610" font-size="12" fill="#3a3a36">message / cents</text>
+    <text x="36" y="626" font-size="12" fill="#3a3a36">resolved_at  (null = OPEN)</text>
+    <rect x="316" y="68" width="266" height="150" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="449.0" y="86" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;value object &#183; input&#187;</text>
+    <text x="449.0" y="103" font-size="15" font-weight="700" text-anchor="middle">MonthContext</text>
+    <line x1="316" y1="112" x2="582" y2="112" stroke="#e4e3df"/>
+    <text x="328" y="124" font-size="12" fill="#3a3a36">items / visits / terms</text>
+    <text x="328" y="140" font-size="12" fill="#3a3a36">customer (residential derived)</text>
+    <text x="328" y="156" font-size="12" fill="#3a3a36">itemProfiles</text>
+    <text x="328" y="172" font-size="12" fill="#3a3a36">customerProvidesChems</text>
+    <text x="328" y="188" font-size="12" fill="#3a3a36">peer + self chem medians</text>
+    <text x="328" y="204" font-size="12" fill="#3a3a36">ionConfig (verified-at)</text>
+    <rect x="316" y="258" width="266" height="116" rx="8" fill="#fff" stroke="#8a4fb0" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="449.0" y="276" font-size="11" text-anchor="middle" fill="#8a4fb0">&#171;interface&#187;</text>
+    <text x="449.0" y="293" font-size="15" font-weight="700" text-anchor="middle">BillingCheck</text>
+    <line x1="316" y1="302" x2="582" y2="302" stroke="#e4e3df"/>
+    <text x="328" y="314" font-size="12" fill="#3a3a36">name</text>
+    <text x="328" y="330" font-size="12" fill="#3a3a36">phase</text>
+    <line x1="316" y1="340" x2="582" y2="340" stroke="#e4e3df"/>
+    <text x="328" y="354" font-size="12" fill="#3a3a36">evaluate(ctx) &#8594; Finding[]</text>
+    <text x="330" y="404" font-size="12" fill="#8a4fb0" font-weight="600">LOG_CORRECTION_CHECKS &#8212; 8 rules</text>
+    <text x="330" y="421" font-size="11.5" fill="#6b6b66">fix in ION, re-ingest &#8212; BEFORE invoicing</text>
+    <text x="330" y="446" font-size="12" fill="#8a4fb0" font-weight="600">BILL_REVIEW_CHECKS &#8212; 3 rules</text>
+    <text x="330" y="463" font-size="11.5" fill="#6b6b66">explain / discount &#8212; never edits the log</text>
+    <text x="330" y="600" font-size="11.5" fill="#6b6b66">runChecks(ctx, suite) = flatMap evaluate</text>
+    <text x="330" y="617" font-size="11.5" fill="#6b6b66">pure: no I/O, no clock, no queries</text>
+    <rect x="614" y="68" width="242" height="102" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="735.0" y="86" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;value object&#187;</text>
+    <text x="735.0" y="103" font-size="15" font-weight="700" text-anchor="middle">GateVerdict</text>
+    <text x="848" y="86" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW</text>
+    <line x1="614" y1="112" x2="856" y2="112" stroke="#e4e3df"/>
+    <text x="626" y="124" font-size="12" fill="#d4761f">ready: boolean</text>
+    <text x="626" y="140" font-size="12" fill="#d4761f">blockers: Finding[*]</text>
+    <text x="626" y="156" font-size="12" fill="#d4761f">reason</text>
+    <rect x="614" y="258" width="242" height="180" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="735.0" y="276" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity &#183; draft in memory&#187;</text>
+    <text x="735.0" y="293" font-size="15" font-weight="700" text-anchor="middle">Invoice</text>
+    <line x1="614" y1="302" x2="856" y2="302" stroke="#e4e3df"/>
+    <text x="626" y="314" font-size="12" fill="#3a3a36">customer / month</text>
+    <text x="626" y="330" font-size="12" fill="#6b6b66">lines: InvoiceLine[*]</text>
+    <text x="626" y="346" font-size="12" fill="#3a3a36">status: draft &#8594; issued &#8594; &#8230;</text>
+    <text x="626" y="362" font-size="12" fill="#3a3a36">collection: CollectionPolicy</text>
+    <line x1="614" y1="372" x2="856" y2="372" stroke="#e4e3df"/>
+    <text x="626" y="386" font-size="12" fill="#3a3a36">issue(qboId, docNo)</text>
+    <text x="626" y="402" font-size="12" fill="#3a3a36">markDelivered(via)</text>
+    <text x="626" y="418" font-size="12" fill="#3a3a36">applyPayment(app)</text>
+    <path d="M148,264 L148,294" fill="none" stroke="#3a3a36" stroke-width="1.4" marker-start="url(#comp)"/>
+    <path d="M24,210 L18,210 L18,540 L24,540" fill="none" stroke="#3a3a36" stroke-width="1.4" marker-start="url(#comp)"/>
+    <path d="M272,96 L316,96" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#ref)"/>
+    <path d="M449,218 L449,258" fill="none" stroke="#3a3a36" stroke-width="1.3" marker-end="url(#ref)"/>
+    <text x="455" y="243" font-size="10.5" fill="#6b6b66">ctx</text>
+    <path d="M560,374 L560,556 L272,556" fill="none" stroke="#3a3a36" stroke-width="1.3" marker-end="url(#ref)"/>
+    <text x="392" y="550" font-size="10.5" fill="#6b6b66">produces findings</text>
+    <path d="M272,80 L288,80 L288,50 L735,50 L735,68" fill="none" stroke="#0b6e6e" stroke-width="1.5" marker-end="url(#ref)"/>
+    <text x="430" y="63" font-size="11" fill="#0b6e6e" font-weight="600">gate(open findings)</text>
+    <path d="M735,170 L735,258" fill="none" stroke="#d4761f" stroke-width="1.5" marker-end="url(#ref)"/>
+    <text x="742" y="202" font-size="10.5" fill="#d4761f" font-weight="600">ready &#8658; build + issue</text>
+    <text x="742" y="218" font-size="10.5" fill="#6b6b66">blocked &#8658; stays a worklist</text>
+    <path d="M614,500 L290,500 L290,410 L272,410" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#ref)"/>
+    <text x="392" y="494" font-size="10.5" fill="#6b6b66">issue stamps qbo_invoice_id / qbo_line_id</text>
+  </svg>
+  </div>
+  <p class="note"><b>Legend.</b> Teal 1.6px = aggregate root &#183; blue =
+  entity &#183; grey dashed = value object &#183; purple dashed = interface /
+  domain service. Solid line with a filled diamond = composition (the month
+  OWNS its items and findings; both cascade with it). Dashed open arrow =
+  reference or dataflow across a boundary. Orange rows are proposed, not yet
+  in code.</p>
+
+  <div class="cal why"><span class="tag">RULED &#183; the signal mechanism</span>
+  A check never enqueues anything and never marks a month "ready". It writes
+  findings. <b>Readiness is derived</b> &#8212; a month is issuable when it has
+  items, has no BLOCKING open findings, and has not already been issued. The
+  transition that enqueues downstream work is the <b>issue</b> itself (items
+  gain <code>qbo_invoice_id</code>), never the check. This keeps three
+  properties: re-running checks is free and side-effect-less, a stale
+  "ready" flag cannot exist, and authorization stays with the human who
+  dispositions the findings.</div>
+
+  <h3>When it runs, and on what</h3>
+  <p><code>checkMonth(customerId, month)</code> is re-runnable at any time and
+  has no side effect except replacing that month&#8217;s OPEN findings. It runs
+  after every accrual &#8212; month-end sweep, a variance re-accrual, a
+  reconcile-driven refresh, or a human pressing re-check in the workbench.
+  Its whole input is <code>MonthContext</code>, assembled by the application
+  layer so the rules stay pure: the month&#8217;s items, visits and terms, the
+  customer (residential derived in its constructor), item profiles with
+  typical quantities, the peer and self chem baselines, and what ION says
+  about each task&#8217;s config.</p>
+
+  <h3>The rules (11 today; adding one appends a class)</h3>
+  <table>
+    <tr><th>Rule</th><th>Fires when</th><th>Sev</th><th>Blocks?</th></tr>
+    <tr><td colspan="4" style="background:#f4f7f6"><b>PHASE A &#8212; log correction</b> &#183; remedy: fix in ION, re-ingest, re-accrue</td></tr>
+    <tr><td><code>task_config_drift</code></td><td>our task config disagrees with ION, or was never verified / verified &gt; 7 days ago</td><td>error / warning</td><td>error only</td></tr>
+    <tr><td><code>high_value_residential_visit</code></td><td>a residential visit&#8217;s chemicals exceed $100 (p95 of real visits)</td><td>error</td><td>yes</td></tr>
+    <tr><td><code>quantity_outlier</code></td><td>a quantity 4x+ that item&#8217;s historical norm &#8212; fat finger</td><td>error</td><td>yes</td></tr>
+    <tr><td><code>unpriced_consumable</code></td><td>an item with no catalog price (or unrecognised entirely)</td><td>error</td><td>yes</td></tr>
+    <tr><td><code>expired_task_billed</code></td><td>accrual on a task whose window closed before the month</td><td>error</td><td>yes</td></tr>
+    <tr><td><code>non_serviceable_billed</code></td><td>labor on a non-serviceable day &#8212; impossible by construction; audit belt</td><td>error</td><td>yes</td></tr>
+    <tr><td><code>zero_rate_labor</code></td><td>a per-visit task at $0 with real visits &#8212; rate never configured (QC is legitimately $0)</td><td>warning</td><td>no</td></tr>
+    <tr><td><code>flat_zero_visits</code></td><td>a flat charge with zero visits &#8212; bills fine, but logs may sit on a sibling task</td><td>warning</td><td>no</td></tr>
+    <tr><td colspan="4" style="background:#fff4ec"><b>PHASE B &#8212; bill review</b> &#183; remedy: explain / discount &#183; the chemicals are already in the pool</td></tr>
+    <tr><td><code>customer_provides_chems</code></td><td>chemicals billed to a customer who supplies their own</td><td>error</td><td>until dispositioned</td></tr>
+    <tr><td><code>high_chem_vs_peer</code></td><td>chem bill &gt; 2x the peer-group median and over $150</td><td>warning</td><td>until dispositioned</td></tr>
+    <tr><td><code>high_chem_vs_self</code></td><td>chem bill &gt; 2x this customer&#8217;s own trailing normal and over $150</td><td>warning</td><td>until dispositioned</td></tr>
+  </table>
+
+  <h3>The gate lives on the aggregate</h3>
+  <p><code>BillingMonth.gate(findings) &#8594; GateVerdict</code>. It is a
+  domain rule about the month&#8217;s own readiness, so it belongs to the object
+  that owns the items &#8212; not to a query, a view, or the UI. The verdict
+  carries its blockers, so &#8220;why is this month not invoiced&#8221; is
+  answerable without re-deriving anything.</p>
+  <table>
+    <tr><th>Invariant</th><th>Rule</th><th>Enforced by</th></tr>
+    <tr><td>I-G1</td><td>A month with no items is not issuable &#8212; there is nothing to bill</td><td>gate</td></tr>
+    <tr><td>I-G2</td><td>Any OPEN <code>log_correction</code> <b>error</b> blocks: reality is wrong, and an invoice would print the wrong reality</td><td>gate</td></tr>
+    <tr><td>I-G3</td><td>Any OPEN <code>bill_review</code> finding blocks until DISPOSITIONED (approved / discounted / letter attached). Judgement, not correctness</td><td>gate</td></tr>
+    <tr><td>I-G4</td><td>Warnings never block &#8212; they inform the reviewer (495 never-verified configs must not stop 495 invoices)</td><td>gate</td></tr>
+    <tr><td>I-G5</td><td>A month already carrying <code>qbo_invoice_id</code> on its items is not re-issuable</td><td>gate + WAL</td></tr>
+    <tr><td>I-G6</td><td>No unpriced item may reach a line</td><td>builder throws</td></tr>
+  </table>
+  <div class="cal brk"><span class="tag">WHY THE GATE IS RE-EVALUATED AT ISSUE TIME</span>
+  A month can be enqueued as ready and stop being ready before the worker
+  claims it &#8212; a re-ingest lands new chemicals, someone reopens a finding.
+  So <code>issueMonth</code> loads findings and calls the gate itself rather
+  than trusting the queue row. This is the same claim-time-read rule the
+  workflow architecture already applies to charging: the queue row is an
+  envelope naming a unit, never a snapshot of its state.</div>
+
+  <h3>Issuing: the month goes in, an invoice comes out</h3>
+  <div class="step"><div class="name">accrueMonth<span>re-runnable</span></div><div class="body">
+    <div class="row"><span class="chip inf">infra</span>load visits, terms (effective-dated), price book</div>
+    <div class="row"><span class="chip dom">domain</span><code>month.accrue(...)</code> &#8212; the one writer of items</div>
+    <div class="row"><span class="chip inf">infra</span>diff-persist; never touches a locked (invoiced) item</div>
+  </div></div>
+  <div class="step"><div class="name">checkMonth<span>re-runnable &#183; no side effects</span></div><div class="body">
+    <div class="row"><span class="chip inf">infra</span>assemble MonthContext (profiles, baselines, ION config)</div>
+    <div class="row"><span class="chip dom">domain</span><code>runChecks(ctx, LOG_CORRECTION)</code> + <code>(ctx, BILL_REVIEW)</code></div>
+    <div class="row"><span class="chip inf">infra</span>replace this month&#8217;s OPEN findings</div>
+  </div></div>
+  <div class="step"><div class="name">human disposition<span>the authorization step</span></div><div class="body">
+    <div class="row"><span class="chip inf">infra</span>worklists read <code>billing.findings</code>; log fixes go to ION then re-accrue</div>
+    <div class="row"><span class="chip inf">infra</span>bill-review: approve, discount, or attach the drafted letter &#8594; <code>resolved_at</code></div>
+  </div></div>
+  <div class="step"><div class="name">issueMonth<span>IRREVERSIBLE &#183; needs a WAL</span></div><div class="body">
+    <div class="row"><span class="chip dom">domain</span><code>month.gate(findings)</code> &#8212; blocked stops here, with reasons</div>
+    <div class="row"><span class="chip dom">domain</span><code>MaintenanceInvoiceBuilder.build(month, items)</code> &#8594; draft</div>
+    <div class="row"><span class="chip inf">infra</span>WAL the intent (deterministic doc number per customer-month)</div>
+    <div class="row"><span class="chip inf">infra</span>create in QBO &#8594; <code>invoice.issue(qboId, docNo)</code> &#8594; stamp items</div>
+    <div class="row"><span class="chip inf">infra</span>the stamp is the transition that enqueues charge/send</div>
+  </div></div>
+  <div class="step"><div class="name">process (live)<span>IRREVERSIBLE &#183; already built</span></div><div class="body">
+    <div class="row"><span class="chip inf">infra</span><code>maint_charge_queue</code> &#8594; <code>process_maint_charges</code>, self-draining</div>
+    <div class="row"><span class="chip dom">domain</span>sentence: resolve &#8594; credits &#8594; charge or send &#8594; deliver</div>
+    <div class="row"><span class="chip inf">infra</span>idempotency in <code>charge_and_record</code> (WAL + Intuit Request-Id)</div>
+  </div></div>
+
+  <div class="cal why"><span class="tag">RULED &#183; checks never hand off directly</span>
+  Checks do not pass passing months to processing. Three reasons, each
+  load-bearing: bill-review findings need a HUMAN between detection and
+  money; coupling detection to processing would make a re-check a
+  side-effectful act; and the workflow architecture requires authorization to
+  happen BEFORE enqueue, because a queue row means &#8220;safe to process&#8221;.</div>
 
   <h2 id="moments">Claim vs settle &#8212; two moments, not one</h2>
   <table>

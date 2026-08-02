@@ -133,6 +133,35 @@ Ordering rule (RULED): everything through reconcile/checks is **re-runnable**;
 processing moves money and is **irreversible** — it comes last and only after
 the model underneath is solid.
 
+## Checks, the gate, and issuing (designed 2026-08-02 — see billing.html#checks)
+
+**The signal mechanism (proposed, awaiting Carter's ruling).** A check never
+enqueues anything and never marks a month "ready". It writes FINDINGS (facts).
+Readiness is DERIVED: a month is issuable when it has items, no BLOCKING open
+findings, and no `qbo_invoice_id` yet. The transition that enqueues downstream
+work is the ISSUE itself (items gain `qbo_invoice_id`), never the check. Three
+properties fall out: re-running checks is free and side-effect-less, a stale
+"ready" flag cannot exist, and authorization stays with the human who
+dispositions findings — matching WORKFLOW_EXECUTION's "authorization happens
+BEFORE enqueue".
+
+**The gate lives on the aggregate**: `BillingMonth.gate(findings) ->
+GateVerdict {ready, blockers, reason}`. Invariants:
+
+- I-G1 no items -> not issuable
+- I-G2 any OPEN log_correction ERROR blocks (reality is wrong)
+- I-G3 any OPEN bill_review finding blocks until DISPOSITIONED (judgement)
+- I-G4 warnings never block (495 never-verified configs must not stop 495 invoices)
+- I-G5 items already stamped with qbo_invoice_id are not re-issuable
+- I-G6 no unpriced item may reach a line (builder throws)
+
+`issueMonth` RE-EVALUATES the gate at claim time rather than trusting the queue
+row — same claim-time-read rule the charge path uses.
+
+**Still to build**: `gate()` + `GateVerdict`, `issueMonth` (with a WAL and a
+deterministic doc number per customer-month — the last irreversible step
+without idempotency), and the findings-disposition UI.
+
 ## Pricing moment (RULED 2026-08-02, Carter)
 
 The visit records WHAT was sold (item + quantity). The PRICE is set at
