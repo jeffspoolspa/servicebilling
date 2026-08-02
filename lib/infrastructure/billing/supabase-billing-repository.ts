@@ -4,7 +4,7 @@
  *
  * The domain never queries; this is the only file that knows the tables.
  */
-import { BillingMonth } from "@/lib/domain/billing"
+import { BillingMonth, laborPolicyFor, consumablesPolicyFor } from "@/lib/domain/billing"
 import type { BillableItem, Catalog, IonInvoiceFact, TaskTerms, VisitFact } from "@/lib/domain/billing"
 
 interface Query extends PromiseLike<{ data: unknown; error: { message: string } | null }> {
@@ -102,24 +102,25 @@ export class SupabaseBillingRepository {
       else byVisit.set(u.visit_id, [u])
     }
 
-    type TRow = { id: string; customer_id: number | null; billing_method: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; status: string | null; starts_on: string | null; ends_on: string | null }
+    type TRow = { id: string; customer_id: number | null; billing_method: string | null; consumables_mode: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; status: string | null; starts_on: string | null; ends_on: string | null }
     const taskIds = [...new Set(visits.map((v) => v.task_id))]
     const owned = await all<TRow>((a, b) =>
       this.maint().from("tasks")
-        .select("id, customer_id, billing_method, price_per_visit_cents, flat_rate_monthly_cents, status, starts_on, ends_on")
+        .select("id, customer_id, billing_method, consumables_mode, price_per_visit_cents, flat_rate_monthly_cents, status, starts_on, ends_on")
         .eq("customer_id", customerId).order("id").range(a, b))
     const extraIds = taskIds.filter((id) => !owned.some((t) => t.id === id))
     const extra = extraIds.length
       ? await all<TRow>((a, b) =>
           this.maint().from("tasks")
-            .select("id, customer_id, billing_method, price_per_visit_cents, flat_rate_monthly_cents, status, starts_on, ends_on")
+            .select("id, customer_id, billing_method, consumables_mode, price_per_visit_cents, flat_rate_monthly_cents, status, starts_on, ends_on")
             .in("id", extraIds).order("id").range(a, b))
       : []
 
     const terms: TaskTerms[] = [...owned, ...extra].map((t) => ({
       id: t.id,
       customerId: t.customer_id,
-      billingMethod: t.billing_method === "flat_rate_monthly" ? "flat_rate_monthly" : "per_visit",
+      laborPolicy: laborPolicyFor(t.billing_method),
+      consumablesPolicy: consumablesPolicyFor(t.consumables_mode),
       perVisitCents: t.price_per_visit_cents ?? 0,
       flatMonthlyCents: t.flat_rate_monthly_cents ?? 0,
       active: t.status === "active",

@@ -168,7 +168,7 @@ export class ZeroRateCheck implements BillingCheck {
   evaluate(ctx: MonthContext): BillingCheckFinding[] {
     const out: BillingCheckFinding[] = []
     for (const t of ctx.terms) {
-      if (t.billingMethod !== "per_visit" || t.perVisitCents > 0 || this.qcTaskIds.has(t.id)) continue
+      if (t.laborPolicy.key !== "per_visit" || t.perVisitCents > 0 || this.qcTaskIds.has(t.id)) continue
       const days = ctx.items.filter((i) => i.taskId === t.id && i.kind === "labor").length
       if (days > 0) out.push(emit(this, "warning", ctx, t.id, null, `${days} serviceable day(s) at a $0 rate`, 0))
     }
@@ -183,7 +183,7 @@ export class FlatZeroVisitsCheck implements BillingCheck {
   evaluate(ctx: MonthContext): BillingCheckFinding[] {
     const out: BillingCheckFinding[] = []
     for (const t of ctx.terms) {
-      if (t.billingMethod !== "flat_rate_monthly") continue
+      if (t.laborPolicy.key !== "flat_rate_monthly") continue
       const flat = ctx.items.find((i) => i.taskId === t.id && i.sourceKind === "flat")
       if (flat && !ctx.visits.some((v) => v.taskId === t.id))
         out.push(emit(this, "info", ctx, t.id, null, "flat charge with zero visits this month", flat.amountCents))

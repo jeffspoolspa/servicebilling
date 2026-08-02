@@ -39,13 +39,10 @@ export class BillingMonth {
   /**
    * The one writer. Recomputes the month's should-be item set from facts:
    *
-   * LABOR (buckets by scheduled_date):
-   *   per_visit — one item per distinct SERVICEABLE service day; duplicate
-   *   logs on a day collapse to the day's first visit (stable choice). The
-   *   TASK dictates the rate (one ION contract = one rate) — a QC task's
-   *   rate of 0 makes $0 labor items with no special case.
-   *   flat_rate_monthly — ONE item per active task effective in the month,
-   *   independent of visit count (a flat task bills even with zero visits).
+   * LABOR (buckets by scheduled_date): delegated to each task's LaborPolicy
+   *   (per-visit days / one flat charge / nothing at all). The TASK dictates
+   *   the rate — one ION contract = one rate — so a QC task's rate of 0 makes
+   *   $0 items with no special case.
    *
    * CONSUMABLES (bucket by visit_date): one item per usage row, priced by
    *   ion_item_id -> catalog. No catalog price -> unitPriceCents null — a
@@ -59,46 +56,23 @@ export class BillingMonth {
     const monthEnd = monthEndOf(this.month)
     const items: BillableItem[] = []
 
-    // ---- labor: per_visit tasks, distinct serviceable days -------------
-    const byTaskDay = new Map<string, VisitFact>()
+    // ---- labor: each task's policy decides the shape --------------------
+    const visitsByTask = new Map<string, VisitFact[]>()
     for (const v of visits) {
-      if (!v.serviceable) continue
-      if (monthStartOf(v.scheduledDate) !== this.month) continue
-      const t = termsOf.get(v.taskId)
-      if (t && t.billingMethod === "flat_rate_monthly") continue
-      const key = `${v.taskId}|${v.scheduledDate}`
-      const held = byTaskDay.get(key)
-      if (!held || v.id < held.id) byTaskDay.set(key, v) // stable day representative
+      const l = visitsByTask.get(v.taskId)
+      if (l) l.push(v)
+      else visitsByTask.set(v.taskId, [v])
     }
-    for (const v of byTaskDay.values()) {
-      const rate = termsOf.get(v.taskId)?.perVisitCents ?? 0
-      items.push({
-        sourceKind: "visit", sourceId: v.id, taskId: v.taskId, kind: "labor",
-        serviceDate: v.scheduledDate, itemName: null, qty: 1,
-        unitPriceCents: rate, amountCents: rate,
-      })
-    }
-
-    // ---- labor: flat tasks, one item per effective month ---------------
     for (const t of terms) {
-      if (t.billingMethod !== "flat_rate_monthly") continue
-      const hasVisits = visits.some((v) => v.taskId === t.id && monthStartOf(v.scheduledDate) === this.month)
-      const effective =
-        t.active && (t.startsOn === null || t.startsOn <= monthEnd) && (t.endsOn === null || t.endsOn >= this.month)
-      // With visits, the flat amount bills regardless of task status (the
-      // builder's task_month union); without visits it needs to be effective.
-      if (!hasVisits && !effective) continue
-      items.push({
-        sourceKind: "flat", sourceId: null, taskId: t.id, kind: "labor",
-        serviceDate: null, itemName: null, qty: 1,
-        unitPriceCents: t.flatMonthlyCents, amountCents: t.flatMonthlyCents,
-      })
+      items.push(...t.laborPolicy.accrue(t, visitsByTask.get(t.id) ?? [], this.month, monthEnd))
     }
 
     // ---- consumables: every usage row, priced by catalog ---------------
     for (const v of visits) {
       const bucket = v.visitDate ?? v.scheduledDate
       if (monthStartOf(bucket) !== this.month) continue
+      // A do-not-invoice task bills nothing at all — labor or chemicals.
+      if (termsOf.get(v.taskId)?.laborPolicy.key === "do_not_invoice") continue
       for (const u of v.usages) {
         if (u.itemName === null) continue
         const unit = u.ionItemId !== null ? (catalog.get(u.ionItemId) ?? null) : null

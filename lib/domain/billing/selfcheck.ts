@@ -3,6 +3,7 @@
  */
 import { strict as assert } from "node:assert"
 import { BillingMonth, BillingRuleError } from "./month"
+import { laborPolicyFor, consumablesPolicyFor } from "./policies"
 import type { TaskTerms, VisitFact } from "./types"
 
 let passed = 0
@@ -12,14 +13,15 @@ function check(name: string, fn: () => void) {
   console.log(`  ok  ${name}`)
 }
 
-const perVisit = (id: string, cents: number): TaskTerms => ({
-  id, customerId: 1, billingMethod: "per_visit", perVisitCents: cents,
-  flatMonthlyCents: 0, active: true, startsOn: null, endsOn: null,
+const terms = (id: string, o: Partial<TaskTerms> = {}): TaskTerms => ({
+  id, customerId: 1,
+  laborPolicy: laborPolicyFor("per_visit"), consumablesPolicy: consumablesPolicyFor("listed"),
+  perVisitCents: 0, flatMonthlyCents: 0, active: true, startsOn: null, endsOn: null, ...o,
 })
-const flat = (id: string, cents: number, active = true): TaskTerms => ({
-  id, customerId: 1, billingMethod: "flat_rate_monthly", perVisitCents: 0,
-  flatMonthlyCents: cents, active, startsOn: "2026-01-01", endsOn: null,
-})
+const perVisit = (id: string, cents: number): TaskTerms => terms(id, { perVisitCents: cents })
+const flat = (id: string, cents: number, active = true): TaskTerms =>
+  terms(id, { laborPolicy: laborPolicyFor("flat_rate_monthly"), flatMonthlyCents: cents, active, startsOn: "2026-01-01" })
+const dni = (id: string): TaskTerms => terms(id, { laborPolicy: laborPolicyFor("do_not_invoice"), perVisitCents: 9500 })
 const visit = (id: string, taskId: string, date: string, o: Partial<VisitFact> = {}): VisitFact => ({
   id, taskId, customerId: 1, scheduledDate: date, visitDate: date,
   serviceable: true, usages: [], ...o,
@@ -263,7 +265,7 @@ check("an unknown item profile never guesses", () => {
 check("expired task with accrual is a log-correction error", () => {
   const found = runChecks(baseCtx({
     items: [cons("u1", "TABS", 2, 450)],
-    terms: [{ id: "t1", customerId: 1, billingMethod: "per_visit", perVisitCents: 5000, flatMonthlyCents: 0, active: false, startsOn: "2026-01-01", endsOn: "2026-06-15" }],
+    terms: [terms("t1", { perVisitCents: 5000, active: false, startsOn: "2026-01-01", endsOn: "2026-06-15" })],
   }), LOG_CORRECTION_CHECKS)
   const f = found.find((x) => x.rule === "expired_task_billed")!
   assert.equal(f.phase, "log_correction")
@@ -295,4 +297,44 @@ check("thresholds are constructor args — same data, retuned floor, no finding"
   const ctx = baseCtx({ items, peerChemMedianCents: 8000 })
   assert.equal(runChecks(ctx, [new HighChemVsPeerCheck()]).length, 1)
   assert.equal(runChecks(ctx, [new HighChemVsPeerCheck(2, 20000)]).length, 0)
+})
+
+/* ------------------------------------------------------------ policies */
+import { LABOR_POLICIES, CONSUMABLES_POLICIES, consumablesPolicyFor as consFor } from "./policies"
+
+console.log("\npolicies — two axes, composed")
+
+check("a do-not-invoice task bills nothing — labor OR chemicals", () => {
+  const m = new BillingMonth(1, "2026-05-01")
+  m.accrue(
+    [visit("a", "dni", "2026-05-04", { usages: [{ id: "u1", ionItemId: "100", itemName: "TABS", quantity: 5 }] })],
+    [dni("dni")],
+    new Map([["100", 450]]),
+  )
+  assert.equal(m.items.length, 0, "ION's Do Not Invoice means exactly that")
+})
+
+check("adding the third labor policy needed no change to accrue (Open/Closed)", () => {
+  assert.deepEqual(Object.keys(LABOR_POLICIES).sort(), ["do_not_invoice", "flat_rate_monthly", "per_visit"])
+  assert.deepEqual(Object.keys(CONSUMABLES_POLICIES).sort(), ["listed", "separate"])
+})
+
+check("the axes compose freely — flat x separate needs no combination class", () => {
+  const t = terms("t1", {
+    laborPolicy: LABOR_POLICIES.flat_rate_monthly,
+    consumablesPolicy: CONSUMABLES_POLICIES.separate,
+    flatMonthlyCents: 85000, startsOn: "2026-01-01",
+  })
+  const m = new BillingMonth(1, "2026-05-01")
+  m.accrue([visit("a", "t1", "2026-05-04", { usages: [{ id: "u1", ionItemId: "1", itemName: "TABS", quantity: 2 }] })], [t], new Map([["1", 450]]))
+  assert.equal(m.items.filter((i) => i.kind === "labor").length, 1)
+  assert.equal(m.items.filter((i) => i.kind === "consumable").length, 1)
+})
+
+check("separate-consumables reads a chem-sized shortfall as pending, not a mismatch", () => {
+  const sep = consFor("separate")
+  assert.equal(sep.interpret(90000, 90000), "chem_invoice_pending", "over by exactly our chemicals -> ION billed labor only")
+  assert.equal(sep.interpret(12345, 90000), "compare_combined", "any other gap is a real diff")
+  assert.equal(consFor("listed").interpret(90000, 90000), "compare_combined")
+  assert.equal(consFor(null).key, "listed", "unset defaults to listed")
 })

@@ -8,7 +8,7 @@
  */
 import { readFileSync } from "node:fs"
 import { createClient } from "@supabase/supabase-js"
-import { BillingMonth } from "@/lib/domain/billing"
+import { BillingMonth, laborPolicyFor, consumablesPolicyFor } from "@/lib/domain/billing"
 import type { TaskExpectation, TaskTerms, VisitFact } from "@/lib/domain/billing"
 
 const MONTH = process.argv[2] ?? "2026-05-01"
@@ -60,13 +60,14 @@ async function main() {
     else usagesByVisit.set(u.visit_id, [u])
   }
 
-  type TRow = { id: string; customer_id: number | null; billing_method: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; status: string | null; starts_on: string | null; ends_on: string | null }
+  type TRow = { id: string; customer_id: number | null; billing_method: string | null; consumables_mode: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; status: string | null; starts_on: string | null; ends_on: string | null }
   const tasks = await fetchAll<TRow>((a, b) =>
-    maint.from("tasks").select("id, customer_id, billing_method, price_per_visit_cents, flat_rate_monthly_cents, status, starts_on, ends_on").order("id").range(a, b),
+    maint.from("tasks").select("id, customer_id, billing_method, consumables_mode, price_per_visit_cents, flat_rate_monthly_cents, status, starts_on, ends_on").order("id").range(a, b),
   )
   const terms = new Map<string, TaskTerms>(tasks.map((t) => [t.id, {
     id: t.id, customerId: t.customer_id,
-    billingMethod: t.billing_method === "flat_rate_monthly" ? "flat_rate_monthly" : "per_visit",
+    laborPolicy: laborPolicyFor(t.billing_method),
+    consumablesPolicy: consumablesPolicyFor(t.consumables_mode),
     perVisitCents: t.price_per_visit_cents ?? 0,
     flatMonthlyCents: t.flat_rate_monthly_cents ?? 0,
     active: t.status === "active", startsOn: t.starts_on, endsOn: t.ends_on,
@@ -97,7 +98,7 @@ async function main() {
   }
   // flat tasks join their customer's month even with zero visits
   for (const t of terms.values()) {
-    if (t.billingMethod !== "flat_rate_monthly") continue
+    if (t.laborPolicy.key !== "flat_rate_monthly") continue
     const c = t.customerId ?? 0
     if (!byCustomer.has(c)) byCustomer.set(c, [])
   }
@@ -106,7 +107,7 @@ async function main() {
   for (const [customerId, custVisits] of byCustomer) {
     const taskIds = new Set(custVisits.map((v) => v.taskId))
     const custTerms = [...terms.values()].filter(
-      (t) => taskIds.has(t.id) || (t.billingMethod === "flat_rate_monthly" && (t.customerId ?? 0) === customerId),
+      (t) => taskIds.has(t.id) || (t.laborPolicy.key === "flat_rate_monthly" && (t.customerId ?? 0) === customerId),
     )
     const m = new BillingMonth(customerId, MONTH)
     m.accrue(custVisits, custTerms, catalog)

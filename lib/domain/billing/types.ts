@@ -7,6 +7,8 @@
  * against ION) — the replay harness holds us to those numbers.
  */
 
+import type { ConsumablesPolicy, LaborPolicy } from "./policies"
+
 export interface UsageFact {
   readonly id: string
   readonly ionItemId: string | null
@@ -29,8 +31,9 @@ export interface VisitFact {
 export interface TaskTerms {
   readonly id: string
   readonly customerId: number | null
-  /** NULL in storage means per_visit (the builder's default). */
-  readonly billingMethod: "per_visit" | "flat_rate_monthly"
+  /** Resolved at the repository boundary — nothing downstream branches on a string. */
+  readonly laborPolicy: LaborPolicy
+  readonly consumablesPolicy: ConsumablesPolicy
   readonly perVisitCents: number
   readonly flatMonthlyCents: number
   readonly active: boolean

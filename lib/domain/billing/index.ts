@@ -10,4 +10,9 @@ export {
 export type {
   BillingCheck, BillingCheckFinding, CheckPhase, ItemProfile, MonthContext, Severity,
 } from "./checks"
+export {
+  LABOR_POLICIES, CONSUMABLES_POLICIES, laborPolicyFor, consumablesPolicyFor,
+  PerVisitLabor, FlatMonthlyLabor, DoNotInvoiceLabor, ListedConsumables, SeparateConsumables,
+} from "./policies"
+export type { LaborPolicy, ConsumablesPolicy, LaborPolicyKey, ConsumablesPolicyKey, ConsumablesVerdict } from "./policies"
 export type { BillableItem, Catalog, TaskExpectation, TaskTerms, UsageFact, VisitFact } from "./types"
