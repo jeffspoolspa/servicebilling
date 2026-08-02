@@ -14,6 +14,22 @@ export interface IonInvoiceFact {
   readonly customer: string | null
 }
 
+/** One line of a task-month's composition — what the money is made of. */
+export interface RollupLine {
+  readonly name: string
+  readonly qty: number
+  readonly unitCents: number | null
+  readonly cents: number
+}
+
+export interface TaskRollup {
+  readonly totalCents: number
+  readonly laborCents: number
+  readonly laborDays: number
+  readonly flat: boolean
+  readonly consumables: readonly RollupLine[]
+}
+
 export interface TaskDiff {
   readonly taskId: string | null
   readonly ionTaskId: string
@@ -21,6 +37,8 @@ export interface TaskDiff {
   readonly ionCents: number
   readonly diffCents: number
   readonly customer: string | null
+  /** Our side of the month, itemized — so a diff is inspectable in place. */
+  readonly ours: TaskRollup
 }
 
 export interface ReconcileReport {
@@ -43,17 +61,20 @@ export interface ReconcileReport {
 /** $1, the established labor tolerance from the audit era. */
 export const RECONCILE_TOLERANCE_CENTS = 100
 
-/** Per-task totals in the billed arithmetic: labor summed; consumables round ONCE on summed qty per item. */
-export function rollupByTask(items: readonly BillableItem[]): Map<string, number> {
-  const tasks = new Map<string, { labor: number; byItem: Map<string, { qty: number; unit: number | null }> }>()
+/** Per-task composition in the billed arithmetic: labor summed; consumables round ONCE on summed qty per item. */
+export function rollupByTask(items: readonly BillableItem[]): Map<string, TaskRollup> {
+  const tasks = new Map<string, { labor: number; days: number; flat: boolean; byItem: Map<string, { qty: number; unit: number | null }> }>()
   for (const it of items) {
     let t = tasks.get(it.taskId)
     if (!t) {
-      t = { labor: 0, byItem: new Map() }
+      t = { labor: 0, days: 0, flat: false, byItem: new Map() }
       tasks.set(it.taskId, t)
     }
-    if (it.kind === "labor") t.labor += it.amountCents ?? 0
-    else {
+    if (it.kind === "labor") {
+      t.labor += it.amountCents ?? 0
+      if (it.sourceKind === "visit") t.days += 1
+      if (it.sourceKind === "flat") t.flat = true
+    } else {
       const name = it.itemName ?? "?"
       const held = t.byItem.get(name)
       if (held) {
@@ -62,32 +83,13 @@ export function rollupByTask(items: readonly BillableItem[]): Map<string, number
       } else t.byItem.set(name, { qty: it.qty, unit: it.unitPriceCents })
     }
   }
-  const totals = new Map<string, number>()
+  const out = new Map<string, TaskRollup>()
   for (const [taskId, t] of tasks) {
-    let cons = 0
-    for (const { qty, unit } of t.byItem.values()) if (unit !== null) cons += Math.round(qty * unit)
-    totals.set(taskId, t.labor + cons)
-  }
-  return totals
-}
-
-/** Per-task consumable share alone — what SeparateConsumables.interpret needs. */
-export function rollupConsumablesByTask(items: readonly BillableItem[]): Map<string, number> {
-  const byTask = new Map<string, Map<string, { qty: number; unit: number | null }>>()
-  for (const it of items) {
-    if (it.kind !== "consumable") continue
-    let m = byTask.get(it.taskId)
-    if (!m) { m = new Map(); byTask.set(it.taskId, m) }
-    const name = it.itemName ?? "?"
-    const held = m.get(name)
-    if (held) { held.qty += it.qty; if (held.unit === null) held.unit = it.unitPriceCents }
-    else m.set(name, { qty: it.qty, unit: it.unitPriceCents })
-  }
-  const out = new Map<string, number>()
-  for (const [taskId, m] of byTask) {
-    let cons = 0
-    for (const { qty, unit } of m.values()) if (unit !== null) cons += Math.round(qty * unit)
-    out.set(taskId, cons)
+    const consumables: RollupLine[] = [...t.byItem.entries()].map(([name, { qty, unit }]) => ({
+      name, qty, unitCents: unit, cents: unit !== null ? Math.round(qty * unit) : 0,
+    })).sort((a, b) => b.cents - a.cents)
+    const cons = consumables.reduce((n, l) => n + l.cents, 0)
+    out.set(taskId, { totalCents: t.labor + cons, laborCents: t.labor, laborDays: t.days, flat: t.flat, consumables })
   }
   return out
 }
@@ -103,7 +105,6 @@ export class Reconciler {
     consumablesPolicyOf: ReadonlyMap<string, ConsumablesPolicy> = new Map(),
   ): ReconcileReport {
     const ours = rollupByTask(items)
-    const oursCons = rollupConsumablesByTask(items)
     const ion = new Map<string, { amt: number; customer: string | null }>()
     for (const f of facts) {
       const held = ion.get(f.ionTaskId)
@@ -118,7 +119,8 @@ export class Reconciler {
     const oursOnly: { taskId: string; oursCents: number }[] = []
     const seen = new Set<string>()
 
-    for (const [taskId, oursCents] of ours) {
+    for (const [taskId, rollup] of ours) {
+      const oursCents = rollup.totalCents
       const ionTaskId = ionTaskIdOf.get(taskId)
       const fact = ionTaskId ? ion.get(ionTaskId) : undefined
       if (!fact) {
@@ -127,11 +129,12 @@ export class Reconciler {
       }
       seen.add(ionTaskId!)
       const diff = oursCents - fact.amt
-      const row = { taskId, ionTaskId: ionTaskId!, oursCents, ionCents: fact.amt, diffCents: diff, customer: fact.customer }
+      const row = { taskId, ionTaskId: ionTaskId!, oursCents, ionCents: fact.amt, diffCents: diff, customer: fact.customer, ours: rollup }
       if (diff === 0) exact++
       else if (Math.abs(diff) <= this.toleranceCents) withinTolerance++
       else if (
-        consumablesPolicyOf.get(taskId)?.interpret(diff, oursCons.get(taskId) ?? 0) === "chem_invoice_pending"
+        consumablesPolicyOf.get(taskId)?.interpret(
+          diff, rollup.consumables.reduce((n, l) => n + l.cents, 0)) === "chem_invoice_pending"
       ) chemPending.push(row)
       else mismatches.push(row)
     }

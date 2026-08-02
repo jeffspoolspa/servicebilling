@@ -30,10 +30,16 @@ async function main() {
   console.log(`ours-with-no-ION-invoice: ${r.oursOnly.length} · ION-with-no-items: ${r.ionOnly.length}`)
   for (const c of r.chemPending)
     console.log(`  pending chems  task ${c.ionTaskId}  ours ${(c.oursCents / 100).toFixed(2)}  ion labor-only ${(c.ionCents / 100).toFixed(2)}  ${c.customer ?? ""}`)
+  const usd = (c: number) => (c / 100).toFixed(2)
   if (r.mismatches.length) {
     console.log(`\nmismatches (largest first):`)
-    for (const m of r.mismatches.slice(0, 25))
-      console.log(`  task ${m.ionTaskId}  ours ${(m.oursCents / 100).toFixed(2)}  ion ${(m.ionCents / 100).toFixed(2)}  diff ${(m.diffCents / 100).toFixed(2)}  ${m.customer ?? ""}`)
+    for (const m of r.mismatches.slice(0, 25)) {
+      console.log(`\n  ${m.customer ?? "?"} — task ${m.ionTaskId}: ours ${usd(m.oursCents)} vs ION ${usd(m.ionCents)} (diff ${usd(m.diffCents)})`)
+      const o = m.ours
+      console.log(`    labor ${usd(o.laborCents)}${o.flat ? " flat" : ` = ${o.laborDays} visit day(s)`}`)
+      for (const l of o.consumables)
+        console.log(`    ${l.name}  x${l.qty}${l.unitCents !== null ? ` @ ${usd(l.unitCents)}` : " UNPRICED"} = ${usd(l.cents)}`)
+    }
   }
   if (r.ionOnly.length)
     console.log(`\nION-only (first 10): ${r.ionOnly.slice(0, 10).map((x) => `${x.ionTaskId} $${(x.ionCents / 100).toFixed(0)}`).join(", ")}`)

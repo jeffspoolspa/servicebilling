@@ -234,7 +234,7 @@ check("rollup rounds once on summed qty per item name", () => {
     amountCents: Math.round(qty * 333),
   })
   const totals = rollupByTask([cons("u1", 0.5), cons("u2", 0.5), cons("u3", 0.5)])
-  assert.equal(totals.get("t1"), 500)
+  assert.equal(totals.get("t1")?.totalCents, 500)
 })
 
 console.log("\nchecks — phase A: log correction (fix in ION)")
