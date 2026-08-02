@@ -25,12 +25,19 @@ import type { QueryClient } from "./supabase-quota-repository"
 const DAY_FIELD = ["day1", "day2", "day3", "day4", "day5", "day6", "day7"] as const
 /** One page is plenty: a scenario touching 1000+ tasks is not a thing. */
 const PAGE = 999
+const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
 export interface IonWriteTarget {
   ionTaskId: string
   ionCustId: string
   /** ION form fields: every weekday, blank where the quota is not served. */
   changes: Record<string, string>
+  /**
+   * What our cache believes ION holds RIGHT NOW (weekday -> ION employee id),
+   * sent so ION can refuse the write if our picture is stale. A complete-week
+   * write from a wrong picture silently re-adds days ION had dropped.
+   */
+  expectDays: Record<string, string>
 }
 
 /** Runs a Windmill script and returns its result. */
@@ -69,15 +76,35 @@ export class IonRoutePublisher implements RoutePublisher {
         continue
       }
       try {
-        const res = await this.windmill.run<{ committed?: boolean; dry_run?: boolean; changed?: unknown[] }>(
+        const res = await this.windmill.run<{
+          committed?: boolean
+          dry_run?: boolean
+          changed?: unknown[]
+          refused?: string
+          drift?: { weekday: string; ion: string | null; expected: string | null }[]
+        }>(
           this.scriptPath,
           {
             ionTaskId: target.ionTaskId,
             ionCustId: target.ionCustId,
             changes: target.changes,
             dry_run: opts.dryRun,
+            expect_days: target.expectDays,
           },
         )
+        // A stale picture is never "accepted", dry run or not: the dry run
+        // exists to tell you the write is unsafe BEFORE you fire it.
+        if (res.refused === "stale_picture") {
+          const drift = (res.drift ?? [])
+            .map((d) => `${WEEKDAY[Number(d.weekday)] ?? d.weekday}: ION ${d.ion ?? "none"} vs ours ${d.expected ?? "none"}`)
+            .join("; ")
+          results.push({
+            quotaId: schedule.quotaId,
+            accepted: false,
+            detail: `stale cache — ${drift}. Reconcile before publishing.`,
+          })
+          continue
+        }
         const changedCount = Array.isArray(res.changed) ? res.changed.length : 0
         results.push({
           quotaId: schedule.quotaId,
@@ -131,6 +158,29 @@ export class IonRoutePublisher implements RoutePublisher {
         t.ion_employee_id,
       ]),
     )
+
+    // What our cache says is live TODAY — the picture we are asking ION to
+    // confirm before it accepts a complete-week write.
+    const { data: slots } = await this.client
+      .schema("maintenance")
+      .from("task_schedules")
+      .select("task_id, day_of_week, tech_employee_id, active")
+      .in("task_id", quotaIds)
+      .range(0, PAGE)
+    const believed = new Map<string, Record<string, string>>()
+    for (const row of (slots ?? []) as {
+      task_id: string
+      day_of_week: number | null
+      tech_employee_id: string | null
+      active: boolean
+    }[]) {
+      if (!row.active || row.day_of_week === null || !row.tech_employee_id) continue
+      const ionTech = ionTechById.get(row.tech_employee_id)
+      if (!ionTech) continue
+      const m = believed.get(row.task_id) ?? {}
+      m[String(row.day_of_week)] = ionTech
+      believed.set(row.task_id, m)
+    }
 
     const customerIds = [
       ...new Set(
@@ -186,7 +236,12 @@ export class IonRoutePublisher implements RoutePublisher {
         })
         continue
       }
-      out.set(schedule.quotaId, { ionTaskId: task.ion_task_id, ionCustId, changes })
+      out.set(schedule.quotaId, {
+        ionTaskId: task.ion_task_id,
+        ionCustId,
+        changes,
+        expectDays: believed.get(schedule.quotaId) ?? {},
+      })
     }
     return out
   }
