@@ -7,7 +7,7 @@
 import { BillingMonth, Customer, EffectiveHistory, laborPolicyFor, consumablesPolicyFor } from "@/lib/domain/billing"
 import type { Effective } from "@/lib/domain/billing"
 import type {
-  BillableItem, BillingCheckFinding, Catalog, ConsumablesPolicy, IonInvoiceFact, IonTaskConfig,
+  BillableItem, BillingCheckFinding, Catalog, ConsumablesPolicy, IonInvoiceFact, IonTaskConfig, RefreshAttempt,
   ItemProfile, MonthContext, TaskTerms, VisitFact,
 } from "@/lib/domain/billing"
 
@@ -24,6 +24,9 @@ interface Query extends PromiseLike<{ data: unknown; error: { message: string } 
   or(filters: string): Query
   order(column: string, opts?: { ascending?: boolean }): Query
   lt(column: string, value: unknown): Query
+  gte(column: string, value: unknown): Query
+  lte(column: string, value: unknown): Query
+  limit(n: number): Query
   range(from: number, to: number): Query
   single(): Query
   maybeSingle(): Query
@@ -384,6 +387,54 @@ export class SupabaseBillingRepository {
       taskId: r.task_id, kind: r.kind as BillableItem["kind"], serviceDate: r.service_date,
       itemName: r.item_name, qty: Number(r.qty), unitPriceCents: r.unit_price_cents, amountCents: r.amount_cents,
     }))
+  }
+
+  /** When the month's ION facts were pulled — the refresh guard's evidence key. */
+  async ionEvidenceAt(month: string): Promise<string | null> {
+    const { data } = await this.client.schema("billing_audit").from("ion_task_transactions")
+      .select("pulled_at").eq("month", month).order("pulled_at", { ascending: false }).limit(1)
+    return ((data ?? []) as { pulled_at: string }[])[0]?.pulled_at ?? null
+  }
+
+  async refreshAttempts(month: string): Promise<RefreshAttempt[]> {
+    const rows = await all<{ task_id: string; evidence_pulled_at: string }>((a, b) =>
+      this.client.schema("billing_audit").from("reconcile_refreshes")
+        .select("task_id, evidence_pulled_at").eq("month", month).order("id").range(a, b))
+    return rows.map((r) => ({ taskId: r.task_id, evidencePulledAt: r.evidence_pulled_at }))
+  }
+
+  async recordRefreshAttempts(
+    month: string, evidencePulledAt: string, rows: readonly { taskId: string; diffBefore: number }[],
+  ): Promise<void> {
+    if (!rows.length) return
+    const { error } = await this.client.schema("billing_audit").from("reconcile_refreshes").insert(
+      rows.map((r) => ({ task_id: r.taskId, month, evidence_pulled_at: evidencePulledAt, diff_cents_before: r.diffBefore })))
+    if (error) throw new Error(error.message)
+  }
+
+  async completeRefreshAttempts(
+    month: string, evidencePulledAt: string, after: ReadonlyMap<string, number>,
+  ): Promise<void> {
+    for (const [taskId, diff] of after) {
+      const { error } = await this.client.schema("billing_audit").from("reconcile_refreshes")
+        .update({ diff_cents_after: diff, completed_at: new Date().toISOString() })
+        .eq("task_id", taskId).eq("month", month).eq("evidence_pulled_at", evidencePulledAt)
+      if (error) throw new Error(error.message)
+    }
+  }
+
+  /** The customers and service-day window behind a set of tasks' month items. */
+  async refreshScope(taskIds: readonly string[], month: string): Promise<{ customerIds: number[]; days: string[] }> {
+    const custRows = await all<{ id: string; customer_id: number | null }>((a, b) =>
+      this.maint().from("tasks").select("id, customer_id").in("id", [...taskIds]).order("id").range(a, b))
+    const monthEnd = monthEndOf(month)
+    const dayRows = await all<{ scheduled_date: string }>((a, b) =>
+      this.maint().from("visits").select("scheduled_date").in("task_id", [...taskIds])
+        .gte("scheduled_date", month).lte("scheduled_date", monthEnd).order("scheduled_date").range(a, b))
+    return {
+      customerIds: [...new Set(custRows.map((r) => r.customer_id).filter((x): x is number => x !== null))],
+      days: [...new Set(dayRows.map((r) => r.scheduled_date))].sort(),
+    }
   }
 
   /** Each task's consumables policy — resolved once, for the reconciler's interpret. */

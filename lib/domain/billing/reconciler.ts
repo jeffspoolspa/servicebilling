@@ -145,3 +145,29 @@ export class Reconciler {
     return { month, exact, withinTolerance, mismatches, oursOnly, ionOnly, chemPending }
   }
 }
+
+/* ------------------------------------------------- refresh remediation */
+
+/** A prior refresh attempt for a task-month, keyed by the evidence it saw. */
+export interface RefreshAttempt {
+  readonly taskId: string
+  readonly evidencePulledAt: string
+}
+
+/**
+ * Which mismatches may trigger a visit re-ingest. The rule that makes the
+ * remediation loop TERMINATE: one attempt per (task, month, evidence). A
+ * mismatch that survived a refresh against the same report pull is not a
+ * stale-ingest problem — it escalates to human review and stays put until a
+ * NEW pull produces new evidence.
+ */
+export function refreshableMismatches(
+  mismatches: readonly TaskDiff[],
+  attempts: readonly RefreshAttempt[],
+  evidencePulledAt: string,
+): TaskDiff[] {
+  const tried = new Set(
+    attempts.filter((a) => a.evidencePulledAt === evidencePulledAt).map((a) => a.taskId),
+  )
+  return mismatches.filter((m) => m.taskId !== null && !tried.has(m.taskId))
+}

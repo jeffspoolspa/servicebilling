@@ -174,7 +174,7 @@ check("accrual is idempotent — same facts, same items", () => {
 console.log(`\n${passed} checks passed`)
 
 /* ------------------------------------------------------- reconciler + checks */
-import { Reconciler, rollupByTask } from "./reconciler"
+import { Reconciler, rollupByTask, refreshableMismatches } from "./reconciler"
 import {
   runChecks, LOG_CORRECTION_CHECKS, BILL_REVIEW_CHECKS,
   QuantityOutlierCheck, HighChemVsPeerCheck, HighValueResidentialVisitCheck,
@@ -580,4 +580,15 @@ check("reconciler: a separate-consumables task over by exactly its chems is PEND
   assert.equal(withPolicy.mismatches.length, 0)
   const withoutPolicy = new Reconciler().reconcile("2026-07-01", items, facts, bridge)
   assert.equal(withoutPolicy.mismatches.length, 1, "a listed task with the same numbers stays a real mismatch")
+})
+
+check("refresh remediation terminates: one attempt per (task, evidence); new evidence re-arms", () => {
+  const rollup = { totalCents: 100, laborCents: 100, laborDays: 1, flat: false, consumables: [] }
+  const m = [{ taskId: "t1", ionTaskId: "i1", oursCents: 100, ionCents: 200, diffCents: -100, customer: null, ours: rollup }]
+  const first = refreshableMismatches(m, [], "2026-08-02T10:00Z")
+  assert.equal(first.length, 1, "unseen mismatch is refreshable")
+  const again = refreshableMismatches(m, [{ taskId: "t1", evidencePulledAt: "2026-08-02T10:00Z" }], "2026-08-02T10:00Z")
+  assert.equal(again.length, 0, "same evidence -> never refreshed twice; the loop terminates")
+  const newPull = refreshableMismatches(m, [{ taskId: "t1", evidencePulledAt: "2026-08-02T10:00Z" }], "2026-08-03T10:00Z")
+  assert.equal(newPull.length, 1, "a NEW report pull is new evidence -> refreshable again")
 })

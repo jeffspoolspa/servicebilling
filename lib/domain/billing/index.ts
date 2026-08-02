@@ -16,8 +16,8 @@ export { requiresIonEdit } from "./variance"
 export type { Variance, VarianceKind, IonLogEditor } from "./variance"
 export { EffectiveHistory } from "./effective"
 export type { Effective, PriceBook } from "./effective"
-export { Reconciler, rollupByTask, RECONCILE_TOLERANCE_CENTS } from "./reconciler"
-export type { IonInvoiceFact, ReconcileReport, TaskDiff } from "./reconciler"
+export { refreshableMismatches, Reconciler, rollupByTask, RECONCILE_TOLERANCE_CENTS } from "./reconciler"
+export type { IonInvoiceFact, ReconcileReport, RefreshAttempt, TaskDiff } from "./reconciler"
 export {
   LOG_CORRECTION_CHECKS, BILL_REVIEW_CHECKS, runChecks,
   HighValueResidentialVisitCheck, QuantityOutlierCheck, UnpricedConsumableCheck,

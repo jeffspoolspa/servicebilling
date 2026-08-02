@@ -3,7 +3,7 @@
  * use case (docs/conventions/LAYERING.md). Load -> domain -> persist; the
  * decisions are all downstairs.
  */
-import { Reconciler, requiresIonEdit, runChecks, LOG_CORRECTION_CHECKS, BILL_REVIEW_CHECKS } from "@/lib/domain/billing"
+import { Reconciler, refreshableMismatches, requiresIonEdit, runChecks, LOG_CORRECTION_CHECKS, BILL_REVIEW_CHECKS } from "@/lib/domain/billing"
 import type { BillingCheckFinding, IonLogEditor, ReconcileReport, Variance } from "@/lib/domain/billing"
 import { SupabaseBillingRepository } from "@/lib/infrastructure/billing/supabase-billing-repository"
 
@@ -108,6 +108,52 @@ export class BillingService {
    * rolled up per task and diffed against ION's pulled invoice facts.
    * Read-only and cheap; run any time after a report pull.
    */
+  /**
+   * Reconcile-driven visit refresh: mismatches are usually edits made in ION
+   * OUTSIDE the nightly ingest window, so the remedy is a targeted re-ingest
+   * of the affected service days, then re-accrue and re-reconcile. The
+   * ledger (billing_audit.reconcile_refreshes, unique on task x month x
+   * evidence) guarantees TERMINATION: one attempt per report pull; survivors
+   * escalate to humans instead of looping.
+   */
+  async refreshMismatches(
+    month: string,
+    ingestDays: (days: readonly string[]) => Promise<void>,
+  ): Promise<{
+    attempted: number
+    skippedAlreadyTried: number
+    days: string[]
+    before: ReconcileReport
+    after: ReconcileReport | null
+  }> {
+    const before = await this.reconcileMonth(month)
+    const evidence = await this.repository.ionEvidenceAt(month)
+    if (!evidence) throw new Error(`no ION facts pulled for ${month} — nothing to reconcile against`)
+    const attempts = await this.repository.refreshAttempts(month)
+    const targets = refreshableMismatches(before.mismatches, attempts, evidence)
+    if (!targets.length)
+      return { attempted: 0, skippedAlreadyTried: before.mismatches.length, days: [], before, after: null }
+
+    const taskIds = targets.map((t) => t.taskId as string)
+    // claim BEFORE the long ingest so a concurrent run cannot double-refresh
+    await this.repository.recordRefreshAttempts(
+      month, evidence, targets.map((t) => ({ taskId: t.taskId as string, diffBefore: t.diffCents })))
+    const { customerIds, days } = await this.repository.refreshScope(taskIds, month)
+
+    await ingestDays(days)
+    for (const c of customerIds) await this.accrueMonth(c, month)
+
+    const after = await this.reconcileMonth(month)
+    const stillOff = new Map(after.mismatches.filter((m) => m.taskId).map((m) => [m.taskId as string, m.diffCents]))
+    await this.repository.completeRefreshAttempts(
+      month, evidence, new Map(taskIds.map((id) => [id, stillOff.get(id) ?? 0])))
+    return {
+      attempted: targets.length,
+      skippedAlreadyTried: before.mismatches.length - targets.length,
+      days, before, after,
+    }
+  }
+
   async reconcileMonth(month: string): Promise<ReconcileReport> {
     const [items, facts] = await Promise.all([
       this.repository.itemsForMonth(month),
