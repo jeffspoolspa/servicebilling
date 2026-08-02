@@ -8,7 +8,7 @@
  */
 import { readFileSync } from "node:fs"
 import { createClient } from "@supabase/supabase-js"
-import { BillingMonth, laborPolicyFor, consumablesPolicyFor } from "@/lib/domain/billing"
+import { BillingMonth, EffectiveHistory, laborPolicyFor, consumablesPolicyFor } from "@/lib/domain/billing"
 import type { TaskExpectation, TaskTerms, VisitFact } from "@/lib/domain/billing"
 
 const MONTH = process.argv[2] ?? "2026-05-01"
@@ -73,10 +73,16 @@ async function main() {
     active: t.status === "active", startsOn: t.starts_on, endsOn: t.ends_on,
   }]))
 
-  type CRow = { ion_item_id: string; unit_price_cents: number | null }
+  type CRow = { ion_item_id: string; unit_price_cents: number | null; valid_from: string; valid_to: string | null }
   const catRows = await fetchAll<CRow>((a, b) =>
-    maint.from("consumables").select("ion_item_id, unit_price_cents").order("ion_item_id").range(a, b))
-  const catalog = new Map(catRows.map((c) => [c.ion_item_id, c.unit_price_cents]))
+    maint.from("consumable_prices").select("ion_item_id, unit_price_cents, valid_from, valid_to").order("ion_item_id").range(a, b))
+  const byItem = new Map<string, { from: string; to: string | null; value: number | null }[]>()
+  for (const c of catRows) {
+    const e = { from: c.valid_from, to: c.valid_to, value: c.unit_price_cents }
+    const l = byItem.get(c.ion_item_id)
+    if (l) l.push(e); else byItem.set(c.ion_item_id, [e])
+  }
+  const catalog = new Map([...byItem].map(([id, es]) => [id, new EffectiveHistory(es)]))
 
   // ---- assemble facts and run the aggregate per customer ----------------
   const facts: VisitFact[] = visits.map((v) => ({

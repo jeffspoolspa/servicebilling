@@ -4,6 +4,8 @@
 import { strict as assert } from "node:assert"
 import { BillingMonth, BillingRuleError } from "./month"
 import { laborPolicyFor, consumablesPolicyFor } from "./policies"
+import { EffectiveHistory } from "./effective"
+import type { PriceBook } from "./effective"
 import type { TaskTerms, VisitFact } from "./types"
 
 let passed = 0
@@ -22,6 +24,10 @@ const perVisit = (id: string, cents: number): TaskTerms => terms(id, { perVisitC
 const flat = (id: string, cents: number, active = true): TaskTerms =>
   terms(id, { laborPolicy: laborPolicyFor("flat_rate_monthly"), flatMonthlyCents: cents, active, startsOn: "2026-01-01" })
 const dni = (id: string): TaskTerms => terms(id, { laborPolicy: laborPolicyFor("do_not_invoice"), perVisitCents: 9500 })
+/** A price with no history: in force always. */
+const priced = (pairs: Record<string, number>): PriceBook =>
+  new Map(Object.entries(pairs).map(([k, v]) => [k, new EffectiveHistory<number | null>([{ from: "2000-01-01", to: null, value: v }])]))
+
 const visit = (id: string, taskId: string, date: string, o: Partial<VisitFact> = {}): VisitFact => ({
   id, taskId, customerId: 1, scheduledDate: date, visitDate: date,
   serviceable: true, usages: [], ...o,
@@ -89,7 +95,7 @@ check("usages price by ion_item_id; missing catalog price stays a worklist row, 
       ],
     })],
     [perVisit("t1", 9500)],
-    new Map([["100", 450]]),
+    priced({ "100": 450 }),
   )
   const cons = m.items.filter((i) => i.kind === "consumable")
   assert.equal(cons.length, 2)
@@ -108,7 +114,7 @@ check("reconcile arithmetic rounds ONCE on the summed qty (the builder's math)",
       usages: [1, 2, 3].map((n) => ({ id: `u${n}`, ionItemId: "7", itemName: "ACID", quantity: 0.5 })),
     })],
     [perVisit("t1", 0)],
-    new Map([["7", 333]]),
+    priced({ "7": 333 }),
   )
   assert.equal(m.expectations()[0].consumableCents, 500)
 })
@@ -147,8 +153,8 @@ check("close refuses while billable visits lack items (I-B2)", () => {
 check("accrual is idempotent — same facts, same items", () => {
   const facts = [visit("a", "t1", "2026-05-04", { usages: [{ id: "u1", ionItemId: "100", itemName: "TABS", quantity: 2 }] })]
   const m = new BillingMonth(1, "2026-05-01")
-  const first = m.accrue(facts, [perVisit("t1", 9500)], new Map([["100", 450]]))
-  const second = m.accrue(facts, [perVisit("t1", 9500)], new Map([["100", 450]]))
+  const first = m.accrue(facts, [perVisit("t1", 9500)], priced({ "100": 450 }))
+  const second = m.accrue(facts, [perVisit("t1", 9500)], priced({ "100": 450 }))
   assert.deepEqual(first, second)
 })
 
@@ -309,7 +315,7 @@ check("a do-not-invoice task bills nothing — labor OR chemicals", () => {
   m.accrue(
     [visit("a", "dni", "2026-05-04", { usages: [{ id: "u1", ionItemId: "100", itemName: "TABS", quantity: 5 }] })],
     [dni("dni")],
-    new Map([["100", 450]]),
+    priced({ "100": 450 }),
   )
   assert.equal(m.items.length, 0, "ION's Do Not Invoice means exactly that")
 })
@@ -326,7 +332,7 @@ check("the axes compose freely — flat x separate needs no combination class", 
     flatMonthlyCents: 85000, startsOn: "2026-01-01",
   })
   const m = new BillingMonth(1, "2026-05-01")
-  m.accrue([visit("a", "t1", "2026-05-04", { usages: [{ id: "u1", ionItemId: "1", itemName: "TABS", quantity: 2 }] })], [t], new Map([["1", 450]]))
+  m.accrue([visit("a", "t1", "2026-05-04", { usages: [{ id: "u1", ionItemId: "1", itemName: "TABS", quantity: 2 }] })], [t], priced({ "1": 450 }))
   assert.equal(m.items.filter((i) => i.kind === "labor").length, 1)
   assert.equal(m.items.filter((i) => i.kind === "consumable").length, 1)
 })
@@ -390,4 +396,38 @@ check("verification older than the window is flagged even when nothing drifted",
 check("only tasks actually billing this month are checked", () => {
   const found = runChecks(baseCtx({ items: [], terms: [winters], ionConfig: new Map() }), [new TaskConfigDriftCheck()])
   assert.equal(found.length, 0)
+})
+
+/* ------------------------------------------------------- effective dating */
+console.log("\neffective dating — a price change must not rewrite history")
+
+check("the CAL HYPO case: June prices at the old rate, July at the new one", () => {
+  const book: PriceBook = new Map([["1431047", new EffectiveHistory<number | null>([
+    { from: "2000-01-01", to: "2026-07-01", value: 26196 },
+    { from: "2026-07-01", to: null, value: 24599 },
+  ])]])
+  const use = (m: string, d: string) => {
+    const bm = new BillingMonth(1, m)
+    bm.accrue([visit("v", "t1", d, { usages: [{ id: `u-${d}`, ionItemId: "1431047", itemName: "CAL HYPO 50LB", quantity: 1 }] })],
+      [perVisit("t1", 0)], book)
+    return bm.items.find((i) => i.kind === "consumable")!.amountCents
+  }
+  assert.equal(use("2026-06-01", "2026-06-15"), 26196, "June bills the price in force in June")
+  assert.equal(use("2026-07-01", "2026-07-15"), 24599, "July bills the new price")
+})
+
+check("a date with no covering entry prices as unknown, never as a guess", () => {
+  const gap = new EffectiveHistory<number | null>([{ from: "2026-07-01", to: null, value: 24599 }])
+  assert.equal(gap.on("2026-06-15"), null)
+  assert.equal(gap.covers("2026-06-15"), false)
+  assert.equal(gap.on("2026-07-15"), 24599)
+})
+
+check("boundaries are half-open: valid_to is exclusive", () => {
+  const h = new EffectiveHistory<number | null>([
+    { from: "2026-01-01", to: "2026-07-01", value: 100 },
+    { from: "2026-07-01", to: null, value: 200 },
+  ])
+  assert.equal(h.on("2026-06-30"), 100)
+  assert.equal(h.on("2026-07-01"), 200, "the change day belongs to the NEW price")
 })

@@ -7,6 +7,7 @@
  * against ION) — the replay harness holds us to those numbers.
  */
 
+import type { PriceBook } from "./effective"
 import type { ConsumablesPolicy, LaborPolicy } from "./policies"
 
 export interface UsageFact {
@@ -41,8 +42,11 @@ export interface TaskTerms {
   readonly endsOn: string | null
 }
 
-/** Priced by ion_item_id — immune to the item_id null-out. */
-export type Catalog = ReadonlyMap<string, number | null>
+/**
+ * Priced by ion_item_id — immune to the item_id null-out — and EFFECTIVE
+ * DATED, so a usage is priced by the catalog in force on its service date.
+ */
+export type Catalog = PriceBook
 
 export interface BillableItem {
   /** flat = the month's flat charge; no single visit is its source. */

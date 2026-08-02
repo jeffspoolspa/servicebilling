@@ -45,7 +45,8 @@ export class BillingMonth {
    *   $0 items with no special case.
    *
    * CONSUMABLES (bucket by visit_date): one item per usage row, priced by
-   *   ion_item_id -> catalog. No catalog price -> unitPriceCents null — a
+   *   ion_item_id -> the catalog IN FORCE ON THE SERVICE DATE. No price ->
+ *   unitPriceCents null — a
    *   finite worklist, never a silent 0. Per-item amounts round per row;
    *   the invoice LINE (and the reconcile) round ONCE on the summed qty —
    *   see expectations().
@@ -75,7 +76,8 @@ export class BillingMonth {
       if (termsOf.get(v.taskId)?.laborPolicy.key === "do_not_invoice") continue
       for (const u of v.usages) {
         if (u.itemName === null) continue
-        const unit = u.ionItemId !== null ? (catalog.get(u.ionItemId) ?? null) : null
+        // Priced by the catalog in force on the SERVICE DATE, never by today.
+        const unit = u.ionItemId !== null ? (catalog.get(u.ionItemId)?.on(bucket) ?? null) : null
         items.push({
           sourceKind: "usage", sourceId: u.id, taskId: v.taskId, kind: "consumable",
           serviceDate: bucket, itemName: u.itemName, qty: u.quantity,

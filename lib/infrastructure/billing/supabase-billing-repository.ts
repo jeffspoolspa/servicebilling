@@ -4,7 +4,8 @@
  *
  * The domain never queries; this is the only file that knows the tables.
  */
-import { BillingMonth, laborPolicyFor, consumablesPolicyFor } from "@/lib/domain/billing"
+import { BillingMonth, EffectiveHistory, laborPolicyFor, consumablesPolicyFor } from "@/lib/domain/billing"
+import type { Effective } from "@/lib/domain/billing"
 import type { BillableItem, Catalog, IonInvoiceFact, TaskTerms, VisitFact } from "@/lib/domain/billing"
 
 interface Query extends PromiseLike<{ data: unknown; error: { message: string } | null }> {
@@ -181,11 +182,20 @@ export class SupabaseBillingRepository {
 
   private catalogMemo: Catalog | null = null
 
+  /** The effective-dated price book — usages price by their service date. */
   async catalog(): Promise<Catalog> {
     if (this.catalogMemo) return this.catalogMemo
-    const rows = await all<{ ion_item_id: string; unit_price_cents: number | null }>((a, b) =>
-      this.maint().from("consumables").select("ion_item_id, unit_price_cents").order("ion_item_id").range(a, b))
-    this.catalogMemo = new Map(rows.map((r) => [r.ion_item_id, r.unit_price_cents]))
+    const rows = await all<{ ion_item_id: string; unit_price_cents: number | null; valid_from: string; valid_to: string | null }>((a, b) =>
+      this.maint().from("consumable_prices")
+        .select("ion_item_id, unit_price_cents, valid_from, valid_to").order("ion_item_id").range(a, b))
+    const byItem = new Map<string, Effective<number | null>[]>()
+    for (const r of rows) {
+      const e = { from: r.valid_from, to: r.valid_to, value: r.unit_price_cents }
+      const l = byItem.get(r.ion_item_id)
+      if (l) l.push(e)
+      else byItem.set(r.ion_item_id, [e])
+    }
+    this.catalogMemo = new Map([...byItem].map(([id, es]) => [id, new EffectiveHistory(es)]))
     return this.catalogMemo
   }
 
