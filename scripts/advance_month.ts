@@ -12,7 +12,9 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { AdvanceMonthService } from "@/lib/billing/application/advance-month-service"
 import { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
 import { SupabaseBillingFacts } from "@/lib/billing/infrastructure/supabase-billing-facts"
-import { SupabaseIonInvoiceFacts } from "@/lib/billing/infrastructure/supabase-ion-invoice-facts"
+import { IonReportInvoiceFacts } from "@/lib/billing/infrastructure/ion-report-invoice-facts"
+import { IonReports } from "@/lib/external/ion/ion"
+import { triggerScriptSync } from "@/lib/windmill"
 
 async function main() {
   const month = process.argv[2] ?? "2026-07-01"
@@ -26,7 +28,13 @@ async function main() {
   const repo = new SupabaseBillingMonthRepository(sb as unknown as ConstructorParameters<typeof SupabaseBillingMonthRepository>[0])
   const service = new AdvanceMonthService(
     repo, facts, facts, facts,
-    new SupabaseIonInvoiceFacts(sb as unknown as ConstructorParameters<typeof SupabaseIonInvoiceFacts>[0]),
+    new IonReportInvoiceFacts(
+      sb as unknown as ConstructorParameters<typeof IonReportInvoiceFacts>[0],
+      new IonReports(
+        { mint: (force) => triggerScriptSync("f/ION/api/get_session", { force_refresh: force }, { timeoutMs: 180000 }) },
+        { run: (path, args) => triggerScriptSync(path, args, { timeoutMs: 600000 }) },
+      ),
+    ),
   )
 
   const { data } = (await (sb.schema("billing").from("billing_months") as unknown as {

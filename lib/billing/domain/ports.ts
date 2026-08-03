@@ -44,9 +44,18 @@ export interface ConsumableCatalog {
   prices(): Promise<CatalogPrice[]>
 }
 
-/** One task's invoice as the system of record built it — reconcile's input. */
+/**
+ * What the system of record says it billed, per task — reconcile's other
+ * side, and the reason a reconcile means anything: it must come from a
+ * DIFFERENT source than the one we priced from, or two calculations over one
+ * input can only ever agree.
+ */
 export interface IonInvoiceFacts {
   perTaskTotals(customerId: number, month: string): Promise<{ taskId: string; totalCents: number }[]>
+  /** When that side was last read. A reconcile against a stale report is worth nothing. */
+  pulledAt(month: string): Promise<string | null>
+  /** Go and read it again. */
+  refresh(month: string): Promise<{ pulledAt: string }>
 }
 
 export interface IssuedInvoice {

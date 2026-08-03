@@ -394,3 +394,55 @@ export class IonCustomers extends Ion {
     return out
   }
 }
+
+/* --------------------------------- reports -------------------------------- */
+
+/** A job runner for the few ION actions that genuinely need a browser. */
+export interface IonJobRunner {
+  run<T>(path: string, args: Record<string, unknown>): Promise<T>
+}
+
+export interface TaskTransactionsPull {
+  month: string
+  rows: number
+  totalCents: number
+  pulledAt: string
+}
+
+/**
+ * ION's reports. Kept on the Ion object like every other ION action, so no
+ * caller anywhere assembles a second gateway (ADR 012).
+ *
+ * This one DELEGATES to a Windmill script rather than using our session, and
+ * the reason is the same one that makes login a script: ION's report criteria
+ * live in the ColdFusion SESSION and are only set by a real browser
+ * navigation form-submit. A fetch POST — even with Chrome's exact headers —
+ * gets the form re-rendered with default dates and the criteria silently
+ * ignored (verified 2026-07-01; Incapsula sits in front). So chromium is a
+ * requirement of the report, not a convenience, and the delegation is the
+ * honest way to express that while keeping the method here.
+ */
+export class IonReports extends Ion {
+  constructor(minter: SessionMinter, private readonly jobs: IonJobRunner) {
+    super(minter)
+  }
+
+  /**
+   * Pull the All Transactions report for a month and load it into
+   * `billing_audit.ion_task_transactions`. This is the INDEPENDENT side of
+   * billing's reconcile — what ION says it billed, per task.
+   */
+  async pullTaskTransactions(month: string): Promise<TaskTransactionsPull> {
+    const ym = month.slice(0, 7)
+    const res = await this.jobs.run<{ rows?: number; loaded?: number; total_cents?: number }>(
+      "f/ION/transactions_report",
+      { month: ym, dry_run: false, load: true },
+    )
+    return {
+      month: ym,
+      rows: res.loaded ?? res.rows ?? 0,
+      totalCents: res.total_cents ?? 0,
+      pulledAt: new Date().toISOString(),
+    }
+  }
+}
