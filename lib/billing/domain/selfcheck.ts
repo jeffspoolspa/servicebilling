@@ -124,4 +124,36 @@ check("reconstitution restores claims and the lock", () => {
   assert.strictEqual(m.pullFacts().length, 0, "reconstitution is not a change")
 })
 
+check("a month cannot be invoiced before it is over", () => {
+  const d = [visit()]
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(d[0], AT)
+  m.lock(d, AT)
+
+  assert.strictEqual(m.billableFrom, "2026-08-01")
+  assert.strictEqual(m.monthIsOver(new Date("2026-07-31T23:00:00Z")), false)
+  assert.strictEqual(m.monthIsOver(new Date("2026-08-01T00:00:00Z")), true)
+
+  // Mid-month: accrual and reconciliation are useful; issuing is refused.
+  const mid = m.issueBlockers(new Date("2026-07-20T12:00:00Z"))
+  assert.strictEqual(mid.length, 1)
+  assert.match(mid[0], /not over — billable from 2026-08-01/)
+
+  // On the first, nothing stands in the way.
+  assert.deepStrictEqual(m.issueBlockers(new Date("2026-08-01T09:00:00Z")), [])
+})
+
+check("December rolls the year, and an open or empty month is refused too", () => {
+  const dec = BillingMonth.open("m2", 1016400, "2026-12-01")
+  assert.strictEqual(dec.billableFrom, "2027-01-01")
+
+  const open = BillingMonth.open("m3", 1016400, "2026-07-01")
+  open.claim(visit(), AT)
+  const why = open.issueBlockers(new Date("2026-08-05T00:00:00Z"))
+  assert.ok(why.some((r) => /not closed/.test(r)), "an unfrozen ledger cannot be billed")
+
+  const empty = BillingMonth.open("m4", 1016400, "2026-07-01")
+  assert.ok(empty.issueBlockers(new Date("2026-08-05T00:00:00Z")).some((r) => /nothing claimed/.test(r)))
+})
+
 console.log(`billing domain selfcheck: ${n} checks passed`)

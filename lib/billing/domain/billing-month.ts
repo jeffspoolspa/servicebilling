@@ -187,6 +187,40 @@ export class BillingMonth {
     })
   }
 
+  /**
+   * The first day the month can be billed: the first of the NEXT month.
+   *
+   * Delivery for a month is only final once the month is over. Until then an
+   * invoice would be a guess that happens to look authoritative — and it is
+   * the customer who would find the missing visit, not us. Running the
+   * pipeline mid-month to watch progress is useful and safe; issuing from it
+   * is not, so the clock is a precondition rather than a warning.
+   */
+  get billableFrom(): string {
+    const [y, m] = this.month.split("-").map(Number)
+    return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`
+  }
+
+  /** Has the month actually ended? Compared by date, never by timezone maths. */
+  monthIsOver(now: Date): boolean {
+    return now.toISOString().slice(0, 10) >= this.billableFrom
+  }
+
+  /**
+   * Why this month may not be invoiced yet — empty means it may. The reasons
+   * are returned rather than thrown because a month waiting for the calendar
+   * is a normal state the UI should be able to explain, not an error.
+   */
+  issueBlockers(now: Date): string[] {
+    const blockers: string[] = []
+    if (!this.monthIsOver(now)) {
+      blockers.push(`${this.month.slice(0, 7)} is not over — billable from ${this.billableFrom}, today is ${now.toISOString().slice(0, 10)}`)
+    }
+    if (!this.isLocked) blockers.push("the month is not closed — its ledger can still change [I-B3]")
+    if (this.claimed.size === 0) blockers.push("nothing claimed — an empty month is not an invoice")
+    return blockers
+  }
+
   /** Facts this month recorded. Drained by whoever persists it. */
   pullFacts(): BillingMonthFact[] {
     const out = this.facts
