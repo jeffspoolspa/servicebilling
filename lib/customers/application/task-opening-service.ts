@@ -15,6 +15,8 @@ import { startsOnFor } from "@/lib/external/ion/acl"
 import type { IonTasks } from "@/lib/external/ion/ion"
 import type { SupabaseCustomerRepository } from "@/lib/customers/infrastructure/supabase-customer-repository"
 
+import { BillingTerms } from "@/lib/maintenance/domain"
+
 export interface TaskToOpen {
   accountId: number
   displayName: string
@@ -22,6 +24,8 @@ export interface TaskToOpen {
   weekday: number
   ratePerVisit: number | null
   poolType: string
+  /** The two axes. Defaults to the residential arrangement when unstated. */
+  billing?: BillingTerms
   note: string
 }
 
@@ -54,7 +58,15 @@ export class TaskOpeningService {
       }
       const startsOn = startsOnFor(t.frequency, t.weekday, opts.notBefore)
       const create = this.acl.toIonCreate(
-        { frequency: t.frequency, weekday: t.weekday, startsOn, ratePerVisit: t.ratePerVisit, poolType: t.poolType, note: t.note },
+        {
+          frequency: t.frequency,
+          weekday: t.weekday,
+          startsOn,
+          ratePerVisit: t.ratePerVisit,
+          poolType: t.poolType,
+          billing: t.billing ?? BillingTerms.residentialDefault(t.ratePerVisit),
+          note: t.note,
+        },
         { ionCustId: link.ionCustId, ionTech: opts.ionTech },
         opts.template,
       )

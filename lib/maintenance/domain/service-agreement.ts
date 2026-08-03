@@ -84,13 +84,16 @@ export function resolveCadence(args: {
 
 /* ------------------------------ the agreement ----------------------------- */
 
+import { BillingTerms } from "./billing-terms"
+
 export interface AgreementTerms {
   customerId: number
   /** The place the truck goes — the ServiceLocation entity's identity. */
   placeId: string | null
   cadence: Cadence
   weekday: number
-  ratePerVisit: number | null
+  /** How this agreement charges — the two axes, never a vendor's enum. */
+  billing: BillingTerms
   monthlyEstimate: number | null
   poolType: string
   /** Access facts the tech needs on the visit; NOT a dumping ground. */

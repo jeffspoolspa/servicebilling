@@ -6,6 +6,7 @@
 
 import assert from "node:assert/strict"
 import type { Weekday } from "@/lib/routing/domain"
+import { BillingTerms } from "./billing-terms"
 import { Task, TaskRuleError, type Terms } from "./task"
 
 let checks = 0
@@ -198,6 +199,27 @@ async function serviceCheck() {
   assert.equal(posted.length, 1, "a refused row never reaches ION")
   checks++
   console.log("  ok  a list walks through the service: valid rows land, the rest say why")
+}
+
+/* --------------------------- billing: two axes ---------------------------- */
+
+{
+  const t = BillingTerms.of("per_visit", "separate", 6500)
+  assert.strictEqual(t.variesWithVisitCount, true)
+  assert.strictEqual(t.chargesConsumablesSeparately, true)
+  assert.match(t.description, /\$65\.00 per visit, chemicals separate/)
+
+  const flat = BillingTerms.of("flat_rate", "included", 26000)
+  assert.strictEqual(flat.variesWithVisitCount, false)
+  assert.strictEqual(flat.chargesConsumablesSeparately, false)
+
+  // The house default for a residential pool.
+  const d = BillingTerms.residentialDefault(65)
+  assert.ok(d.equals(t))
+  // A null rate is meaningful: the catalog service type prices it.
+  assert.strictEqual(BillingTerms.residentialDefault(null).amountCents, null)
+  assert.throws(() => BillingTerms.of("per_visit", "separate", -1))
+  checks += 2
 }
 
 serviceCheck().then(() => console.log(`\n${checks} checks passed\n`))
