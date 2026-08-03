@@ -30,7 +30,7 @@ export interface AdvanceAllOutcome {
   months: number
   tally: Record<string, number>
   disputedQueued: number
-  audit: { findings: number; recorded: number; alreadyOpen: number }
+  audit: { findings: number; recorded: number; alreadyOpen: number; retracted: number }
   statesWritten: number
   itemsRewritten: number
   factsAppended: number
@@ -61,6 +61,34 @@ export class BillingRunService {
   /** One month, at interactive priority — the button. */
   async nudge(monthId: string): Promise<void> {
     await this.queue.enqueue([monthId], 1)
+  }
+
+  /**
+   * Re-derive one month's audit — the peer-group reassignment path. The
+   * findings are a derived view (only resolutions are facts), so a retag is
+   * safe by construction: recompute under the new grouping, sync — stale
+   * open findings retract, resolved ones never move.
+   */
+  async auditMonth(month: string): Promise<{ findings: number; recorded: number; alreadyOpen: number; retracted: number }> {
+    const monthsAll = await this.months.allForMonth(month)
+    return this.runAudit(monthsAll, month)
+  }
+
+  private async runAudit(monthsAll: BillingMonth[], month: string) {
+    // Repository selects the criteria rows (peer groups, task provisions,
+    // trailing self-history), the factory shapes observations, the domain
+    // judges: chem-per-visit vs the peer group's percentile AND the
+    // customer's own median.
+    const taskIds = monthsAll.flatMap((m) => m.billableItems.map((i) => i.taskId)).filter((t): t is string => !!t)
+    const [peerGroups, provisions, histories] = await Promise.all([
+      this.months.customerPeerGroups(monthsAll.map((m) => m.customerId)),
+      this.months.taskChemProvision(taskIds),
+      this.months.chemHistory(month),
+    ])
+    const observations = observationsOf(monthsAll, peerGroups, provisions)
+    const found = auditConsumables(observations, histories)
+    const wrote = await this.months.recordFindings(found, monthsAll.map((m) => m.id))
+    return { findings: found.length, ...wrote }
   }
 
   /** The whole month, in memory, in seconds. */
@@ -125,27 +153,9 @@ export class BillingRunService {
       }
     }
 
-    // THE AUDIT — the pre-invoice billing check. Repository selected the
-    // rows (this run's items + the trailing self-history), the aggregates
-    // shaped them, the domain judges: normalized chem-per-visit against the
-    // peer group's percentile AND the customer's own median. Findings are
-    // recorded BEFORE the gate context loads, so findings_resolved sees them
-    // in the same run — audit writes, gate holds.
-    const audit = { findings: 0, recorded: 0, alreadyOpen: 0 }
-    {
-      const taskIds = monthsAll.flatMap((m) => m.billableItems.map((i) => i.taskId)).filter((t): t is string => !!t)
-      const [peerGroups, provisions, histories] = await Promise.all([
-        this.months.customerPeerGroups(monthsAll.map((m) => m.customerId)),
-        this.months.taskChemProvision(taskIds),
-        this.months.chemHistory(month),
-      ])
-      const observations = observationsOf(monthsAll, peerGroups, provisions)
-      const found = auditConsumables(observations, histories)
-      const wrote = await this.months.recordFindings(found)
-      audit.findings = found.length
-      audit.recorded = wrote.recorded
-      audit.alreadyOpen = wrote.alreadyOpen
-    }
+    // THE AUDIT — the pre-invoice billing check, recorded BEFORE the gate
+    // context loads so findings_resolved sees this run's findings.
+    const audit = await this.runAudit(monthsAll, month)
 
     // The gate's context: one MonthGateFacts per customer, bulk-loaded —
     // AFTER the audit, so this run's own findings are in it.

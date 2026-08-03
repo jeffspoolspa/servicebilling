@@ -12,6 +12,7 @@ import { reconcile, RECONCILE_TOLERANCE_CENTS } from "./reconciler"
 import { gate, type MonthGateFacts } from "./gate"
 import { auditConsumables } from "./consumables-audit"
 import { draftInvoice } from "./invoice-draft"
+import { documentsOf, presentationOf } from "./invoice-documents"
 
 let n = 0
 const check = (_name: string, fn: () => void) => {
@@ -633,6 +634,55 @@ check("the draft invoice is the ledger regrouped — regenerating IS reading", (
   const vline = d3.lines.find((l) => l.kind === "variance")
   assert.ok(vline && vline.detail === "started mid-month", "the edit carries its reason onto the document")
   assert.strictEqual(d3.subtotalCents, 118000 - 49000)
+})
+
+check("documents: itemized groups by visit, summary collapses, separate splits in two", () => {
+  // Two visits at $65, chems on each; a second task on separate consumables.
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item({ sourceId: "v1", serviceDate: "2026-07-08" }), { claimedByMonthId: null }, AT)
+  m.claim(item({ sourceId: "v2", serviceDate: "2026-07-15" }), { claimedByMonthId: null }, AT)
+  m.claim(item({ sourceKind: "usage", sourceId: "u1", kind: "consumable", serviceDate: "2026-07-08", itemName: "CHLORINE TABLET", qty: 2, unitPriceCents: 699, amountCents: 1398 }), { claimedByMonthId: null }, AT)
+  m.claim(item({ sourceKind: "usage", sourceId: "u2", kind: "consumable", serviceDate: "2026-07-15", itemName: "CHLORINE TABLET", qty: 3, unitPriceCents: 699, amountCents: 2097 }), { claimedByMonthId: null }, AT)
+  m.claim(item({ sourceKind: "usage", sourceId: "u3", kind: "consumable", taskId: "t2", serviceDate: "2026-07-15", itemName: "MURIATIC ACID", qty: 1, unitPriceCents: 1299, amountCents: 1299 }), { claimedByMonthId: null }, AT)
+  const terms = [
+    { taskId: "t1", labor: "per_visit" as const, consumables: "included" as const },
+    { taskId: "t2", labor: "per_visit" as const, consumables: "separate" as const },
+  ]
+
+  // ITEMIZED: break row per date, oldest first; labor then that visit's chems.
+  const [svc, cons] = documentsOf(m, terms, "itemized")
+  assert.deepStrictEqual(
+    svc.lines.map((l) => (l.kind === "visit_break" ? `— ${l.serviceDate}` : `${l.kind}:${l.itemName}:${l.qty}`)),
+    ["— 2026-07-08", "labor:POOL MAINTENANCE 65:1", "consumable:CHLORINE TABLET:2",
+     "— 2026-07-15", "labor:POOL MAINTENANCE 65:1", "consumable:CHLORINE TABLET:3"],
+  )
+  assert.ok(cons && cons.kind === "consumables", "separate-consumables task gets its own document")
+  assert.deepStrictEqual(cons.lines.map((l)=> l.kind==="visit_break" ? `— ${l.serviceDate}` : `${l.itemName}:${l.qty}`), ["— 2026-07-15", "MURIATIC ACID:1"])
+  assert.strictEqual(svc.subtotalCents, 6500 + 6500 + 1398 + 2097)
+
+  // SUMMARY: same-rate labor is ONE row qty 2; chems roll up by item.
+  const [sum] = documentsOf(m, terms, "summary")
+  assert.deepStrictEqual(
+    sum.lines.map((l) => (l.kind === "visit_break" ? "break" : `${l.itemName}:${l.qty}:${l.amountCents}`)),
+    ["POOL MAINTENANCE 65:2:13000", "CHLORINE TABLET:5:3495"],
+  )
+
+  // FLAT RATE itemized: the flat line leads at qty 1; visits break for chems only.
+  const f = BillingMonth.open("m2", 8, "2026-07-01")
+  f.claim(item({ sourceId: "v9", serviceDate: "2026-07-10", unitPriceCents: 0, amountCents: 0 }), { claimedByMonthId: null }, AT)
+  f.claim(item({ sourceKind: "flat", sourceId: "t1:2026-07", itemName: "POOL — monthly", unitPriceCents: 30000, amountCents: 30000 }), { claimedByMonthId: null }, AT)
+  f.claim(item({ sourceKind: "usage", sourceId: "u9", kind: "consumable", serviceDate: "2026-07-10", itemName: "TABS", qty: 1, unitPriceCents: 699, amountCents: 699 }), { claimedByMonthId: null }, AT)
+  const [flat] = documentsOf(f, [{ taskId: "t1", labor: "flat_rate", consumables: "included" }], "itemized")
+  assert.deepStrictEqual(
+    flat.lines.map((l) => (l.kind === "visit_break" ? `— ${l.serviceDate}` : `${l.itemName}:${l.qty}`)),
+    ["POOL — monthly:1", "— 2026-07-10", "TABS:1"],
+    "flat leads at qty 1; the $0-claimed visit is a claim, not a line",
+  )
+
+  // The ACL translates ION's vocabulary; null defaults to itemized.
+  assert.strictEqual(presentationOf("Per Visit Summary (list consumables)"), "summary")
+  assert.strictEqual(presentationOf("Per Visit Itemized (separate consumables)"), "itemized")
+  assert.strictEqual(presentationOf(null), "itemized")
 })
 
 console.log(`billing domain selfcheck: ${n} checks passed`)

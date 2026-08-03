@@ -19,18 +19,20 @@ import type { FindingGroup } from "../_lib/findings"
  * to the next open customer.
  */
 
-interface DraftLine {
-  kind: string
-  itemName: string
-  qty: number
-  unitPriceCents: number
-  amountCents: number
-  detail: string | null
+type DocLine =
+  | { kind: "visit_break"; serviceDate: string }
+  | { kind: "labor" | "consumable" | "variance"; itemName: string; qty: number; unitPriceCents: number; amountCents: number; serviceDate: string | null; detail: string | null }
+interface DocumentT {
+  kind: "service" | "consumables"
+  lines: DocLine[]
+  subtotalCents: number
 }
 interface Draft {
-  lines: DraftLine[]
   subtotalCents: number
   claimedAtZero: number
+  presentation: "itemized" | "summary"
+  defaultPresentation: "itemized" | "summary"
+  documents: DocumentT[]
 }
 
 export function FindingsWorkbench({
@@ -49,6 +51,8 @@ export function FindingsWorkbench({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | "loading" | "error">("loading")
+  const [presentation, setPresentation] = useState<"itemized" | "summary" | null>(null)
+  const [provisionBusy, setProvisionBusy] = useState(false)
 
   const month = group.month.slice(0, 7)
   const monthLabel = new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone: "UTC" })
@@ -61,17 +65,38 @@ export function FindingsWorkbench({
   useEffect(() => {
     let alive = true
     setDraft("loading")
-    fetch(`/api/billing/months/${group.monthId}/draft-invoice`)
+    const q = presentation ? `?presentation=${presentation}` : ""
+    fetch(`/api/billing/months/${group.monthId}/draft-invoice${q}`)
       .then((r) => r.json().then((j) => (r.ok ? j : Promise.reject(new Error(j.error)))))
       .then((j) => alive && setDraft(j as Draft))
       .catch(() => alive && setDraft("error"))
     return () => {
       alive = false
     }
-  }, [group.monthId])
+  }, [group.monthId, presentation])
 
-  const lines = draft !== "loading" && draft !== "error" ? draft.lines : []
+  const docs = draft !== "loading" && draft !== "error" ? draft.documents : []
   const subtotal = draft !== "loading" && draft !== "error" ? draft.subtotalCents / 100 : 0
+  const shownPresentation = presentation ?? (draft !== "loading" && draft !== "error" ? draft.presentation : "itemized")
+
+  const reassign = async (provision: string) => {
+    if (provision === "keep") return
+    setProvisionBusy(true)
+    const res = await fetch(`/api/billing/customers/${group.customerId}/chem-provision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provision, month: `${month}-01` }),
+    })
+    setProvisionBusy(false)
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string }
+      setError(body.error ?? `reassign failed (${res.status})`)
+      return
+    }
+    router.refresh()
+  }
+
+  const seg = (on: boolean) => (on ? "bg-cyan text-bg" : "bg-transparent text-ink-dim")
 
   const resolve = async () => {
     setBusy(true)
@@ -108,6 +133,18 @@ export function FindingsWorkbench({
           ) : (
             <span className="text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-bg-elev border border-line rounded-full px-2 py-0.5">Draft</span>
           )}
+          <select
+            defaultValue="keep"
+            disabled={provisionBusy}
+            onChange={(e) => reassign(e.target.value)}
+            title="Reassign this customer's chem-provision peer group — the audit re-derives and stale flags retract"
+            className="h-6 bg-bg-elev border border-line rounded-full px-2 text-[10px] uppercase tracking-[0.08em] text-ink-dim outline-none focus:border-cyan disabled:opacity-50"
+          >
+            <option value="keep">peer group…</option>
+            <option value="bulk_refill">mark bulk refill</option>
+            <option value="provides_chems">mark provides chems</option>
+            <option value="auto">demographic (auto)</option>
+          </select>
           {group.openIds.length === 0 && (
             <span className="text-[10px] uppercase tracking-[0.08em] text-grass bg-grass/10 border border-grass/30 rounded-full px-2 py-0.5">
               Reviewed · {group.resolvedBy}
@@ -174,6 +211,10 @@ export function FindingsWorkbench({
             <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-mute">
               Invoice lines — draft, regenerated on demand
             </span>
+            <div className="flex border border-line rounded-lg overflow-hidden">
+              <button onClick={() => setPresentation("itemized")} className={`h-[22px] px-2 text-[10.5px] font-semibold ${seg(shownPresentation === "itemized")}`}>Itemized</button>
+              <button onClick={() => setPresentation("summary")} className={`h-[22px] px-2 text-[10.5px] font-semibold border-l border-line ${seg(shownPresentation === "summary")}`}>Summary</button>
+            </div>
           </div>
           {draft === "loading" && (
             <div className="px-5 py-8 text-center text-[12px] text-ink-mute">Building the draft…</div>
@@ -181,21 +222,37 @@ export function FindingsWorkbench({
           {draft === "error" && (
             <div className="px-5 py-8 text-center text-[12px] text-coral">Failed to build the draft invoice.</div>
           )}
-          {lines.map((ln, idx) => (
-            <div key={idx} className="border-b border-line-soft px-5 py-2.5 hover:bg-white/[0.015]">
-              <div className="flex items-center gap-2.5">
-                <div className="flex-1 min-w-0">
-                  <div className="text-[12.5px] font-medium text-ink">{ln.itemName}</div>
-                  <div className="font-mono text-[10.5px] text-ink-mute mt-0.5">
-                    {ln.kind === "variance"
-                      ? ln.detail
-                      : `${ln.qty} × ${formatCurrency(ln.unitPriceCents / 100)}`}
+          {docs.map((doc, d) => (
+            <div key={d}>
+              {docs.length > 1 && (
+                <div className="px-5 pt-3 pb-1 flex items-baseline justify-between">
+                  <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-cyan">
+                    {doc.kind === "service" ? "Service invoice" : "Consumables invoice"}
+                  </span>
+                  <span className="font-mono text-[10.5px] text-ink-dim">{formatCurrency(doc.subtotalCents / 100)}</span>
+                </div>
+              )}
+              {doc.lines.map((ln, idx) =>
+                ln.kind === "visit_break" ? (
+                  <div key={idx} className="px-5 pt-2.5 pb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-white/[0.015]">
+                    {new Date(ln.serviceDate + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })}
                   </div>
-                </div>
-                <div className="w-[92px] text-right flex-none">
-                  <div className="font-mono text-[12.5px] text-ink">{formatCurrency(ln.amountCents / 100)}</div>
-                </div>
-              </div>
+                ) : (
+                  <div key={idx} className="border-b border-line-soft px-5 py-2 hover:bg-white/[0.015]">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[12.5px] font-medium text-ink">{ln.itemName}</div>
+                        <div className="font-mono text-[10.5px] text-ink-mute mt-0.5">
+                          {ln.kind === "variance" ? ln.detail : `${ln.qty} × ${formatCurrency(ln.unitPriceCents / 100)}`}
+                        </div>
+                      </div>
+                      <div className="w-[92px] text-right flex-none">
+                        <div className="font-mono text-[12.5px] text-ink">{formatCurrency(ln.amountCents / 100)}</div>
+                      </div>
+                    </div>
+                  </div>
+                ),
+              )}
             </div>
           ))}
           {draft !== "loading" && draft !== "error" && (

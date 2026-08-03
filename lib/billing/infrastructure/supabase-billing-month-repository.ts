@@ -475,21 +475,38 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   }
 
   /**
-   * Record audit findings, deduped against what is already OPEN: the same
-   * visit flagged twice is one finding, and a resolved finding never
-   * resurrects — resolution is a human decision the audit must respect.
+   * SYNC audit findings for the audited months: the finding rows are a
+   * DERIVED VIEW of the audit — only resolutions are human facts. So a
+   * computed finding that is already open stays; a new one is inserted; an
+   * OPEN one that no longer reproduces (a peer-group reassignment, a healed
+   * visit) is retracted; and a RESOLVED finding is never touched and never
+   * resurrects. Pass every audited month, findings or not — a month whose
+   * flags all vanished is exactly the retraction case.
    */
-  async recordFindings(findings: readonly { monthId: string; customerId: number; rule: string; severity: string; sourceKey: string; message: string; cents: number }[]): Promise<{ recorded: number; alreadyOpen: number }> {
-    if (findings.length === 0) return { recorded: 0, alreadyOpen: 0 }
-    const monthIds = [...new Set(findings.map((f) => f.monthId))]
+  async recordFindings(
+    findings: readonly { monthId: string; customerId: number; rule: string; severity: string; sourceKey: string; message: string; cents: number }[],
+    auditedMonthIds: readonly string[],
+  ): Promise<{ recorded: number; alreadyOpen: number; retracted: number }> {
+    const monthIds = [...new Set(auditedMonthIds)]
     const existing = new Set<string>()
+    const openRows: { id: string; key: string }[] = []
     for (let i = 0; i < monthIds.length; i += 40) {
       const c = monthIds.slice(i, i + 40)
-      const { data, error } = await this.q("findings").select("billing_month_id, rule, message").in("billing_month_id", c).range(0, 4999)
+      const { data, error } = await this.q("findings").select("id, billing_month_id, rule, message, resolved_at").eq("phase", "audit").in("billing_month_id", c).range(0, 4999)
       if (error) throw new Error(`findings read failed: ${JSON.stringify(error).slice(0, 200)}`)
-      for (const r of (data ?? []) as { billing_month_id: string; rule: string; message: string | null }[]) {
-        const dateKey = (r.message ?? "").slice(0, 10)
-        existing.add(`${r.billing_month_id}|${r.rule}|${dateKey}`)
+      for (const r of (data ?? []) as { id: string; billing_month_id: string; rule: string; message: string | null; resolved_at: string | null }[]) {
+        const key = `${r.billing_month_id}|${r.rule}|${(r.message ?? "").slice(0, 10)}`
+        existing.add(key)
+        if (r.resolved_at === null) openRows.push({ id: r.id, key })
+      }
+    }
+    const computed = new Set(findings.map((f) => `${f.monthId}|${f.rule}|${f.message.slice(0, 10)}`))
+    const stale = openRows.filter((r) => !computed.has(r.key)).map((r) => r.id)
+    if (stale.length > 0) {
+      for (let i = 0; i < stale.length; i += 100) {
+        const del = this.q("findings").delete().in("id", stale.slice(i, i + 100)) as unknown as PromiseLike<{ error: unknown }>
+        const { error } = await del
+        if (error) throw new Error(`findings retract failed: ${JSON.stringify(error).slice(0, 200)}`)
       }
     }
     const fresh = findings.filter((f) => !existing.has(`${f.monthId}|${f.rule}|${f.message.slice(0, 10)}`))
@@ -504,7 +521,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       if (error) throw new Error(`findings insert failed: ${JSON.stringify(error).slice(0, 240)}`)
       if (!data || data.length !== fresh.length) throw new Error(`findings insert wrote ${data?.length ?? 0} of ${fresh.length}`)
     }
-    return { recorded: fresh.length, alreadyOpen: findings.length - fresh.length }
+    return { recorded: fresh.length, alreadyOpen: findings.length - fresh.length, retracted: stale.length }
   }
 
   async customersWithDelivery(month: string): Promise<number[]> {
