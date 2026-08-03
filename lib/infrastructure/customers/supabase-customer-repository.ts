@@ -179,4 +179,13 @@ export class SupabaseCustomerRepository {
       throw new Error(`ion link stamp touched NO rows (account ${accountId}) — filtered, not applied`)
     }
   }
+
+  /** The LINKED subset of these accounts: accountId -> ion_cust_id. */
+  async linkedOf(accountIds: number[]): Promise<Map<number, { ionCustId: string; displayName: string | null }>> {
+    const { data, error } = await (this.client.from("Customers") as unknown as {
+      select(c: string): { in(c2: string, v: unknown[]): { not(c3: string, op: string, v3: null): PromiseLike<{ data: { id: number; display_name: string | null; ion_cust_id: string }[] | null; error: unknown }> } }
+    }).select("id, display_name, ion_cust_id").in("id", accountIds).not("ion_cust_id", "is", null)
+    if (error) throw new Error(`linkedOf scan failed: ${JSON.stringify(error).slice(0, 200)}`)
+    return new Map((data ?? []).map((r) => [r.id, { ionCustId: r.ion_cust_id, displayName: r.display_name }]))
+  }
 }

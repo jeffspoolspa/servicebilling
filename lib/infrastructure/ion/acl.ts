@@ -150,7 +150,7 @@ export class IonTaskAcl {
       StartsOn: c.startsOn,
       AssignedTo: id.ionTech,
     }
-    if (c.note) changes["TaskNote"] = c.note.slice(0, 500)
+    if (c.note) changes["tasknote"] = c.note.slice(0, 900) // ION form field is lowercase; ~1000 char cap
     if (serviceRepeat === "2") changes[DAY_FIELD[c.weekday]] = id.ionTech
     return { ionCustId: id.ionCustId, changes, expect: { serviceRepeat, startsOn: c.startsOn } }
   }
@@ -298,13 +298,13 @@ export function maintenanceDefaults(pool: { poolType: string; ratePerVisit: numb
   const fields: Record<string, string> = { profileid, InvoiceType: "6" }
   if (isSpa) {
     fields.ServiceType = SPA_CLEAN
-    fields.itemcost = rate !== null ? String(rate) : ""
+    fields.itemcost = rate !== null ? rate.toFixed(2) : ""
     advisories.push(`spa: SPA CLEAN service type prices by itemcost ($${rate ?? "?"})`)
   } else if (rung) {
     fields.ServiceType = rung
     fields.itemcost = "" // the ladder prices it; the override must NOT linger
   } else {
-    fields.itemcost = rate !== null ? String(rate) : ""
+    fields.itemcost = rate !== null ? rate.toFixed(2) : ""
     advisories.push(`rate $${rate ?? "?"} has no POOL MAINTENANCE rung — kept itemcost override`)
   }
   return { fields, advisories }

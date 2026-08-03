@@ -68,7 +68,7 @@ async function main() {
         weekday: r.profile.weekday,
         ratePerVisit: r.profile.ratePerVisit,
         poolType: (r.notes.find((n) => n.startsWith("pool: ")) ?? "pool: ").slice(6),
-        note: r.notes.filter((n) => /gate|pool|billing|segment/.test(n)).join(" | "),
+        note: r.notes.find((n) => n.startsWith("gate code: ")) ?? "",
       }))
   }
 
