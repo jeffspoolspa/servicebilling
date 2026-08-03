@@ -144,19 +144,20 @@ export class SupabaseCustomerRepository {
 
   /** Customers holding a QBO id but no ION link yet — the Awaiting set. */
   async awaitingIon(accountIds: number[]): Promise<{ accountId: number; displayName: string | null; firstName: string; lastName: string; street: string }[]> {
-    const { data } = await this.client
+    const { data, error } = await this.client
       .from("Customers")
-      .select("id, display_name, first_name, last_name, service_street, street, ion_cust_id, qbo_customer_id")
+      .select("id, display_name, first_name, last_name, street, ion_cust_id, qbo_customer_id")
       .in("id", accountIds)
       .is("ion_cust_id", null)
       .not("qbo_customer_id", "is", null)
-    return ((data ?? []) as { id: number; display_name: string | null; first_name: string | null; last_name: string | null; service_street: string | null; street: string | null }[]).map(
+    if (error) throw new Error(`awaitingIon scan failed: ${JSON.stringify(error).slice(0, 200)}`)
+    return ((data ?? []) as { id: number; display_name: string | null; first_name: string | null; last_name: string | null; street: string | null }[]).map(
       (r) => ({
         accountId: r.id,
         displayName: r.display_name,
         firstName: r.first_name ?? "",
         lastName: r.last_name ?? "",
-        street: r.service_street ?? r.street ?? "",
+        street: r.street ?? "",
       }),
     )
   }
