@@ -17,8 +17,7 @@
  * one thing to get right.
  */
 
-import { Task, type Terms } from "@/lib/domain/maintenance/task"
-import type { TaskGateway, TaskRepository } from "@/lib/domain/maintenance/ports"
+import { Task, type Terms, type TaskGateway, type TaskRepository } from "@/lib/domain/maintenance"
 
 export interface TaskOutcome {
   readonly ok: boolean

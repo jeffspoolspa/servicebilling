@@ -9,8 +9,8 @@
  * side knows nothing about pools.
  */
 
-import { Customer, type CustomerInput, type Violation } from "@/lib/domain/customers/customer"
-import { resolveCadence, loadOf, type Cadence, type CadenceResolution } from "@/lib/domain/maintenance/service-agreement"
+import { Customer, type CustomerInput, type Violation } from "@/lib/domain/customers"
+import { resolveCadence, loadOf, type Cadence, type CadenceResolution } from "@/lib/domain/maintenance"
 import { Pin } from "@/lib/domain/routing"
 import { resolveServiceAddress, type ResolvedAddress } from "@/lib/places/resolve"
 

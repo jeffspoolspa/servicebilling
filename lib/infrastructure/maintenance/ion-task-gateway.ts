@@ -16,8 +16,7 @@
  * leaves as it was, which for a moved visit means it gets served twice.
  */
 
-import type { DesiredWeek, Frequency } from "@/lib/domain/maintenance/task"
-import type { GatewayResult, TaskGateway } from "@/lib/domain/maintenance/ports"
+import type { DesiredWeek, Frequency, GatewayResult, TaskGateway } from "@/lib/domain/maintenance"
 import type { Weekday } from "@/lib/domain/routing"
 
 /** Sun..Sat, the ION form's per-day tech selects. */

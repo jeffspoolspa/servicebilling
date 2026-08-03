@@ -1,7 +1,7 @@
 # Layering rules for domain modules
 
 > Status: [active]
-> Last updated: 2026-07-31
+> Last updated: 2026-08-03
 
 How a domain-driven module is layered in this repo, and exactly which calls
 must route through an application service. Settled on the routing module
@@ -21,6 +21,62 @@ Reference implementation: `lib/domain/routing` + `lib/application/routing` +
 Dependencies point inward, always. The domain imports nothing from the other
 three. This is the rule that makes the domain runnable anywhere - including
 the browser, which the workbench pattern below depends on.
+
+## File layout: layer first, module second, one file per building block
+
+```
+lib/domain/<module>/        aggregates, value objects, domain services, ports
+  index.ts                  the PUBLISHED CONTRACT — everything above imports here
+  <aggregate>.ts            one file per aggregate (customer.ts, task.ts, quota.ts)
+  values.ts                 the module's value objects (several per file is fine)
+  ports.ts                  interfaces the domain needs implemented
+  selfcheck.ts              assert-based, `npx tsx <path>` — no framework
+lib/application/<module>/   one file per named service, one method per use case
+lib/infrastructure/<module>/ repositories, caches, gateways for that module
+app/(shell)/<area>/         pages; formatting and gesture-wiring only
+```
+
+Not one file per class: a file holds a BUILDING BLOCK. `values.ts` may carry
+four value objects that only make sense together; an aggregate with a big
+lifecycle gets its own file. The test is whether a reader looking for a rule
+knows which file to open.
+
+**Nothing above the domain imports a file INSIDE a domain module** — imports
+go through `index.ts`. That is what makes the contract real rather than
+aspirational: renaming a file inside the module cannot break a caller.
+
+Modules today: `routing` (reference), `customers`, `maintenance`.
+
+## External-system objects are NOT module-scoped (ADR 012)
+
+`lib/infrastructure/ion/` and `lib/infrastructure/qbo/` sit beside the module
+folders, not inside one, because a single ION object serves routing (publish
+a week), maintenance (open a task) and customers (resolve an id). Each holds:
+
+- `<system>.ts` — one class per system; ALL of its communication; no domain
+  logic. Credentials are minted by exactly one Windmill script per system,
+  and nothing else may touch them.
+- `acl.ts` — the anti-corruption layer: translation both directions, no HTTP.
+- `selfcheck.ts` — the translation rules, asserted.
+
+A second gateway for a system that already has one is the mistake this
+layout exists to prevent.
+
+## Ports versus concrete dependencies [decided 2026-08-03]
+
+The domain declares a port when the DOMAIN needs something implemented
+(`TaskRepository`, `TaskGateway`). An APPLICATION service may instead take
+the concrete infrastructure class as a TYPE-ONLY import when there is exactly
+one implementation — `OnboardingService(customers, qbo, resolveAddress)`.
+
+Why this is allowed: the runtime dependency is still inverted (the service
+never constructs its collaborators; callers inject them), the type import is
+erased from the build, and an interface with one implementation named after
+the class it wraps is ceremony that hides the real collaborator's name. The
+rule: **extract a port the day a second implementation appears**, not before.
+
+The line that does NOT bend: no application or domain file may perform I/O
+itself, and no domain file may import infrastructure at all, type or value.
 
 ## The one rule about writes
 

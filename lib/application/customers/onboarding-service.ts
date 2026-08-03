@@ -15,7 +15,7 @@
  * communication), and the address resolver (mints place id + geocode).
  */
 
-import type { Customer } from "@/lib/domain/customers/customer"
+import type { Customer } from "@/lib/domain/customers"
 import type { QboCustomers } from "@/lib/infrastructure/qbo/qbo"
 import type { RawAddress, ResolveResult } from "@/lib/places/resolve"
 import type { SupabaseCustomerRepository } from "@/lib/infrastructure/customers/supabase-customer-repository"
