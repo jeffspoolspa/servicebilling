@@ -13,6 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { HistoryTimeline, type HistoryRow } from "@/components/ui/history-timeline"
 import { formatCurrency } from "@/lib/utils/format"
 import { cn } from "@/lib/utils/cn"
@@ -178,9 +179,22 @@ export function MonthWorkbench({
 
   const seg = (on: boolean) => (on ? "bg-cyan text-bg" : "bg-transparent text-ink-dim")
 
+  const fold = {
+    totalBalance: invoices.reduce((s, i) => s + Number(i.balance ?? 0), 0),
+    total: invoices.reduce((s, i) => s + Number(i.total_amt ?? 0), 0),
+    allSent: invoices.length > 0 && invoices.every((i) => i.email_status === "EmailSent"),
+    allPaid: invoices.length > 0 && invoices.every((i) => (i.balance ?? 1) <= 0),
+  }
+
+  const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div>
+      <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">{label}</div>
+      <div className="text-[13px] text-ink mt-0.5">{children}</div>
+    </div>
+  )
+
   return (
     <div className="space-y-4">
-      {/* header */}
       <div className="flex items-end justify-between gap-4">
         <div>
           <div className="text-[10px] uppercase tracking-[0.14em] text-ink-mute">Billing month · {monthLabel}</div>
@@ -201,170 +215,274 @@ export function MonthWorkbench({
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <StatusStepper stages={[...MONTH_STAGES]} current={stepperStage(m.status)} className="max-w-[560px]" />
-        {m.status === "disputed" && <Pill tone="coral">disputed</Pill>}
-        {m.status === "held" && <Pill tone="sun">held</Pill>}
-        <span className="ml-auto font-mono num text-[17px] text-ink">{formatCurrency(m.subtotal_cents / 100)}</span>
-      </div>
-
-      {/* tabs: the month, then one per invoice (or the draft) */}
-      <div className="flex gap-1 border-b border-line-soft">
-        <button
-          onClick={() => setTab("month")}
-          className={cn(
-            "px-3.5 py-2 text-[13px] -mb-px border-b-2",
-            tab === "month" ? "text-ink border-cyan font-medium" : "text-ink-mute border-transparent hover:text-ink",
-          )}
-        >
-          Billing month
-        </button>
-        {invoices.map((inv) => {
-          const paid = (inv.balance ?? 1) <= 0
-          const sent = inv.email_status === "EmailSent"
-          const key = inv.qbo_invoice_id
-          return (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={cn(
-                "px-3.5 py-2 text-[13px] -mb-px border-b-2 inline-flex items-center gap-1.5",
-                tab === key ? "text-ink border-cyan font-medium" : "text-ink-mute border-transparent hover:text-ink",
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4 items-start">
+        {/* ------------------------------- LEFT ------------------------------- */}
+        <div className="space-y-4 min-w-0">
+          <Card>
+            {/* the document card: tabs in the header, like WO | INVOICE */}
+            <div className="flex items-center gap-4 px-5 pt-3 border-b border-line-soft flex-wrap">
+              <button
+                onClick={() => setTab("month")}
+                className={cn(
+                  "pb-2.5 -mb-px border-b-2 text-[12px] uppercase tracking-[0.08em]",
+                  tab === "month" ? "text-ink border-cyan font-medium" : "text-ink-mute border-transparent hover:text-ink",
+                )}
+              >
+                Billing month {monthLabel}
+              </button>
+              {invoices.map((inv) => (
+                <button
+                  key={inv.qbo_invoice_id}
+                  onClick={() => setTab(inv.qbo_invoice_id)}
+                  className={cn(
+                    "pb-2.5 -mb-px border-b-2 text-[12px] uppercase tracking-[0.08em]",
+                    tab === inv.qbo_invoice_id ? "text-ink border-cyan font-medium" : "text-ink-mute border-transparent hover:text-ink",
+                  )}
+                >
+                  Invoice {inv.doc_number ?? inv.qbo_invoice_id}
+                </button>
+              ))}
+              {!hasInvoices && (
+                <button
+                  onClick={() => setTab("draft")}
+                  className={cn(
+                    "pb-2.5 -mb-px border-b-2 text-[12px] uppercase tracking-[0.08em]",
+                    tab === "draft" ? "text-ink border-cyan font-medium" : "text-ink-mute border-transparent hover:text-ink",
+                  )}
+                >
+                  Draft invoice
+                </button>
               )}
-            >
-              Inv {inv.doc_number ?? key}
-              <Pill tone={sent ? "grass" : "neutral"}>{sent ? "sent" : "not sent"}</Pill>
-              <Pill tone={paid ? "grass" : "sun"}>{paid ? "paid" : "open"}</Pill>
-            </button>
-          )
-        })}
-        {!hasInvoices && (
-          <button
-            onClick={() => setTab("draft")}
-            className={cn(
-              "px-3.5 py-2 text-[13px] -mb-px border-b-2",
-              tab === "draft" ? "text-ink border-cyan font-medium" : "text-ink-mute border-transparent hover:text-ink",
-            )}
-          >
-            Draft invoice
-          </button>
-        )}
-      </div>
+              <span className="ml-auto flex items-center gap-1.5 pb-2">
+                {tab === "month" ? (
+                  <>
+                    {m.status === "disputed" && <Pill tone="coral">disputed</Pill>}
+                    {m.status === "held" && <Pill tone="sun">held</Pill>}
+                    <Pill tone="cyan">{m.status}</Pill>
+                  </>
+                ) : (
+                  invoices
+                    .filter((i) => i.qbo_invoice_id === tab)
+                    .map((i) => (
+                      <span key={i.qbo_invoice_id} className="flex items-center gap-1.5">
+                        <Pill tone={i.email_status === "EmailSent" ? "grass" : "neutral"}>
+                          {i.email_status === "EmailSent" ? "sent" : "not sent"}
+                        </Pill>
+                        <Pill tone={(i.balance ?? 1) <= 0 ? "grass" : "sun"}>
+                          {(i.balance ?? 1) <= 0 ? "paid" : `balance ${formatCurrency(Number(i.balance ?? 0))}`}
+                        </Pill>
+                      </span>
+                    ))
+                )}
+              </span>
+            </div>
 
-      {/* ------------------------------ month tab ------------------------------ */}
-      {tab === "month" && (
+            {/* month tab: field grid + progression + service log */}
+            {tab === "month" && (
+              <CardBody className="space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
+                  <Field label="Customer">{m.customer_name ?? m.customer_id}</Field>
+                  <Field label="Month">{monthLabel}</Field>
+                  <Field label="Items">{m.item_count}</Field>
+                  <Field label="Subtotal">
+                    <span className="font-mono num">{formatCurrency(m.subtotal_cents / 100)}</span>
+                  </Field>
+                </div>
+                <StatusStepper stages={[...MONTH_STAGES]} current={stepperStage(m.status)} />
+                <ServiceLog
+                  visits={visits}
+                  period={{
+                    label: monthLabel,
+                    start: `${monthLabel}-01`,
+                    end: new Date(Date.UTC(+monthLabel.slice(0, 4), +monthLabel.slice(5, 7), 0)).toISOString().slice(0, 10),
+                  }}
+                />
+              </CardBody>
+            )}
+
+            {/* invoice tabs: field grid + lines */}
+            {invoices
+              .filter((inv) => tab === inv.qbo_invoice_id)
+              .map((inv) => (
+                <CardBody key={inv.qbo_invoice_id} className="space-y-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
+                    <Field label="Customer">{m.customer_name ?? m.customer_id}</Field>
+                    <Field label="Invoice date">{inv.txn_date ?? "—"}</Field>
+                    <Field label="Subtotal">
+                      <span className="font-mono num">{formatCurrency(Number(inv.subtotal ?? 0))}</span>
+                    </Field>
+                    <Field label="Total">
+                      <span className="font-mono num">{formatCurrency(Number(inv.total_amt ?? 0))}</span>
+                    </Field>
+                  </div>
+                  <Table className="text-[11.5px]">
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead>Item</TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                        <TableHead className="text-right">Unit</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(inv.line_items ?? []).map((l, i) => (
+                        <TableRow key={i} className="text-ink-dim">
+                          <TableCell>{l.name ?? l.item ?? "—"}</TableCell>
+                          <TableCell className="text-ink-mute">{l.description ?? ""}</TableCell>
+                          <TableCell className="text-right font-mono num">{l.qty ?? l.quantity ?? ""}</TableCell>
+                          <TableCell className="text-right font-mono num">{l.unit_price != null ? formatCurrency(Number(l.unit_price)) : ""}</TableCell>
+                          <TableCell className="text-right font-mono num text-ink">{l.amount != null ? formatCurrency(Number(l.amount)) : ""}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                    <TableFooter>
+                      <TableRow className="text-ink hover:bg-transparent">
+                        <TableCell>Subtotal</TableCell>
+                        <TableCell />
+                        <TableCell />
+                        <TableCell />
+                        <TableCell className="text-right font-mono num font-semibold">{formatCurrency(Number(inv.subtotal ?? 0))}</TableCell>
+                      </TableRow>
+                    </TableFooter>
+                  </Table>
+                </CardBody>
+              ))}
+
+            {/* draft tab */}
+            {!hasInvoices && tab === "draft" && (
+              <CardBody className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-ink-mute">Draft — regenerated from the ledger on every view</span>
+                  <div className="flex border border-line rounded-lg overflow-hidden">
+                    <button onClick={() => setPresentation("itemized")} className={`h-[22px] px-2 text-[10.5px] font-semibold ${seg((presentation ?? (draft && draft !== "loading" && draft !== "error" ? draft.presentation : "itemized")) === "itemized")}`}>Itemized</button>
+                    <button onClick={() => setPresentation("summary")} className={`h-[22px] px-2 text-[10.5px] font-semibold border-l border-line ${seg((presentation ?? (draft && draft !== "loading" && draft !== "error" ? draft.presentation : "itemized")) === "summary")}`}>Summary</button>
+                  </div>
+                </div>
+                {draft === "loading" && <div className="py-6 text-center text-[12px] text-ink-mute">Building the draft…</div>}
+                {draft === "error" && <div className="py-6 text-center text-[12px] text-coral">Failed to build the draft.</div>}
+                {draft && draft !== "loading" && draft !== "error" &&
+                  draft.documents.map((doc, d) => (
+                    <div key={d} className="rounded border border-line-soft overflow-hidden">
+                      {draft.documents.length > 1 && (
+                        <div className="px-3 py-1.5 font-mono text-[9.5px] uppercase tracking-[0.1em] text-cyan bg-white/[0.02]">
+                          {doc.kind} · {formatCurrency(doc.subtotalCents / 100)}
+                        </div>
+                      )}
+                      {doc.lines.map((ln, idx) =>
+                        ln.kind === "visit_break" ? (
+                          <div key={idx} className="px-3 pt-2 pb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-white/[0.015]">
+                            {ln.serviceDate}
+                          </div>
+                        ) : (
+                          <div key={idx} className="flex items-center gap-2.5 border-b border-line-soft/60 last:border-b-0 px-3 py-1.5">
+                            <div className="flex-1 min-w-0">
+                              <span className="text-[12px] text-ink">{ln.itemName}</span>
+                              <span className="ml-2 font-mono text-[10px] text-ink-mute">
+                                {ln.kind === "variance" ? ln.detail : `${ln.qty} × ${formatCurrency(ln.unitPriceCents / 100)}`}
+                              </span>
+                            </div>
+                            <span className="font-mono num text-[12px] text-ink">{formatCurrency(ln.amountCents / 100)}</span>
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  ))}
+              </CardBody>
+            )}
+          </Card>
+
+          {/* payments & credits — fed per invoice once the process step emits */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Payments &amp; credits</CardTitle>
+            </CardHeader>
+            <CardBody className="text-ink-mute text-sm">
+              {hasInvoices
+                ? "No payments or credits touch these invoices yet."
+                : "Payments and credits appear once the invoice exists — credit checks and payment resolution run per invoice."}
+            </CardBody>
+          </Card>
+        </div>
+
+        {/* ------------------------------- RIGHT ------------------------------ */}
         <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Summary</CardTitle>
+              <span className="ml-auto">
+                {m.status === "sent" ? <Pill tone="grass">sent</Pill> : <Pill tone="cyan">{m.status}</Pill>}
+              </span>
+            </CardHeader>
+            <CardBody className="space-y-2 text-[13px]">
+              <div className="flex justify-between">
+                <span className="text-ink-mute">Subtotal</span>
+                <span className="font-mono num">{formatCurrency(m.subtotal_cents / 100)}</span>
+              </div>
+              {hasInvoices && (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-ink-mute">Invoiced</span>
+                    <span className="font-mono num">{formatCurrency(fold.total)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-ink-mute">Balance</span>
+                    <span className={cn("font-mono num", fold.totalBalance > 0 ? "text-sun" : "text-grass")}>{formatCurrency(fold.totalBalance)}</span>
+                  </div>
+                </>
+              )}
+              {m.open_findings > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-ink-mute">Open findings</span>
+                  <Pill tone="sun">{m.open_findings}</Pill>
+                </div>
+              )}
+              {invoices.map((inv) => (
+                <div key={inv.qbo_invoice_id} className="flex items-center gap-2 pt-1 border-t border-line-soft/60 text-[12px]">
+                  <span className="font-mono text-ink-mute">{inv.doc_number}</span>
+                  <span className="text-ink-mute">·</span>
+                  <span className={inv.email_status === "EmailSent" ? "text-grass" : "text-ink-mute"}>
+                    {inv.email_status === "EmailSent" ? "sent" : "not sent"}
+                  </span>
+                  <span className={cn("ml-auto font-mono num", (inv.balance ?? 0) > 0 ? "text-sun" : "text-grass")}>
+                    {formatCurrency(Number(inv.balance ?? 0))}
+                  </span>
+                </div>
+              ))}
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Payment method</CardTitle>
+            </CardHeader>
+            <CardBody className="text-[13px]">
+              {m.preprocessed_at ? (
+                m.linked_payment_method_id ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-ink">Autopay</span>
+                    <span className="font-mono text-[10px] text-ink-mute">{m.linked_payment_method_id}</span>
+                    <span className="ml-auto"><Pill tone="grass">will charge</Pill></span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-ink">Email route</span>
+                    <span className="ml-auto"><Pill tone="neutral">send only</Pill></span>
+                  </div>
+                )
+              ) : (
+                <span className="text-ink-mute">Resolved at preprocess — after the invoice exists.</span>
+              )}
+            </CardBody>
+          </Card>
+
           <HistoryTimeline
             rows={monthHistoryRows(history)}
             title="History"
             emptyText="No events yet — the month has not been advanced."
           />
-
-          <ServiceLog
-            visits={visits}
-            period={{
-              label: monthLabel,
-              start: `${monthLabel}-01`,
-              end: new Date(Date.UTC(+monthLabel.slice(0, 4), +monthLabel.slice(5, 7), 0)).toISOString().slice(0, 10),
-            }}
-          />
         </div>
-      )}
-
-      {/* ----------------------------- invoice tabs ---------------------------- */}
-      {invoices
-        .filter((inv) => tab === inv.qbo_invoice_id)
-        .map((inv) => (
-          <div key={inv.qbo_invoice_id} className="rounded-lg border border-line-soft overflow-hidden">
-            <div className="flex items-center gap-3 px-4 py-2.5 bg-white/[0.02] border-b border-line-soft text-[12px]">
-              <span className="text-ink font-medium">Invoice {inv.doc_number ?? inv.qbo_invoice_id}</span>
-              {inv.txn_date && <span className="font-mono text-ink-mute">{inv.txn_date}</span>}
-              <span className="ml-auto flex items-center gap-4">
-                <span className="text-ink-mute">
-                  Total <span className="font-mono num text-ink">{formatCurrency(Number(inv.total_amt ?? 0))}</span>
-                </span>
-                <span className="text-ink-mute">
-                  Balance <span className={cn("font-mono num", (inv.balance ?? 0) > 0 ? "text-sun" : "text-grass")}>{formatCurrency(Number(inv.balance ?? 0))}</span>
-                </span>
-              </span>
-            </div>
-            <Table className="text-[11.5px]">
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>Item</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Unit</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(inv.line_items ?? []).map((l, i) => (
-                  <TableRow key={i} className="text-ink-dim">
-                    <TableCell>
-                      {l.name ?? l.item ?? "—"}
-                      {l.description && <span className="ml-2 text-ink-mute">{l.description}</span>}
-                    </TableCell>
-                    <TableCell className="text-right font-mono num">{l.qty ?? l.quantity ?? ""}</TableCell>
-                    <TableCell className="text-right font-mono num">{l.unit_price != null ? formatCurrency(Number(l.unit_price)) : ""}</TableCell>
-                    <TableCell className="text-right font-mono num text-ink">{l.amount != null ? formatCurrency(Number(l.amount)) : ""}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-              <TableFooter>
-                <TableRow className="text-ink hover:bg-transparent">
-                  <TableCell>Subtotal</TableCell>
-                  <TableCell />
-                  <TableCell />
-                  <TableCell className="text-right font-mono num font-semibold">{formatCurrency(Number(inv.subtotal ?? 0))}</TableCell>
-                </TableRow>
-              </TableFooter>
-            </Table>
-          </div>
-        ))}
-
-      {/* ------------------------------ draft tab ------------------------------ */}
-      {!hasInvoices && tab === "draft" && (
-        <div className="rounded-lg border border-line-soft overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2 bg-white/[0.02] border-b border-line-soft">
-            <span className="text-[11px] text-ink font-medium">
-              Draft — regenerated from the ledger on every view
-            </span>
-            <div className="flex border border-line rounded-lg overflow-hidden">
-              <button onClick={() => setPresentation("itemized")} className={`h-[22px] px-2 text-[10.5px] font-semibold ${seg((presentation ?? (draft !== "loading" && draft !== "error" && draft ? draft.presentation : "itemized")) === "itemized")}`}>Itemized</button>
-              <button onClick={() => setPresentation("summary")} className={`h-[22px] px-2 text-[10.5px] font-semibold border-l border-line ${seg((presentation ?? (draft !== "loading" && draft !== "error" && draft ? draft.presentation : "itemized")) === "summary")}`}>Summary</button>
-            </div>
-          </div>
-          {draft === "loading" && <div className="px-4 py-6 text-center text-[12px] text-ink-mute">Building the draft…</div>}
-          {draft === "error" && <div className="px-4 py-6 text-center text-[12px] text-coral">Failed to build the draft.</div>}
-          {draft && draft !== "loading" && draft !== "error" &&
-            draft.documents.map((doc, d) => (
-              <div key={d}>
-                {draft.documents.length > 1 && (
-                  <div className="px-4 pt-2.5 pb-1 font-mono text-[9.5px] uppercase tracking-[0.1em] text-cyan">
-                    {doc.kind} · {formatCurrency(doc.subtotalCents / 100)}
-                  </div>
-                )}
-                {doc.lines.map((ln, idx) =>
-                  ln.kind === "visit_break" ? (
-                    <div key={idx} className="px-4 pt-2 pb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-white/[0.015]">
-                      {ln.serviceDate}
-                    </div>
-                  ) : (
-                    <div key={idx} className="flex items-center gap-2.5 border-b border-line-soft px-4 py-1.5">
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[12px] text-ink">{ln.itemName}</span>
-                        <span className="ml-2 font-mono text-[10px] text-ink-mute">
-                          {ln.kind === "variance" ? ln.detail : `${ln.qty} × ${formatCurrency(ln.unitPriceCents / 100)}`}
-                        </span>
-                      </div>
-                      <span className="font-mono num text-[12px] text-ink">{formatCurrency(ln.amountCents / 100)}</span>
-                    </div>
-                  ),
-                )}
-              </div>
-            ))}
-        </div>
-      )}
+      </div>
     </div>
   )
 }
