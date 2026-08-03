@@ -1,4 +1,4 @@
-# ADR 011: One object per external system, one translator, thin services
+# ADR 012: One object per external system, one translator, thin services
 
 > Status: [accepted] — decided with Carter 2026-08-03 after the routing publish
 > shipped. Every failure that week had one root: knowledge living in transport
