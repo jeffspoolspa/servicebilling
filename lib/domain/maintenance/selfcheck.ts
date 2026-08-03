@@ -153,4 +153,43 @@ check("ION's one Invoice Type string splits into two independent decisions", () 
     { billingMethod: "per_visit", consumablesMode: "listed" }, "unknown defaults to the common case")
 })
 
+console.log("\ncadence — derived from ACTIVE slots only (the 2026-08-02 bug)")
+
+const slot = (dayOfWeek: number | null, active = true, frequency = "weekly") => ({ dayOfWeek, frequency, active })
+
+check("I-C1: a retired slot never contributes — a rerouted task stays WEEKLY", () => {
+  // the exact shape of the bug: moved Tuesday -> Thursday, old slot retired
+  const c = Cadence.fromSlots([slot(2, false), slot(4, true)])
+  assert.equal(c.daysPerWeek, 1, "one live day, not two")
+  assert.equal(c.frequency, "weekly", "not multi_week")
+})
+
+check("a genuine two-day task still reads as multi_week", () => {
+  const c = Cadence.fromSlots([slot(1), slot(4)])
+  assert.equal(c.daysPerWeek, 2)
+  assert.equal(c.frequency, "multi_week")
+})
+
+check("I-C2: a slot with no weekday contributes no day", () => {
+  const c = Cadence.fromSlots([slot(null)])
+  assert.equal(c.daysPerWeek, null, "a gap to fill, not a zero to average in")
+})
+
+check("a retired biweekly slot cannot force the task biweekly", () => {
+  assert.equal(Cadence.fromSlots([slot(2, false, "biweekly_a"), slot(4, true, "weekly")]).frequency, "weekly")
+  assert.equal(Cadence.fromSlots([slot(2, true, "biweekly_a")]).frequency, "biweekly")
+})
+
+check("disagreesWith catches a stored cadence that drifted from its slots", () => {
+  const slots = [slot(2, false), slot(4, true)]
+  assert.equal(new Cadence("multi_week", 2).disagreesWith(slots), true, "the corrupted state")
+  assert.equal(new Cadence("weekly", 1).disagreesWith(slots), false, "the repaired state")
+})
+
+check("no live slots at all means no cadence — not a fabricated one", () => {
+  const c = Cadence.fromSlots([slot(1, false), slot(3, false)])
+  assert.equal(c.daysPerWeek, null)
+  assert.equal(c.frequency, null)
+})
+
 console.log(`\n${passed} checks passed`)

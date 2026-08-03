@@ -69,16 +69,63 @@ export class TaskWindow {
   }
 }
 
-/** How often the pool is serviced. ION's `serviceRepeat`, normalised. */
+/**
+ * One recurring slot on the schedule: a weekday the tech is expected. Retired
+ * slots are kept (they are how a reroute is auditable) but they are HISTORY,
+ * not schedule.
+ */
+export interface ScheduleSlot {
+  readonly dayOfWeek: number | null
+  readonly frequency: string | null
+  readonly active: boolean
+}
+
+/**
+ * How often the pool is serviced. DERIVED FROM THE ACTIVE SLOTS — never stored
+ * independently of them, because that is exactly how it went wrong:
+ * `recalc_task_frequency` counted `day_of_week` across ALL slots including
+ * retired ones, so every task that ever changed day carried an inflated
+ * cadence (measured 2026-08-02: 74 active tasks, 74/74 explained by counting
+ * inactive slots, observed reality 1.00 service days per week).
+ *
+ *   I-C1 a retired slot never contributes to the cadence.
+ *   I-C2 a slot with no weekday cannot contribute a day — it is a gap to fill,
+ *        not a zero to average in.
+ */
 export class Cadence {
   constructor(
     readonly frequency: string | null,
     readonly daysPerWeek: number | null,
   ) {}
 
+  /** The one correct derivation. Everything else must call this. */
+  static fromSlots(slots: readonly ScheduleSlot[]): Cadence {
+    const live = slots.filter((s) => s.active)                      // I-C1
+    const days = new Set(
+      live.map((s) => s.dayOfWeek).filter((d): d is number => d !== null),  // I-C2
+    )
+    const has = (f: string) => live.some((s) => (s.frequency ?? "") === f)
+    const frequency = live.some((s) => (s.frequency ?? "").startsWith("biweekly"))
+      ? "biweekly"
+      : has("daily")
+        ? "multi_week"
+        : has("weekly")
+          ? (days.size > 1 ? "multi_week" : "weekly")
+          : has("monthly")
+            ? "monthly"
+            : null
+    return new Cadence(frequency, days.size === 0 ? null : days.size)
+  }
+
   /** Weekly-or-more is the "regular maintenance" shape peer grouping keys on. */
   get isWeeklyOrMore(): boolean {
     return (this.daysPerWeek ?? 0) >= 1
+  }
+
+  /** True when a stored cadence disagrees with what the slots actually say. */
+  disagreesWith(slots: readonly ScheduleSlot[]): boolean {
+    const truth = Cadence.fromSlots(slots)
+    return truth.frequency !== this.frequency || truth.daysPerWeek !== this.daysPerWeek
   }
 }
 
