@@ -1,8 +1,9 @@
 /**
- * Coastal Blue list resolution — shared by the report and the creator so the
- * two can NEVER disagree about a row. Sheet columns in, resolved drafts out:
- * factory validation, week-field cadence, geocode, and the day partition that
- * levels Emily Loper's new routes.
+ * Customer-list resolution — GENERAL: any spreadsheet of customer rows in this
+ * column shape resolves the same way. Shared by the report and the creator so
+ * the two can NEVER disagree about a row: factory validation, week-field
+ * cadence, geocode, and the day partition that levels a NEW tech's routes
+ * (candidate days split for equal effective load, nearest-to-seed first).
  */
 
 import { draftCustomer, isBlocked, type CustomerDraft, type RawCustomerRow } from "@/lib/domain/customers/customer"

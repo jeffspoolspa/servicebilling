@@ -1,5 +1,5 @@
 /**
- * Onboard the Coastal Blue list through OnboardingService — the same service
+ * Onboard a customer list through OnboardingService — the same service
  * any UI calls; this harness only feeds it the sheet.
  *
  *   NODE_OPTIONS="--conditions=react-server" npx tsx scripts/onboard_create.ts <exported.json> <plan.json> [--live]
@@ -15,8 +15,10 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { OnboardingService } from "@/lib/application/customers/onboarding-service"
 import { SupabaseAccountStore } from "@/lib/infrastructure/customers/supabase-account-store"
 import { QboCustomerGateway } from "@/lib/infrastructure/customers/qbo-customer-gateway"
+import { QboCustomers } from "@/lib/infrastructure/qbo/qbo"
+import { triggerScriptSync } from "@/lib/windmill"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
-import { resolveAll, DAY, type Exported } from "./_coastal_resolve"
+import { resolveAll, DAY, type Exported } from "./_onboard_resolve"
 
 async function main() {
   const [jsonPath, planPath] = process.argv.slice(2)
@@ -26,9 +28,13 @@ async function main() {
   const x = JSON.parse(readFileSync(jsonPath, "utf8")) as Exported
   const { rows } = await resolveAll(x)
 
+  const sys = createSupabaseAdmin()
   const service = new OnboardingService(
-    new SupabaseAccountStore(createSupabaseAdmin() as unknown as ConstructorParameters<typeof SupabaseAccountStore>[0]),
-    new QboCustomerGateway(),
+    new SupabaseAccountStore(sys as unknown as ConstructorParameters<typeof SupabaseAccountStore>[0]),
+    new QboCustomerGateway(
+      new QboCustomers({ mint: () => triggerScriptSync("f/qbo/api/get_access_token", {}, { timeoutMs: 60000 }) }),
+      sys as unknown as ConstructorParameters<typeof QboCustomerGateway>[1],
+    ),
   )
 
   const plan: Record<string, unknown>[] = []

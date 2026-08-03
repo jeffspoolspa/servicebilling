@@ -1,6 +1,6 @@
 /**
  * Onboarding validation report — the DRY step of customer intake. Same
- * resolution the creator uses (scripts/_coastal_resolve), formatted for a
+ * resolution the creator uses (scripts/_onboard_resolve), formatted for a
  * human decision. Touches nothing: no QBO, no ION, no writes.
  *
  *   NODE_OPTIONS="--conditions=react-server" npx tsx scripts/onboard_report.ts <exported.json> <report.md>
@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { SupabaseAccountStore } from "@/lib/infrastructure/customers/supabase-account-store"
 import { startsOnFor } from "@/lib/infrastructure/ion/acl"
-import { isBlocked, loadOf, resolveAll, DAY, type Exported } from "./_coastal_resolve"
+import { isBlocked, loadOf, resolveAll, DAY, type Exported } from "./_onboard_resolve"
 
 async function main() {
   const [jsonPath, outPath] = process.argv.slice(2)
@@ -31,7 +31,7 @@ async function main() {
   const advisories = rows.filter((r) => !isBlocked(r.draft) && r.draft.violations.length > 0)
 
   const lines: string[] = []
-  lines.push(`# Coastal Blue onboarding — validation report`)
+  lines.push(`# Customer onboarding — validation report`)
   lines.push(``)
   lines.push(`${rows.length} rows: **${clean.length} ready to create**, **${blocked.length} need a decision**, ${advisories.length} carry advisory flags, ${collisions.length} may already exist.`)
   lines.push(``)
@@ -69,7 +69,7 @@ async function main() {
   }
   lines.push(``)
 
-  lines.push(`## Emily's week (all pools, new routes)`)
+  lines.push(`## The new tech's week (all pools, new routes)`)
   lines.push(``)
   lines.push(`| Day | Pools | Effective visits/wk |`)
   lines.push(`|---|---|---|`)
