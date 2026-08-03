@@ -78,6 +78,10 @@ export class AdvanceMonthService {
       }
 
       case "reconcile": {
+        // A reconcile against a stale report is worth nothing — it would
+        // compare fresh arithmetic to yesterday's facts and call it agreement.
+        // Coalesced, so this costs one scrape per run, not one per month.
+        await this.systemInvoices.refresh(month.month)
         const totals = await this.systemInvoices.perTaskTotals(month.customerId, month.month)
         const result = reconcile(month, totals)
         if (result.agrees) {

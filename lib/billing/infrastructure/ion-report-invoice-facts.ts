@@ -29,6 +29,16 @@ type Sel = {
 }
 
 export class IonReportInvoiceFacts implements IonInvoiceFacts {
+  /**
+   * The report is pulled ONCE PER RUN, not once per customer-month.
+   *
+   * It is a month-wide report, so one pull answers for all ~490 customers in
+   * it; pulling per reconcile would be ~490 chromium scrapes at ~15s each —
+   * two hours to learn the same thing. This memo gives every month in a run
+   * the same fresh report, and a new run pulls again.
+   */
+  private pulls = new Map<string, Promise<{ pulledAt: string }>>()
+
   constructor(
     private readonly client: Db,
     /** The Ion object owns the pull; this adapter only reads what it loaded. */
@@ -70,10 +80,24 @@ export class IonReportInvoiceFacts implements IonInvoiceFacts {
     return [...totals].map(([taskId, totalCents]) => ({ taskId, totalCents }))
   }
 
-  /** Go and read ION's report again — the Ion object does the work. */
-  async refresh(month: string): Promise<{ pulledAt: string }> {
-    const pull = await this.reports.pullTaskTransactions(month)
-    return { pulledAt: pull.pulledAt }
+  /**
+   * Go and read ION's report again — the Ion object does the work. Coalesced
+   * per month for the life of this adapter, so a whole run costs one scrape
+   * and concurrent callers wait on the same promise rather than racing.
+   */
+  refresh(month: string): Promise<{ pulledAt: string }> {
+    const key = month.slice(0, 7)
+    const existing = this.pulls.get(key)
+    if (existing) return existing
+    const pull = this.reports
+      .pullTaskTransactions(month)
+      .then((p) => ({ pulledAt: p.pulledAt }))
+      .catch((e) => {
+        this.pulls.delete(key) // a failed pull must not poison the run
+        throw e
+      })
+    this.pulls.set(key, pull)
+    return pull
   }
 
   /** When ION's report was last pulled — a reconcile against a stale report
