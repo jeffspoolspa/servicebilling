@@ -110,22 +110,20 @@ export function priceMonth(args: {
   const laborRateCents = terms.amountCents ?? 0
 
   if (terms.labor === "per_visit") {
-    {
-      for (const v of billableVisits) {
-        const charged = chargedVisit.has(v.sourceId)
-        items.push({
-          sourceKind: "visit",
-          sourceId: v.sourceId,
-          taskId: v.taskId,
-          kind: "labor",
-          serviceDate: v.serviceDate,
-          itemName: v.itemName,
-          qty: 1,
-          unitPriceCents: charged ? laborRateCents : 0,
-          amountCents: charged ? money(laborRateCents) : 0,
-          claimedAt: at,
-        })
-      }
+    for (const v of billableVisits) {
+      const charged = chargedVisit.has(v.sourceId)
+      items.push({
+        sourceKind: "visit",
+        sourceId: v.sourceId,
+        taskId: v.taskId,
+        kind: "labor",
+        serviceDate: v.serviceDate,
+        itemName: v.itemName,
+        qty: 1,
+        unitPriceCents: charged ? laborRateCents : 0,
+        amountCents: charged ? money(laborRateCents) : 0,
+        claimedAt: at,
+      })
     }
   } else {
     // FLAT RATE: the month bills once, as its OWN source (`flat`) keyed on
