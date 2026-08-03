@@ -66,6 +66,7 @@ export class IonTaskGateway implements TaskGateway {
     private readonly paths = {
       create: "f/ION/api/create_task",
       update: "f/ION/api/update_task",
+      setStartDate: "f/ION/_discover/set_startson",
     },
   ) {}
 
@@ -132,6 +133,52 @@ export class IonTaskGateway implements TaskGateway {
       return res.committed === true
         ? { accepted: true, ionTaskId, detail: `wrote ${n} field(s) to ION task ${ionTaskId}` }
         : { accepted: false, detail: `ION refused the write to task ${ionTaskId}` }
+    } catch (err) {
+      return { accepted: false, detail: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  /**
+   * Change a task's StartsOn. The abstraction of a full day of discovery:
+   *
+   * A bare form POST silently DROPS backdated StartsOn values — ION accepts
+   * the request, returns 200, and keeps the old date. The UI succeeds because
+   * its date field carries a ColdFusion AJAX bind that server-side pre-sets
+   * the date via /includes/_proxy.cfm WITH the full CF envelope
+   * (_cf_clientid, containerId, nodebug, nocache, rc) from a session primed
+   * through customerTabs. The deployed script (f/ION/_discover/set_startson)
+   * performs exactly that browser sequence and proves the result by re-reading
+   * the form — a write's status code is worthless here, only read-back counts.
+   *
+   * Callers state a task, a date, and dryRun. Nothing else ever needs to know
+   * the recipe again.
+   */
+  async changeStartDate(
+    ionTaskId: string,
+    customerId: number,
+    date: string,
+    opts: { dryRun: boolean },
+  ): Promise<GatewayResult> {
+    try {
+      const res = await this.windmill.run<{
+        fixed: number
+        results: { id: string; before?: string; after?: string; ok?: boolean; detail?: string }[]
+      }>(this.paths.setStartDate, {
+        writes: [{ ionTaskId, ionCustId: String(customerId), date }],
+        dry_run: opts.dryRun,
+      })
+      const r = res.results?.[0]
+      if (!r) return { accepted: false, detail: "no result returned" }
+      if (opts.dryRun) {
+        return { accepted: true, ionTaskId, detail: `dry run: StartsOn ${r.before ?? "?"} -> ${date}` }
+      }
+      return r.ok
+        ? { accepted: true, ionTaskId, detail: `StartsOn ${r.before} -> ${r.after} (read-back verified)` }
+        : {
+            accepted: false,
+            ionTaskId,
+            detail: `StartsOn write did not land: wanted ${date}, ION holds ${r.after ?? r.before ?? "?"} ${r.detail ?? ""}`,
+          }
     } catch (err) {
       return { accepted: false, detail: err instanceof Error ? err.message : String(err) }
     }

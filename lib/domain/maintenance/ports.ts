@@ -51,6 +51,19 @@ export interface GatewayResult {
 export interface TaskGateway {
   create(week: DesiredWeek, opts: { dryRun: boolean }): Promise<GatewayResult>
   update(ionTaskId: string, week: DesiredWeek, opts: { dryRun: boolean }): Promise<GatewayResult>
+  /**
+   * Set a task's start date — the anchor that, for non-weekly cadences, encodes
+   * BOTH the serviced weekday and the alternating-week parity. Works in either
+   * direction (the system of record guards backdates behind a side channel the
+   * adapter knows about; callers never do). Verified by read-back, not by the
+   * write's status code.
+   */
+  changeStartDate(
+    ionTaskId: string,
+    customerId: number,
+    date: string,
+    opts: { dryRun: boolean },
+  ): Promise<GatewayResult>
 }
 
 /** Prices that live in the foreign catalog, not in our contract. */
