@@ -94,6 +94,15 @@ rule: **extract a port the day a second implementation appears**, not before.
 The line that does NOT bend: no application or domain file may perform I/O
 itself, and no domain file may import infrastructure at all, type or value.
 
+## Events, commands, and who advances them
+
+Which of a workflow's steps are COMMANDS (owed, refusable, retried, one
+handler, queue) and which are DOMAIN EVENTS (happened, undeniable, zero or
+many handlers, fact log) is settled once in
+[EVENTS_AND_COMMANDS.md](EVENTS_AND_COMMANDS.md), along with the rule that
+keeps the whole thing recoverable: events give latency, state queries give
+correctness. Aggregates raise events; they never subscribe.
+
 ## The one rule about writes
 
 **Every DURABLE write goes through exactly one named application-service

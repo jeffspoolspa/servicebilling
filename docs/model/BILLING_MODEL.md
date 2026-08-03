@@ -98,6 +98,10 @@ application services. Rules live once, in the domain, selfchecked.
 
 ## Domain events in this workflow [added 2026-08-03]
 
+> The vocabulary and the decision rules now live once, in
+> [EVENTS_AND_COMMANDS.md](../conventions/EVENTS_AND_COMMANDS.md). This
+> section is how they land in THIS workflow.
+
 An event earns its place when a domain expert can say the sentence in past
 tense and someone OUTSIDE the module cares. Everything else is either a plain
 method call (same aggregate) or a work item (owed, retried, has a terminal

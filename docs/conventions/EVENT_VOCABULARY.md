@@ -7,6 +7,9 @@
 > operative list. Event names are **permanent** (a stored `type` outlives every
 > refactor) — this is a [SCHEMA_OWNERSHIP](SCHEMA_OWNERSHIP.md)-grade contract.
 > Additions follow the rules below; existing names never change.
+> **When to make something an event at all** — and the command/event
+> distinction the two planes below rest on — is
+> [EVENTS_AND_COMMANDS.md](EVENTS_AND_COMMANDS.md).
 
 ## The two planes (read this first)
 
