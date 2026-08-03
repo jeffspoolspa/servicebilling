@@ -133,11 +133,12 @@ export class BillingRunService {
     // in the same run — audit writes, gate holds.
     const audit = { findings: 0, recorded: 0, alreadyOpen: 0 }
     {
+      const bulkNames = await this.months.bulkItemNames()
       const [peerGroups, histories] = await Promise.all([
         this.months.customerPeerGroups(monthsAll.map((m) => m.customerId)),
-        this.months.chemHistory(month),
+        this.months.chemHistory(month, bulkNames),
       ])
-      const observations = observationsOf(monthsAll, peerGroups)
+      const observations = observationsOf(monthsAll, peerGroups, bulkNames)
       const found = auditConsumables(observations, histories)
       const wrote = await this.months.recordFindings(found)
       audit.findings = found.length
@@ -189,19 +190,30 @@ export class BillingRunService {
  * service type's name), because "normal chemicals" only means something
  * within a service type.
  */
-export function observationsOf(months: readonly BillingMonth[], peerGroups: ReadonlyMap<number, string>): ChemObservation[] {
+export function observationsOf(
+  months: readonly BillingMonth[],
+  peerGroups: ReadonlyMap<number, string>,
+  bulkNames: ReadonlySet<string>,
+): ChemObservation[] {
   const out: ChemObservation[] = []
   for (const m of months) {
-    const byVisit = new Map<string, { chemCents: number; serviceDate: string; taskId: string }>()
+    const byVisit = new Map<string, { chemCents: number; bulkCents: number; bulkItems: string[]; serviceDate: string }>()
     for (const it of m.billableItems) {
       if (!it.taskId || !it.serviceDate || it.kind !== "consumable") continue
       const key = `${it.taskId}:${it.serviceDate}`
-      const v = byVisit.get(key) ?? { chemCents: 0, serviceDate: it.serviceDate, taskId: it.taskId }
-      v.chemCents += it.amountCents
+      const v = byVisit.get(key) ?? { chemCents: 0, bulkCents: 0, bulkItems: [], serviceDate: it.serviceDate }
+      // Bulk containers are split out of the CPV number entirely — the
+      // domain decides whether their presence is a delivery or a mis-bill.
+      if (bulkNames.has(it.itemName)) {
+        v.bulkCents += it.amountCents
+        v.bulkItems.push(it.itemName)
+      } else {
+        v.chemCents += it.amountCents
+      }
       byVisit.set(key, v)
     }
     for (const [key, v] of byVisit) {
-      if (v.chemCents <= 0) continue
+      if (v.chemCents <= 0 && v.bulkCents <= 0) continue
       out.push({
         monthId: m.id,
         customerId: m.customerId,
@@ -211,6 +223,8 @@ export function observationsOf(months: readonly BillingMonth[], peerGroups: Read
         // the live chem-flag medians use; one vocabulary, two consumers.
         peerKey: peerGroups.get(m.customerId) ?? "unclassified",
         chemCents: v.chemCents,
+        bulkCents: v.bulkCents,
+        bulkItems: v.bulkItems,
       })
     }
   }

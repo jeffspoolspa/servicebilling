@@ -386,7 +386,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
    * over the trailing window, from the SAME priced items the months bill.
    * The repository owns the criteria; the domain only judges (Evans).
    */
-  async chemHistory(beforeMonth: string, windowMonths = 6): Promise<Map<number, { customerId: number; medianChemCents: number; visits: number }>> {
+  async chemHistory(beforeMonth: string, excludeItems?: ReadonlySet<string>, windowMonths = 6): Promise<Map<number, { customerId: number; medianChemCents: number; visits: number }>> {
     const [y, m] = beforeMonth.split("-").map(Number)
     const months: string[] = []
     for (let i = 1; i <= windowMonths; i++) {
@@ -409,11 +409,14 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     for (let i = 0; i < ids.length; i += 40) {
       const c = ids.slice(i, i + 40)
       const { data, error } = await this.q("billable_items")
-        .select("billing_month_id, task_id, service_date, kind, amount_cents")
+        .select("billing_month_id, task_id, service_date, kind, item_name, amount_cents")
         .in("billing_month_id", c).range(0, 19999)
       if (error) throw new Error(`history items failed: ${JSON.stringify(error).slice(0, 200)}`)
-      for (const r of (data ?? []) as { billing_month_id: string; task_id: string | null; service_date: string | null; kind: string; amount_cents: number | null }[]) {
+      for (const r of (data ?? []) as { billing_month_id: string; task_id: string | null; service_date: string | null; kind: string; item_name: string | null; amount_cents: number | null }[]) {
         if (r.kind !== "consumable" || !r.task_id || !r.service_date) continue
+        // Bulk containers are not "usage" — the baseline is what the pool
+        // consumes, so history excludes them the same way observations do.
+        if (excludeItems && r.item_name && excludeItems.has(r.item_name)) continue
         const key = `${r.billing_month_id}|${r.task_id}|${r.service_date}`
         const cur = perVisit.get(key) ?? { customerId: custOf.get(r.billing_month_id)!, cents: 0 }
         cur.cents += r.amount_cents ?? 0
@@ -438,6 +441,16 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
    * (any task >2 days a week) / low_freq (all monthly-biweekly) /
    * weekly_residential (the rest).
    */
+  /** The catalog's bulk containers, by name — the audit's exclusion set. */
+  async bulkItemNames(): Promise<Set<string>> {
+    const cat = this.client.schema("maintenance").from("consumables") as unknown as {
+      select(c: string): { eq(col: string, v: boolean): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+    }
+    const { data, error } = await cat.select("item_name").eq("is_bulk", true)
+    if (error) throw new Error(`bulk items read failed: ${JSON.stringify(error).slice(0, 200)}`)
+    return new Set(((data ?? []) as { item_name: string }[]).map((r) => r.item_name))
+  }
+
   async customerPeerGroups(customerIds: readonly number[]): Promise<Map<number, string>> {
     const out = new Map<number, string>()
     const ids = [...new Set(customerIds)]

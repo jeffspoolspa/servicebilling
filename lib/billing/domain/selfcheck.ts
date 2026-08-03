@@ -543,12 +543,15 @@ check("re-accrual REPLACES the month; a vanished source is released", () => {
   assert.deepStrictEqual(m.billableItems.map((i) => i.sourceId), ["new-1"])
 })
 
+const ob = (o: { monthId: string; customerId: number; visitKey: string; serviceDate: string; peerKey: string; chemCents: number; bulkCents?: number; bulkItems?: string[] }) =>
+  ({ bulkCents: 0, bulkItems: [], ...o })
+
 check("the audit flags a peer-group outlier, with the numbers in the sentence", () => {
   // 24 normal visits at $10, one at $200 — above p95 of the group, and the
   // customer has no history, so peers alone decide.
   const obs = []
-  for (let i = 0; i < 24; i++) obs.push({ monthId: `m${i}`, customerId: i, visitKey: `t${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "POOL MAINTENANCE 65", chemCents: 1000 })
-  obs.push({ monthId: "mX", customerId: 99, visitKey: "tX:2026-07-15", serviceDate: "2026-07-15", peerKey: "POOL MAINTENANCE 65", chemCents: 20000 })
+  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `m${i}`, customerId: i, visitKey: `t${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "POOL MAINTENANCE 65", chemCents: 1000 }))
+  obs.push(ob({ monthId: "mX", customerId: 99, visitKey: "tX:2026-07-15", serviceDate: "2026-07-15", peerKey: "POOL MAINTENANCE 65", chemCents: 20000 }))
   const f = auditConsumables(obs, new Map())
   assert.strictEqual(f.length, 1)
   assert.strictEqual(f[0].customerId, 99)
@@ -558,8 +561,8 @@ check("the audit flags a peer-group outlier, with the numbers in the sentence", 
 
 check("self history VETOES the peers — a pool that always eats chlorine is not an outlier", () => {
   const obs = []
-  for (let i = 0; i < 24; i++) obs.push({ monthId: `m${i}`, customerId: i, visitKey: `t${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "P", chemCents: 1000 })
-  obs.push({ monthId: "mX", customerId: 99, visitKey: "tX:2026-07-15", serviceDate: "2026-07-15", peerKey: "P", chemCents: 20000 })
+  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `m${i}`, customerId: i, visitKey: `t${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "P", chemCents: 1000 }))
+  obs.push(ob({ monthId: "mX", customerId: 99, visitKey: "tX:2026-07-15", serviceDate: "2026-07-15", peerKey: "P", chemCents: 20000 }))
   // $200 is under 2x this customer's own $150 median: their normal, not a finding.
   const history = new Map([[99, { customerId: 99, medianChemCents: 15000, visits: 12 }]])
   assert.strictEqual(auditConsumables(obs, history).length, 0)
@@ -572,11 +575,28 @@ check("a peer group too small to define normal flags NOTHING", () => {
   // 3 visits is not a distribution. Flagging against it would be noise with
   // a percentile attached.
   const obs = [
-    { monthId: "a", customerId: 1, visitKey: "t1:2026-07-01", serviceDate: "2026-07-01", peerKey: "RARE", chemCents: 100 },
-    { monthId: "b", customerId: 2, visitKey: "t2:2026-07-01", serviceDate: "2026-07-01", peerKey: "RARE", chemCents: 100 },
-    { monthId: "c", customerId: 3, visitKey: "t3:2026-07-01", serviceDate: "2026-07-01", peerKey: "RARE", chemCents: 99999 },
+    ob({ monthId: "a", customerId: 1, visitKey: "t1:2026-07-01", serviceDate: "2026-07-01", peerKey: "RARE", chemCents: 100 }),
+    ob({ monthId: "b", customerId: 2, visitKey: "t2:2026-07-01", serviceDate: "2026-07-01", peerKey: "RARE", chemCents: 100 }),
+    ob({ monthId: "c", customerId: 3, visitKey: "t3:2026-07-01", serviceDate: "2026-07-01", peerKey: "RARE", chemCents: 99999 }),
   ]
   assert.strictEqual(auditConsumables(obs, new Map()).length, 0)
+})
+
+check("a bulk bucket is a delivery at commercial, a mis-bill everywhere else", () => {
+  // The same $350 bucket, two customers. Commercial: silence — bulk spend is
+  // excluded from CPV and its presence is allowed. Residential: its own
+  // finding, unconditionally, even though the non-bulk CPV is a quiet $10.
+  const obs = [
+    ob({ monthId: "mc", customerId: 1, visitKey: "tc:2026-07-08", serviceDate: "2026-07-08", peerKey: "commercial", chemCents: 1000, bulkCents: 35000, bulkItems: ["CHLORINE TABLET 50LB"] }),
+    ob({ monthId: "mr", customerId: 2, visitKey: "tr:2026-07-08", serviceDate: "2026-07-08", peerKey: "weekly_residential", chemCents: 1000, bulkCents: 35000, bulkItems: ["CHLORINE TABLET 50LB"] }),
+  ]
+  const f = auditConsumables(obs, new Map())
+  assert.strictEqual(f.length, 1)
+  assert.strictEqual(f[0].rule, "bulk_item_misbill")
+  assert.strictEqual(f[0].customerId, 2)
+  assert.strictEqual(f[0].cents, 35000)
+  assert.ok(f[0].message.includes("CHLORINE TABLET 50LB"), "names the item the tech keyed")
+  assert.ok(f[0].message.includes("single-unit"), "asks the actual question")
 })
 
 console.log(`billing domain selfcheck: ${n} checks passed`)

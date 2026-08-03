@@ -27,9 +27,14 @@ export interface ChemObservation {
   /** One serviced day of one task — the same grain labour bills at. */
   readonly visitKey: string
   readonly serviceDate: string
-  /** The peer group: the service type's name ("POOL MAINTENANCE 65"). */
+  /** The peer group: v_customer_peer_group's ruling for this customer. */
   readonly peerKey: string
+  /** Chemicals dispensed on the visit, EXCLUDING bulk containers. */
   readonly chemCents: number
+  /** Bulk-container spend on the visit (50lb buckets etc), kept apart. */
+  readonly bulkCents: number
+  /** The bulk items' names, for the finding's sentence. */
+  readonly bulkItems: readonly string[]
 }
 
 export interface ChemHistory {
@@ -48,6 +53,13 @@ export interface AuditPolicy {
   readonly selfFactor: number
   /** Customers with fewer historical visits than this skip the self bar. */
   readonly minSelfVisits: number
+  /**
+   * Peer groups where a bulk container is a normal thing to bill: a 50lb
+   * bucket at a commercial property is a DELIVERY. Everywhere else its
+   * presence is a mis-bill finding in its own right — the tech keyed the
+   * bucket instead of the single-unit item.
+   */
+  readonly bulkAllowedGroups: readonly string[]
 }
 
 /** The house numbers. A policy object so the UI can show and change them. */
@@ -56,12 +68,13 @@ export const AUDIT_POLICY: AuditPolicy = {
   minPeers: 20,
   selfFactor: 2,
   minSelfVisits: 6,
+  bulkAllowedGroups: ["commercial"],
 }
 
 export interface AuditFinding {
   readonly monthId: string
   readonly customerId: number
-  readonly rule: "cpv_outlier"
+  readonly rule: "cpv_outlier" | "bulk_item_misbill"
   readonly severity: "high"
   readonly sourceKey: string
   readonly message: string
@@ -93,7 +106,27 @@ export function auditConsumables(
   }
 
   const findings: AuditFinding[] = []
+  const bulkAllowed = new Set(policy.bulkAllowedGroups)
   for (const o of observations) {
+    // THE BULK RULE. Bulk spend is excluded from every CPV number — a
+    // legitimate commercial delivery must not read as a chemical anomaly,
+    // and a mis-keyed bucket must not poison the baselines either. Instead,
+    // a bulk container OUTSIDE the allowed groups is its own finding,
+    // unconditionally: no percentile can excuse a 50lb bucket on a
+    // residential pool.
+    if (o.bulkCents > 0 && !bulkAllowed.has(o.peerKey)) {
+      findings.push({
+        monthId: o.monthId,
+        customerId: o.customerId,
+        rule: "bulk_item_misbill",
+        severity: "high",
+        sourceKey: o.visitKey,
+        cents: o.bulkCents,
+        message:
+          `${o.serviceDate}: ${o.bulkItems.join(", ")} ($${(o.bulkCents / 100).toFixed(2)}) on a ` +
+          `${o.peerKey} pool — bulk containers are commercial deliveries; was this meant to be the single-unit item?`,
+      })
+    }
     if (o.chemCents <= 0) continue
     const bar = thresholds.get(o.peerKey)
     if (bar === undefined || o.chemCents <= bar) continue
