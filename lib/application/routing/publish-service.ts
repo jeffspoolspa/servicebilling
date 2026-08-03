@@ -74,7 +74,7 @@ export class PublishService {
       return { scenarioId, dryRun: opts.dryRun, committed: false, results: [], invalidated: restored.invalidated, refreshed }
     }
 
-    // changes -> ACL -> ION writes. The cadence decision reads ION's OWN form.
+    // changes -> ACL -> ION writes. Pure translation of OUR just-refreshed rows.
     const ids = await this.tasks.identities(schedules.map((s) => s.quotaId))
     const writes = []
     const refusals: LandedChange[] = []
@@ -84,8 +84,7 @@ export class PublishService {
         refusals.push({ quotaId: s.quotaId, accepted: false, detail: "no ION identity for this task" })
         continue
       }
-      const form = await this.ion.readTask(id.ionTaskId, id.ionCustId)
-      const t = this.acl.toIonWrite(s, id, form)
+      const t = this.acl.toIonWrite(s, id)
       if ("refusal" in t) refusals.push({ quotaId: t.refusal.quotaId, accepted: false, detail: t.refusal.reason })
       else writes.push(t.write)
     }
@@ -103,9 +102,8 @@ export class PublishService {
       }
     }
 
-    // ION object: POST + read-back proof. Preflight already happened above —
-    // the form read the ACL translated from IS the rehearsal (fresh cache,
-    // fresh form, drift refused) — so no redundant re-read pass here.
+    // ION object: merge, POST, read-back proof. One form read per task, which
+    // ION requires anyway to POST a complete form.
     const results = this.acl.fromIonResults(await this.ion.applyWeeks(writes, { dryRun: opts.dryRun }))
 
     // the ones that landed: cache, then events

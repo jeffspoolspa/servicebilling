@@ -39,6 +39,11 @@ interface TaskRow {
 }
 
 type IonDays = Record<string, { dow: number; techId: string; techName: string }[]>
+/** ION's own answer for what a task IS — the field our cadence must follow. */
+type IonMeta = Record<string, { serviceRepeat: string; serviceRepeatText: string; startsOn: string }>
+
+/** ServiceRepeat values that render a day picker (Daily / Weekly). */
+const PICKER_REPEATS = ["1", "2"]
 
 export class TaskCacheRefresher {
   constructor(
@@ -67,11 +72,17 @@ export class TaskCacheRefresher {
   /**
    * Bring the stale ones in line with ION and stamp them verified.
    *
-   * Only WEEKLY tasks can have their days reconciled: a non-weekly task renders
-   * no day picker, so ION reports no days for it and treating that as truth
-   * would delete real slots (it nearly cost us thirty customers' schedules).
-   * Those are reported as skipped rather than quietly stamped, because a stamp
-   * we did not earn is worse than no stamp.
+   * CADENCE COMES FROM ION, NOT FROM WHAT WE ALREADY BELIEVE. Reading only the
+   * tasks we think are weekly is how a task ION had switched to Weekly stayed
+   * biweekly in our cache forever, and a write down the wrong path silently did
+   * nothing. Every stale task is read; ION's ServiceRepeat decides what its
+   * answer means.
+   *
+   * Only a task ION renders a day picker for can have its days reconciled: a
+   * non-weekly task reports no days, and treating that as truth would delete
+   * real slots (it nearly cost us thirty customers' schedules). Those are
+   * reported as skipped rather than quietly stamped — a stamp we did not earn
+   * is worse than no stamp.
    */
   async refresh(taskIds: readonly string[], maxAgeMinutes = 60): Promise<RefreshReport> {
     const verifiedAt = new Date().toISOString()
@@ -84,18 +95,13 @@ export class TaskCacheRefresher {
         skipped.push({ taskId: t.id, reason: "no ion_task_id" })
         return false
       }
-      if (t.frequency && !["weekly", "multi_week", "daily"].includes(t.frequency)) {
-        // Non-weekly: ION shows no day picker, so its days cannot be read back.
-        skipped.push({ taskId: t.id, reason: `${t.frequency} — ION exposes no day picker to read` })
-        return false
-      }
       return true
     })
     if (readable.length === 0) {
       return { alreadyFresh, read: 0, slotsChanged: 0, skipped, verifiedAt }
     }
 
-    const res = await this.windmill.run<{ days: IonDays; failed: Record<string, string> }>(
+    const res = await this.windmill.run<{ days: IonDays; meta: IonMeta; failed: Record<string, string> }>(
       this.readScript,
       { ionTaskIds: readable.map((t) => t.ion_task_id!) },
     )
@@ -131,8 +137,25 @@ export class TaskCacheRefresher {
     const verified: string[] = []
     for (const task of readable) {
       const ionDays = res.days?.[task.ion_task_id!]
-      if (!ionDays) {
+      const meta = res.meta?.[task.ion_task_id!]
+      if (!ionDays || !meta) {
         skipped.push({ taskId: task.id, reason: res.failed?.[task.ion_task_id!] ?? "not returned" })
+        continue
+      }
+
+      // ION's ServiceRepeat is the cadence, whatever we believed walking in.
+      const cachedWeekly = task.frequency !== null && ["weekly", "multi_week", "daily"].includes(task.frequency)
+      const ionWeekly = PICKER_REPEATS.includes(meta.serviceRepeat)
+      if (!ionWeekly) {
+        // No picker: its day and parity live in StartsOn, which we cannot read
+        // back into slots. Unverifiable — but if we thought it WAS weekly, that
+        // disagreement is the dangerous one and must not stay silent.
+        skipped.push({
+          taskId: task.id,
+          reason: cachedWeekly
+            ? `cache says ${task.frequency} but ION says ${meta.serviceRepeatText} — cadence disagreement, days unverifiable`
+            : `${meta.serviceRepeatText} — ION exposes no day picker to read`,
+        })
         continue
       }
       // An empty day list from a task that SHOULD have a picker means the form
@@ -141,6 +164,9 @@ export class TaskCacheRefresher {
         skipped.push({ taskId: task.id, reason: "ION returned no days for a weekly task — failed read" })
         continue
       }
+      // ION says weekly and our cache did not: correct the slots' cadence so the
+      // task's frequency rollup follows (trigger on task_schedules).
+      const fixCadence = !cachedWeekly
 
       const want = new Map(ionDays.map((d) => [d.dow, ourTechByIon.get(d.techId) ?? null]))
       const mine = slots.filter((s) => s.task_id === task.id)
@@ -149,8 +175,12 @@ export class TaskCacheRefresher {
         if (s.day_of_week !== null && want.has(s.day_of_week)) {
           seen.add(s.day_of_week)
           const tech = want.get(s.day_of_week)!
-          if (!s.active || (tech && s.tech_employee_id !== tech)) {
-            await this.update(s.id, { active: true, ...(tech ? { tech_employee_id: tech } : {}) })
+          if (!s.active || fixCadence || (tech && s.tech_employee_id !== tech)) {
+            await this.update(s.id, {
+              active: true,
+              ...(fixCadence ? { frequency: "weekly" } : {}),
+              ...(tech ? { tech_employee_id: tech } : {}),
+            })
             slotsChanged++
           }
         } else if (s.active) {
@@ -225,6 +255,7 @@ export class TaskCacheRefresher {
         day_of_week: weekday,
         tech_employee_id: techId,
         active: true,
+        frequency: "weekly", // only a day-picker task reaches here
         external_source: "ion_verify",
       })
       .select("id")

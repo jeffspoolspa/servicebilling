@@ -12,9 +12,13 @@
  *    never an empty schedule (acting on one nearly wiped 30 schedules)
  *  - a write is proven by READ-BACK, never by its status code (ION returns
  *    200 and silently drops what it dislikes)
- *  - one form read per task: the read the ACL translates from also serves the
- *    drift preflight (in the ACL) and the merge here — never re-read a form
- *    we already hold from seconds ago
+ *  - a write is a COMPLETE form: read the current one, merge our changes over
+ *    it, POST the whole thing. That one read is the merge base and pays for
+ *    the layer's own assertions; nothing else re-reads it
+ *
+ * What ION does NOT decide here is WHICH write to send. Publishing refreshes
+ * the cache first, so the cache is the authority on cadence and on who sits
+ * where; this layer only refuses to send a payload the live form cannot take.
  */
 
 import { parse } from "node-html-parser"
@@ -119,11 +123,12 @@ export interface WeekWrite {
   key: string
   ionTaskId: string
   ionCustId: string
+  /** The ACL decided this from our refreshed cache; ION's form must agree. */
+  weekly: boolean
   /** Form fields to change (day1..day7 for weekly, AssignedTo for non-weekly). */
   changes: Record<string, string>
-  /** The form this write was translated FROM. One read serves the ACL's cadence
-   *  decision, the drift preflight, and the merge — never re-read what we hold. */
-  form: IonTaskForm
+  /** weekday -> ION employee id our cache holds, for the free race guard. */
+  believedDays: Record<string, string>
 }
 
 export interface VerifiedWrite {
@@ -144,22 +149,45 @@ export class IonTasks extends Ion {
   }
 
   /**
-   * Apply complete-week writes, one session for the batch. The form each write
-   * carries was already read for translation (and drift was refused there) —
-   * this method spends its HTTP on the two things only it can do: the POST,
-   * and the READ-BACK that proves it. The status code proves nothing.
+   * Apply writes, one session for the batch. ION only accepts a COMPLETE form,
+   * so each write reads the current one as its merge base — that single read
+   * also pays, for free, for two assertions this layer owns: that the form can
+   * accept the payload the ACL built, and that nobody moved the task between
+   * our refresh and now. Then POST, then READ BACK. A status code proves nothing.
    */
   async applyWeeks(writes: WeekWrite[], opts: { dryRun: boolean }): Promise<VerifiedWrite[]> {
     const out: VerifiedWrite[] = []
     for (const w of writes) {
       try {
+        const form = await this.readTask(w.ionTaskId, w.ionCustId)
+
+        // The ACL chose the write path from our cache; the form must agree.
+        const hasPicker = form.serviceRepeat === "2" || form.serviceRepeat === "1"
+        if (hasPicker !== w.weekly) {
+          out.push({
+            key: w.key,
+            accepted: false,
+            detail: `cache says ${w.weekly ? "weekly" : "non-weekly"} but ION renders ${form.serviceRepeatText || "?"} — refresh is wrong about this task`,
+          })
+          continue
+        }
+        if (w.weekly) {
+          const drift = Object.entries({ ...w.believedDays, ...form.days })
+            .filter(([d]) => (w.believedDays[d] ?? null) !== (form.days[d] ?? null))
+            .map(([d]) => `dow${d} ION=${form.days[d] ?? "none"} cache=${w.believedDays[d] ?? "none"}`)
+          if (drift.length > 0) {
+            out.push({ key: w.key, accepted: false, detail: `moved in ION since our refresh: ${drift.join("; ")}` })
+            continue
+          }
+        }
+
         if (opts.dryRun) {
-          const changed = Object.keys(w.changes).filter((k) => w.form.fields[k] !== w.changes[k])
-          out.push({ key: w.key, accepted: true, detail: `dry run: ${changed.length} field(s) would change`, daysAfter: w.form.days })
+          const changed = Object.keys(w.changes).filter((k) => form.fields[k] !== w.changes[k])
+          out.push({ key: w.key, accepted: true, detail: `dry run: ${changed.length} field(s) would change`, daysAfter: form.days })
           continue
         }
 
-        const payload = { ...w.form.fields, ...w.changes }
+        const payload = { ...form.fields, ...w.changes }
         if (!payload["LinkUsed"]) payload["LinkUsed"] = "Save"
         if (!payload["Submit"]) payload["Submit"] = "Submit"
         await this.post(`/tasks/addTask.cfm?EventID=${w.ionTaskId}&isIFrame=1`, payload)

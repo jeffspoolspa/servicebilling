@@ -1,30 +1,36 @@
 /**
  * The ION anti-corruption layer (ADR 012). Sole purpose: translate between
- * ION's vocabulary and ours, both directions. Application services pass data
- * THROUGH this; neither the domain nor the Ion object ever learns the other's
- * words. Every mapping quirk lives here and nowhere else:
+ * ION's vocabulary and ours, both directions — from OUR rows alone, no HTTP.
+ * The cache is the authority here because refresh is a required precondition
+ * of every publish. Every mapping quirk lives here and nowhere else:
  *
- *  - day1..day7 are Sun..Sat weekday selects; blank = not serviced
- *  - the write path is decided by ION's OWN ServiceRepeat, never our cached
- *    frequency (the Jordan Tom lesson: the cache was stale on exactly that
- *    field and a wrong-path write silently did nothing)
- *  - a non-weekly task has no day picker; its day+parity live in StartsOn,
- *    so a non-weekly DAY move is not expressible as a week write at all
+ *  - day1..day7 are Sun..Sat weekday selects; blank = not serviced; a WEEKLY
+ *    write must state the COMPLETE week — a day left out is a day ION keeps,
+ *    which for a move means a double visit
+ *  - weekly-class tasks (weekly / multi_week / daily) have a day picker;
+ *    biweekly and monthly do not — their day+parity live in StartsOn, so a
+ *    non-weekly DAY move is not expressible as a week write at all
+ *  - our employees.id -> ION employee id is the only tech vocabulary ION takes
  */
 
 import type { TaskSchedule } from "@/lib/domain/routing"
-import type { IonTaskForm, WeekWrite, VerifiedWrite } from "./ion"
+import type { WeekWrite, VerifiedWrite } from "./ion"
 
 const DAY_FIELD = ["day1", "day2", "day3", "day4", "day5", "day6", "day7"] as const
+
+/** Cached frequencies that mean "ION renders a day picker for this task". */
+const WEEKLY_CLASS = ["weekly", "multi_week", "daily"]
 
 /** Identity our side must supply: who is who, in both vocabularies. */
 export interface TaskIdentity {
   quotaId: string
   ionTaskId: string
   ionCustId: string
+  /** Our cached (refresh-verified) frequency rollup for this task. */
+  frequency: string | null
   /** our employees.id -> ION employee id */
   ionTechOf: (techId: string) => string | null
-  /** weekday -> ION employee id we currently believe (for the preserve check) */
+  /** weekday -> ION employee id we currently believe (guards the write). */
   believedDays: Record<string, string>
 }
 
@@ -40,12 +46,8 @@ export interface LandedChange {
 }
 
 export class IonTaskAcl {
-  /**
-   * OUR complete week -> an ION write. The cadence decision uses the FORM the
-   * Ion object read (ION's own ServiceRepeat), which the caller passes in —
-   * never a cached frequency column.
-   */
-  toIonWrite(schedule: TaskSchedule, id: TaskIdentity, form: IonTaskForm): Translated {
+  /** OUR complete week -> the exact form data ION wants. Rows in, fields out. */
+  toIonWrite(schedule: TaskSchedule, id: TaskIdentity): Translated {
     const named: { weekday: number; ionTech: string }[] = []
     for (const stop of schedule.stops) {
       const ionTech = id.ionTechOf(stop.techId)
@@ -55,46 +57,36 @@ export class IonTaskAcl {
       named.push({ weekday: stop.weekday, ionTech })
     }
 
-    const isWeekly = form.serviceRepeat === "2" || form.serviceRepeat === "1" // Weekly / Daily
+    if (id.frequency === null) {
+      return { refusal: { quotaId: schedule.quotaId, reason: "no cached frequency — refresh could not verify this task" } }
+    }
+
     const changes: Record<string, string> = {}
 
-    if (isWeekly) {
-      // The plan was drawn on our cache. If ION's day picker disagrees with the
-      // cache on ANY day, the plan is stale — refuse; a fresh refresh makes this
-      // a true race, not routine.
-      const drift: string[] = []
-      for (let d = 0; d < 7; d++) {
-        const believed = id.believedDays[String(d)] ?? null
-        const actual = form.days[String(d)] ?? null
-        if (believed !== actual) drift.push(`dow${d} ION=${actual ?? "none"} cache=${believed ?? "none"}`)
-      }
-      if (drift.length > 0) {
-        return { refusal: { quotaId: schedule.quotaId, reason: `cache disagrees with ION: ${drift.join("; ")}` } }
-      }
-      // Complete week: every day stated, blank where not served — a day left
-      // out is a day ION keeps, which for a move means a double visit.
+    if (WEEKLY_CLASS.includes(id.frequency)) {
+      // Complete week: every day stated, blank where not served.
       for (const f of DAY_FIELD) changes[f] = ""
       for (const n of named) changes[DAY_FIELD[n.weekday]] = n.ionTech
-      return { write: { key: schedule.quotaId, ionTaskId: id.ionTaskId, ionCustId: id.ionCustId, changes, form } }
+      return { write: { key: schedule.quotaId, ionTaskId: id.ionTaskId, ionCustId: id.ionCustId, weekly: true, changes, believedDays: id.believedDays } }
     }
 
     // Non-weekly: no day picker. Tech-only is AssignedTo; a DAY move needs an
     // anchor-preserving StartsOn (IonTasks.setStartDate) and is refused here —
     // loudly, never silently rebased (the 27-contract-dates lesson).
     if (named.length !== 1) {
-      return { refusal: { quotaId: schedule.quotaId, reason: `${form.serviceRepeatText} task with ${named.length} days cannot be expressed by one start date` } }
+      return { refusal: { quotaId: schedule.quotaId, reason: `${id.frequency} task with ${named.length} days cannot be expressed by one start date` } }
     }
-    const currentDay = Object.keys(form.days)[0] ?? Object.keys(id.believedDays)[0]
+    const currentDay = Object.keys(id.believedDays)[0]
     if (currentDay !== undefined && Number(currentDay) !== named[0].weekday) {
       return {
         refusal: {
           quotaId: schedule.quotaId,
-          reason: `${form.serviceRepeatText} day move requires an anchor-preserving StartsOn (setStartDate) — refused, not silently rebased`,
+          reason: `${id.frequency} day move requires an anchor-preserving StartsOn (setStartDate) — refused, not silently rebased`,
         },
       }
     }
     changes["AssignedTo"] = named[0].ionTech
-    return { write: { key: schedule.quotaId, ionTaskId: id.ionTaskId, ionCustId: id.ionCustId, changes, form } }
+    return { write: { key: schedule.quotaId, ionTaskId: id.ionTaskId, ionCustId: id.ionCustId, weekly: false, changes, believedDays: id.believedDays } }
   }
 
   /** ION's verified answers -> our vocabulary. */

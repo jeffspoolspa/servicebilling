@@ -37,7 +37,7 @@ export class SupabaseTaskStore implements TaskStore {
 
   async identities(quotaIds: readonly string[]): Promise<Map<string, TaskIdentity>> {
     const [{ data: tasks }, { data: slots }, { data: emps }] = await Promise.all([
-      this.reads.schema("maintenance").from("tasks").select("id, ion_task_id, customer_id").in("id", quotaIds as string[]).range(0, PAGE),
+      this.reads.schema("maintenance").from("tasks").select("id, ion_task_id, customer_id, frequency").in("id", quotaIds as string[]).range(0, PAGE),
       this.reads.schema("maintenance").from("task_schedules").select("task_id, day_of_week, tech_employee_id, active").in("task_id", quotaIds as string[]).range(0, PAGE),
       this.reads.from("employees").select("id, ion_employee_id").not("ion_employee_id", "is", null).range(0, PAGE),
     ])
@@ -60,13 +60,14 @@ export class SupabaseTaskStore implements TaskStore {
     }
 
     const out = new Map<string, TaskIdentity>()
-    for (const t of (tasks ?? []) as { id: string; ion_task_id: string | null; customer_id: number | null }[]) {
+    for (const t of (tasks ?? []) as { id: string; ion_task_id: string | null; customer_id: number | null; frequency: string | null }[]) {
       const cust = t.customer_id !== null ? ionCust.get(t.customer_id) : null
       if (!t.ion_task_id || !cust) continue
       out.set(t.id, {
         quotaId: t.id,
         ionTaskId: t.ion_task_id,
         ionCustId: cust,
+        frequency: t.frequency,
         ionTechOf: (techId) => ionTech.get(techId) ?? null,
         believedDays: believed.get(t.id) ?? {},
       })
