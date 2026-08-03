@@ -35,7 +35,18 @@ export class BillingRuleError extends Error {}
 
 /* -------------------------------- variance -------------------------------- */
 
-export type VarianceKind = "remove_consumable" | "qty_correction" | "discount" | "missed"
+export type VarianceKind =
+  | "remove_consumable"
+  | "qty_correction"
+  | "discount"
+  | "missed"
+  /**
+   * A flat rate billed in full for a month only partly served. The ledger
+   * states the contract; this states the adjustment — separately, so it can
+   * be seen, explained and totalled, rather than disappearing into a smaller
+   * number nobody can trace back.
+   */
+  | "proration"
 
 export interface Variance {
   readonly sourceId: string | null

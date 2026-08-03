@@ -104,10 +104,13 @@ export function priceMonth(args: {
 
   /* ------------------------------- the labour ------------------------------ */
 
+  // RULED (Carter, 2026-08-03): a task with no price is QUALITY CONTROL —
+  // the labour genuinely is $0. That is why isBillable does not special-case
+  // it: a QC visit bills, at nothing, and its chemicals still bill.
+  const laborRateCents = terms.amountCents ?? 0
+
   if (terms.labor === "per_visit") {
-    if (terms.amountCents === null) {
-      for (const v of billableVisits) refused.push({ source: v, reason: "per-visit task has no rate — the catalog service type must price it" })
-    } else {
+    {
       for (const v of billableVisits) {
         const charged = chargedVisit.has(v.sourceId)
         items.push({
@@ -118,8 +121,8 @@ export function priceMonth(args: {
           serviceDate: v.serviceDate,
           itemName: v.itemName,
           qty: 1,
-          unitPriceCents: charged ? terms.amountCents : 0,
-          amountCents: charged ? money(terms.amountCents) : 0,
+          unitPriceCents: charged ? laborRateCents : 0,
+          amountCents: charged ? money(laborRateCents) : 0,
           claimedAt: at,
         })
       }
@@ -130,22 +133,13 @@ export function priceMonth(args: {
     // consume a visit: a visit claimed for a flat charge could not also be
     // claimed for its own labour, and I-B1 would then hide a real conflict.
     //
-    // ponytail: a flat-rate month with only PART of the month served — a
-    // start or a cancellation mid-month — is refused rather than guessed.
-    // Full amount, prorated, or per-visit for that month is a business
-    // ruling nobody has made, and inventing one here would quietly bill a
-    // real customer the wrong amount.
-    const partial =
-      terms.startsOn > `${month.slice(0, 7)}-01` || (terms.endsOn !== null && terms.endsOn < endOfMonth(month))
+    // RULED (Carter, 2026-08-03): a flat rate bills the FULL month even when
+    // service covered only part of it. Proration is real, but it is applied
+    // to the INVOICE as a Variance — so the ledger states what the contract
+    // says, and the reduction is an explicit act with a reason attached to
+    // it, rather than arithmetic nobody can find later.
     if (billableVisits.length === 0) {
-      // Nothing delivered: no charge, and no refusal — an untouched month.
-    } else if (partial) {
-      refused.push({
-        source: billableVisits[billableVisits.length - 1],
-        reason: `flat-rate task served only part of ${month.slice(0, 7)} (starts ${terms.startsOn}, ends ${terms.endsOn ?? "open"}) — full, prorated or per-visit is an unmade ruling`,
-      })
-    } else if (terms.amountCents === null) {
-      refused.push({ source: billableVisits[billableVisits.length - 1], reason: "flat-rate task has no monthly amount" })
+      // Nothing delivered: no charge — an untouched month.
     } else {
       const anchor = billableVisits[billableVisits.length - 1]
       // The visits are CLAIMED at zero: the flat charge is what bills, but
@@ -173,8 +167,8 @@ export function priceMonth(args: {
         serviceDate: anchor.serviceDate,
         itemName: `${anchor.itemName} — monthly`,
         qty: 1,
-        unitPriceCents: terms.amountCents,
-        amountCents: money(terms.amountCents),
+        unitPriceCents: laborRateCents,
+        amountCents: money(laborRateCents),
         claimedAt: at,
       })
     }
@@ -216,10 +210,4 @@ export function priceMonth(args: {
     }
   }
   return { items, refused }
-}
-
-function endOfMonth(month: string): string {
-  const [y, m] = month.split("-").map(Number)
-  const last = new Date(Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 0))
-  return last.toISOString().slice(0, 10)
 }

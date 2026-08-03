@@ -294,6 +294,59 @@ check("flat rate bills the MONTH once, not each visit", () => {
   assert.strictEqual(flat.serviceDate, "2026-07-22", "dated by the last visit so the charge has a date")
 })
 
+check("a task with no price is QUALITY CONTROL — it bills at nothing", () => {
+  // Ruled 2026-08-03. The visit is still claimed and its chemicals still
+  // bill; only the labour is zero.
+  const sources = [
+    src(),
+    src({ sourceId: "u1", sourceKind: "usage", itemName: "Tabs", itemId: "IT-1", qty: 2 }),
+  ]
+  const catalog = [{ itemId: "IT-1", unitPriceCents: 500, validFrom: "2026-01-01", validTo: null }]
+  const qc = priceMonth({ month: "2026-07-01", terms: terms({ amountCents: null }), sources, catalog, at: AT })
+  assert.deepStrictEqual(qc.refused, [], "a QC task is not a failure to price")
+  assert.strictEqual(qc.items.find((i) => i.kind === "labor")!.amountCents, 0)
+  assert.strictEqual(qc.items.find((i) => i.kind === "consumable")!.amountCents, 1000, "chemicals still bill")
+})
+
+check("a flat rate bills the FULL month, however much of it was served", () => {
+  // Ruled 2026-08-03: proration is applied to the invoice as a Variance, so
+  // the ledger states the contract and the reduction is an explicit act.
+  // Evidence: THE LAKES (started 15 July) and SJC (ended 15 July) were each
+  // billed their whole monthly rate in the live ledger.
+  const started = priceMonth({
+    month: "2026-07-01",
+    terms: terms({ labor: "flat_rate", amountCents: 145000, startsOn: "2026-07-15" }),
+    sources: [src({ serviceDate: "2026-07-22" })],
+    catalog: [], at: AT,
+  })
+  assert.deepStrictEqual(started.refused, [])
+  assert.strictEqual(started.items.find((i) => i.sourceKind === "flat")!.amountCents, 145000)
+
+  const ended = priceMonth({
+    month: "2026-07-01",
+    terms: terms({ labor: "flat_rate", amountCents: 30000, endsOn: "2026-07-15" }),
+    sources: [src({ serviceDate: "2026-07-08" })],
+    catalog: [], at: AT,
+  })
+  assert.strictEqual(ended.items.find((i) => i.sourceKind === "flat")!.amountCents, 30000)
+})
+
+check("a proration is a NAMED variance, not a quietly smaller number", () => {
+  const delivered = [src()]
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item({ amountCents: 145000, unitPriceCents: 145000 }), { claimedByMonthId: null }, AT)
+  m.markReconciled(AT)
+  m.markGated([], AT)
+  m.markInvoiced(delivered, AUG, AT)
+
+  m.recordVariance(
+    { sourceId: null, kind: "proration", origin: "invoice", reason: "service began 15 July — 17 of 31 days", deltaCents: -65500, techId: null },
+    AT,
+  )
+  assert.strictEqual(m.totalCents, 79500, "the contract is stated, the adjustment is visible")
+  assert.strictEqual(m.pendingAmendments()[0].needs, "ion_log_edit")
+})
+
 check("what cannot be priced is REFUSED, never billed at zero", () => {
   // An unknown consumable: a zero here is invisible on the invoice and
   // permanent in the ledger, so it becomes a finding instead.
@@ -306,15 +359,14 @@ check("what cannot be priced is REFUSED, never billed at zero", () => {
   assert.strictEqual(unknown.items.length, 0)
   assert.match(unknown.refused[0].reason, /no catalogue price in force for item IT-9 .* as of 2026-08-02/)
 
-  // A flat-rate month served only in part — an unmade business ruling.
-  const partial = priceMonth({
+  // A consumable with no catalogue id at all cannot be priced either.
+  const noId = priceMonth({
     month: "2026-07-01",
-    terms: terms({ labor: "flat_rate", amountCents: 26000, startsOn: "2026-07-14" }),
-    sources: [src({ serviceDate: "2026-07-22" })],
+    terms: terms(),
+    sources: [src({ sourceId: "u8", sourceKind: "usage", itemName: "Loose bag", itemId: null, qty: 1 })],
     catalog: [], at: AT,
   })
-  assert.strictEqual(partial.items.length, 0)
-  assert.match(partial.refused[0].reason, /served only part of 2026-07.*unmade ruling/)
+  assert.match(noId.refused[0].reason, /no catalogue id to price by/)
 })
 
 /* ------------------------------ reconciliation ---------------------------- */
