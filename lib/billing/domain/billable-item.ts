@@ -61,11 +61,26 @@ export interface BillableItem {
 export const sourceKeyOf = (s: { sourceKind: SourceKind; sourceId: string }) => `${s.sourceKind}:${s.sourceId}`
 
 /**
- * Is this source billable? A skipped or non-serviceable visit is a real fact
- * about the pool, not an omission, and it bills nothing. A completed visit
- * bills at whatever its terms say — which is why a quality-control task
- * priced at zero needs no special case: it bills, at nothing.
+ * LABOUR is billable only when the service happened. A skipped or
+ * non-serviceable visit is a real fact about the pool, not an omission, and
+ * no labour is owed for it. A completed visit bills at whatever its terms
+ * say — which is why a quality-control task priced at zero needs no special
+ * case: it bills, at nothing.
  */
-export function isBillable(s: { visitState: BillableSource["visitState"] }): boolean {
+export function isBillable(s: { visitState: VisitState }): boolean {
   return s.visitState === "completed"
+}
+
+/**
+ * CHEMICALS follow a different rule (RULED: Carter, 2026-08-03). A tech who
+ * could not complete the service may still have dispensed chemicals, and
+ * what went into the pool was bought and used regardless of whether the
+ * visit counted as serviced. So consumables bill on every state EXCEPT
+ * `deleted` — a deleted log did not happen at all, so nothing on it did.
+ *
+ * This is the one place labour and consumables part company, and it is why
+ * the two questions are separate functions rather than one `isBillable`.
+ */
+export function chemicalsBillable(s: { visitState: VisitState }): boolean {
+  return s.visitState !== "deleted"
 }

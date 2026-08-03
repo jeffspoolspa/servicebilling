@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert"
-import { isBillable, type BillableItem, type BillableSource } from "./billable-item"
+import { chemicalsBillable, isBillable, type BillableItem, type BillableSource } from "./billable-item"
 import { BillingMonth, BillingRuleError } from "./billing-month"
 import { priceMonth, type PricingTerms } from "./pricer"
 import { reconcile, RECONCILE_TOLERANCE_CENTS } from "./reconciler"
@@ -61,11 +61,20 @@ const terms = (over: Partial<PricingTerms> = {}): PricingTerms => ({
 
 /* --------------------------------- the rules ------------------------------ */
 
-check("billability is Delivery's verdict, never re-decided here", () => {
+check("labour and chemicals part company on the same verdict", () => {
+  // Labour is owed only for service performed...
   assert.strictEqual(isBillable({ visitState: "completed" }), true)
   assert.strictEqual(isBillable({ visitState: "skipped" }), false)
   assert.strictEqual(isBillable({ visitState: "non_serviceable" }), false)
-  assert.strictEqual(isBillable({ visitState: "scheduled" }), false)
+  assert.strictEqual(isBillable({ visitState: "deleted" }), false)
+
+  // ...but chemicals were bought and dispensed regardless. A gate-locked
+  // visit still consumed what went in the pool; only a DELETED log did not
+  // happen at all. [ruled 2026-08-03]
+  assert.strictEqual(chemicalsBillable({ visitState: "completed" }), true)
+  assert.strictEqual(chemicalsBillable({ visitState: "non_serviceable" }), true)
+  assert.strictEqual(chemicalsBillable({ visitState: "skipped" }), true)
+  assert.strictEqual(chemicalsBillable({ visitState: "deleted" }), false)
 })
 
 check("a month is the first of a month, or it is not a month", () => {
@@ -305,17 +314,22 @@ check("a deleted visit bills nothing — its chemicals included", () => {
   ]
   const catalog = [{ itemId: "IT-1", unitPriceCents: 1299, validFrom: "2026-01-01", validTo: null }]
   const { items } = priceMonth({ month: "2026-07-01", terms: terms(), sources, catalog, at: AT })
-  assert.strictEqual(items.filter((i) => i.kind === "consumable").length, 1, "only the live visit's chemical")
+  assert.strictEqual(items.filter((i) => i.kind === "consumable").length, 1, "the deleted log's chemical is gone")
   assert.strictEqual(items.reduce((s2, i) => s2 + i.amountCents, 0), 6500 + 1299)
 
-  // The same is true of a skipped visit's chemicals.
-  const skipped = priceMonth({
+  // A gate-locked visit bills NO labour but DOES bill its chemicals —
+  // WATERS AT GATEWAY, 17 July, $330.39 of shock and cal hypo.
+  const gateLocked = priceMonth({
     month: "2026-07-01",
     terms: terms(),
-    sources: [src({ sourceId: "u2", sourceKind: "usage", itemName: "Acid", itemId: "IT-1", qty: 1, visitState: "skipped" })],
+    sources: [
+      src({ sourceId: "vG", visitState: "non_serviceable" }),
+      src({ sourceId: "uG", sourceKind: "usage", itemName: "Acid", itemId: "IT-1", qty: 1, visitState: "non_serviceable" }),
+    ],
     catalog, at: AT,
   })
-  assert.strictEqual(skipped.items.length, 0)
+  assert.strictEqual(gateLocked.items.filter((i) => i.kind === "labor").length, 0, "no service, no labour")
+  assert.strictEqual(gateLocked.items.filter((i) => i.kind === "consumable")[0].amountCents, 1299, "but the chemical was used")
 })
 
 check("a task with no price is QUALITY CONTROL — it bills at nothing", () => {

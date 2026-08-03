@@ -15,7 +15,7 @@
  */
 
 import type { BillableItem, BillableSource } from "./billable-item"
-import { isBillable } from "./billable-item"
+import { chemicalsBillable, isBillable } from "./billable-item"
 
 export class PricingRefused extends Error {}
 
@@ -182,12 +182,10 @@ export function priceMonth(args: {
   // [evidence: the July shadow run — `listed` customers are billed for
   // chemicals in the live ledger. The axis drives InvoiceType, not billability.]
   {
-    // Chemicals inherit the visit's verdict: a bag of chlorine recorded
-    // against a visit that was skipped, non-serviceable or DELETED did not
-    // happen either. Filtering visits alone let a deleted July visit keep
-    // billing its four consumables — the last $24.93 the shadow could not
-    // explain.
-    for (const u of mine.filter((s) => s.sourceKind === "usage" && isBillable(s))) {
+    // Chemicals bill on every state except DELETED — see chemicalsBillable.
+    // A gate-locked visit still consumed what the tech put in the pool; a
+    // deleted log did not happen at all.
+    for (const u of mine.filter((s) => s.sourceKind === "usage" && chemicalsBillable(s))) {
       // Priced as of the RUN, not the service date — see CatalogPrice.
       const unit = u.unitPriceCents ?? (u.itemId ? priceOn(catalog, u.itemId, at.slice(0, 10)) : undefined)
       if (unit === undefined) {
