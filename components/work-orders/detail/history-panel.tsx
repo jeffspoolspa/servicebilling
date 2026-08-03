@@ -1,4 +1,4 @@
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
+import { HistoryTimeline, type HistoryRow } from "@/components/ui/history-timeline"
 import { formatCurrency } from "@/lib/utils/format"
 import type {
   InvoiceHistoryEvent,
@@ -20,27 +20,8 @@ import type {
  * exist for this invoice (transitional, until the charge path emits live).
  */
 
-type Row = {
-  key: string
-  at: string
-  /** A stage boundary (pre-processing / processing started or finished).
-   * Rendered as a coloured rule, not an event row — it BRACKETS the events a
-   * workflow produced so you can see which run did what, without the boundary
-   * itself pretending to be something that happened to the invoice. */
-  boundary?: { label: string; edge: "start" | "end"; stage: "preprocess" | "charge" }
-  /** stream sequence — the tiebreaker when several events share a timestamp.
-   * Enrichment, the charge enqueue it triggers, and the claim that follows all
-   * land in the same second; sorting on `at` alone rendered them out of order. */
-  seq?: number
-  action: React.ReactNode | null
-  tag: string | null
-  note?: string | null
-  changes?: [string, { from: string | null; to: string | null }][]
-  /** Gate rules and their outcomes AT THE TIME OF THE DECISION. Recorded in
-   * the event, not re-derived — so refactoring billing.invoice_ready() cannot
-   * rewrite what a past invoice was actually judged against. */
-  checks?: [string, boolean][]
-}
+/** Row shape now lives with the shared renderer; the vocabulary stays here. */
+type Row = HistoryRow
 
 const qboTxnUrl = (kind: string, id: string) =>
   `https://app.qbo.intuit.com/app/${kind}?txnId=${id}`
@@ -343,124 +324,5 @@ export function HistoryPanel({
     a.at !== b.at ? (a.at < b.at ? 1 : -1) : (b.seq ?? 0) - (a.seq ?? 0),
   )
 
-  if (rows.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>History</CardTitle>
-        </CardHeader>
-        <CardBody className="text-ink-mute text-sm">
-          No activity yet — nothing has happened to this invoice.
-        </CardBody>
-      </Card>
-    )
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>History</CardTitle>
-        <span className="ml-auto text-[11px] text-ink-mute">
-          {rows.filter((r) => !r.boundary).length} event
-          {rows.filter((r) => !r.boundary).length === 1 ? "" : "s"}
-        </span>
-      </CardHeader>
-      <CardBody className="py-1">
-        <ol>
-          {rows.map((r) =>
-            r.boundary ? (
-              <li key={r.key} className="flex items-center gap-2 py-1.5">
-                <span
-                  className={
-                    "h-px flex-1 " +
-                    (r.boundary.stage === "charge" ? "bg-cyan/30" : "bg-grass/30")
-                  }
-                />
-                <span
-                  className={
-                    "shrink-0 text-[10px] uppercase tracking-[0.1em] " +
-                    (r.boundary.stage === "charge" ? "text-cyan/70" : "text-grass/70")
-                  }
-                >
-                  {r.boundary.label}
-                  {r.boundary.edge === "end" ? " done" : ""}
-                </span>
-                <span
-                  className={
-                    "h-px w-4 " +
-                    (r.boundary.stage === "charge" ? "bg-cyan/30" : "bg-grass/30")
-                  }
-                />
-              </li>
-            ) : (
-            <li
-              key={r.key}
-              className="py-2.5 border-b border-line-soft/60 last:border-b-0"
-            >
-              <div className="flex items-start gap-2">
-                <span className="flex-1 min-w-0 text-[13px] text-ink leading-snug">
-                  {r.action}
-                </span>
-                {r.tag && (
-                  <span className="shrink-0 text-[10px] text-ink-mute border border-line-soft rounded-full px-1.5 py-px">
-                    {r.tag}
-                  </span>
-                )}
-                <span
-                  className="shrink-0 text-[11px] text-ink-mute whitespace-nowrap"
-                  title={new Date(r.at).toLocaleString()}
-                >
-                  {new Date(r.at).toLocaleString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </span>
-              </div>
-              {r.note && (
-                <div className="mt-0.5 text-[11px] text-ink-mute">{r.note}</div>
-              )}
-              {r.checks && r.checks.length > 0 && (
-                <details className="mt-1">
-                  <summary className="text-[11px] text-ink-mute cursor-pointer select-none hover:text-ink-dim">
-                    rules applied
-                  </summary>
-                  <ul className="mt-1 space-y-0.5 pl-4 list-none">
-                    {r.checks.map(([rule, ok]) => (
-                      <li key={rule} className="text-[11px]">
-                        <span className={ok ? "text-grass" : "text-coral"}>
-                          {ok ? "\u2713" : "\u2717"}
-                        </span>{" "}
-                        <span className="text-ink-dim">{rule.replace(/_/g, " ")}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-              {r.changes && r.changes.length > 0 && (
-                <details className="mt-1">
-                  <summary className="text-[11px] text-ink-mute cursor-pointer select-none hover:text-ink-dim">
-                    {r.changes.length} change{r.changes.length === 1 ? "" : "s"}
-                  </summary>
-                  <ul className="mt-1 space-y-0.5 pl-4 list-disc marker:text-ink-mute">
-                    {r.changes.map(([field, c]) => (
-                      <li key={field} className="text-[11px] text-ink-dim">
-                        <span className="text-ink-mute">{field.replace(/_/g, " ")}:</span>{" "}
-                        <span className="line-through opacity-60">
-                          {c.from ?? "—"}
-                        </span>{" "}
-                        → <span className="text-ink">{c.to ?? "—"}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-            </li>
-            ),
-          )}
-        </ol>
-      </CardBody>
-    </Card>
-  )
+  return <HistoryTimeline rows={rows} title="History" emptyText="No activity yet — nothing has happened to this invoice." />
 }
