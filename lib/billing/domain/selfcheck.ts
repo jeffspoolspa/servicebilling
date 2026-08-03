@@ -8,6 +8,8 @@ import assert from "node:assert"
 import { isBillable, type BillableItem, type BillableSource } from "./billable-item"
 import { BillingMonth, BillingRuleError } from "./billing-month"
 import { priceMonth, type PricingTerms } from "./pricer"
+import { reconcile, RECONCILE_TOLERANCE_CENTS } from "./reconciler"
+import { gate, type GateFacts } from "./gate"
 
 let n = 0
 const check = (_name: string, fn: () => void) => {
@@ -265,6 +267,89 @@ check("what cannot be priced is REFUSED, never billed at zero", () => {
   })
   assert.strictEqual(partial.items.length, 0)
   assert.match(partial.refused[0].reason, /served only part of 2026-07.*unmade ruling/)
+})
+
+/* ------------------------------ reconciliation ---------------------------- */
+
+const reconcilable = () => {
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item(), { claimedByMonthId: null }, AT)                                  // t1: 6500
+  m.claim(item({ sourceId: "v2", taskId: "t2", serviceDate: "2026-07-09" }), { claimedByMonthId: null }, AT)
+  return m
+}
+
+check("reconciliation is per TASK, so our grouping cannot affect the check", () => {
+  const m = reconcilable()
+  const r = reconcile(m, [{ taskId: "t1", totalCents: 6500 }, { taskId: "t2", totalCents: 6500 }])
+  assert.strictEqual(r.agrees, true)
+  assert.deepStrictEqual(r.findings, [])
+})
+
+check("rounding between two systems is not an error; a missed visit is", () => {
+  const m = reconcilable()
+  const close = reconcile(m, [{ taskId: "t1", totalCents: 6500 - RECONCILE_TOLERANCE_CENTS }, { taskId: "t2", totalCents: 6500 }])
+  assert.strictEqual(close.agrees, true, "inside tolerance — not worth a person")
+
+  const off = reconcile(m, [{ taskId: "t1", totalCents: 5000 }, { taskId: "t2", totalCents: 6500 }])
+  assert.strictEqual(off.findings[0].rule, "task_total_mismatch")
+  assert.strictEqual(off.findings[0].cents, 1500)
+})
+
+check("the three shapes of disagreement are named, not merged", () => {
+  const m = reconcilable()
+  // They billed a task we claimed nothing for — a delivered visit unbilled.
+  const missedByUs = reconcile(m, [{ taskId: "t1", totalCents: 6500 }, { taskId: "t2", totalCents: 6500 }, { taskId: "t3", totalCents: 4000 }])
+  assert.strictEqual(missedByUs.findings[0].rule, "task_not_claimed_by_us")
+  assert.match(missedByUs.findings[0].message, /a delivered visit we never billed/)
+
+  // We claimed a task they have no invoice for.
+  const missedByThem = reconcile(m, [{ taskId: "t1", totalCents: 6500 }])
+  assert.strictEqual(missedByThem.findings[0].rule, "task_not_billed_by_system")
+})
+
+/* ---------------------------------- the gate ------------------------------ */
+
+const facts = (over: Partial<GateFacts> = {}): GateFacts => ({
+  invoiceVoided: false,
+  onHold: false,
+  enriched: true,
+  memo: "July pool maintenance",
+  qboClass: "Maintenance",
+  paymentRoute: "credit_card",
+  systemSubtotalCents: 6500,
+  undecidedCredits: [],
+  reconciled: true,
+  ...over,
+})
+
+check("the gate names every criterion, and says WHY it failed", () => {
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item(), { claimedByMonthId: null }, AT)
+
+  const ok = gate(m, facts())
+  assert.strictEqual(ok.cleared, true)
+  assert.strictEqual(ok.criteria.length, 10, "all ten are reported, not just failures")
+
+  const held = gate(m, facts({ memo: null, paymentRoute: null }))
+  assert.deepStrictEqual(held.heldFor, ["memo_present", "route_resolved"])
+  assert.match(held.criteria.find((c) => c.name === "route_resolved")!.detail!, /we do not know how this customer pays/)
+})
+
+check("the buried SQL rules become sentences a person can read", () => {
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item(), { claimedByMonthId: null }, AT)
+
+  const credits = gate(m, facts({ undecidedCredits: [{ creditId: "P-9", unappliedCents: 12000 }] }))
+  assert.deepStrictEqual(credits.heldFor, ["credits_settled"])
+  assert.match(credits.criteria.find((c) => c.name === "credits_settled")!.detail!, /how a customer pays twice/)
+
+  // Our total INCLUDES variances, so the document must match the real bill.
+  const drift = gate(m, facts({ systemSubtotalCents: 9900 }))
+  assert.deepStrictEqual(drift.heldFor, ["subtotal_matches"])
+  assert.match(drift.criteria.find((c) => c.name === "subtotal_matches")!.detail!, /we bill 65.00 and the document says 99.00/)
+
+  // An unreconciled month never reaches a customer.
+  assert.deepStrictEqual(gate(m, facts({ reconciled: false })).heldFor, ["reconciled"])
 })
 
 console.log(`billing domain selfcheck: ${n} checks passed`)

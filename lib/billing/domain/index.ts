@@ -24,4 +24,6 @@
 export * from "./billable-item"
 export * from "./billing-month"
 export * from "./pricer"
+export * from "./reconciler"
+export * from "./gate"
 export * from "./ports"
