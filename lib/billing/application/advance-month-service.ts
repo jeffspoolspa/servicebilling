@@ -68,15 +68,33 @@ export class AdvanceMonthService {
         ])
         let claimed = 0
         const refusals: string[] = []
+        const priced = new Set<string>()
         for (const t of termsList) {
-          const priced = priceMonth({ month: month.month, terms: t, sources, catalog, at })
-          for (const r of priced.refused) refusals.push(r.reason)
-          for (const item of priced.items) {
+          const out = priceMonth({ month: month.month, terms: t, sources, catalog, at })
+          for (const r of out.refused) refusals.push(r.reason)
+          for (const item of out.items) {
             month.claim(item, { claimedByMonthId: null }, at)
+            priced.add(`${item.sourceKind}:${item.sourceId}`)
             claimed++
           }
         }
-        detail = `claimed ${claimed} item(s)` + (refusals.length ? `; ${refusals.length} refused: ${refusals[0]}` : "")
+
+        // ACCRUAL IS A COMPLETE STATEMENT OF THE MONTH, not an append.
+        // A re-ingest gives a re-read log a NEW source id, so an item whose
+        // source is no longer delivered must be released or the month grows
+        // by the same chemicals every time it heals (seen live: Abel Kay
+        // climbed $192.99 -> $247.98 -> $302.97, +$54.99 a pass).
+        let released = 0
+        for (const held of month.billableItems) {
+          const key = `${held.sourceKind}:${held.sourceId}`
+          if (priced.has(key)) continue
+          month.release(held.sourceKind, held.sourceId, at, "source no longer delivered — re-accrued")
+          released++
+        }
+        detail =
+          `claimed ${claimed} item(s)` +
+          (released ? `, released ${released} stale` : "") +
+          (refusals.length ? `; ${refusals.length} refused: ${refusals[0]}` : "")
         break
       }
 
@@ -106,12 +124,9 @@ export class AdvanceMonthService {
         if (opts.dryRun) {
           return { monthId, from, step, to: from, detail: `dry run: would re-read ${month.month.slice(0, 7)} from ION`, again: false }
         }
-        // Only the days this customer was actually served — we hold the
-        // sources already, so the refresh is as small as the question.
-        const days = [...new Set(sources.map((s2) => s2.serviceDate))].sort()
-        const pulled = await this.deliveryRefresher.refreshDays(days)
+        const pulled = await this.deliveryRefresher.refreshCustomerMonth(month.customerId, month.month)
         month.markDeliveryRefreshed(at)
-        detail = `re-read ${days.length} day(s), ${pulled.visitsTouched} log(s) from ION; will re-accrue and reconcile`
+        detail = `re-read ${pulled.visitsTouched} of this customer's log(s) from ION; will re-accrue and reconcile`
         break
       }
 

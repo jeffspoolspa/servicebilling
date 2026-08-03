@@ -36,7 +36,7 @@ async function main() {
       sb as unknown as ConstructorParameters<typeof IonReportInvoiceFacts>[0],
       new IonReports(mint, jobs),
     ),
-    new IonDeliveryRefresher(new IonVisits(mint, jobs)),
+    new IonDeliveryRefresher(sb as never, new IonVisits(mint, jobs)),
   )
 
   const { data } = (await (sb.schema("billing").from("billing_months") as unknown as {

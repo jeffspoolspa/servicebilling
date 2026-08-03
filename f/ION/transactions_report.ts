@@ -8,7 +8,14 @@ import * as wmill from "windmill-client"
 import { getOrRefreshSession } from "/f/ION/_lib/session_cache"
 import { parse } from "node-html-parser"
 
-// ION "All Transactions" report (TransactionType=Tasks) for a month.
+// ION "All Transactions" report for a month.
+//
+// transaction_type (default "Tasks", preserving the original behaviour):
+// "Tasks" returns only task transactions. A customer on SEPARATE CONSUMABLES
+// has their chemicals invoiced on their OWN document, which a Tasks-only pull
+// never returns — so a billing reconcile against it shows us "over" by
+// exactly the chemicals, forever. Pass "" to leave ION's own default (all
+// types) and get both.
 //
 // WHY A BROWSER (verified empirically 2026-07-01): /reports/_xls/allTransactions.cfm reads its
 // criteria from the ColdFusion SESSION, and that session state is only created/updated by a REAL
@@ -34,7 +41,7 @@ function bounds(month: string) {
 }
 const toIsoDate = (mdy: string) => { const m = String(mdy).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}` : null }
 
-export async function main(month: string, dry_run: boolean = true, load: boolean = false) {
+export async function main(month: string, dry_run: boolean = true, load: boolean = false, transaction_type: string = "Tasks") {
   const b = bounds(month)
   const ion = { loginUrl: await wmill.getVariable("f/ION/LOGIN_URL"), username: await wmill.getVariable("f/ION/USERNAME"), password: await wmill.getVariable("f/ION/PASSWORD") }
   const s: any = await getOrRefreshSession(ion)
@@ -51,10 +58,13 @@ export async function main(month: string, dry_run: boolean = true, load: boolean
       const g = (id: string) => document.getElementById(id) as any
       if (g("rptStart")) g("rptStart").value = a.start
       if (g("rptEnd")) g("rptEnd").value = a.end
-      const tt = document.querySelector('select[name="TransactionType"]') as any; if (tt) tt.value = "Tasks"
+      // Empty = leave ION's default (all types), which is what a billing
+      // reconcile needs: separate-consumables invoices are not "Tasks".
+      const tt = document.querySelector('select[name="TransactionType"]') as any
+      if (tt && a.transaction_type) tt.value = a.transaction_type
       const wf = document.querySelector('input[name="WorkFrom"]') as any; if (wf) wf.value = a.us_start
       const wt = document.querySelector('input[name="WorkTo"]') as any; if (wt) wt.value = a.us_end
-    }, { start: b.start, end: b.end, us_start: b.us_start, us_end: b.us_end })
+    }, { start: b.start, end: b.end, us_start: b.us_start, us_end: b.us_end, transaction_type })
     await Promise.all([page.waitForLoadState("networkidle").catch(() => {}), page.evaluate(() => (document.getElementById("rpt") as any).submit())])
     await page.waitForTimeout(1000)
     const r: any = await page.evaluate(async (u: string) => { const x = await fetch(u, { credentials: "include" }); return { status: x.status, body: await x.text() } }, `${o}/reports/_xls/allTransactions.cfm`)

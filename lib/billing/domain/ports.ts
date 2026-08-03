@@ -36,12 +36,13 @@ export interface DeliveryFacts {
  */
 export interface DeliveryRefresher {
   /**
-   * Re-read specific SERVICE DAYS. A dispute is about particular tasks, and
-   * we already know which days they were served on — re-reading a whole
-   * month to find a difference on four days is both slow enough to time out
-   * and more disruption than the question warrants.
+   * Re-read this customer's month of delivery, scoped to exactly the logs we
+   * already hold. A dispute names tasks; the visits carry their log ids; so
+   * the refresh is as small as the question. What this cannot do is discover
+   * logs we have NEVER seen — that is the day ingest's job, and a difference
+   * caused by one still surfaces to a person after the one repull.
    */
-  refreshDays(dates: readonly string[]): Promise<{ visitsTouched: number }>
+  refreshCustomerMonth(customerId: number, month: string): Promise<{ visitsTouched: number }>
 }
 
 /**

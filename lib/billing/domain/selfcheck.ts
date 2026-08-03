@@ -523,4 +523,19 @@ check("a dispute buys ONE trip back to ION, then it is a person's problem", () =
   )
 })
 
+check("re-accrual REPLACES the month; a vanished source is released", () => {
+  // A re-ingest gives a re-read log a new source id. Without releasing the
+  // old one the month grows by the same chemicals every heal — seen live on
+  // Abel, Kay: $192.99 -> $247.98 -> $302.97.
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item({ sourceKind: "usage", sourceId: "old-1", kind: "consumable", amountCents: 5499 }), { claimedByMonthId: null }, AT)
+  assert.strictEqual(m.subtotalCents, 5499)
+
+  // The same chemical comes back under a new id; the old one must go.
+  m.claim(item({ sourceKind: "usage", sourceId: "new-1", kind: "consumable", amountCents: 5499 }), { claimedByMonthId: null }, AT)
+  m.release("usage", "old-1", AT, "source no longer delivered — re-accrued")
+  assert.strictEqual(m.subtotalCents, 5499, "one charge, not two")
+  assert.deepStrictEqual(m.billableItems.map((i) => i.sourceId), ["new-1"])
+})
+
 console.log(`billing domain selfcheck: ${n} checks passed`)
