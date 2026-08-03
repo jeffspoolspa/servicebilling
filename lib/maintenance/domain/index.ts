@@ -1,6 +1,10 @@
 /**
  * Maintenance domain — pure. Imports nothing outside this folder.
  *
+ * The billing half of this module is modelled in
+ *   docs/model/BILLING_MODEL.md   (worksheet — aggregates, invariants and
+ *   where domain events fit)
+ *
  * This index is the module's PUBLISHED CONTRACT: everything above the domain
  * imports from here, never from a file inside.
  *

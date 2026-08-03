@@ -93,6 +93,59 @@ application services. Rules live once, in the domain, selfchecked.
 - A rule needing two aggregates is a domain service the application layer
   feeds: `reconciler.reconcile(month, invoices, visits)`.
 
+## Domain events in this workflow [added 2026-08-03]
+
+An event earns its place when a domain expert can say the sentence in past
+tense and someone OUTSIDE the module cares. Everything else is either a plain
+method call (same aggregate) or a work item (owed, retried, has a terminal
+state). Getting this wrong in either direction is the usual failure: events
+used as a job queue, or a job queue used to notify.
+
+### The three jobs events do here — billing uses all three
+
+| Job | What it means | In this workflow |
+|---|---|---|
+| Notification | another module reacts | `VisitCompleted` (delivery) — billing may now claim it. Delivery must never know billing exists. |
+| History | what happened, when, by whom | `VisitClaimed`, `MonthLocked`, `MonthReconciled` — the audit trail behind every number on an invoice |
+| Derivation | state is a FOLD over facts | balance = fold(applications) + checksum, already ruled in [ADR 010](../adrs/010-domain-event-stream.md) |
+
+The third is the one people forget exists, and it is the strongest: a balance
+computed from facts cannot silently drift the way a stamped column does.
+
+### Which facts each module raises
+
+| Module | Raises | Who cares |
+|---|---|---|
+| delivery | `VisitCompleted`, `VisitSkipped`, `VisitNonServiceable` | billing (claimability) |
+| agreements | `TaskTermsChanged`, `TaskClosed` | billing (future months only — Terms are SNAPSHOTTED onto the claim, so a rate change never rewrites a claimed month; the event is informational, not corrective) |
+| billing | `VisitClaimed` (I-B1 made durable), `MonthLocked` (I-B3), `MonthReconciled` + findings | payments (a reconciled month may charge), the UI timeline |
+| payments | `PaymentApplied`, `ChargeFailed` | billing (the balance fold) |
+
+Aggregates RAISE; they never subscribe. `BillingMonth.claim()` records
+`VisitClaimed` the same way `Task.pullEvents()` already works — the fact is
+accumulated by the aggregate and drained by whoever persists it.
+
+### What is NOT an event here
+
+- "Build this month's invoices", "charge this card", "retry the ION read" —
+  these are WORK: owed, retried, with a terminal state and a person at the
+  end. They live in the queue (ADR 008), keyed on state.
+- Anything inside one aggregate. `claim()` calling its own rule needs no
+  event; publishing to yourself is ceremony.
+
+### The rule that keeps it recoverable
+
+**Events give latency; state queries give correctness.** The charge queue is
+fed by asking "which months are reconciled, unlocked and unpaid?", not by
+trusting that a `MonthReconciled` subscriber fired. A dropped event then
+costs a delay, never a missed invoice — the same reasoning that makes the
+wake trigger in [WORKFLOW_EXECUTION](../conventions/WORKFLOW_EXECUTION.md)
+best-effort while the sweep is the guarantee.
+
+The one place the fold IS the truth (balance) is safe for the opposite
+reason: it is derived from facts that are themselves the source of record,
+and it carries a checksum.
+
 ## Remaining open questions
 
 1. Glossary to rule word-by-word: Visit, Reading, Task, Consumable,
@@ -102,3 +155,7 @@ application services. Rules live once, in the domain, selfchecked.
    customer-month? (Storage can stay; the aggregate defines the boundary.)
 3. Visit.state vocabulary: exact states and who writes each (ingester map
    from ION log flags -> state).
+4. Does `VisitCompleted` need a subscriber at all, or does the month-end
+   sweep asking "which completed visits are unclaimed?" cover it? Leaning
+   sweep-only until a same-day billing need appears — fewer moving parts,
+   and the state query is the safety net either way.

@@ -124,6 +124,7 @@
   <a class="sub" href="#flow">Workflow through the layers</a>
   <a class="sub" href="#schema">Schema fit</a>
   <a class="sub" href="#ext">External system objects</a>
+  <a class="sub" href="#events">Where domain events fit</a>
   <a class="sub" href="#open">Open questions</a>
   <div class="tools">
     <button onclick="document.querySelectorAll('details').forEach(d=>d.open=true)">Expand all</button>
@@ -524,6 +525,29 @@
     ColdFusion comma-join the two values into garbage on 65 live tasks. Field names come from the
     rendered form, never from intuition.
   </div>
+
+  <h2 id="events">Where domain events fit</h2>
+  <p>Two mechanisms, and picking the wrong one is the usual failure — events used as a job queue,
+  or a queue used to notify:</p>
+  <table>
+    <tr><th></th><th>Domain event</th><th>Work item</th></tr>
+    <tr><th>Means</th><td>this happened</td><td>this is owed</td></tr>
+    <tr><th>Shape</th><td>past tense, immutable, zero or many subscribers</td><td>retried, bounded, terminal state, someone can ask what is outstanding</td></tr>
+    <tr><th>Here</th><td><code>CustomerLinkedToIon</code> — history, and the one fact maintenance cares about</td><td>the ION link itself: three daily tries, then a person</td></tr>
+  </table>
+  <div class="call why">
+    <span class="tag">Ruled 2026-08-03</span>
+    Linking is <strong>not</strong> an event case even though it chains one action to another,
+    because it happens inside one module and needs retries. It is driven by a state query —
+    <code>dueForIonLink(now)</code> — with the attempt clock on the aggregate
+    (<code>ionLinkAttempted</code>, <code>ionLinkExhausted</code> at three, <code>ionLinkDue</code>).
+    <strong>Events give latency; state queries give correctness</strong>, so a dropped signal costs
+    a day, never a missed customer. The same daily service method backs the UI button, which skips
+    the waiting window because a person saying "I just synced them" beats a clock.
+  </div>
+  <p>The genuine event case is the one that crosses a module boundary: a linked customer who
+  <em>also</em> has a service agreement means maintenance may open the task — and maintenance owns
+  that subscription, because the publisher must never know who cares.</p>
 
   <h2 id="open">Open questions</h2>
   <ul>

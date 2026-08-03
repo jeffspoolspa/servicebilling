@@ -260,6 +260,11 @@ Pool maintenance: scheduled visits, technician routes, chemistry readings, consu
 
 The shared "customer record" and "work order" entities used by every other domain.
 
+**Model doc**: [docs/model/customer-onboarding.html](model/customer-onboarding.html) — the
+Customer aggregate, its value objects, the two doors (we refuse / QBO-born gets flagged),
+the four states of an external reference, and where domain events fit. Code lives in
+`lib/customers/{domain,application,infrastructure}`; ION and QBO in `lib/external/`.
+
 **UI routes**:
 - `/customers`, `/customers/[id]` — main customer detail + sub-tabs: `/billing`, `/invoices`, `/notes`, `/payment-methods`, `/work-orders`
 - `/work-orders`, `/work-orders/[id]` — WO list + detail

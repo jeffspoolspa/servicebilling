@@ -1,6 +1,10 @@
 /**
  * Customers domain — pure. Imports nothing outside this folder.
  *
+ * The picture, with the diagram and the reasoning:
+ *   docs/model/customer-onboarding.html   (living — update it in the same
+ *   change as the code, per the repo's docs-must-not-drift rule)
+ *
  * This index is the module's PUBLISHED CONTRACT: everything above the domain
  * imports from here, never from a file inside. Three mechanics hold it
  * together; a change that breaks one is a change to the model, not a refactor:
