@@ -146,7 +146,11 @@ check("nextStep is the ONE statement of the sequence", () => {
   assert.strictEqual(m.nextStep(delivered, AUG), "issue")
 
   m.markInvoiced(delivered, AUG, AT)
-  assert.strictEqual(m.nextStep(delivered, AUG), "send", "the human's turn")
+  assert.strictEqual(m.nextStep(delivered, AUG), "preprocess", "credits + payment route before anything ships")
+  assert.throws(() => m.markSent(AT), /not preprocessed/, "sending before preprocess is refused")
+  m.markPreprocessed("pm-1", AT, 0)
+  assert.strictEqual(m.nextStep(delivered, AUG), "process", "charge (instrument linked) and send")
+  assert.strictEqual(m.paymentMethodId, "pm-1", "the linked instrument is preprocess's recorded answer")
   m.markSent(AT)
   assert.strictEqual(m.nextStep(delivered, AUG), null, "done")
 })
@@ -220,6 +224,7 @@ check("a variance bridges the difference, from EITHER side, with a reason", () =
 
   assert.throws(() => m.recordVariance({ sourceId: "v1", kind: "discount", origin: "invoice", reason: "  ", deltaCents: -100, techId: null }, AT), /needs a reason/)
 
+  m.markPreprocessed(null, AT, 0)
   m.markSent(AT)
   assert.deepStrictEqual(m.pendingAmendments(), [], "the send ends amendment, whenever the difference was found")
   m.recordVariance({ sourceId: "v1", kind: "qty_correction", origin: "visit", reason: "tech logged a second bag", deltaCents: 400, techId: "emily" }, AT)

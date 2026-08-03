@@ -146,13 +146,16 @@ export class AdvanceMonthService {
       }
 
       case "issue":
-      case "send":
-        // Issuing needs the invoice builder (Phase 4). Deliberately NOT a
-        // silent no-op — a pipeline that appears to advance past the money
-        // steps is worse than one that stops and says so.
+      case "preprocess":
+      case "process":
+        // The money steps run through their EXPLICIT services (issueMonth /
+        // preprocessMonth / processMonth) until Carter rules the drainer may
+        // fire them. Deliberately NOT a silent no-op — a pipeline that
+        // appears to advance past the money steps is worse than one that
+        // stops and says so.
         return {
           monthId, from, step, to: from,
-          detail: `${step} is not wired yet — Phase 4`,
+          detail: `${step} runs via its explicit service — not drainer-wired yet`,
           again: false,
         }
     }
@@ -168,7 +171,7 @@ export class AdvanceMonthService {
       monthId, from, step, to: fresh?.status ?? month.status, detail,
       // The tail-chain: enqueue again only while there is more to do. The
       // loop would have found it anyway; this just removes the wait.
-      again: next !== null && next !== "gate" && next !== "issue" && next !== "send",
+      again: next !== null && next !== "gate" && next !== "issue" && next !== "preprocess" && next !== "process",
     }
   }
 
