@@ -1,5 +1,9 @@
 -- Queue verbs (coalesced enqueue / SKIP LOCKED claim / finish-with-retry) and
--- the statement-level dirty-month detector on maintenance.visits.
+-- (briefly) a dirty-month detector on maintenance.visits — DROPPED the same
+-- day (migration drop_dirty_month_detector, Carter's call): it could only see
+-- rows the ingester writes (recent days, already in active accrual), while
+-- the changes that matter are edits to PAST months the ingester never
+-- re-reads. Those are the reconciler's job, and it self-heals.
 -- Applied 2026-08-03. See EVENTS_AND_COMMANDS.md; detector rules per the
 -- 706k wake-trigger postmortem (statement-level, coalesced, transition
 -- tables split into INSERT/UPDATE twins because PG allows one event each).
