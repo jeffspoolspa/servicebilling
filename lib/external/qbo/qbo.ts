@@ -129,3 +129,87 @@ export class QboCustomers extends Qbo {
     return res.QueryResponse?.Customer?.[0] ?? null
   }
 }
+
+/* -------------------------------- invoices -------------------------------- */
+
+export interface QboInvoiceLine {
+  readonly qboItemId: string
+  readonly description: string | null
+  readonly qty: number
+  readonly unitPriceCents: number
+  readonly amountCents: number
+}
+
+export interface QboInvoiceInput {
+  readonly qboCustomerId: string
+  /** The document number — RULED: one of the month's ION invoice numbers. */
+  readonly docNumber: string
+  readonly txnDate: string
+  readonly memo: string
+  readonly lines: readonly QboInvoiceLine[]
+}
+
+export interface CreatedInvoice {
+  readonly qboInvoiceId: string
+  readonly docNumber: string
+  readonly subtotalCents: number
+  readonly how: "created" | "already_existed"
+}
+
+interface QboInvoiceEntity {
+  Id: string
+  DocNumber: string
+  TotalAmt: number
+  CustomerRef: { value: string }
+  Line: { Amount?: number; DetailType?: string }[]
+}
+
+export class QboInvoices extends Qbo {
+  /**
+   * Make this invoice exist in QBO, echo-verified and idempotent by
+   * DocNumber: a re-run finds the existing document (same customer) and
+   * converges instead of double-billing — the unique index of the outside
+   * world. The echo must agree line-for-line on the subtotal, or the create
+   * is treated as failed even though QBO said 200.
+   */
+  async createInvoice(inv: QboInvoiceInput): Promise<CreatedInvoice> {
+    const existing = await this.query<{ QueryResponse: { Invoice?: QboInvoiceEntity[] } }>(
+      `select Id, DocNumber, TotalAmt, CustomerRef from Invoice where DocNumber = '${inv.docNumber.replace(/'/g, "")}'`,
+    )
+    const found = existing.QueryResponse.Invoice?.[0]
+    if (found) {
+      if (found.CustomerRef.value !== inv.qboCustomerId) {
+        throw new Error(`doc number ${inv.docNumber} already belongs to customer ${found.CustomerRef.value} — refusing to reuse it for ${inv.qboCustomerId}`)
+      }
+      return { qboInvoiceId: found.Id, docNumber: found.DocNumber, subtotalCents: Math.round(found.TotalAmt * 100), how: "already_existed" }
+    }
+
+    const subtotal = inv.lines.reduce((s, l) => s + l.amountCents, 0)
+    const body = {
+      DocNumber: inv.docNumber,
+      TxnDate: inv.txnDate,
+      CustomerRef: { value: inv.qboCustomerId },
+      CustomerMemo: { value: inv.memo },
+      Line: inv.lines.map((l) => ({
+        DetailType: "SalesItemLineDetail",
+        Amount: l.amountCents / 100,
+        Description: l.description ?? undefined,
+        SalesItemLineDetail: {
+          ItemRef: { value: l.qboItemId },
+          Qty: l.qty,
+          UnitPrice: l.unitPriceCents / 100,
+        },
+      })),
+    }
+    const res = await this.request<{ Invoice: QboInvoiceEntity }>("POST", "/invoice", body)
+    const echo = res.Invoice
+    if (!echo?.Id) throw new Error(`invoice create returned no Id — unproven, treating as failed`)
+    const echoSubtotal = Math.round(
+      echo.Line.filter((l) => l.DetailType === "SalesItemLineDetail").reduce((s, l) => s + (l.Amount ?? 0), 0) * 100,
+    )
+    if (echoSubtotal !== subtotal) {
+      throw new Error(`invoice ${echo.Id} echo subtotal ${echoSubtotal} != built ${subtotal} — the document does not say what the ledger says`)
+    }
+    return { qboInvoiceId: echo.Id, docNumber: echo.DocNumber, subtotalCents: echoSubtotal, how: "created" }
+  }
+}

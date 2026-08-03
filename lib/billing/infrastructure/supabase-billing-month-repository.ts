@@ -479,6 +479,86 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     return out
   }
 
+  /** Task doc metadata for the issue step: terms axes + ION invoice type + category. */
+  async taskDocMeta(taskIds: readonly string[]): Promise<Map<string, { labor: "per_visit" | "flat_rate"; consumables: "included" | "separate"; ionInvoiceType: string | null; category: string | null }>> {
+    const out = new Map<string, { labor: "per_visit" | "flat_rate"; consumables: "included" | "separate"; ionInvoiceType: string | null; category: string | null }>()
+    const ids = [...new Set(taskIds)]
+    const tasks = this.client.schema("maintenance").from("tasks") as unknown as {
+      select(c: string): { in(col: string, vals: string[]): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+    }
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data, error } = await tasks.select("id, billing_method, consumables_mode, ion_invoice_type, category").in("id", ids.slice(i, i + 100))
+      if (error) throw new Error(`task doc meta failed: ${JSON.stringify(error).slice(0, 200)}`)
+      for (const r of (data ?? []) as { id: string; billing_method: string | null; consumables_mode: string | null; ion_invoice_type: string | null; category: string | null }[]) {
+        out.set(r.id, {
+          labor: r.billing_method === "flat_rate" ? "flat_rate" : "per_visit",
+          consumables: r.consumables_mode === "separate" ? "separate" : "included",
+          ionInvoiceType: r.ion_invoice_type,
+          category: r.category,
+        })
+      }
+    }
+    return out
+  }
+
+  /** Consumable QBO item ids by item name — the chemical side of the catalog. */
+  async consumableQboIds(): Promise<Map<string, string>> {
+    const cat = this.client.schema("maintenance").from("consumables") as unknown as {
+      select(c: string): { not(col: string, op: string, v: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+    }
+    const { data, error } = await cat.select("item_name, qbo_item_id").not("qbo_item_id", "is", null)
+    if (error) throw new Error(`consumable qbo ids failed: ${JSON.stringify(error).slice(0, 200)}`)
+    const out = new Map<string, string>()
+    for (const r of (data ?? []) as { item_name: string; qbo_item_id: string }[]) out.set(r.item_name, r.qbo_item_id)
+    return out
+  }
+
+  /**
+   * The month's ION invoice numbers — the consolidation set (RULED: ION's
+   * per-task grain is for reconciliation; one of these becomes our doc
+   * number and the whole set is recorded on the issued document).
+   */
+  async ionInvoiceNumbers(taskIds: readonly string[], month: string): Promise<string[]> {
+    const q = this.client.schema("billing_audit").from("task_billing_periods") as unknown as {
+      select(c: string): { in(col: string, vals: string[]): { eq(col: string, v: string): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
+    }
+    const out = new Set<string>()
+    const ids = [...new Set(taskIds)]
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data, error } = await q.select("ion_invoice_number").in("task_id", ids.slice(i, i + 100)).eq("billing_month", month)
+      if (error) throw new Error(`ion invoice numbers failed: ${JSON.stringify(error).slice(0, 200)}`)
+      for (const r of (data ?? []) as { ion_invoice_number: string | null }[]) if (r.ion_invoice_number) out.add(r.ion_invoice_number)
+    }
+    return [...out]
+  }
+
+  /** The customer's QBO id — the billing identity the gate already required. */
+  async qboCustomerId(customerId: number): Promise<string | null> {
+    const q = this.client.schema("public").from("Customers") as unknown as {
+      select(c: string): { eq(col: string, v: number): { limit(n: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
+    }
+    const { data, error } = await q.select("qbo_customer_id").eq("id", customerId).limit(1)
+    if (error) throw new Error(`qbo customer id failed: ${JSON.stringify(error).slice(0, 200)}`)
+    return ((data ?? [])[0] as { qbo_customer_id: string | null } | undefined)?.qbo_customer_id ?? null
+  }
+
+  /** Record the issued documents — insert-only; the unique keys refuse doubles. */
+  async saveIssued(rows: { billingMonthId: string; kind: string; qboInvoiceId: string; docNumber: string; subtotalCents: number; presentation: string; ionInvoiceNumbers: string[] }[]): Promise<void> {
+    if (rows.length === 0) return
+    const ins = this.q("month_invoices").insert(rows.map((r) => ({
+      billing_month_id: r.billingMonthId,
+      kind: r.kind,
+      qbo_invoice_id: r.qboInvoiceId,
+      doc_number: r.docNumber,
+      subtotal_cents: r.subtotalCents,
+      presentation: r.presentation,
+      ion_invoice_numbers: r.ionInvoiceNumbers,
+    }))) as unknown as { select(c: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+    const { data, error } = await ins.select("id")
+    if (error) throw new Error(`month_invoices insert failed: ${JSON.stringify(error).slice(0, 240)}`)
+    if (!data || data.length !== rows.length) throw new Error(`month_invoices wrote ${data?.length ?? 0} of ${rows.length}`)
+  }
+
   async customerPeerGroups(customerIds: readonly number[]): Promise<Map<number, string>> {
     const out = new Map<number, string>()
     const ids = [...new Set(customerIds)]
