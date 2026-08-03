@@ -42,9 +42,17 @@ export class OnboardingService {
       }
     }
 
-    // Never a second active account at one service address (DB-enforced rule;
-    // asked here first so the answer is a reuse, not an RPC error).
-    const existing = await this.customers.findByStreet(draft.shape.street)
+    // The service location is an ENTITY whose identity is the rooftop place
+    // id: resolve the address FIRST (our constraints — real rooftop, city
+    // required, in service area — or null), then dedup on that identity.
+    // Same rooftop -> same row -> same account, exactly. The normalized
+    // street comparison is only the fallback for unpinnable addresses.
+    const shape = draft.shape
+    const geo = await this.resolveAddress({ street: shape.street, city: shape.city, state: shape.state, zip: shape.zip })
+    const address = geo.resolved ? geo.address : null
+
+    const existing = (address ? await this.customers.findByPlaceId(address.place_id) : null)
+      ?? (await this.customers.findByStreet(shape.street))
     if (existing) {
       // Reuse — but a reused account with NO QBO id is a half-kept promise
       // (a prior run's deferral). Live re-runs finish the job here, which is
@@ -62,15 +70,8 @@ export class OnboardingService {
     }
 
     if (opts.dryRun) {
-      return { outcome: "dry_run", wouldCreate: `${draft.displayName} @ ${draft.shape.street}, ${draft.shape.city}` }
+      return { outcome: "dry_run", wouldCreate: `${draft.displayName} @ ${shape.street}, ${shape.city}${address ? "" : " (address NOT rooftop-resolvable — will create unpinned)"}` }
     }
-
-    // Rooftop place id + coordinates, minted here so every caller gets a
-    // pinned address without knowing geocoding exists. A miss is not fatal —
-    // the nightly geocode backfill repairs it (ADR 007).
-    const s = draft.shape
-    const geo = await this.resolveAddress({ street: s.street, city: s.city, state: s.state, zip: s.zip })
-    const address = geo.resolved ? geo.address : null
 
     const { accountId } = await this.customers.create(draft, address)
     const qbo = await this.ensureQbo(accountId, draft, address)

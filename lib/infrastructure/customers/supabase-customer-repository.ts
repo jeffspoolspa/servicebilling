@@ -33,6 +33,27 @@ export class SupabaseCustomerRepository {
 
   constructor(private readonly client: Rpc) {}
 
+  /**
+   * THE identity lookup: a rooftop's place id names exactly one service
+   * location row, and that row names its account. Exact — no normalization,
+   * no guessing. String street-matching (findByStreet) is only the fallback
+   * for addresses Google could not pin.
+   */
+  async findByPlaceId(placeId: string): Promise<{ accountId: number; displayName: string | null; qboId: string | null } | null> {
+    const { data, error } = await (this.client.from("service_locations") as unknown as {
+      select(c: string): { eq(c2: string, v: unknown): { limit(n: number): PromiseLike<{ data: { account_id: number | null }[] | null; error: unknown }> } }
+    }).select("account_id").eq("place_id", placeId).limit(1)
+    if (error) throw new Error(`place_id lookup failed: ${JSON.stringify(error).slice(0, 200)}`)
+    const accountId = data?.[0]?.account_id
+    if (!accountId) return null
+    const { data: c, error: e2 } = await (this.client.from("Customers") as unknown as {
+      select(cs: string): { eq(c2: string, v: unknown): { limit(n: number): PromiseLike<{ data: { id: number; display_name: string | null; qbo_customer_id: string | null }[] | null; error: unknown }> } }
+    }).select("id, display_name, qbo_customer_id").eq("id", accountId).limit(1)
+    if (e2) throw new Error(`Customers lookup failed: ${JSON.stringify(e2).slice(0, 200)}`)
+    const row = c?.[0]
+    return row ? { accountId: row.id, displayName: row.display_name, qboId: row.qbo_customer_id } : null
+  }
+
   async findByStreet(street: string) {
     if (!this.streets) {
       this.streets = new Map()
