@@ -42,7 +42,7 @@ def comp(x1,y1,x2,y2,color=TEAL):   # filled diamond at the OWNER end (x1,y1)
 # ---- domain: customers lane
 c   = box("cust",28,52,392,"«aggregate root»","Customer",TEAL,
       ["id: uuid              (Customers.id)","name: PersonName","billing: BillingAddress","phone: Phone | null","email: Email | null","violations: Violation[]   <- both doors","qbo: ExternalRef","ion: ExternalRef","~onboarding: derived from the two refs"],
-      ["blocks('create_task'): string | null   [I-C3]","onboarding: drafted|awaiting_ion|linked"])
+      ["Customer.draft(input) | rehydrate(...)   the two doors","blocks('create_task')            [I-C3]","linkQbo(echoedId) / linkIon(match)   refuse relink","ionLinkAttempted() / ionLinkDue(now)","ionLinkExhausted   3 tries, then a person"])
 er  = box("eref",28,c["y2"]+20,190,"«value object»","ExternalRef",GREY,
       ["unlinked","awaiting(since, attempts)","linked(id, method,","   confidence, at)","ambiguous(candidates[])"],dashed=True)
 ph  = box("phone",230,c["y2"]+20,190,"«value object»","Phone",GREY,
@@ -51,7 +51,7 @@ em  = box("email",230,ph["y2"]+16,190,"«value object»","Email / PersonName",GR
       ["address: lower-cased, one","first / last -> displayName"],dashed=True)
 sp  = box("bill",28,er["y2"]+20,190,"«value object»","BillingAddress",GREY,
       ["street / city / state / zip","(the SERVICE address is an","  entity, not a value)"],dashed=True)
-sl  = box("loc",28,max(sp["y2"],em["y2"])+20,392,"«entity»","ServiceLocation",BLUE,
+sl  = box("loc",28,max(sp["y2"],em["y2"])+20,392,"«entity»","ServiceLocation            [table + repo, no class yet]",BLUE,
       ["id                (service_locations.id)","account_id -> Customers.id","place_id: text     <- THE IDENTITY","latitude / longitude","geocode_status / place_provider","is_primary / is_active"])
 cd  = box("draftfn",28,sl["y2"]+20,392,"«domain service»","customer.ts — parse, don't validate",PURPLE,
       ["no I/O · selfchecked · both doors"],
@@ -60,7 +60,7 @@ ds  = cd
 
 # ---- domain: maintenance lane
 ag  = box("agree",468,52,384,"«aggregate root»","ServiceAgreement   (maintenance)",TEAL,
-      ["customerId -> Customers.id","placeId -> service_locations.place_id","cadence: weekly|biweekly_a|_b|monthly","weekday: 0..6","ratePerVisit / monthlyEstimate","poolType   gateCode","~what Task.open() consumes"])
+      ["customerId -> Customers.id","placeId -> service_locations.place_id","cadence: weekly|biweekly_a|_b|monthly","weekday: 0..6","billing: BillingTerms  (2 axes)","poolType   gateCode","~what Task.open() consumes"])
 tk  = box("task",468,ag["y2"]+20,384,"«aggregate root»","Task   (maintenance)",TEAL,
       ["id: uuid        (maintenance.tasks.id)","customer_id -> Customers.id","ion_task_id: text","frequency / days_per_week","price_per_visit_cents","~schedules: TaskSchedule[*]"])
 tsc = box("slot",468,tk["y2"]+18,384,"«entity»","TaskSchedule   (the slot)",BLUE,
@@ -73,15 +73,15 @@ qbo = box("qbo",28,INF_T+40,264,"«infra · gateway»","Qbo / QboCustomers",ORAN
 ion = box("ion",308,INF_T+40,270,"«infra · gateway»","Ion / IonTasks / IonCustomers",ORANGE,
       ["minter -> f/ION/api/get_session","(chromium login, the only one)"],
       ["readTask() / applyWeeks()  read-back","createTask()  task-list diff proof","setStartDate()    search()"],fill="#fffdf9")
-acl = box("acl",594,INF_T+40,258,"«infra · ACL»","IonTaskAcl",ORANGE,
+acl = box("acl",594,INF_T+40,258,"«infra · ACL»","one per RELATIONSHIP",ORANGE,
       ["translation only · no HTTP · no rules"],
-      ["toIonWrite() / toIonCreate()","fromIonForm() / fromIonResults()","maintenanceDefaults()","matchIonCustomer()","anchorOf() / startsOnFor()"],fill="#fffdf9")
+      ["ion/acl: toIonWrite, fromIonForm,","   anchorOf, startsOnFor   (shared)","maintenance/ion-task-acl: toIonCreate,","   invoiceTypeFor, maintenanceDefaults","customers/ion-customer-directory:","   identify()  -> ExternalCustomerDirectory"],fill="#fffdf9")
 rp  = box("repo",28,max(qbo["y2"],ion["y2"],acl["y2"])+26,404,"«infra · repository»","SupabaseCustomerRepository",ORANGE,
       ["public.Customers + service_locations"],
-      ["findByPlaceId()   identity dedup","findByStreet()    fallback dedup","create()          canonical RPC door","stampQboId()      row-count asserted","awaitingIon() / linkIon() / linkedOf()"],fill="#fffdf9")
+      ["byPlaceId() / byStreet()   identity, then fallback","byIds()                    reconstitutes aggregates","add()                      canonical create_account","save()                     row-count asserted","awaitingIon() / dueForIonLink(now)"],fill="#fffdf9")
 sv  = box("svc",448,rp["y"],404,"«application»","services — one sentence each",PURPLE,
       ["callable by any UI, script, or agent"],
-      ["OnboardingService.onboard(draft)","LinkIonService.link(accountIds)","TaskOpeningService.open(tasks)","PublishService.publish(scenarioId)"],fill="#f7f2fa")
+      ["OnboardingService.onboard(customer)","LinkIonService.linkDue(now) | link(ids)","TaskOpeningService.open(tasks)","PublishService.publish(scenarioId)"],fill="#f7f2fa")
 INF_B = max(rp["y2"], sv["y2"]) + 18
 H = INF_B + 14
 
