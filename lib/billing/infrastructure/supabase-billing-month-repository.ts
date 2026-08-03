@@ -460,6 +460,25 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     return out
   }
 
+  /**
+   * The labor line-item catalog — the published language toward QBO for
+   * service lines (maintenance.labor_items, seeded from billed history).
+   * The invoice generator resolves every labor line through this lookup;
+   * a line it cannot resolve is a refusal, never a guess.
+   */
+  async laborItems(): Promise<Map<string, { qboItemId: string; usualRateCents: number | null }>> {
+    const cat = this.client.schema("maintenance").from("labor_items") as unknown as {
+      select(c: string): { eq(col: string, v: boolean): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+    }
+    const { data, error } = await cat.select("item_name, qbo_item_id, usual_rate_cents").eq("active", true)
+    if (error) throw new Error(`labor items read failed: ${JSON.stringify(error).slice(0, 200)}`)
+    const out = new Map<string, { qboItemId: string; usualRateCents: number | null }>()
+    for (const r of (data ?? []) as { item_name: string; qbo_item_id: string; usual_rate_cents: number | null }[]) {
+      out.set(r.item_name, { qboItemId: r.qbo_item_id, usualRateCents: r.usual_rate_cents })
+    }
+    return out
+  }
+
   async customerPeerGroups(customerIds: readonly number[]): Promise<Map<number, string>> {
     const out = new Map<number, string>()
     const ids = [...new Set(customerIds)]

@@ -20,7 +20,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
   const url = new URL(req.url)
   const asked = url.searchParams.get("presentation")
   const sys = createSupabaseAdmin()
-  const month = await new SupabaseBillingMonthRepository(sys as never).byId(monthId)
+  const repo = new SupabaseBillingMonthRepository(sys as never)
+  const month = await repo.byId(monthId)
   if (!month) return NextResponse.json({ error: "month not found" }, { status: 404 })
 
   // The tasks' agreements decide the axes; ION's invoice-type string is
@@ -42,10 +43,31 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
   const defaultPresentation = presentationOf(rows.find((t) => t.ion_invoice_type)?.ion_invoice_type ?? null)
   const presentation: InvoicePresentation = asked === "summary" || asked === "itemized" ? asked : defaultPresentation
 
+  // Resolve every labor line through the catalog — the same lookup the
+  // issue step will refuse on. Flat monthly lines bill as the FLAT RATE
+  // item; unresolved names surface so a gap is visible in draft, not at
+  // issue time.
+  const laborCatalog = await repo.laborItems()
+  const resolveLabor = (itemName: string): string | null =>
+    laborCatalog.get(itemName)?.qboItemId ??
+    (itemName.endsWith(" — monthly") ? laborCatalog.get("FLAT RATE")?.qboItemId ?? null : null)
+  const documents = documentsOf(month, terms, presentation).map((d) => ({
+    ...d,
+    lines: d.lines.map((l) =>
+      l.kind === "labor" ? { ...l, qboItemId: resolveLabor(l.itemName) } : l,
+    ),
+  }))
+  const unmappedLabor = [
+    ...new Set(
+      documents.flatMap((d) => d.lines.filter((l) => l.kind === "labor" && !("qboItemId" in l && l.qboItemId)).map((l) => (l.kind === "labor" ? l.itemName : ""))),
+    ),
+  ].filter(Boolean)
+
   return NextResponse.json({
     ...draftInvoice(month),
     presentation,
     defaultPresentation,
-    documents: documentsOf(month, terms, presentation),
+    documents,
+    unmappedLabor,
   })
 }
