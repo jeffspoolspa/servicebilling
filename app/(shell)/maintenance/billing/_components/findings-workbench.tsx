@@ -1,77 +1,77 @@
 "use client"
 
-import { useState } from "react"
-import Link from "next/link"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Pill } from "@/components/ui/pill"
 import { formatCurrency } from "@/lib/utils/format"
-import { cn } from "@/lib/utils/cn"
-import { DraftInvoicePanel } from "./draft-invoice-panel"
+import { ServiceLog, type ServiceLogVisit } from "../../_components/service-log"
+import { ChemHistoryContext, type FlagContext } from "./chem-history-context"
 import type { FindingGroup } from "../_lib/findings"
 
 /**
- * The findings review workbench — the bill-review detail's shape: header
- * card (customer, month, CPV context, total flagged, the review action),
- * invoice lines on the left (the DRAFT invoice — regenerated on demand from
- * the aggregate), and on the right the report panel (where bill-review has
- * "what's driving") above the per-visit service log with flagged visits
- * highlighted. Resolving auto-advances to the next open customer.
+ * The audit findings workbench — the bill-review workbench's EXACT chrome
+ * (same header, same 430px/flex grid, same left ledger + right analysis/log
+ * layout, same ServiceLog and chem-history components), fed by the NEW
+ * module's read models. The one thing this module doesn't have yet is a
+ * QBO invoice, so the left ledger shows the DRAFT invoice — the aggregate
+ * projection, regenerated on every read. The bill-analysis slot generates
+ * the usage report to attach alongside the invoice. Approve's slot is Mark
+ * Reviewed: one resolution clears the customer's findings and auto-advances
+ * to the next open customer.
  */
 
-export interface WorkbenchVisit {
-  visit_id: string
-  visit_date: string
-  tech: string | null
-  minutes: number | null
-  notes: string | null
-  readings: Record<string, string>
-  chems: { item: string; qty: number; cents: number | null }[]
+interface DraftLine {
+  kind: string
+  itemName: string
+  qty: number
+  unitPriceCents: number
+  amountCents: number
+  detail: string | null
 }
-
-const READINGS: [string, string][] = [
-  ["Free Chlorine", "FC"],
-  ["pH", "pH"],
-  ["Cyanuric Acid", "CYA"],
-  ["Total Alkalinity", "TA"],
-  ["Salinity", "Salt"],
-]
-
-/** Peer/self CPV parsed from the finding's own sentence — the domain wrote
- *  both sides. (Upgrade path: persist observation context on the row.) */
-function cpvContext(g: FindingGroup): { peerGroup: string | null; peerP95: string | null; selfMedian: string | null } {
-  const m = g.findings[0]?.message ?? ""
-  const peer = m.match(/95th percentile of (\S+) \(\$([\d,.]+)\)/)
-  const self = m.match(/own median \(\$([\d,.]+)\)/)
-  return { peerGroup: peer?.[1] ?? null, peerP95: peer?.[2] ?? null, selfMedian: self?.[1] ?? null }
+interface Draft {
+  lines: DraftLine[]
+  subtotalCents: number
+  claimedAtZero: number
 }
 
 export function FindingsWorkbench({
   group,
   queue,
   visits,
+  flagContext,
 }: {
   group: FindingGroup
   queue: { customerId: number; name: string }[]
-  visits: WorkbenchVisit[]
+  visits: ServiceLogVisit[]
+  flagContext: FlagContext | null
 }) {
   const router = useRouter()
   const [resolution, setResolution] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [draft, setDraft] = useState<Draft | "loading" | "error">("loading")
 
-  const monthParam = group.month.slice(0, 7)
-  const i = queue.findIndex((q) => q.customerId === group.customerId)
-  const prev = i > 0 ? queue[i - 1] : null
-  const next = i >= 0 && i < queue.length - 1 ? queue[i + 1] : null
-  const hrefFor = (customerId: number) => `/maintenance/billing/findings/${customerId}?month=${monthParam}`
+  const month = group.month.slice(0, 7)
+  const monthLabel = new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone: "UTC" })
+    .format(new Date(`${month}-15T12:00:00Z`))
+  const queueIdx = queue.findIndex((q) => q.customerId === group.customerId)
+  const prevInQueue = queueIdx > 0 ? queue[queueIdx - 1] : null
+  const nextInQueue = queueIdx >= 0 && queueIdx < queue.length - 1 ? queue[queueIdx + 1] : null
+  const hrefFor = (customerId: number) => `/maintenance/billing/findings/${customerId}?month=${month}`
 
-  const flagged = new Set(
-    group.findings.map((f) => f.message.slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)),
-  )
-  const ctx = cpvContext(group)
-  const ordered = [...visits].sort((a, b) => b.visit_date.localeCompare(a.visit_date))
-  const chemOf = (v: WorkbenchVisit) => v.chems.reduce((s, c) => s + (c.cents ?? 0), 0)
-  const monthChem = visits.reduce((s, v) => s + chemOf(v), 0)
+  useEffect(() => {
+    let alive = true
+    setDraft("loading")
+    fetch(`/api/billing/months/${group.monthId}/draft-invoice`)
+      .then((r) => r.json().then((j) => (r.ok ? j : Promise.reject(new Error(j.error)))))
+      .then((j) => alive && setDraft(j as Draft))
+      .catch(() => alive && setDraft("error"))
+    return () => {
+      alive = false
+    }
+  }, [group.monthId])
+
+  const lines = draft !== "loading" && draft !== "error" ? draft.lines : []
+  const subtotal = draft !== "loading" && draft !== "error" ? draft.subtotalCents / 100 : 0
 
   const resolve = async () => {
     setBusy(true)
@@ -87,172 +87,174 @@ export function FindingsWorkbench({
       setError(body.error ?? `failed (${res.status})`)
       return
     }
-    router.push((next ? hrefFor(next.customerId) : `/maintenance/billing/findings`) as never)
+    router.push((nextInQueue ? hrefFor(nextInQueue.customerId) : `/maintenance/billing/findings`) as never)
     router.refresh()
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.14em] text-ink-mute">
-            Findings review · {monthParam}
-          </div>
-          <h2 className="font-display text-[18px] mt-0.5">{group.customerName}</h2>
-        </div>
-        <div className="flex items-center gap-3 text-[12px]">
-          {prev ? (
-            <Link href={hrefFor(prev.customerId) as never} title={prev.name} className="text-ink-mute hover:text-ink underline underline-offset-2">
-              Prev
-            </Link>
-          ) : null}
-          <span className="text-ink-mute">{i + 1} of {queue.length} open</span>
-          {next ? (
-            <Link href={hrefFor(next.customerId) as never} title={next.name} className="text-ink-mute hover:text-ink underline underline-offset-2">
-              Next
-            </Link>
-          ) : null}
-          <Link href={`/maintenance/billing/findings` as never} className="text-ink-mute hover:text-ink underline underline-offset-2">
-            Back to findings
-          </Link>
-        </div>
-      </div>
-
-      {/* header card — the bill-review shape: identity left, money + action right */}
-      <div className="rounded-lg border border-line-soft px-4 py-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-ink text-[14px]">{group.customerName}</span>
-          <span className="text-ink-mute text-[12px]">{monthParam}</span>
-          <Pill tone="sun">
-            {group.findings.length} visit{group.findings.length === 1 ? "" : "s"} flagged
-          </Pill>
-          {flagged.size > 0 && (
-            <span className="text-[11px] text-ink-mute">
-              peer p95 {ctx.peerP95 ? `$${ctx.peerP95}` : "—"}
-              {ctx.peerGroup ? ` (${ctx.peerGroup})` : ""} · self median{" "}
-              {ctx.selfMedian ? `$${ctx.selfMedian}` : "no history yet"}
+    <div className="rounded-xl border border-line bg-bg-surface overflow-hidden">
+      {/* header */}
+      <div className="flex items-center gap-3.5 px-5 py-4 border-b border-line-soft flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-display text-[17px] tracking-tight">{group.customerName}</span>
+          <span className="font-mono text-[10.5px] text-ink-mute">
+            Draft · {monthLabel}
+          </span>
+          <span className="text-[10px] uppercase tracking-[0.08em] text-sun bg-sun/10 border border-sun/30 rounded-full px-2 py-0.5">
+            {group.findings.length} chem outlier visit{group.findings.length === 1 ? "" : "s"}
+          </span>
+          {group.monthInvoiced ? (
+            <span className="text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-bg-elev border border-line rounded-full px-2 py-0.5">Invoiced</span>
+          ) : (
+            <span className="text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-bg-elev border border-line rounded-full px-2 py-0.5">Draft</span>
+          )}
+          {group.openIds.length === 0 && (
+            <span className="text-[10px] uppercase tracking-[0.08em] text-grass bg-grass/10 border border-grass/30 rounded-full px-2 py-0.5">
+              Reviewed · {group.resolvedBy}
             </span>
           )}
-          {group.monthInvoiced && <Pill tone="neutral">invoiced</Pill>}
-          <div className="ml-auto text-right">
-            <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">Flagged $</div>
-            <div className="font-mono num text-[18px] text-sun">{formatCurrency(group.totalCents / 100)}</div>
-          </div>
         </div>
-        {group.openIds.length > 0 ? (
-          <div className="mt-3 flex items-start gap-3">
-            <textarea
+        <div className="flex-1" />
+        {queueIdx >= 0 && queue.length > 1 && (
+          <div className="flex items-center gap-1.5 mr-2">
+            <button
+              onClick={() => prevInQueue && router.push(hrefFor(prevInQueue.customerId) as never)}
+              disabled={!prevInQueue}
+              title={prevInQueue ? `Previous: ${prevInQueue.name}` : undefined}
+              className="h-7 w-7 rounded-lg border border-line bg-bg-elev text-ink-dim text-[13px] hover:border-cyan hover:text-cyan disabled:opacity-30 disabled:hover:border-line disabled:hover:text-ink-dim"
+              aria-label="Previous open finding"
+            >
+              ‹
+            </button>
+            <span className="font-mono text-[10.5px] text-ink-mute whitespace-nowrap">
+              {queueIdx + 1} of {queue.length} open
+            </span>
+            <button
+              onClick={() => nextInQueue && router.push(hrefFor(nextInQueue.customerId) as never)}
+              disabled={!nextInQueue}
+              title={nextInQueue ? `Next: ${nextInQueue.name}` : undefined}
+              className="h-7 w-7 rounded-lg border border-line bg-bg-elev text-ink-dim text-[13px] hover:border-cyan hover:text-cyan disabled:opacity-30 disabled:hover:border-line disabled:hover:text-ink-dim"
+              aria-label="Next open finding"
+            >
+              ›
+            </button>
+          </div>
+        )}
+        <div className="text-right mr-1.5">
+          <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">Flagged</div>
+          <div className="font-display text-[19px] text-sun">{formatCurrency(group.totalCents / 100)}</div>
+        </div>
+        {group.openIds.length > 0 && (
+          <>
+            <input
               value={resolution}
               onChange={(e) => setResolution(e.target.value)}
-              rows={1}
-              placeholder="Resolution (required) — what was decided and why"
-              className="flex-1 rounded border border-line-soft bg-transparent px-2.5 py-2 text-sm text-ink placeholder:text-ink-mute focus:outline-none focus:border-cyan/50"
+              placeholder="Resolution (required)"
+              className="h-8 w-[240px] bg-bg-elev border border-line rounded-lg px-2.5 text-[12px] text-ink outline-none focus:border-cyan"
             />
             <button
               onClick={resolve}
               disabled={busy || !resolution.trim()}
-              className="text-[12px] px-3.5 py-2 rounded bg-cyan/15 border border-cyan/40 text-cyan hover:bg-cyan/25 disabled:opacity-40 whitespace-nowrap"
+              title={!resolution.trim() ? "A cleared flag needs a reason" : undefined}
+              className="h-8 px-3.5 rounded-lg bg-gradient-to-b from-cyan to-cyan-deep text-bg text-[12px] font-semibold hover:brightness-110 disabled:opacity-50"
             >
-              {busy ? "Saving" : "Mark reviewed"}
+              {busy ? "Saving…" : "Mark Reviewed"}
             </button>
-          </div>
-        ) : (
-          <div className="mt-3 flex items-center gap-3 text-[12px]">
-            <Pill tone="grass">Reviewed</Pill>
-            <span className="text-ink-mute">{group.resolvedBy}</span>
-            <span className="text-ink-dim">{group.findings[0]?.resolution}</span>
-          </div>
+          </>
         )}
-        {error && <p className="mt-2 text-xs text-coral">{error}</p>}
+        {error && <span className="text-[11px] text-coral max-w-[260px]">{error}</span>}
       </div>
 
-      <div className="grid grid-cols-[340px_1fr] gap-4 items-start">
-        {/* left: what the invoice will say — the draft, regenerated on demand */}
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.14em] text-ink-mute mb-2">Invoice lines (draft)</div>
-          <DraftInvoicePanel monthId={group.monthId} />
+      {/* minmax(0,1fr): a bare 1fr can't shrink below the content's
+          min-width, so wide service logs used to overflow and get clipped */}
+      <div className="grid grid-cols-1 lg:grid-cols-[430px_minmax(0,1fr)] lg:h-[680px]">
+        {/* LEFT: the draft invoice ledger */}
+        <div className="border-r border-line-soft pt-2 overflow-y-auto min-h-0">
+          <div className="flex items-center justify-between px-5 py-2">
+            <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-mute">
+              Invoice lines — draft, regenerated on demand
+            </span>
+          </div>
+          {draft === "loading" && (
+            <div className="px-5 py-8 text-center text-[12px] text-ink-mute">Building the draft…</div>
+          )}
+          {draft === "error" && (
+            <div className="px-5 py-8 text-center text-[12px] text-coral">Failed to build the draft invoice.</div>
+          )}
+          {lines.map((ln, idx) => (
+            <div key={idx} className="border-b border-line-soft px-5 py-2.5 hover:bg-white/[0.015]">
+              <div className="flex items-center gap-2.5">
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12.5px] font-medium text-ink">{ln.itemName}</div>
+                  <div className="font-mono text-[10.5px] text-ink-mute mt-0.5">
+                    {ln.kind === "variance"
+                      ? ln.detail
+                      : `${ln.qty} × ${formatCurrency(ln.unitPriceCents / 100)}`}
+                  </div>
+                </div>
+                <div className="w-[92px] text-right flex-none">
+                  <div className="font-mono text-[12.5px] text-ink">{formatCurrency(ln.amountCents / 100)}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+          {draft !== "loading" && draft !== "error" && (
+            <div className="px-5 py-3 flex flex-col gap-1.5">
+              <div className="flex justify-between text-[12px] text-ink-dim">
+                <span>
+                  Subtotal
+                  {draft.claimedAtZero > 0 && (
+                    <span className="text-ink-mute"> · {draft.claimedAtZero} visit(s) at $0</span>
+                  )}
+                </span>
+                <span className="font-mono">{formatCurrency(subtotal)}</span>
+              </div>
+              <div className="flex justify-between items-baseline border-t border-line pt-2 mt-0.5">
+                <span className="text-[12px] font-medium">Total</span>
+                <span className="font-display text-[19px] text-ink">{formatCurrency(subtotal)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* why-flagged context: the same graph bill-review shows */}
+          {flagContext && <ChemHistoryContext flagContext={flagContext} />}
         </div>
 
-        {/* right: the report slot (bill-review's "what's driving"), then the service log */}
-        <div className="space-y-4">
-          <div className="rounded-lg border border-line-soft px-4 py-3 flex items-center gap-3">
-            <div className="flex-1 text-[12px] text-ink-dim">
-              Generate the chemical-usage report for this month — the context document to attach alongside the
-              customer&apos;s invoice. Built on demand from the service log; flagged visits are marked.
+        {/* RIGHT: report + visit log */}
+        <div className="p-4 lg:p-5 bg-bg-elev/40 flex flex-col gap-3.5 min-h-0">
+          {/* usage report — this module's "what's driving" slot */}
+          <div className="bg-bg border border-line rounded-xl overflow-hidden flex-none">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-line-soft">
+              <span className="font-display text-[15px]">Usage report</span>
+              <span className="text-[11px] text-ink-mute truncate">
+                {group.findings.length} flagged visit{group.findings.length === 1 ? "" : "s"} this month
+              </span>
+              <div className="flex-1" />
+              <a
+                href={`/billing-report/${group.customerId}?month=${month}`}
+                target="_blank"
+                className="h-7 px-3 rounded-lg bg-gradient-to-b from-cyan to-cyan-deep text-bg text-[12px] font-semibold hover:brightness-110 inline-flex items-center"
+              >
+                Generate report
+              </a>
             </div>
-            <a
-              href={`/billing-report/${group.customerId}?month=${monthParam}`}
-              target="_blank"
-              className="text-[12px] px-3 py-1.5 rounded border border-cyan/40 text-cyan hover:bg-cyan/10 whitespace-nowrap"
-            >
-              Generate PDF report
-            </a>
+            <div className="px-4 py-3 text-[12px] text-ink-mute leading-relaxed">
+              Builds the customer-safe chemical usage report for {monthLabel} — every visit with readings and
+              chemicals added, flagged visits marked. Print → Save as PDF and attach it alongside the invoice.
+            </div>
           </div>
 
-          <div className="rounded-lg border border-line-soft overflow-hidden">
-            <div className="flex items-center gap-3 px-4 py-2 bg-white/[0.02] border-b border-line-soft text-[11px]">
-              <span className="text-ink font-medium">Service log</span>
-              <span className="text-ink-mute">{monthParam}</span>
-              <span className="ml-auto text-ink-mute">
-                {visits.length} visits · <span className="text-sun">{flagged.size} flagged</span> · chems{" "}
-                <span className="font-mono num text-ink">{formatCurrency(monthChem / 100)}</span>
-              </span>
-            </div>
-            <div>
-              {ordered.map((v) => {
-                const isFlagged = flagged.has(v.visit_date.slice(0, 10))
-                return (
-                  <div
-                    key={v.visit_id}
-                    className={cn(
-                      "flex items-center gap-3 px-4 py-2 border-b border-line-soft/50 last:border-b-0",
-                      isFlagged && "bg-coral/[0.06]",
-                    )}
-                  >
-                    <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", isFlagged ? "bg-coral" : "bg-grass/60")} />
-                    <div className="w-24 shrink-0">
-                      <div className="text-[12px] text-ink font-mono num">{fmtDay(v.visit_date)}</div>
-                      <div className="text-[10px] text-ink-mute truncate">
-                        {v.tech ?? "—"}
-                        {v.minutes != null && ` · ${v.minutes}m`}
-                      </div>
-                    </div>
-                    <div className="flex gap-3 shrink-0">
-                      {READINGS.map(([name, label]) => {
-                        const val = v.readings?.[name]
-                        if (val == null) return null
-                        return (
-                          <span key={name} className="text-[11px] font-mono num text-ink-dim">
-                            <span className="text-ink-mute">{label}</span> {val}
-                          </span>
-                        )
-                      })}
-                    </div>
-                    <div className="flex-1 text-[11px] text-ink-mute truncate">
-                      {v.chems.length > 0
-                        ? v.chems.map((c) => `${c.item} × ${c.qty}`).join(", ")
-                        : v.notes ?? ""}
-                    </div>
-                    <span className={cn("font-mono num text-[12px] shrink-0", isFlagged ? "text-sun" : "text-ink-dim")}>
-                      {chemOf(v) > 0 ? formatCurrency(chemOf(v) / 100) : "—"}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
+          {/* visit log — the same reusable ServiceLog, locked to the month */}
+          <ServiceLog
+            visits={visits}
+            period={{
+              label: monthLabel,
+              start: `${month}-01`,
+              end: new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7), 0)).toISOString().slice(0, 10),
+            }}
+          />
         </div>
       </div>
     </div>
   )
-}
-
-/** '2026-07-22' -> 'Tue, Jul 22' */
-function fmtDay(iso: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(iso.slice(0, 10) + "T12:00:00Z"))
 }
