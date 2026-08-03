@@ -43,15 +43,12 @@ interface MonthRow {
   gated_at: string | null
   gate_held_for: string[] | null
   invoiced_at: string | null
-  preprocessed_at: string | null
-  linked_payment_method_id: string | null
-  sent_at: string | null
 }
 
 const data_of = (r: { data: unknown[] | null }) => r.data
 
 const MONTH_COLS =
-  "id, customer_id, month, reconciled_at, disputed_at, disputes, delivery_refreshed_at, gated_at, gate_held_for, invoiced_at, preprocessed_at, linked_payment_method_id, sent_at"
+  "id, customer_id, month, reconciled_at, disputed_at, disputes, delivery_refreshed_at, gated_at, gate_held_for, invoiced_at"
 
 export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   constructor(private readonly client: Db) {}
@@ -114,9 +111,6 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       gatedAt: row.gated_at,
       gateHeldFor: row.gate_held_for ?? [],
       invoicedAt: row.invoiced_at,
-      preprocessedAt: row.preprocessed_at,
-      linkedPaymentMethodId: row.linked_payment_method_id,
-      sentAt: row.sent_at,
       variances,
     })
   }
@@ -173,8 +167,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   private statePatch(month: BillingMonth): Record<string, unknown> {
     const s = month as unknown as {
       reconciledAt: string | null; disputedAt: string | null; deliveryRefreshedAt: string | null
-      gatedAt: string | null; invoicedAt: string | null; preprocessedAt: string | null
-      linkedPaymentMethodId: string | null; sentAt: string | null
+      gatedAt: string | null; invoicedAt: string | null
     }
     return {
       reconciled_at: s.reconciledAt,
@@ -184,9 +177,6 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       gated_at: s.gatedAt,
       gate_held_for: month.heldFor,
       invoiced_at: s.invoicedAt,
-      preprocessed_at: s.preprocessedAt,
-      linked_payment_method_id: s.linkedPaymentMethodId,
-      sent_at: s.sentAt,
     }
   }
 
@@ -319,7 +309,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       items: itemsBy.get(row.id) ?? [],
       reconciledAt: row.reconciled_at, disputedAt: row.disputed_at, disputes: row.disputes ?? [],
       deliveryRefreshedAt: row.delivery_refreshed_at, gatedAt: row.gated_at, gateHeldFor: row.gate_held_for ?? [],
-      invoicedAt: row.invoiced_at, sentAt: row.sent_at, variances: varsBy.get(row.id) ?? [],
+      invoicedAt: row.invoiced_at, variances: varsBy.get(row.id) ?? [],
     }))
   }
 

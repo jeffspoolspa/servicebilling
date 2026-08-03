@@ -1,82 +1,63 @@
-import type { BillingMonth } from "@/lib/billing/domain"
 import type { InvoiceCharger } from "@/lib/payments/application/invoice-charger"
 import type { InvoiceSender, PaymentInstrument } from "@/lib/payments/domain/ports"
+import type { InvoiceRef } from "./preprocess-service"
 
 /**
- * PROCESS — the month's last automated act: collect if an instrument is
- * linked, then send, emitting facts at every transition.
+ * PROCESS — an INVOICE step: collect if an instrument is linked, then send.
+ * The invoice's own machine (RULED): the month ended at creation and only
+ * tracks; every event emitted here carries the parent as a PARTICIPANT.
  *
- * Collection is ONE ACTION: InvoiceCharger.chargeInvoice pairs the fresh
- * open-balance read with the Charge aggregate's ladder (RULED: you never
- * charge an invoice without asking what is owed at that moment, so the
- * pairing lives behind the method, not in every caller). This service only
- * sequences the month: charge each document, then send with attachments,
- * then markSent. A DECLINE stops the month unsent — the decline path
- * (retry cycle, dunning, disable) is a decision, not a loop. An UNKNOWN
- * stops harder: the adapter already tried query-before-retry, so a person
- * must look.
+ * Collection is ONE ACTION — InvoiceCharger.chargeInvoice pairs the fresh
+ * open-balance read with the Charge aggregate's ladder. A DECLINE stops
+ * this invoice unsent and surfaces; UNKNOWN stops harder (the adapter
+ * already query-before-retried). nothing_owed falls through to sending —
+ * someone already paid.
  */
 
 export class ProcessRefused extends Error {}
 
-export interface ProcessDeps {
-  issuedInvoices(monthId: string): Promise<{ qboInvoiceId: string; kind: string; subtotalCents: number }[]>
-  /** The instrument preprocess linked — resolved to its CURRENT state (a
-   *  disable between preprocess and process must win). */
-  instrument(paymentMethodId: string): Promise<PaymentInstrument | null>
+export interface ProcessInvoiceDeps {
+  /** The instrument preprocess linked — re-resolved to its CURRENT state. */
+  linkedInstrument(qboInvoiceId: string): Promise<PaymentInstrument | null>
   charger: InvoiceCharger
   sender: InvoiceSender
-  /** The month's report PDF for attachment, if one was generated. */
-  attachments(monthId: string): Promise<{ filename: string; pdf: Uint8Array }[]>
-  save(month: BillingMonth): Promise<void>
+  /** Attachments for THIS invoice (the month's usage report rides the maintenance service invoice). */
+  attachments(inv: InvoiceRef): Promise<{ filename: string; pdf: Uint8Array }[]>
+  sentAt(qboInvoiceId: string): Promise<string | null>
+  emit(type: string, payload: Record<string, unknown>, participants: string[], at: string): Promise<void>
 }
 
-export type ProcessOutcome =
-  | { monthId: string; result: "sent"; charged: { qboInvoiceId: string; qboPaymentId: string; amountCents: number }[] }
-  | { monthId: string; result: "declined"; reason: string; qboInvoiceId: string }
-  | { monthId: string; result: "unknown"; detail: string; qboInvoiceId: string }
+export type ProcessInvoiceOutcome =
+  | { qboInvoiceId: string; result: "sent"; charged: { qboPaymentId: string; amountCents: number } | null }
+  | { qboInvoiceId: string; result: "declined"; reason: string }
+  | { qboInvoiceId: string; result: "unknown"; detail: string }
 
-export async function processMonth(m: BillingMonth, deps: ProcessDeps, now: Date): Promise<ProcessOutcome> {
-  if (!m.isPreprocessed) throw new ProcessRefused(`${m.month} was not preprocessed — the payment route is not resolved`)
-  if (m.isSent) return { monthId: m.id, result: "sent", charged: [] } // level-triggered convergence
-
+export async function processInvoice(inv: InvoiceRef, deps: ProcessInvoiceDeps, now: Date): Promise<ProcessInvoiceOutcome> {
   const at = now.toISOString()
-  const invoices = await deps.issuedInvoices(m.id)
-  const charged: { qboInvoiceId: string; qboPaymentId: string; amountCents: number }[] = []
+  if (await deps.sentAt(inv.qboInvoiceId)) {
+    return { qboInvoiceId: inv.qboInvoiceId, result: "sent", charged: null } // convergence
+  }
 
-  /* ------------------------------ collection ------------------------------ */
-
-  if (m.paymentMethodId) {
-    // Re-resolve the instrument NOW: preprocess's link is the route, but a
-    // 3-strike disable or user deactivation since then must win.
-    const instrument = await deps.instrument(m.paymentMethodId)
-    if (instrument?.active) {
-      for (const inv of invoices) {
-        const r = await deps.charger.chargeInvoice({ qboInvoiceId: inv.qboInvoiceId, customerId: m.customerId, instrument, at })
-        if (r.outcome === "declined") {
-          // The month does NOT send on a decline — what happens next is a
-          // decision, not a loop.
-          return { monthId: m.id, result: "declined", reason: r.reason, qboInvoiceId: inv.qboInvoiceId }
-        }
-        if (r.outcome === "unknown") {
-          return { monthId: m.id, result: "unknown", detail: r.detail, qboInvoiceId: inv.qboInvoiceId }
-        }
-        if (r.outcome === "charged") charged.push({ qboInvoiceId: r.qboInvoiceId, qboPaymentId: r.qboPaymentId, amountCents: r.amountCents })
-        // nothing_owed: someone already paid — fall through to sending.
-      }
+  let charged: { qboPaymentId: string; amountCents: number } | null = null
+  const instrument = await deps.linkedInstrument(inv.qboInvoiceId)
+  if (instrument?.active) {
+    const r = await deps.charger.chargeInvoice({ qboInvoiceId: inv.qboInvoiceId, customerId: inv.customerId, instrument, at })
+    if (r.outcome === "declined") {
+      await deps.emit("charge_declined", { qbo_invoice_id: inv.qboInvoiceId, reason: r.reason }, [inv.linkedTo.id], at)
+      return { qboInvoiceId: inv.qboInvoiceId, result: "declined", reason: r.reason }
     }
-    // instrument vanished/disabled since preprocess: fall through to
-    // send-only — the email route is the answer for a routeless month.
+    if (r.outcome === "unknown") {
+      await deps.emit("charge_uncertain", { qbo_invoice_id: inv.qboInvoiceId, detail: r.detail }, [inv.linkedTo.id], at)
+      return { qboInvoiceId: inv.qboInvoiceId, result: "unknown", detail: r.detail }
+    }
+    if (r.outcome === "charged") {
+      charged = { qboPaymentId: r.qboPaymentId, amountCents: r.amountCents }
+      await deps.emit("charge_captured", { qbo_invoice_id: inv.qboInvoiceId, qbo_payment_id: r.qboPaymentId, amount_cents: r.amountCents }, [inv.linkedTo.id], at)
+    }
+    // nothing_owed: fall through to sending.
   }
 
-  /* -------------------------------- sending ------------------------------- */
-
-  const attachments = await deps.attachments(m.id)
-  for (const inv of invoices) {
-    await deps.sender.send(inv.qboInvoiceId, attachments)
-  }
-  m.markSent(at)
-  await deps.save(m)
-
-  return { monthId: m.id, result: "sent", charged }
+  await deps.sender.send(inv.qboInvoiceId, await deps.attachments(inv))
+  await deps.emit("invoice_emailed", { qbo_invoice_id: inv.qboInvoiceId, kind: inv.kind }, [inv.linkedTo.id], at)
+  return { qboInvoiceId: inv.qboInvoiceId, result: "sent", charged }
 }

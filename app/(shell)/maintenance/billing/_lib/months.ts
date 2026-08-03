@@ -10,6 +10,9 @@ export interface IssuedInvoiceRow {
   qbo_invoice_id: string
   subtotal_cents: number
   presentation: string
+  email_status: string | null
+  balance: number | null
+  total_amt: number | null
 }
 
 export interface MonthOverviewRow {
@@ -17,7 +20,7 @@ export interface MonthOverviewRow {
   customer_id: number
   customer_name: string | null
   month: string
-  status: "accruing" | "reconciled" | "disputed" | "gated" | "held" | "invoiced" | "preprocessed" | "sent"
+  status: "accruing" | "reconciled" | "disputed" | "gated" | "held" | "invoiced" | "closed"
   subtotal_cents: number
   item_count: number
   open_findings: number
@@ -27,9 +30,6 @@ export interface MonthOverviewRow {
   gated_at: string | null
   gate_held_for: string[] | null
   invoiced_at: string | null
-  preprocessed_at: string | null
-  linked_payment_method_id: string | null
-  sent_at: string | null
   issued_invoices: IssuedInvoiceRow[] | null
 }
 
@@ -38,8 +38,7 @@ export const MONTH_STAGES = [
   { key: "reconciled", label: "Reconcile" },
   { key: "gated", label: "Gate" },
   { key: "invoiced", label: "Invoice" },
-  { key: "preprocessed", label: "Preprocess" },
-  { key: "sent", label: "Sent" },
+  { key: "closed", label: "Closed" },
 ] as const
 
 /** Map pauses onto the stage where they pause, for the stepper. */
@@ -50,4 +49,4 @@ export function stepperStage(status: MonthOverviewRow["status"]): string {
 }
 
 export const MONTHS_SELECT =
-  "id, customer_id, customer_name, month, status, subtotal_cents, item_count, open_findings, reconciled_at, disputed_at, disputes, gated_at, gate_held_for, invoiced_at, preprocessed_at, linked_payment_method_id, sent_at, issued_invoices"
+  "id, customer_id, customer_name, month, status, subtotal_cents, item_count, open_findings, reconciled_at, disputed_at, disputes, gated_at, gate_held_for, invoiced_at, issued_invoices"

@@ -377,7 +377,7 @@ export function MonthWorkbench({
                         ) : (
                           <div key={idx} className="flex items-center gap-2.5 border-b border-line-soft/60 last:border-b-0 px-3 py-1.5">
                             <div className="flex-1 min-w-0">
-                              <span className="text-[12px] text-ink">{ln.itemName}</span>
+                              <span className={ln.itemName ? "text-[12px] text-ink" : "text-[12px] text-ink-mute"}>{ln.itemName || "—"}</span>
                               <span className="ml-2 font-mono text-[10px] text-ink-mute">
                                 {ln.kind === "variance" ? ln.detail : `${ln.qty} × ${formatCurrency(ln.unitPriceCents / 100)}`}
                               </span>
@@ -411,7 +411,7 @@ export function MonthWorkbench({
             <CardHeader>
               <CardTitle>Summary</CardTitle>
               <span className="ml-auto">
-                {m.status === "sent" ? <Pill tone="grass">sent</Pill> : <Pill tone="cyan">{m.status}</Pill>}
+                {m.status === "closed" ? <Pill tone="grass">closed</Pill> : <Pill tone="cyan">{m.status}</Pill>}
               </span>
             </CardHeader>
             <CardBody className="space-y-2 text-[13px]">
@@ -457,22 +457,10 @@ export function MonthWorkbench({
               <CardTitle>Payment method</CardTitle>
             </CardHeader>
             <CardBody className="text-[13px]">
-              {m.preprocessed_at ? (
-                m.linked_payment_method_id ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-ink">Autopay</span>
-                    <span className="font-mono text-[10px] text-ink-mute">{m.linked_payment_method_id}</span>
-                    <span className="ml-auto"><Pill tone="grass">will charge</Pill></span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-ink">Email route</span>
-                    <span className="ml-auto"><Pill tone="neutral">send only</Pill></span>
-                  </div>
-                )
-              ) : (
-                <span className="text-ink-mute">Resolved at preprocess — after the invoice exists.</span>
-              )}
+              <span className="text-ink-mute">
+                Resolved per invoice at its credit-check step — each invoice&apos;s
+                machine links (or declines to link) the active instrument.
+              </span>
             </CardBody>
           </Card>
 

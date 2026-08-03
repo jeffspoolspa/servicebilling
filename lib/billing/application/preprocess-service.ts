@@ -1,24 +1,31 @@
-import type { BillingMonth } from "@/lib/billing/domain"
 import type { PaymentInstrument } from "@/lib/payments/domain/ports"
 
 /**
- * PREPROCESS — between the invoice existing and anything shipping.
+ * PREPROCESS — an INVOICE step (RULED: after creation each invoice runs its
+ * own machine; the month only tracks). Two questions, answered once per
+ * invoice, events emitted with the linked billing month (or work order) as
+ * a PARTICIPANT so the parent's history assembles the whole story:
  *
- * Two questions, answered once and recorded on the month:
- *  1. CREDITS: any DECIDED maintenance credits apply to the new invoice(s)
- *     now. (The gate's credits_settled already held the month while credits
- *     were UNDECIDED — by the time we are here, what remains is applying
- *     the decisions.)
- *  2. ROUTE: is this customer on autopay with an ACTIVE instrument? Link it
- *     to the month; its absence IS the answer too — the send-only email
- *     route. Process never re-derives this.
+ *  1. CREDITS: any DECIDED open credits apply to this invoice now.
+ *  2. ROUTE: the customer's ACTIVE instrument links to the invoice; its
+ *     absence IS the answer too — the send-only email route.
  *
- * Idempotent: credit application is keyed per (payment, invoice) by the
- * applier; a re-run converges. markPreprocessed refuses out of order
- * (no invoice yet / already sent) — the aggregate is the sequence.
+ * The POLICY behind both ports is scoped by the invoice's KIND — which is
+ * defined by what it is LINKED TO (billing month -> maintenance: the
+ * autopay ROSTER decides; work order -> service: its own resolver).
  */
 
 export class PreprocessRefused extends Error {}
+
+export interface InvoiceRef {
+  qboInvoiceId: string
+  customerId: number
+  /** What the invoice is linked to defines its kind and its policies. */
+  kind: "maintenance" | "service"
+  /** The parent aggregate id — a PARTICIPANT on every event emitted here. */
+  linkedTo: { aggregate: "billing_month" | "work_order"; id: string }
+  subtotalCents: number
+}
 
 export interface AppliedCredit {
   paymentId: string
@@ -26,64 +33,61 @@ export interface AppliedCredit {
   appliedCents: number
 }
 
-export interface PreprocessDeps {
-  /** The month's issued documents — preprocess needs the invoice ids. */
-  issuedInvoices(monthId: string): Promise<{ qboInvoiceId: string; kind: string; subtotalCents: number }[]>
-  /**
-   * DECIDED, still-open maintenance credits for this customer. Undecided
-   * credits held the month at the gate; they cannot appear here.
-   */
-  decidedOpenCredits(customerId: number): Promise<{ paymentId: string; unappliedCents: number }[]>
-  /** Apply one credit against one invoice in QBO — idempotent per pair, echo-verified. */
+export interface PreprocessInvoiceDeps {
+  /** Already preprocessed? Level-triggered convergence, never re-applied. */
+  preprocessedAt(qboInvoiceId: string): Promise<string | null>
+  /** DECIDED, still-open credits for this customer — kind-scoped policy. */
+  decidedOpenCredits(customerId: number, kind: InvoiceRef["kind"]): Promise<{ paymentId: string; unappliedCents: number }[]>
+  /** Apply one credit against this invoice in QBO — idempotent per pair, echo-verified (mirror rides the echo). */
   applyCredit(paymentId: string, qboInvoiceId: string, cents: number): Promise<AppliedCredit>
-  /** The autopay roster's answer: the customer's current ACTIVE instrument, or null. */
-  activeInstrument(customerId: number): Promise<PaymentInstrument | null>
-  save(month: BillingMonth): Promise<void>
+  /**
+   * The payment route, kind-scoped: maintenance = ON the autopay roster
+   * with an active method; service = its own resolver. Inactive = null.
+   */
+  activeInstrument(customerId: number, kind: InvoiceRef["kind"]): Promise<PaymentInstrument | null>
+  /** Record the answer ON the invoice (the machine's state, not the month's). */
+  linkInstrument(qboInvoiceId: string, paymentMethodId: string | null, at: string): Promise<void>
+  /** Emit a fact with the parent as participant. */
+  emit(type: string, payload: Record<string, unknown>, participants: string[], at: string): Promise<void>
 }
 
 export interface PreprocessOutcome {
-  monthId: string
+  qboInvoiceId: string
   appliedCredits: AppliedCredit[]
   route: "autopay" | "email"
   paymentMethodId: string | null
 }
 
-export async function preprocessMonth(m: BillingMonth, deps: PreprocessDeps, now: Date): Promise<PreprocessOutcome> {
-  if (!m.isInvoiced) throw new PreprocessRefused(`${m.month} has no invoice yet — preprocess follows issue`)
-  if (m.isPreprocessed) {
-    // Level-triggered: already answered. Converge, don't re-apply.
-    return { monthId: m.id, appliedCredits: [], route: m.paymentMethodId ? "autopay" : "email", paymentMethodId: m.paymentMethodId }
-  }
-
+export async function preprocessInvoice(inv: InvoiceRef, deps: PreprocessInvoiceDeps, now: Date): Promise<PreprocessOutcome> {
   const at = now.toISOString()
-  const invoices = await deps.issuedInvoices(m.id)
-  if (invoices.length === 0) throw new PreprocessRefused(`${m.month} is marked invoiced but has no issued documents — refusing to preprocess a ghost`)
-
-  /* 1 — credits. Decided credits burn down against the invoices largest
-   *     first, never past either side's remainder. */
-  const credits = await deps.decidedOpenCredits(m.customerId)
-  const applied: AppliedCredit[] = []
-  const remaining = new Map(invoices.map((i) => [i.qboInvoiceId, i.subtotalCents]))
-  for (const credit of credits) {
-    let left = credit.unappliedCents
-    for (const inv of [...invoices].sort((a, b) => b.subtotalCents - a.subtotalCents)) {
-      if (left <= 0) break
-      const room = remaining.get(inv.qboInvoiceId) ?? 0
-      if (room <= 0) continue
-      const cents = Math.min(left, room)
-      applied.push(await deps.applyCredit(credit.paymentId, inv.qboInvoiceId, cents))
-      remaining.set(inv.qboInvoiceId, room - cents)
-      left -= cents
-    }
+  const already = await deps.preprocessedAt(inv.qboInvoiceId)
+  if (already) {
+    return { qboInvoiceId: inv.qboInvoiceId, appliedCredits: [], route: "email", paymentMethodId: null }
   }
 
-  /* 2 — the payment route. An inactive instrument is NO instrument: the
-   *     3-strike disable and user deactivation both land here for free. */
-  const instrument = await deps.activeInstrument(m.customerId)
+  /* 1 — credits: decided credits burn down, never past either remainder. */
+  const credits = await deps.decidedOpenCredits(inv.customerId, inv.kind)
+  const applied: AppliedCredit[] = []
+  let room = inv.subtotalCents
+  for (const credit of credits) {
+    if (room <= 0) break
+    const cents = Math.min(credit.unappliedCents, room)
+    if (cents <= 0) continue
+    applied.push(await deps.applyCredit(credit.paymentId, inv.qboInvoiceId, cents))
+    room -= cents
+  }
+
+  /* 2 — the route. An inactive instrument is NO instrument. */
+  const instrument = await deps.activeInstrument(inv.customerId, inv.kind)
   const methodId = instrument?.active ? instrument.paymentMethodId : null
+  await deps.linkInstrument(inv.qboInvoiceId, methodId, at)
 
-  m.markPreprocessed(methodId, at, applied.length)
-  await deps.save(m)
+  await deps.emit(
+    "invoice_preprocessed",
+    { qbo_invoice_id: inv.qboInvoiceId, route: methodId ? "autopay" : "email", payment_method_id: methodId, credits_applied: applied.length, kind: inv.kind },
+    [inv.linkedTo.id],
+    at,
+  )
 
-  return { monthId: m.id, appliedCredits: applied, route: methodId ? "autopay" : "email", paymentMethodId: methodId }
+  return { qboInvoiceId: inv.qboInvoiceId, appliedCredits: applied, route: methodId ? "autopay" : "email", paymentMethodId: methodId }
 }

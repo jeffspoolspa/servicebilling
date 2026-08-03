@@ -251,7 +251,7 @@ export function FindingsWorkbench({
                   <div key={idx} className="border-b border-line-soft px-5 py-2 hover:bg-white/[0.015]">
                     <div className="flex items-center gap-2.5">
                       <div className="flex-1 min-w-0">
-                        <div className="text-[12.5px] font-medium text-ink">{ln.itemName}</div>
+                        <div className={ln.itemName ? "text-[12.5px] font-medium text-ink" : "text-[12.5px] font-medium text-ink-mute"}>{ln.itemName || "—"}</div>
                         <div className="font-mono text-[10.5px] text-ink-mute mt-0.5">
                           {ln.kind === "variance" ? ln.detail : `${ln.qty} × ${formatCurrency(ln.unitPriceCents / 100)}`}
                         </div>

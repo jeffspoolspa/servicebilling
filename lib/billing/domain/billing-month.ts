@@ -90,10 +90,10 @@ export interface BillingMonthFact {
 }
 
 /** Where the month is. Derived from what has happened, never stamped. */
-export type MonthStatus = "accruing" | "disputed" | "reconciled" | "held" | "gated" | "invoiced" | "preprocessed" | "sent"
+export type MonthStatus = "accruing" | "disputed" | "reconciled" | "held" | "gated" | "invoiced"
 
 /** The next COMMAND this month is owed. Null = nothing to do, or a human's turn. */
-export type NextStep = "accrue" | "reconcile" | "refresh_delivery" | "gate" | "issue" | "preprocess" | "process" | null
+export type NextStep = "accrue" | "reconcile" | "refresh_delivery" | "gate" | "issue" | null
 
 export class BillingMonth {
   private facts: BillingMonthFact[] = []
@@ -114,9 +114,6 @@ export class BillingMonth {
     private gatedAt: string | null,
     private gateHeldFor: string[],
     private invoicedAt: string | null,
-    private preprocessedAt: string | null,
-    private linkedPaymentMethodId: string | null,
-    private sentAt: string | null,
     private readonly variances: Variance[],
   ) {}
 
@@ -124,7 +121,7 @@ export class BillingMonth {
     if (!/^\d{4}-\d{2}-01$/.test(month)) {
       throw new BillingRuleError(`a billing month is the first of a month, got "${month}"`)
     }
-    return new BillingMonth(id, customerId, month, new Map(), null, null, [], null, null, [], null, null, null, null, [])
+    return new BillingMonth(id, customerId, month, new Map(), null, null, [], null, null, [], null, [])
   }
 
   static reconstitute(args: {
@@ -139,9 +136,6 @@ export class BillingMonth {
     gatedAt?: string | null
     gateHeldFor?: readonly string[]
     invoicedAt?: string | null
-    preprocessedAt?: string | null
-    linkedPaymentMethodId?: string | null
-    sentAt?: string | null
     variances?: readonly Variance[]
   }): BillingMonth {
     return new BillingMonth(
@@ -156,9 +150,6 @@ export class BillingMonth {
       args.gatedAt ?? null,
       [...(args.gateHeldFor ?? [])],
       args.invoicedAt ?? null,
-      args.preprocessedAt ?? null,
-      args.linkedPaymentMethodId ?? null,
-      args.sentAt ?? null,
       [...(args.variances ?? [])],
     )
   }
@@ -169,22 +160,7 @@ export class BillingMonth {
     return this.invoicedAt !== null
   }
 
-  get isSent(): boolean {
-    return this.sentAt !== null
-  }
-
-  get isPreprocessed(): boolean {
-    return this.preprocessedAt !== null
-  }
-
-  /** The instrument preprocess linked, or null = no autopay -> send-only. */
-  get paymentMethodId(): string | null {
-    return this.linkedPaymentMethodId
-  }
-
   get status(): MonthStatus {
-    if (this.sentAt) return "sent"
-    if (this.preprocessedAt) return "preprocessed"
     if (this.invoicedAt) return "invoiced"
     if (this.gateHeldFor.length > 0) return "held"
     if (this.gatedAt) return "gated"
@@ -320,9 +296,12 @@ export class BillingMonth {
    * issuing waits for the month to end.
    */
   nextStep(delivered: readonly BillableSource[], now: Date): NextStep {
-    if (this.isSent) return null
-    if (this.isPreprocessed) return "process"
-    if (this.isInvoiced) return "preprocess"
+    // RULED: the month's own lifecycle ENDS at invoice creation. After it,
+    // each invoice runs its OWN machine (enrich folded into creation ->
+    // credit check -> charge -> send), and the month merely TRACKS: it is
+    // CLOSED when every linked invoice is sent and paid — a fold the read
+    // model derives, never a command the month is owed.
+    if (this.isInvoiced) return null
     if (this.gateHeldFor.length > 0) return null
     // A dispute buys ONE trip back to the system of record; a second one is
     // a real issue for a person, not something to retry forever.
@@ -436,38 +415,23 @@ export class BillingMonth {
    * bills. The ONLY way past the freeze, and deliberately not free: a reason
    * is required and the difference is attributable.
    */
-  recordVariance(v: Omit<Variance, "at" | "disposition">, at: string): void {
+  recordVariance(v: Omit<Variance, "at" | "disposition">, at: string, opts: { invoiceSent: boolean } = { invoiceSent: false }): void {
     if (!this.isInvoiced) {
       throw new BillingRuleError(`${this.month} has no invoice yet — change the claim itself, not a Variance`)
     }
     if (!v.reason.trim()) {
       throw new BillingRuleError("a variance needs a reason — an unexplained change to a customer's bill is what this refuses")
     }
-    const disposition = this.isSent ? ("recorded_only" as const) : ("amend_invoice" as const)
+    // Sent-ness now belongs to the INVOICE machine — the caller answers it
+    // from the invoice fold; the month only applies the ruling: before the
+    // customer reads the bill, an edit amends; after, it is recorded and
+    // moves as a credit.
+    const disposition = opts.invoiceSent ? ("recorded_only" as const) : ("amend_invoice" as const)
     this.variances.push({ ...v, disposition, at })
     this.facts.push({ type: "VarianceRecorded", monthId: this.id, at, payload: { ...v, disposition, month: this.month, customerId: this.customerId } })
   }
 
-  /**
-   * Credits applied, payment route resolved. The linked instrument (or its
-   * absence — the send-only email route) is preprocess's ANSWER, recorded
-   * on the month so process never re-derives it.
-   */
-  markPreprocessed(paymentMethodId: string | null, at: string, appliedCredits: number): void {
-    if (!this.isInvoiced) throw new BillingRuleError(`${this.month} has no invoice to preprocess`)
-    if (this.isSent) throw new BillingRuleError(`${this.month} is already sent`)
-    this.preprocessedAt = at
-    this.linkedPaymentMethodId = paymentMethodId
-    this.facts.push({ type: "MonthPreprocessed", monthId: this.id, at, payload: { paymentMethodId, appliedCredits, route: paymentMethodId ? "autopay" : "email" } })
-  }
 
-  /** The customer has it. After this a difference moves as a credit. */
-  markSent(at: string): void {
-    if (!this.isPreprocessed) throw new BillingRuleError(`${this.month} was not preprocessed — credits and the payment route come first`)
-    if (this.isSent) return
-    this.sentAt = at
-    this.facts.push({ type: "MonthSent", monthId: this.id, at, payload: { customerId: this.customerId, month: this.month, variances: this.variances.length } })
-  }
 
   get varianceTotalCents(): number {
     return this.variances.reduce((sum, v) => sum + (v.deltaCents ?? 0), 0)
@@ -485,7 +449,6 @@ export class BillingMonth {
    * that is true of differences recorded before the send as well.
    */
   pendingAmendments(): { variance: Variance; needs: "ion_log_edit" | "invoice_line" }[] {
-    if (this.isSent) return []
     return this.variances
       .filter((v) => v.disposition === "amend_invoice")
       .map((v) => ({ variance: v, needs: v.origin === "invoice" ? ("ion_log_edit" as const) : ("invoice_line" as const) }))

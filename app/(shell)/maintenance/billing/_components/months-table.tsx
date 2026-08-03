@@ -83,7 +83,7 @@ export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
     .sort()
     .reverse()
     .map((v) => ({ value: v, label: v }))
-  const statusOptions = ["accruing", "reconciled", "disputed", "gated", "held", "invoiced", "preprocessed", "sent"].map((v) => ({
+  const statusOptions = ["accruing", "reconciled", "disputed", "gated", "held", "invoiced", "closed"].map((v) => ({
     value: v,
     label: v,
   }))
