@@ -2,28 +2,26 @@
  * Run the publish use case directly — no browser, no HTTP, no auth session.
  *
  * This is the point of putting the use case in the application layer instead of
- * a route handler: the same method a button calls is callable from a script, a
- * cron job, or an agent. A multi-minute operation held open by a browser fetch
- * is fragile for anyone; this is not.
+ * a route handler: the same method the button calls is callable from a script,
+ * a cron job, or an agent. A multi-minute operation held open by a browser
+ * fetch is fragile for anyone; this is not.
  *
  *   npx tsx scripts/publish_scenario.ts <scenarioId> [--live]
  */
 
 import { readFileSync } from "node:fs"
 import { createClient } from "@supabase/supabase-js"
-import { RoutingService } from "@/lib/application/routing/routing-service"
-import {
-  SupabaseQuotaRepository,
-  type QueryClient,
-} from "@/lib/infrastructure/routing/supabase-quota-repository"
+import { PublishService } from "@/lib/application/routing/publish-service"
+import { SupabaseTaskStore } from "@/lib/infrastructure/routing/supabase-task-store"
 import {
   SupabaseScenarioRepository,
   type ScenarioClient,
 } from "@/lib/infrastructure/routing/supabase-scenario-repository"
-import { IonRoutePublisher } from "@/lib/infrastructure/routing/ion-route-publisher"
-import { SupabasePlacementCache } from "@/lib/infrastructure/routing/supabase-placement-cache"
 import { SupabaseMaintenanceEventLog } from "@/lib/infrastructure/maintenance/supabase-event-log"
 import { TaskCacheRefresher } from "@/lib/infrastructure/maintenance/task-cache-refresher"
+import { IonTasks } from "@/lib/infrastructure/ion/ion"
+import { IonTaskAcl } from "@/lib/infrastructure/ion/acl"
+import type { QueryClient } from "@/lib/infrastructure/routing/supabase-quota-repository"
 
 // No dotenv dependency — read .env.local directly.
 for (const line of readFileSync(".env.local", "utf8").split("\n")) {
@@ -60,48 +58,40 @@ async function main() {
     { auth: { persistSession: false, autoRefreshToken: false } },
   )
 
-  const service = new RoutingService(new SupabaseQuotaRepository(sb as unknown as QueryClient))
-  const scenarios = new SupabaseScenarioRepository(sb as unknown as ScenarioClient)
-  const publisher = new IonRoutePublisher(sb as unknown as QueryClient, windmill)
-  const cache = new SupabasePlacementCache(sb as unknown as QueryClient)
-  const events = new SupabaseMaintenanceEventLog(
-    sb as unknown as ConstructorParameters<typeof SupabaseMaintenanceEventLog>[0],
+  const service = new PublishService(
+    new SupabaseScenarioRepository(sb as unknown as ScenarioClient),
+    new SupabaseTaskStore(
+      sb as unknown as QueryClient,
+      sb as unknown as QueryClient,
+      new TaskCacheRefresher(sb as unknown as QueryClient, windmill),
+    ),
+    new IonTasks({ mint: (force) => windmill.run("f/ION/api/get_session", { force_refresh: force }) }),
+    new IonTaskAcl(),
+    new SupabaseMaintenanceEventLog(
+      sb as unknown as ConstructorParameters<typeof SupabaseMaintenanceEventLog>[0],
+    ),
   )
-  const freshness = new TaskCacheRefresher(sb as unknown as QueryClient, windmill)
 
   const t0 = Date.now()
   console.log(`${live ? "LIVE" : "DRY RUN"} publish of ${scenarioId}…`)
-  const report = await service.publishScenario(scenarioId, scenarios, publisher, {
-    dryRun: !live,
-    cache,
-    events,
-    freshness,
-  })
+  const report = await service.publish(scenarioId, { dryRun: !live })
 
   const accepted = report.results.filter((r) => r.accepted)
   const refused = report.results.filter((r) => !r.accepted)
   console.log(`\n--- ${Math.round((Date.now() - t0) / 1000)}s ---`)
   console.log(`committed:   ${report.committed}`)
-  console.log(`freshness:   ${JSON.stringify({ ...report.refreshed, skipped: report.refreshed?.skipped.length })}`)
+  console.log(`freshness:   ${JSON.stringify({ ...report.refreshed, skipped: report.refreshed.skipped.length })}`)
   console.log(`results:     ${report.results.length}  accepted: ${accepted.length}  refused: ${refused.length}`)
   console.log(`invalidated: ${report.invalidated.length}`)
-  console.log(`cached:      ${report.cached.length}   facts: ${JSON.stringify(report.facts)}`)
+
+  for (const s of report.refreshed.skipped) console.log(`  skipped ${s.taskId.slice(0, 8)}: ${s.reason}`)
+  for (const r of report.results) console.log(`  ${r.accepted ? "ok " : "NO "} ${r.quotaId.slice(0, 8)}: ${r.detail}`)
 
   for (const inv of report.invalidated) {
-    const c = inv.change as { kind: string; quotaId: string; from?: { techId: string; weekday: number }; to?: { techId: string; weekday: number } }
+    const c = inv.change as { kind: string; quotaId: string; from?: unknown; to?: unknown }
     console.log(`\ninvalidated: ${c.kind} quota=${c.quotaId}`)
     console.log(`  from: ${JSON.stringify(c.from)}  to: ${JSON.stringify(c.to)}`)
     console.log(`  reason: ${inv.reason}`)
-  }
-
-  const reasons = new Map<string, number>()
-  for (const r of refused) {
-    const k = r.detail.slice(0, 90)
-    reasons.set(k, (reasons.get(k) ?? 0) + 1)
-  }
-  if (reasons.size) {
-    console.log(`\nrefusals:`)
-    for (const [k, n] of [...reasons].sort((a, b) => b[1] - a[1])) console.log(`  ${n}x  ${k}`)
   }
 }
 
