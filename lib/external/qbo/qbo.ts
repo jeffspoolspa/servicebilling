@@ -160,11 +160,38 @@ interface QboInvoiceEntity {
   Id: string
   DocNumber: string
   TotalAmt: number
+  Balance?: number
+  TxnDate?: string
   CustomerRef: { value: string }
+  CustomerMemo?: { value?: string }
   Line: { Amount?: number; DetailType?: string }[]
 }
 
+/**
+ * The MIRROR — RULED (Carter, 2026-08-03): every write to the system of
+ * record updates our cache FROM THE VERIFIED ECHO, inside the write method,
+ * so the caller never remembers and the mirror is warm the instant we act.
+ * Webhooks/CDC and the self-healer remain the CONVERGENCE path — the echo
+ * write is the fast lane, not a second source of truth.
+ */
+export interface InvoiceMirror {
+  invoiceUpserted(echo: {
+    qboInvoiceId: string
+    docNumber: string
+    qboCustomerId: string
+    txnDate: string
+    totalAmt: number
+    balance: number
+    memo: string | null
+    raw: unknown
+  }): Promise<void>
+}
+
 export class QboInvoices extends Qbo {
+  constructor(minter: QboMinter, private readonly mirror?: InvoiceMirror) {
+    super(minter)
+  }
+
   /**
    * Make this invoice exist in QBO, echo-verified and idempotent by
    * DocNumber: a re-run finds the existing document (same customer) and
@@ -210,6 +237,37 @@ export class QboInvoices extends Qbo {
     if (echoSubtotal !== subtotal) {
       throw new Error(`invoice ${echo.Id} echo subtotal ${echoSubtotal} != built ${subtotal} — the document does not say what the ledger says`)
     }
+    // The mirror rides the verified echo — inside the write, always.
+    await this.mirror?.invoiceUpserted({
+      qboInvoiceId: echo.Id,
+      docNumber: echo.DocNumber,
+      qboCustomerId: inv.qboCustomerId,
+      txnDate: echo.TxnDate ?? inv.txnDate,
+      totalAmt: echo.TotalAmt,
+      balance: echo.Balance ?? echo.TotalAmt,
+      memo: inv.memo,
+      raw: echo,
+    })
     return { qboInvoiceId: echo.Id, docNumber: echo.DocNumber, subtotalCents: echoSubtotal, how: "created" }
+  }
+
+  /** The moment-of-truth balance read — fresh from QBO, mirror updated en route. */
+  async openBalance(qboInvoiceId: string): Promise<number> {
+    const res = await this.query<{ QueryResponse: { Invoice?: QboInvoiceEntity[] } }>(
+      `select Id, DocNumber, TotalAmt, Balance, TxnDate, CustomerRef from Invoice where Id = '${qboInvoiceId.replace(/'/g, "")}'`,
+    )
+    const inv = res.QueryResponse.Invoice?.[0]
+    if (!inv) throw new Error(`invoice ${qboInvoiceId} not found in QBO — cannot know its balance`)
+    await this.mirror?.invoiceUpserted({
+      qboInvoiceId: inv.Id,
+      docNumber: inv.DocNumber,
+      qboCustomerId: inv.CustomerRef.value,
+      txnDate: inv.TxnDate ?? "",
+      totalAmt: inv.TotalAmt,
+      balance: inv.Balance ?? 0,
+      memo: inv.CustomerMemo?.value ?? null,
+      raw: inv,
+    })
+    return Math.round((inv.Balance ?? 0) * 100)
   }
 }

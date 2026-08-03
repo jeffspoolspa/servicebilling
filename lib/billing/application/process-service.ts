@@ -1,51 +1,34 @@
 import type { BillingMonth } from "@/lib/billing/domain"
-import { Charge } from "@/lib/payments/domain/charge"
-import type { CardCharger, ChargeRepository, InvoiceSender, PaymentInstrument, PaymentRecorder, ReceiptSender } from "@/lib/payments/domain/ports"
+import type { InvoiceCharger } from "@/lib/payments/application/invoice-charger"
+import type { InvoiceSender, PaymentInstrument } from "@/lib/payments/domain/ports"
 
 /**
  * PROCESS — the month's last automated act: collect if an instrument is
  * linked, then send, emitting facts at every transition.
  *
- * The orchestration NEVER decides — the Charge aggregate does. This service
- * loads or requests the charge, asks the ports to act, and hands each
- * outcome back to the aggregate to record, saving after every money fact so
- * a crash between steps leaves a resumable, honest state:
- *
- *   charge (processor)  ->  record Payment (accounting)  ->  receipt
- *   -- each step idempotent by the charge's DOMAIN key (invoiceId:cycle) --
- *
- * then send the invoice with its attachments and markSent. A DECLINE stops
- * the month (no send) and surfaces — the decline path (retry cycle, dunning
- * email, disable) is a decision, not a loop. An UNKNOWN outcome stops
- * harder: the adapter already tried query-before-retry, so the truth is
- * genuinely unknowable right now and a person must look.
+ * Collection is ONE ACTION: InvoiceCharger.chargeInvoice pairs the fresh
+ * open-balance read with the Charge aggregate's ladder (RULED: you never
+ * charge an invoice without asking what is owed at that moment, so the
+ * pairing lives behind the method, not in every caller). This service only
+ * sequences the month: charge each document, then send with attachments,
+ * then markSent. A DECLINE stops the month unsent — the decline path
+ * (retry cycle, dunning, disable) is a decision, not a loop. An UNKNOWN
+ * stops harder: the adapter already tried query-before-retry, so a person
+ * must look.
  */
 
 export class ProcessRefused extends Error {}
 
 export interface ProcessDeps {
   issuedInvoices(monthId: string): Promise<{ qboInvoiceId: string; kind: string; subtotalCents: number }[]>
-  /**
-   * The invoice's OPEN BALANCE, read FRESH from QBO at the moment of truth
-   * — never the cache. QBO is the system of record for balance (ADR-010:
-   * applications are facts, balance is the fold, checksummed against QBO).
-   * This is the guard the Charge aggregate cannot be: our loop's identity
-   * (invoiceId:cycle) stops US double-charging, but only the balance knows
-   * about the check that arrived yesterday.
-   */
-  openBalance(qboInvoiceId: string): Promise<number>
-  /** The instrument preprocess linked — resolved to its current state (a
+  /** The instrument preprocess linked — resolved to its CURRENT state (a
    *  disable between preprocess and process must win). */
   instrument(paymentMethodId: string): Promise<PaymentInstrument | null>
-  charges: ChargeRepository
-  charger: CardCharger
-  recorder: PaymentRecorder
-  receipts: ReceiptSender
+  charger: InvoiceCharger
   sender: InvoiceSender
   /** The month's report PDF for attachment, if one was generated. */
   attachments(monthId: string): Promise<{ filename: string; pdf: Uint8Array }[]>
   save(month: BillingMonth): Promise<void>
-  newChargeId(): string
 }
 
 export type ProcessOutcome =
@@ -69,60 +52,17 @@ export async function processMonth(m: BillingMonth, deps: ProcessDeps, now: Date
     const instrument = await deps.instrument(m.paymentMethodId)
     if (instrument?.active) {
       for (const inv of invoices) {
-        // The moment-of-truth read: charge what is OWED, not what was
-        // billed. A check that arrived yesterday, a partial payment, a
-        // credit applied after issue — the balance knows; our cache and the
-        // subtotal do not. Zero balance = nothing to collect, fall through
-        // to sending.
-        const balanceCents = await deps.openBalance(inv.qboInvoiceId)
-        if (balanceCents <= 0) continue
-
-        // One charge per invoice per CYCLE — a crashed run resumes ITS
-        // charge; a re-decision after a decline mints a new cycle.
-        const cycle = await deps.charges.nextCycle(inv.qboInvoiceId)
-        const charge =
-          (await deps.charges.openFor(inv.qboInvoiceId, cycle)) ??
-          Charge.request({
-            id: deps.newChargeId(),
-            invoiceId: inv.qboInvoiceId,
-            qboInvoiceId: inv.qboInvoiceId,
-            customerId: m.customerId,
-            paymentMethodId: instrument.paymentMethodId,
-            amountCents: balanceCents,
-            cycle,
-            at,
-          })
-
-        if (charge.status === "requested") {
-          const result = await deps.charger.charge(instrument, charge.amountCents, charge.idempotencyKey)
-          if (result.outcome === "declined") {
-            charge.markDeclined(result.reason, at)
-            await deps.charges.save(charge)
-            // The month does NOT send on a decline — what happens next
-            // (retry cycle, dunning, disable) is a decision, not a loop.
-            return { monthId: m.id, result: "declined", reason: result.reason, qboInvoiceId: inv.qboInvoiceId }
-          }
-          if (result.outcome === "unknown") {
-            await deps.charges.save(charge) // still "requested" — resumable
-            return { monthId: m.id, result: "unknown", detail: result.detail, qboInvoiceId: inv.qboInvoiceId }
-          }
-          charge.markSettled(result.processorRef, at)
-          await deps.charges.save(charge) // settle is durable before accounting
+        const r = await deps.charger.chargeInvoice({ qboInvoiceId: inv.qboInvoiceId, customerId: m.customerId, instrument, at })
+        if (r.outcome === "declined") {
+          // The month does NOT send on a decline — what happens next is a
+          // decision, not a loop.
+          return { monthId: m.id, result: "declined", reason: r.reason, qboInvoiceId: inv.qboInvoiceId }
         }
-
-        if (charge.status === "settled") {
-          const { qboPaymentId } = await deps.recorder.record(inv.qboInvoiceId, charge.amountCents, charge.idempotencyKey)
-          charge.markPaymentRecorded(qboPaymentId, at)
-          await deps.charges.save(charge)
+        if (r.outcome === "unknown") {
+          return { monthId: m.id, result: "unknown", detail: r.detail, qboInvoiceId: inv.qboInvoiceId }
         }
-
-        if (charge.status === "recorded") {
-          await deps.receipts.send(m.customerId, charge.paymentId!, charge.amountCents)
-          charge.markReceipted(at)
-          await deps.charges.save(charge)
-        }
-
-        charged.push({ qboInvoiceId: inv.qboInvoiceId, qboPaymentId: charge.paymentId!, amountCents: charge.amountCents })
+        if (r.outcome === "charged") charged.push({ qboInvoiceId: r.qboInvoiceId, qboPaymentId: r.qboPaymentId, amountCents: r.amountCents })
+        // nothing_owed: someone already paid — fall through to sending.
       }
     }
     // instrument vanished/disabled since preprocess: fall through to
