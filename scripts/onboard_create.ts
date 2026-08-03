@@ -13,9 +13,9 @@
 import "./_env"
 import { readFileSync, writeFileSync } from "node:fs"
 import { OnboardingService } from "@/lib/application/customers/onboarding-service"
-import { SupabaseAccountStore } from "@/lib/infrastructure/customers/supabase-account-store"
-import { QboCustomerGateway } from "@/lib/infrastructure/customers/qbo-customer-gateway"
+import { SupabaseCustomerRepository } from "@/lib/infrastructure/customers/supabase-customer-repository"
 import { QboCustomers } from "@/lib/infrastructure/qbo/qbo"
+import { resolveServiceAddress } from "@/lib/places/resolve"
 import { triggerScriptSync } from "@/lib/windmill"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { resolveAll, DAY, type Exported } from "./_onboard_resolve"
@@ -30,17 +30,15 @@ async function main() {
 
   const sys = createSupabaseAdmin()
   const service = new OnboardingService(
-    new SupabaseAccountStore(sys as unknown as ConstructorParameters<typeof SupabaseAccountStore>[0]),
-    new QboCustomerGateway(
-      new QboCustomers({ mint: () => triggerScriptSync("f/qbo/api/get_access_token", {}, { timeoutMs: 60000 }) }),
-      sys as unknown as ConstructorParameters<typeof QboCustomerGateway>[1],
-    ),
+    new SupabaseCustomerRepository(sys as unknown as ConstructorParameters<typeof SupabaseCustomerRepository>[0]),
+    new QboCustomers({ mint: () => triggerScriptSync("f/qbo/api/get_access_token", {}, { timeoutMs: 60000 }) }),
+    resolveServiceAddress,
   )
 
   const plan: Record<string, unknown>[] = []
   const tally = { created: 0, deferred: 0, already: 0, refused: 0, dry: 0 }
   for (const r of rows) {
-    const out = await service.onboard(r.draft, r.address, { dryRun: !live })
+    const out = await service.onboard(r.draft, { dryRun: !live })
     const c = r.draft.profile.cadence
     plan.push({
       num: r.row["#"],

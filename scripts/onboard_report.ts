@@ -9,7 +9,7 @@
 import "./_env"
 import { readFileSync, writeFileSync } from "node:fs"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
-import { SupabaseAccountStore } from "@/lib/infrastructure/customers/supabase-account-store"
+import { SupabaseCustomerRepository } from "@/lib/infrastructure/customers/supabase-customer-repository"
 import { startsOnFor } from "@/lib/infrastructure/ion/acl"
 import { isBlocked, loadOf, resolveAll, DAY, type Exported } from "./_onboard_resolve"
 
@@ -19,7 +19,7 @@ async function main() {
   const x = JSON.parse(readFileSync(jsonPath, "utf8")) as Exported
   const { rows, dayPicks } = await resolveAll(x)
 
-  const store = new SupabaseAccountStore(createSupabaseAdmin() as unknown as ConstructorParameters<typeof SupabaseAccountStore>[0])
+  const store = new SupabaseCustomerRepository(createSupabaseAdmin() as unknown as ConstructorParameters<typeof SupabaseCustomerRepository>[0])
   const collisions: { name: string; street: string; hit: { accountId: number; displayName: string | null } }[] = []
   for (const r of rows) {
     const hit = await store.findByStreet(r.draft.shape.street)

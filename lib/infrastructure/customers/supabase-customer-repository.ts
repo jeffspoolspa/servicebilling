@@ -1,10 +1,11 @@
 /**
- * AccountStore over the canonical Supabase doors: the create_account /
- * upsert_service_location RPCs (ADR 005/007 — never direct inserts), and a
- * normalized-street lookup for the address-first dedup rule.
+ * The customer repository: our cache of who a customer is, behind the
+ * canonical Supabase doors — the create_account RPC (ADR 005/007, never a
+ * direct insert), a normalized-street lookup for the address-first dedup
+ * rule, and the row-count-asserted stamp that records a fulfilled QBO
+ * promise.
  */
 
-import type { AccountStore } from "@/lib/application/customers/onboarding-service"
 import type { CustomerDraft } from "@/lib/domain/customers/customer"
 import type { ResolvedAddress } from "@/lib/places/resolve"
 
@@ -14,12 +15,15 @@ interface Rpc {
     select(cols: string): {
       range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }>
     }
+    update(v: Record<string, unknown>): {
+      eq(c: string, v: unknown): { select(cols: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+    }
   }
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "")
 
-export class SupabaseAccountStore implements AccountStore {
+export class SupabaseCustomerRepository {
   private streets: Map<string, { accountId: number; displayName: string | null; qboId: string | null }> | null = null
 
   constructor(private readonly client: Rpc) {}
@@ -72,5 +76,21 @@ export class SupabaseAccountStore implements AccountStore {
     // The row must be findable immediately — a re-run reuses, never duplicates.
     this.streets?.set(norm(s.street), { accountId, displayName: draft.displayName, qboId: null })
     return { accountId }
+  }
+
+  /** Record the echo-verified QBO id. Zero rows = filtered, not applied. */
+  async stampQboId(accountId: number, qboId: string): Promise<void> {
+    const { data, error } = await this.client
+      .from("Customers")
+      .update({ qbo_customer_id: qboId })
+      .eq("id", accountId)
+      .select("id")
+    if (error) throw new Error(`qbo_customer_id stamp failed: ${JSON.stringify(error).slice(0, 200)}`)
+    if (!data || data.length === 0) {
+      throw new Error(`qbo_customer_id stamp touched NO rows (account ${accountId}) — filtered, not applied`)
+    }
+    this.streets?.forEach((v) => {
+      if (v.accountId === accountId) v.qboId = qboId
+    })
   }
 }
