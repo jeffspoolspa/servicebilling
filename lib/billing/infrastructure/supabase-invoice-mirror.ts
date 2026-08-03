@@ -24,6 +24,7 @@ export class SupabaseInvoiceMirror implements InvoiceMirror {
     balance: number
     memo: string | null
     raw: unknown
+    emailStatus?: string
   }): Promise<void> {
     const t = this.client.schema("billing").from("invoices") as {
       upsert(v: Record<string, unknown>, o: { onConflict: string }): { select(c: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
@@ -39,6 +40,7 @@ export class SupabaseInvoiceMirror implements InvoiceMirror {
           balance: echo.balance,
           memo: echo.memo,
           raw: echo.raw,
+          ...(echo.emailStatus ? { email_status: echo.emailStatus } : {}),
           fetched_at: new Date().toISOString(),
         },
         { onConflict: "qbo_invoice_id" },

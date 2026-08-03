@@ -60,6 +60,21 @@ export abstract class Qbo {
   protected query<T>(q: string): Promise<T> {
     return this.request("GET", `/query?query=${encodeURIComponent(q)}`)
   }
+
+  /** Raw-body request (multipart uploads). Same auth door, same re-mint. */
+  protected async requestRaw(method: "POST", path: string, body: Uint8Array, contentType: string, retried = false): Promise<void> {
+    if (!this.keys) this.keys = await this.minter.mint(false)
+    const res = await fetch(`${BASE}/${this.keys.realm_id}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${this.keys.access_token}`, Accept: "application/json", "Content-Type": contentType },
+      body: body as unknown as BodyInit,
+    })
+    if (res.status === 401 && !retried) {
+      this.keys = await this.minter.mint(true)
+      return this.requestRaw(method, path, body, contentType, true)
+    }
+    if (!res.ok) throw new Error(`QBO ${method} ${path} -> ${res.status}: ${(await res.text()).slice(0, 300)}`)
+  }
 }
 
 /* ------------------------------- customers -------------------------------- */
@@ -184,6 +199,7 @@ export interface InvoiceMirror {
     balance: number
     memo: string | null
     raw: unknown
+    emailStatus?: string
   }): Promise<void>
 }
 
@@ -249,6 +265,54 @@ export class QboInvoices extends Qbo {
       raw: echo,
     })
     return { qboInvoiceId: echo.Id, docNumber: echo.DocNumber, subtotalCents: echoSubtotal, how: "created" }
+  }
+
+  /**
+   * Attach a PDF to the invoice (QBO attachable API) — the usage report
+   * rides the maintenance service invoice. Idempotent enough for the
+   * pipeline: QBO tolerates duplicate attachments; the send is the act.
+   */
+  async attachPdf(qboInvoiceId: string, filename: string, pdf: Uint8Array): Promise<void> {
+    const boundary = "jpsb" + Math.random().toString(36).slice(2)
+    const meta = JSON.stringify({
+      FileName: filename,
+      ContentType: "application/pdf",
+      AttachableRef: [{ EntityRef: { type: "Invoice", value: qboInvoiceId } }],
+    })
+    const head =
+      `--${boundary}\r\nContent-Disposition: form-data; name="file_metadata_01"; filename="attachment.json"\r\nContent-Type: application/json\r\n\r\n${meta}\r\n` +
+      `--${boundary}\r\nContent-Disposition: form-data; name="file_content_01"; filename="${filename}"\r\nContent-Type: application/pdf\r\n\r\n`
+    const tail = `\r\n--${boundary}--\r\n`
+    const body = new Uint8Array([...new TextEncoder().encode(head), ...pdf, ...new TextEncoder().encode(tail)])
+    await this.requestRaw("POST", "/upload", body, `multipart/form-data; boundary=${boundary}`)
+  }
+
+  /**
+   * Send the invoice by email. The echo (the returned Invoice with
+   * EmailStatus) proves it, and the mirror rides it — email_status flips to
+   * EmailSent in our cache the moment QBO confirms.
+   */
+  async sendInvoice(qboInvoiceId: string): Promise<void> {
+    const res = await this.request<{ Invoice: QboInvoiceEntity & { EmailStatus?: string } }>(
+      "POST",
+      `/invoice/${qboInvoiceId}/send`,
+    )
+    const echo = res.Invoice
+    if (!echo?.Id) throw new Error(`invoice send returned no echo — unproven`)
+    if (echo.EmailStatus !== "EmailSent") {
+      throw new Error(`invoice ${qboInvoiceId} send echo says EmailStatus=${echo.EmailStatus ?? "?"} — not proven sent`)
+    }
+    await this.mirror?.invoiceUpserted({
+      qboInvoiceId: echo.Id,
+      docNumber: echo.DocNumber,
+      qboCustomerId: echo.CustomerRef.value,
+      txnDate: echo.TxnDate ?? "",
+      totalAmt: echo.TotalAmt,
+      balance: echo.Balance ?? 0,
+      memo: echo.CustomerMemo?.value ?? null,
+      raw: echo,
+      emailStatus: "EmailSent",
+    })
   }
 
   /** The moment-of-truth balance read — fresh from QBO, mirror updated en route. */

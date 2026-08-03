@@ -646,10 +646,17 @@
     <div class="row"><span class="chip inf">infra</span>create in QBO &#8594; <code>invoice.issue(qboId, docNo)</code> &#8594; stamp items</div>
     <div class="row"><span class="chip inf">infra</span>the stamp is the transition that enqueues charge/send</div>
   </div></div>
-  <div class="step"><div class="name">process (live)<span>IRREVERSIBLE &#183; already built</span></div><div class="body">
-    <div class="row"><span class="chip inf">infra</span><code>maint_charge_queue</code> &#8594; <code>process_maint_charges</code>, self-draining</div>
-    <div class="row"><span class="chip dom">domain</span>sentence: resolve &#8594; credits &#8594; charge or send &#8594; deliver</div>
-    <div class="row"><span class="chip inf">infra</span>idempotency in <code>charge_and_record</code> (WAL + Intuit Request-Id)</div>
+  <div class="step"><div class="name">the invoice machine<span>RULED 2026-08-03 &#183; per INVOICE, kind-scoped</span></div><div class="body">
+    <div class="row"><span class="chip dom">domain</span>THE HANDOFF: the month&#8217;s own lifecycle ENDS at invoice creation (nextStep after invoiced = null). Each created invoice enters ITS OWN machine.</div>
+    <div class="row"><span class="chip dom">domain</span>enrich (folded into creation) &#8594; credit check (<code>preprocessInvoice</code>: apply DECIDED credits + link the ACTIVE instrument) &#8594; charge &#8594; send (<code>processInvoice</code>)</div>
+    <div class="row"><span class="chip inf">infra</span>KIND = what the invoice is LINKED TO: billing_month &#8594; maintenance (the autopay ROSTER decides the route); work_order &#8594; service (its own resolver). One machine, two policy adapters.</div>
+    <div class="row"><span class="chip inf">infra</span>machine state on <code>billing.month_invoices</code> (preprocessed_at, linked instrument); sent/paid read the invoice MIRROR (email_status, balance &#8212; the mirror rides every verified echo; webhooks stay convergence)</div>
+    <div class="row"><span class="chip dom">domain</span>collection is ONE ACTION: <code>InvoiceCharger.chargeInvoice</code> pairs the FRESH open-balance read with the Charge aggregate&#8217;s ladder (request &#8594; settle &#8594; record &#8594; receipt; idempotency key = invoiceId:cycle; save after every money fact)</div>
+    <div class="row"><span class="chip inf">infra</span>every event carries the month as PARTICIPANT; <code>billing_month_history</code> assembles the whole story</div>
+  </div></div>
+  <div class="step"><div class="name">closed<span>a FOLD, never a command</span></div><div class="body">
+    <div class="row"><span class="chip inf">infra</span>the month is CLOSED when every linked invoice is sent AND paid &#8212; derived live by <code>v_months_overview</code>; a check arriving by webhook closes the month with zero code in the loop</div>
+    <div class="row"><span class="chip dom">domain</span>variance dispositions take the sent answer from the invoice fold (<code>recordVariance(v, at, {invoiceSent})</code>): before the customer reads the bill an edit AMENDS; after, it is RECORDED and moves as a credit</div>
   </div></div>
 
   <div class="cal why"><span class="tag">RULED &#183; checks never hand off directly</span>
