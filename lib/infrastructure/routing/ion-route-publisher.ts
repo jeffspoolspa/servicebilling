@@ -18,17 +18,7 @@
  * write path per ADR 002, dry-run first. Nothing here talks to ION directly.
  */
 
-import {
-  cadence,
-  isoDateOf,
-  nextOccurrence,
-  positionInWeek,
-  weekOf,
-  type PublishResult,
-  type RoutePublisher,
-  type TaskSchedule,
-  type Weekday,
-} from "@/lib/domain/routing"
+import type { PublishResult, RoutePublisher, TaskSchedule, Weekday } from "@/lib/domain/routing"
 import type { QueryClient } from "./supabase-quota-repository"
 
 /** Sun..Sat — the ION form's day field names, by weekday index. */
@@ -228,11 +218,6 @@ export class IonRoutePublisher implements RoutePublisher {
       active: boolean
       frequency: string | null
     }[]
-    // A/B parity is a property of the slots.
-    const anchorOf = (taskId: string) =>
-      currentSlots.some((r) => r.task_id === taskId && r.active && r.frequency === "biweekly_b")
-        ? 1
-        : 0
     const techIds = [
       ...new Set([
         ...schedules.flatMap((s) => s.stops.map((st) => st.techId)),
@@ -359,25 +344,28 @@ export class IonRoutePublisher implements RoutePublisher {
         for (const field of DAY_FIELD) changes[field] = ""
         for (const n of named) changes[DAY_FIELD[n.weekday]] = n.ionTech
       } else {
-        // Non-weekly: ION renders no day picker. The serviced day AND the A/B
-        // parity both come from StartsOn, so a move is a start-date write.
-        // Chosen date = the NEXT occurrence of that weekday in a week this
-        // cadence fires, so the change takes effect going forward rather than
-        // rewriting a contract that has been running for months.
+        // Non-weekly: ION renders no day picker — StartsOn encodes the day AND
+        // the A/B parity. This publisher NEVER writes StartsOn: computing one
+        // here is how 27 contract dates got rebased (fixed by remediation, rule
+        // learned). A tech-only change needs only AssignedTo. A DAY change
+        // needs an anchor-preserving date via IonTaskGateway.changeStartDate
+        // (the proxy-envelope recipe) and is REFUSED here until that is wired —
+        // a loud refusal, never a silent rebase.
         if (named.length !== 1) {
           out.set(schedule.quotaId, {
             reason: `${task.frequency} task with ${named.length} days — ION states one start date, so it cannot express this`,
           })
           continue
         }
-        const now = new Date()
-        const occ = nextOccurrence(
-          cadence(interval, anchorOf(schedule.quotaId)),
-          named[0].weekday,
-          weekOf(now),
-          now.getDay(),
-        )
-        changes["StartsOn"] = isoDateOf(occ.week, occ.weekday)
+        const currentDay = Object.keys(believed.get(schedule.quotaId) ?? {})[0]
+        if (currentDay !== undefined && Number(currentDay) !== named[0].weekday) {
+          out.set(schedule.quotaId, {
+            reason:
+              `${task.frequency} day move (${WEEKDAY[Number(currentDay)]} -> ${WEEKDAY[named[0].weekday]}) ` +
+              `requires an anchor-preserving StartsOn via changeStartDate — refused, not silently rebased`,
+          })
+          continue
+        }
         changes["AssignedTo"] = named[0].ionTech
       }
 
