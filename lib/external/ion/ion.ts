@@ -446,3 +446,33 @@ export class IonReports extends Ion {
     }
   }
 }
+
+/* --------------------------------- visits --------------------------------- */
+
+export interface DayLogPull {
+  from: string
+  to: string
+  visitsTouched: number
+}
+
+/**
+ * ION's service logs — the source of every visit and every consumable.
+ *
+ * Like the reports, this delegates to the ingest script rather than using our
+ * HTTP session, because refreshing the ION session logs in with a browser.
+ * The method lives here so no caller assembles a second ION gateway.
+ */
+export class IonVisits extends Ion {
+  constructor(minter: SessionMinter, private readonly jobs: IonJobRunner) {
+    super(minter)
+  }
+
+  /** Re-read the logs for a date range and upsert them, keyed on LogID. */
+  async refreshDays(from: string, to: string): Promise<DayLogPull> {
+    const res = await this.jobs.run<{ visits?: number; upserted?: number }>(
+      "f/ION/ingest_day_logs",
+      { start_date: from, end_date: to, dry_run: false },
+    )
+    return { from, to, visitsTouched: res.upserted ?? res.visits ?? 0 }
+  }
+}

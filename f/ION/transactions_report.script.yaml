@@ -1,3 +1,6 @@
+# tag: chromium — drives a real browser navigation: ION's report criteria live in the ColdFusion session and are only set by a form submit. Untagged, it lands on the default bun pool,
+# which has no browser, and only works when luck puts it somewhere that does.
+tag: chromium
 summary: ''
 description: ''
 lock: ''

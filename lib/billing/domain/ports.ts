@@ -28,6 +28,17 @@ export interface DeliveryFacts {
 }
 
 /**
+ * Go and re-read delivery from the system of record.
+ *
+ * This is the healing half of a dispute: a mismatch is usually not a wrong
+ * number but a stale copy, so the month spends its one repull here before
+ * anything is called an issue.
+ */
+export interface DeliveryRefresher {
+  refreshMonth(month: string): Promise<{ visitsTouched: number }>
+}
+
+/**
  * What the customer agreed to pay. Agreements' published language.
  *
  * `asOf` is the accrual date, not the month: terms change, and accrual prices

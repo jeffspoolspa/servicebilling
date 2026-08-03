@@ -20,6 +20,7 @@ import {
   type BillingMonthRepository,
   type ConsumableCatalog,
   type DeliveryFacts,
+  type DeliveryRefresher,
   type IonInvoiceFacts,
   type NextStep,
 } from "@/lib/billing/domain"
@@ -41,6 +42,8 @@ export class AdvanceMonthService {
     private readonly terms: AgreementTermsSource,
     private readonly catalog: ConsumableCatalog,
     private readonly systemInvoices: IonInvoiceFacts,
+    /** The healing half — absent, a dispute can only ever be reported. */
+    private readonly deliveryRefresher?: DeliveryRefresher,
   ) {}
 
   async advance(monthId: string, opts: { now?: Date; dryRun?: boolean } = {}): Promise<AdvanceOutcome> {
@@ -95,11 +98,17 @@ export class AdvanceMonthService {
       }
 
       case "refresh_delivery": {
-        // The one repull a dispute buys. The REFRESH itself belongs to
-        // delivery — we only record that it happened and let the next pass
-        // re-accrue on whatever it finds.
+        // The one repull a dispute buys: go back to ION for this month's
+        // logs, then let the next pass re-accrue on whatever it finds.
+        if (!this.deliveryRefresher) {
+          return { monthId, from, step, to: from, detail: "disputed, and no delivery refresher is wired", again: false }
+        }
+        if (opts.dryRun) {
+          return { monthId, from, step, to: from, detail: `dry run: would re-read ${month.month.slice(0, 7)} from ION`, again: false }
+        }
+        const pulled = await this.deliveryRefresher.refreshMonth(month.month)
         month.markDeliveryRefreshed(at)
-        detail = "re-read delivery from the system of record; will re-accrue and reconcile"
+        detail = `re-read ${pulled.visitsTouched} visit(s) from ION; will re-accrue and reconcile`
         break
       }
 
