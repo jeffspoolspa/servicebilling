@@ -13,7 +13,7 @@
 import { IonTaskAcl } from "@/lib/external/ion/acl"
 import { startsOnFor } from "@/lib/external/ion/acl"
 import type { IonTasks } from "@/lib/external/ion/ion"
-import type { SupabaseCustomerRepository } from "@/lib/customers/infrastructure/supabase-customer-repository"
+import type { CustomerRepository } from "@/lib/customers/domain"
 
 import { BillingTerms } from "@/lib/maintenance/domain"
 
@@ -39,7 +39,7 @@ export interface OpenedTask {
 
 export class TaskOpeningService {
   constructor(
-    private readonly customers: SupabaseCustomerRepository,
+    private readonly customers: CustomerRepository,
     private readonly ion: IonTasks,
     private readonly acl: IonTaskAcl,
   ) {}
@@ -48,14 +48,18 @@ export class TaskOpeningService {
     tasks: TaskToOpen[],
     opts: { ionTech: string; template: Record<string, string>; notBefore: string; dryRun: boolean },
   ): Promise<OpenedTask[]> {
-    const linked = await this.customers.linkedOf(tasks.map((t) => t.accountId))
+    const customers = await this.customers.byIds(tasks.map((t) => t.accountId))
     const out: OpenedTask[] = []
     for (const t of tasks) {
-      const link = linked.get(t.accountId)
-      if (!link) {
-        out.push({ accountId: t.accountId, displayName: t.displayName, accepted: false, detail: "ION ref not linked — task creation is blocked until it is" })
+      const customer = customers.get(t.accountId)
+      // The AGGREGATE decides whether a task may be opened [I-C3]; this
+      // service only relays the refusal.
+      const blocked = customer ? customer.blocks("create_task") : "no such customer"
+      if (!customer || blocked) {
+        out.push({ accountId: t.accountId, displayName: t.displayName, accepted: false, detail: blocked ?? "no such customer" })
         continue
       }
+      const link = { ionCustId: (customer.ion as { id: string }).id }
       const startsOn = startsOnFor(t.frequency, t.weekday, opts.notBefore)
       const create = this.acl.toIonCreate(
         {

@@ -115,4 +115,20 @@ check("a customer carries no service terms — those belong to the agreement", (
   assert.ok(!("cadence" in c) && !("poolType" in c) && !("ratePerVisit" in c))
 })
 
+check("the aggregate records its own links, and refuses a re-fuzz [ADR 006]", () => {
+  const c = (Customer.draft(input()) as Customer).withIds("1016400")
+  const withQbo = c.linkQbo("6532")
+  assert.strictEqual(withQbo.onboarding, "awaiting_ion")
+  assert.strictEqual((withQbo.qbo as { id: string }).id, "6532")
+
+  const linked = withQbo.linkIon({ ionCustId: "2581350", method: "api_fuzzy", confidence: "high" })
+  assert.strictEqual(linked.onboarding, "linked")
+  assert.strictEqual(linked.blocks("create_task"), null)
+
+  // Matched once, never re-fuzzed: a second match would have no tie-break.
+  assert.throws(() => linked.linkIon({ ionCustId: "9999999", method: "api_fuzzy", confidence: "high" }), /matched once/)
+  // Nor may a QBO identity be silently swapped.
+  assert.throws(() => withQbo.linkQbo("7777"), /refusing to relink/)
+})
+
 console.log(`customers domain selfcheck: ${n} checks passed`)

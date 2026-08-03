@@ -193,4 +193,34 @@ export class Customer {
   withIds(id: string, refs: { qbo?: ExternalRef; ion?: ExternalRef } = {}): Customer {
     return new Customer(id, this.name, this.billing, this.phone, this.email, this.violations, refs.qbo ?? this.qbo, refs.ion ?? this.ion)
   }
+
+  /**
+   * Record the billing identity QBO echoed back. The aggregate decides what a
+   * fulfilled promise looks like; the repository only writes it down.
+   */
+  linkQbo(qboId: string, at = new Date().toISOString()): Customer {
+    if (this.qbo.state === "linked" && this.qbo.id !== qboId) {
+      throw new Error(`${this.displayName} is already QBO ${this.qbo.id}; refusing to relink to ${qboId}`)
+    }
+    return this.withIds(this.id ?? "", { qbo: { state: "linked", id: qboId, method: "create_echo", confidence: "high", at } })
+  }
+
+  /**
+   * Record the ION match. Fuzzy-match ONCE and persist (ADR 006): a customer
+   * already linked is never re-matched, because a second fuzz can disagree
+   * with the first and we would have no way to tell which was right.
+   */
+  linkIon(match: { ionCustId: string; method: string; confidence: string }, at = new Date().toISOString()): Customer {
+    if (this.ion.state === "linked") {
+      throw new Error(`${this.displayName} is already ION ${this.ion.id} — matched once, never re-fuzzed`)
+    }
+    return this.withIds(this.id ?? "", {
+      ion: { state: "linked", id: match.ionCustId, method: match.method, confidence: match.confidence, at },
+    })
+  }
+
+  /** Several plausible ION matches and no tie-break — a person decides. */
+  ionIsAmbiguous(candidates: { id: string; name: string }[]): Customer {
+    return this.withIds(this.id ?? "", { ion: { state: "ambiguous", candidates } })
+  }
 }

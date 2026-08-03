@@ -15,17 +15,17 @@
 
 import { matchIonCustomer } from "@/lib/external/ion/acl"
 import type { IonCustomers } from "@/lib/external/ion/ion"
-import type { SupabaseCustomerRepository } from "@/lib/customers/infrastructure/supabase-customer-repository"
+import type { CustomerRepository } from "@/lib/customers/domain"
 
 export interface LinkReport {
-  linked: { accountId: number; displayName: string | null; ionCustId: string; confidence: string }[]
-  ambiguous: { accountId: number; displayName: string | null; candidates: { ionCustId: string; rowText: string }[] }[]
-  notFound: { accountId: number; displayName: string | null }[]
+  linked: { accountId: number; displayName: string; ionCustId: string; confidence: string }[]
+  ambiguous: { accountId: number; displayName: string; candidates: { ionCustId: string; rowText: string }[] }[]
+  notFound: { accountId: number; displayName: string }[]
 }
 
 export class LinkIonService {
   constructor(
-    private readonly customers: SupabaseCustomerRepository,
+    private readonly customers: CustomerRepository,
     private readonly ion: IonCustomers,
   ) {}
 
@@ -34,15 +34,17 @@ export class LinkIonService {
     const report: LinkReport = { linked: [], ambiguous: [], notFound: [] }
 
     for (const c of awaiting) {
-      const rows = await this.ion.search(c.lastName || c.displayName || "")
-      const match = matchIonCustomer({ firstName: c.firstName, lastName: c.lastName, street: c.street }, rows)
+      const rows = await this.ion.search(c.name.last || c.displayName)
+      const match = matchIonCustomer({ firstName: c.name.first, lastName: c.name.last, street: c.billing.street }, rows)
+      const accountId = Number(c.id)
       if (match.kind === "linked") {
-        if (!opts.dryRun) await this.customers.linkIon(c.accountId, match.ionCustId, "api_fuzzy", match.confidence)
-        report.linked.push({ accountId: c.accountId, displayName: c.displayName, ionCustId: match.ionCustId, confidence: match.confidence })
+        // The aggregate records the match (and refuses a re-fuzz); we save it.
+        if (!opts.dryRun) await this.customers.save(c.linkIon({ ionCustId: match.ionCustId, method: "api_fuzzy", confidence: match.confidence }))
+        report.linked.push({ accountId, displayName: c.displayName, ionCustId: match.ionCustId, confidence: match.confidence })
       } else if (match.kind === "ambiguous") {
-        report.ambiguous.push({ accountId: c.accountId, displayName: c.displayName, candidates: match.candidates })
+        report.ambiguous.push({ accountId, displayName: c.displayName, candidates: match.candidates })
       } else {
-        report.notFound.push({ accountId: c.accountId, displayName: c.displayName })
+        report.notFound.push({ accountId, displayName: c.displayName })
       }
     }
     return report

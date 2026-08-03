@@ -22,8 +22,8 @@ async function main() {
   const store = new SupabaseCustomerRepository(createSupabaseAdmin() as unknown as ConstructorParameters<typeof SupabaseCustomerRepository>[0])
   const collisions: { name: string; street: string; hit: { accountId: number; displayName: string | null } }[] = []
   for (const r of rows) {
-    const hit = await store.findByStreet(r.row["Service Address"] ?? "")
-    if (hit) collisions.push({ name: r.customer?.displayName ?? String(r.row["Customer"]), street: r.row["Service Address"] ?? "", hit })
+    const hit = await store.byStreet(r.row["Service Address"] ?? "")
+    if (hit) collisions.push({ name: r.customer?.displayName ?? String(r.row["Customer"]), street: r.row["Service Address"] ?? "", hit: { accountId: Number(hit.id), displayName: hit.displayName } })
   }
 
   const clean = rows.filter((r) => r.customer !== null && r.service.cadence.kind === "resolved")

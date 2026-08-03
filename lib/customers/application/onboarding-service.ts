@@ -18,7 +18,7 @@
 import type { Customer } from "@/lib/customers/domain"
 import type { QboCustomers } from "@/lib/external/qbo/qbo"
 import type { RawAddress, ResolveResult } from "@/lib/places/resolve"
-import type { SupabaseCustomerRepository } from "@/lib/customers/infrastructure/supabase-customer-repository"
+import type { CustomerRepository } from "@/lib/customers/domain"
 
 export type OnboardOutcome =
   | { outcome: "refused"; reasons: string[] }
@@ -28,7 +28,7 @@ export type OnboardOutcome =
 
 export class OnboardingService {
   constructor(
-    private readonly customers: SupabaseCustomerRepository,
+    private readonly customers: CustomerRepository,
     private readonly qbo: QboCustomers,
     private readonly resolveAddress: (a: RawAddress) => Promise<ResolveResult>,
   ) {}
@@ -49,36 +49,38 @@ export class OnboardingService {
     const geo = await this.resolveAddress({ street: b.street, city: b.city, state: b.state, zip: b.zip })
     const address = geo.resolved ? geo.address : null
 
-    const existing = (address ? await this.customers.findByPlaceId(address.place_id) : null)
-      ?? (await this.customers.findByStreet(b.street))
+    const existing = (address ? await this.customers.byPlaceId(address.place_id) : null)
+      ?? (await this.customers.byStreet(b.street))
     if (existing) {
       // Reuse — but a reused account with NO QBO id is a half-kept promise
       // (a prior run's deferral). Live re-runs finish the job here, which is
       // what makes deferrals converge instead of accumulating.
-      if (existing.qboId || opts.dryRun) {
+      if (existing.qbo.state === "linked" || opts.dryRun) {
         return {
           outcome: "already_ours",
-          accountId: existing.accountId,
+          accountId: Number(existing.id),
           displayName: existing.displayName,
-          qbo: existing.qboId ? "linked" : "unlinked",
+          qbo: existing.qbo.state === "linked" ? "linked" : "unlinked",
         }
       }
-      const qbo = await this.ensureQbo(existing.accountId, customer, null)
-      return { outcome: "already_ours", accountId: existing.accountId, displayName: existing.displayName, qbo: qbo === "deferred" ? "unlinked" : "linked" }
+      const qbo = await this.ensureQbo(existing, null)
+      return { outcome: "already_ours", accountId: Number(existing.id), displayName: existing.displayName, qbo: qbo === "deferred" ? "unlinked" : "linked" }
     }
 
     if (opts.dryRun) {
       return { outcome: "dry_run", wouldCreate: `${customer.displayName} @ ${b.street}, ${b.city}${address ? "" : " (address NOT rooftop-resolvable — will create unpinned)"}` }
     }
 
-    const { accountId } = await this.customers.create(customer, address)
-    const qbo = await this.ensureQbo(accountId, customer, address)
-    return { outcome: "created", accountId, qbo }
+    const added = await this.customers.add(
+      customer,
+      address ? { placeId: address.place_id, street: address.street, city: address.city, state: address.state, zip: address.zip, lat: address.lat, lng: address.lng } : null,
+    )
+    const qbo = await this.ensureQbo(added, address)
+    return { outcome: "created", accountId: Number(added.id), qbo }
   }
 
   /** QBO, echo-verified; the stamp writes the fulfilled promise to our row. */
   private async ensureQbo(
-    accountId: number,
     customer: Customer,
     address: { street: string; city: string; state: string; zip: string } | null,
   ): Promise<"created" | "already_existed" | "deferred"> {
@@ -96,7 +98,8 @@ export class OnboardingService {
         phone: customer.phone?.display ?? null,
         notes: "",
       })
-      await this.customers.stampQboId(accountId, r.qboId)
+      // The AGGREGATE decides what a fulfilled promise is; we just save it.
+      await this.customers.save(customer.linkQbo(r.qboId))
       return r.how
     } catch (err) {
       // Honest deferral: the account exists, the QBO id does not — a re-run
