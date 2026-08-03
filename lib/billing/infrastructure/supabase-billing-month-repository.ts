@@ -441,6 +441,28 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
    * (any task >2 days a week) / low_freq (all monthly-biweekly) /
    * weekly_residential (the rest).
    */
+  /**
+   * Chem provision per task — the audit's OVERRIDE peer groups. A task
+   * marked customer_provides_chems or bulk_refill leaves its customer's
+   * demographic group and joins the provision group, which has its own rule.
+   */
+  async taskChemProvision(taskIds: readonly string[]): Promise<Map<string, "provides_chems" | "bulk_refill">> {
+    const out = new Map<string, "provides_chems" | "bulk_refill">()
+    const ids = [...new Set(taskIds)]
+    const tasks = this.client.schema("maintenance").from("tasks") as unknown as {
+      select(c: string): { in(col: string, vals: string[]): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+    }
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data, error } = await tasks.select("id, customer_provides_chems, bulk_refill").in("id", ids.slice(i, i + 100))
+      if (error) throw new Error(`task chem provision failed: ${JSON.stringify(error).slice(0, 200)}`)
+      for (const r of (data ?? []) as { id: string; customer_provides_chems: boolean | null; bulk_refill: boolean | null }[]) {
+        if (r.customer_provides_chems) out.set(r.id, "provides_chems")
+        else if (r.bulk_refill) out.set(r.id, "bulk_refill")
+      }
+    }
+    return out
+  }
+
   /** The catalog's bulk containers, by name — the audit's exclusion set. */
   async bulkItemNames(): Promise<Set<string>> {
     const cat = this.client.schema("maintenance").from("consumables") as unknown as {

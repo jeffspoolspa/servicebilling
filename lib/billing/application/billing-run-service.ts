@@ -133,12 +133,14 @@ export class BillingRunService {
     // in the same run — audit writes, gate holds.
     const audit = { findings: 0, recorded: 0, alreadyOpen: 0 }
     {
+      const taskIds = monthsAll.flatMap((m) => m.billableItems.map((i) => i.taskId)).filter((t): t is string => !!t)
       const bulkNames = await this.months.bulkItemNames()
-      const [peerGroups, histories] = await Promise.all([
+      const [peerGroups, provisions, histories] = await Promise.all([
         this.months.customerPeerGroups(monthsAll.map((m) => m.customerId)),
+        this.months.taskChemProvision(taskIds),
         this.months.chemHistory(month, bulkNames),
       ])
-      const observations = observationsOf(monthsAll, peerGroups, bulkNames)
+      const observations = observationsOf(monthsAll, peerGroups, bulkNames, provisions)
       const found = auditConsumables(observations, histories)
       const wrote = await this.months.recordFindings(found)
       audit.findings = found.length
@@ -194,6 +196,7 @@ export function observationsOf(
   months: readonly BillingMonth[],
   peerGroups: ReadonlyMap<number, string>,
   bulkNames: ReadonlySet<string>,
+  provisions: ReadonlyMap<string, string> = new Map(),
 ): ChemObservation[] {
   const out: ChemObservation[] = []
   for (const m of months) {
@@ -214,14 +217,17 @@ export function observationsOf(
     }
     for (const [key, v] of byVisit) {
       if (v.chemCents <= 0 && v.bulkCents <= 0) continue
+      const taskId = key.slice(0, key.lastIndexOf(":"))
       out.push({
         monthId: m.id,
         customerId: m.customerId,
         visitKey: key,
         serviceDate: v.serviceDate,
-        // v_customer_peer_group — the already-ruled customer classification
-        // the live chem-flag medians use; one vocabulary, two consumers.
-        peerKey: peerGroups.get(m.customerId) ?? "unclassified",
+        // The TASK's chem provision overrides the customer's demographic
+        // group: provides_chems and bulk_refill are their own peer groups
+        // with their own rules. Otherwise v_customer_peer_group — the
+        // already-ruled classification the live chem-flag medians use.
+        peerKey: provisions.get(taskId) ?? peerGroups.get(m.customerId) ?? "unclassified",
         chemCents: v.chemCents,
         bulkCents: v.bulkCents,
         bulkItems: v.bulkItems,
