@@ -20,6 +20,7 @@ const TABS = [
   { href: "/maintenance/billing/processed", label: "Processed" },
   { href: "/maintenance/billing/autopay", label: "Autopay" },
   { href: "/maintenance/billing/findings", label: "Findings" },
+  { href: "/maintenance/billing/months", label: "Months" },
 ] as const
 
 export function BillingStageTabs() {
