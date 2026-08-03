@@ -16,11 +16,16 @@ that reaches the customer. Stated as invariants the model must enforce:
 
 - I-B1  **exclusivity** — a visit is claimed by at most one invoice
 - I-B2  **completeness** — every billable visit of a closed month is claimed
-- I-B3  **sent is locked** — the freeze is the SEND, not month end and not
-        document creation. The billing checks are where a bad consumable or
-        quantity surfaces, and fixing one means editing visits, so an earlier
-        freeze makes the checks unactionable. After the send, a correction is
-        a Variance. [ruled 2026-08-03]
+- I-B3  **the document is the freeze, the send is the door** — two moments,
+        not one. The claim ledger changes freely until the invoice is
+        CREATED (the billing checks are where a bad consumable surfaces, and
+        fixing one means editing visits, so freezing at month end would make
+        the checks unactionable). After creation, every difference — from
+        EITHER side, a visit edited after the freeze or the document edited
+        in QBO — goes through as a VARIANCE that bridges the gap and forces
+        a reason. While the invoice is still a draft a variance can be pushed
+        through to it; once SENT it is recorded only, and the money moves as
+        a credit. [ruled 2026-08-03]
 
 ## Modules
 
