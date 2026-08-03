@@ -13,8 +13,7 @@ import "./_env"
 import { readFileSync, writeFileSync } from "node:fs"
 import { createClient } from "@supabase/supabase-js"
 import { draftCustomer, isBlocked, type CustomerDraft, type RawCustomerRow } from "@/lib/domain/customers/customer"
-import { Pin, Quota, RouteFactory, RouteGeometry, weekOf, type Requirement, type Route, type Weekday } from "@/lib/domain/routing"
-import { SupabaseQuotaRepository, type QueryClient } from "@/lib/infrastructure/routing/supabase-quota-repository"
+import { Pin } from "@/lib/domain/routing"
 import { resolveServiceAddress } from "@/lib/places/resolve"
 import { startsOnFor } from "@/lib/infrastructure/ion/acl"
 
@@ -45,50 +44,64 @@ const toRaw = (r: Record<string, string>): RawCustomerRow => ({
 })
 
 /**
- * Day-drift resolver: when the only ambiguity is WHICH day, our own drive
- * model decides — the candidate day whose cheapest route absorbs the pin for
- * the fewest marginal miles (RouteGeometry.fit, the same maths the map uses).
+ * Day assignment for a NEW route. Every Coastal Blue pool lands on ONE tech
+ * (Emily Loper) as fresh routes, so a drifted row's day is not an insertion
+ * into existing routes — it is a partition question: split each drifted group
+ * between its two candidate days so Emily's days carry EQUAL effective load
+ * (weekly = 1 visit/week, bi-weekly = 1/2), keeping each day geographically
+ * compact by assigning nearest-to-seed first.
  */
-function pickDayByDriveCost(
-  draft: CustomerDraft,
-  pin: Pin,
-  routes: readonly Route[],
-  week: number,
-): { frequency: string; weekday: number; detail: string } | null {
-  const c = draft.profile.cadence
-  if (c.kind !== "ambiguous" || c.candidates.length < 2) return null
-  const frequencies = new Set(c.candidates.map((x) => x.frequency))
-  if (frequencies.size !== 1) return null // cadence itself in doubt — not a day pick
-  const frequency = c.candidates[0].frequency
+interface DriftRow {
+  key: string
+  pin: Pin
+  frequency: "weekly" | "biweekly_a" | "biweekly_b"
+  days: [number, number]
+}
 
-  const requirement: Requirement = {
-    quotaId: `candidate:${draft.displayName}`,
-    customerId: null,
-    pin,
-    intervalWeeks: frequency.startsWith("biweekly") ? 2 : 1,
-    anchorWeek: (frequency === "biweekly_b" ? week + 1 : week) as Requirement["anchorWeek"],
-    requiredDays: 1,
-    serviceMinutes: null,
-    orderingConstraint: "none",
-    startWeek: week as Requirement["startWeek"],
-    endWeek: null,
+const loadOf = (f: string) => (f === "weekly" ? 1 : f.startsWith("biweekly") ? 0.5 : 0.25)
+
+function partitionGroup(
+  rows: DriftRow[],
+  fixedPins: Map<number, Pin[]>,
+  fixedLoad: Map<number, number>,
+): Map<string, { weekday: number; detail: string }> {
+  const [dayA, dayB] = rows[0].days
+  const seedOf = (d: number) => {
+    const pins = fixedPins.get(d) ?? []
+    if (pins.length === 0) return null
+    const lat = pins.reduce((a, p) => a + p.lat, 0) / pins.length
+    const lng = pins.reduce((a, p) => a + p.lng, 0) / pins.length
+    return Pin.hypothetical(lat, lng)
   }
-  const fits = new RouteGeometry().fit(routes, Quota.rehydrate(requirement, []), 999)
-  const best = c.candidates
-    .map((cand) => ({
-      weekday: cand.weekdays[0],
-      fit: fits.find((f) => f.weekday === cand.weekdays[0]) ?? null,
-    }))
-    .filter((b): b is { weekday: number; fit: NonNullable<(typeof b)["fit"]> } => b.fit !== null)
-    .sort((a, b) => a.fit.insertionMi - b.fit.insertionMi)
-  if (best.length === 0) return null
-  const [win, ...rest] = best
-  const vs = rest.map((r) => `${DAY[r.weekday]} +${r.fit.insertionMi}mi`).join(", ")
-  return {
-    frequency,
-    weekday: win.weekday,
-    detail: `${DAY[win.weekday]} +${win.fit.insertionMi}mi into ${win.fit.techId.slice(0, 8)}'s route${vs ? ` (vs ${vs})` : ""}`,
+  const seedA = seedOf(dayA)
+  const groupLoad = rows.reduce((a, r) => a + loadOf(r.frequency), 0)
+  const loadA0 = fixedLoad.get(dayA) ?? 0
+  const loadB0 = fixedLoad.get(dayB) ?? 0
+  // How much of the group day A should take so both days end level.
+  const targetA = Math.max(0, (loadA0 + loadB0 + groupLoad) / 2 - loadA0)
+
+  // Nearest-to-A first keeps each half compact; without a seed, sort along the
+  // group's own axis so the split is still spatial, not arbitrary.
+  const sorted = [...rows].sort((r1, r2) => {
+    if (seedA) return r1.pin.distanceTo(seedA) - r2.pin.distanceTo(seedA)
+    return r1.pin.lat + r1.pin.lng - (r2.pin.lat + r2.pin.lng)
+  })
+  const out = new Map<string, { weekday: number; detail: string }>()
+  let acc = 0
+  for (const r of sorted) {
+    const w = loadOf(r.frequency)
+    const toA = acc + w <= targetA + w / 2
+    if (toA) acc += w
+    out.set(r.key, { weekday: toA ? dayA : dayB, detail: "" })
   }
+  const nA = [...out.values()].filter((v) => v.weekday === dayA).length
+  for (const [k, v] of out) {
+    out.set(k, {
+      ...v,
+      detail: `${DAY[v.weekday]} — balances the new route: ${DAY[dayA]} ${(loadA0 + acc).toFixed(1)} vs ${DAY[dayB]} ${(loadB0 + groupLoad - acc).toFixed(1)} eff visits/wk (${nA}/${rows.length - nA} split)`,
+    })
+  }
+  return out
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "")
@@ -107,37 +120,57 @@ async function main() {
     auth: { persistSession: false },
   })
 
-  // Day-drift rows: OUR drive model picks the day (lowest marginal miles into
-  // an existing route), replacing the seller-sheet proposal.
-  const week = weekOf(new Date())
-  const live = await new SupabaseQuotaRepository(sys as unknown as QueryClient).liveIn(week)
-  const routes = new RouteFactory().territory(live, week)
-  const { data: emps } = await sys.from("employees").select("id, first_name, last_name").range(0, 999)
-  const techName = new Map(
-    ((emps ?? []) as { id: string; first_name: string | null; last_name: string | null }[]).map((e) => [
-      e.id,
-      `${e.first_name ?? ""} ${e.last_name ?? ""}`.trim(),
-    ]),
-  )
-  const dayPicks = new Map<string, string>()
+  // Every pool here forms Emily Loper's NEW routes; drifted rows are a
+  // partition between their two candidate days, balanced on effective load.
+  const geocoded = new Map<string, Pin>()
   for (const d of drafts) {
-    if (!isBlocked(d.draft) || d.draft.profile.cadence.kind !== "ambiguous") continue
     const geo = await resolveServiceAddress({ street: d.draft.shape.street, city: d.draft.shape.city, state: "GA", zip: d.draft.shape.zip })
-    if (!geo.resolved) continue
-    const pick = pickDayByDriveCost(d.draft, Pin.hypothetical(geo.address.lat, geo.address.lng), routes, week)
-    if (!pick) continue
-    d.draft.profile.cadence = {
-      kind: "resolved",
-      frequency: pick.frequency as "weekly" | "biweekly_a" | "biweekly_b",
-      weekdays: [pick.weekday],
+    if (geo.resolved) geocoded.set(String(d.row["#"]), Pin.hypothetical(geo.address.lat, geo.address.lng))
+  }
+
+  const fixedPins = new Map<number, Pin[]>()
+  const fixedLoad = new Map<number, number>()
+  for (const d of drafts) {
+    const c = d.draft.profile.cadence
+    const pin = geocoded.get(String(d.row["#"]))
+    if (c.kind !== "resolved" || !pin) continue
+    for (const wd of c.weekdays) {
+      fixedPins.set(wd, [...(fixedPins.get(wd) ?? []), pin])
+      fixedLoad.set(wd, (fixedLoad.get(wd) ?? 0) + loadOf(c.frequency))
     }
-    d.draft.violations = d.draft.violations.filter((v) => v.rule !== "cadence")
-    const named = pick.detail.replace(/into ([0-9a-f-]{8})[0-9a-f-]*'s/, (_, p) => {
-      const full = [...techName.entries()].find(([id]) => id.startsWith(p))
-      return `into ${full ? full[1] : p}'s`
+  }
+
+  const drifted: DriftRow[] = []
+  for (const d of drafts) {
+    const c = d.draft.profile.cadence
+    const pin = geocoded.get(String(d.row["#"]))
+    if (c.kind !== "ambiguous" || c.candidates.length !== 2 || !pin) continue
+    const freqs = new Set(c.candidates.map((x) => x.frequency))
+    if (freqs.size !== 1) continue
+    drifted.push({
+      key: String(d.row["#"]),
+      pin,
+      frequency: c.candidates[0].frequency as DriftRow["frequency"],
+      days: [c.candidates[0].weekdays[0], c.candidates[1].weekdays[0]],
     })
-    dayPicks.set(String(d.row["#"]), named)
-    d.draft.profile.notes.push(`day picked by drive model: ${named}`)
+  }
+
+  const dayPicks = new Map<string, string>()
+  const byPair = new Map<string, DriftRow[]>()
+  for (const r of drifted) byPair.set(r.days.join("|"), [...(byPair.get(r.days.join("|")) ?? []), r])
+  for (const rows of byPair.values()) {
+    const picks = partitionGroup(rows, fixedPins, fixedLoad)
+    const rowByKey = new Map(rows.map((r) => [r.key, r]))
+    for (const d of drafts) {
+      const pick = picks.get(String(d.row["#"]))
+      if (!pick) continue
+      const c = d.draft.profile.cadence
+      if (c.kind !== "ambiguous") continue
+      d.draft.profile.cadence = { kind: "resolved", frequency: rowByKey.get(String(d.row["#"]))!.frequency, weekdays: [pick.weekday] }
+      d.draft.violations = d.draft.violations.filter((v) => v.rule !== "cadence")
+      dayPicks.set(String(d.row["#"]), pick.detail)
+      d.draft.profile.notes.push(`day assigned for the new route: ${pick.detail}`)
+    }
   }
 
   // Might we already have them? The address is the primary dedup axis
@@ -207,6 +240,24 @@ async function main() {
     lines.push(
       `| ${c.row["#"]} | ${c.draft.displayName} | ${c.draft.shape.city} | ${cadenceOf(c.draft)} | ${starts} | $${c.draft.profile.ratePerVisit ?? "?"} | $${c.draft.profile.monthly ?? "?"} | ${extra} |`,
     )
+  }
+  lines.push(``)
+  lines.push(`## Emily's week (all 65 pools, new routes)`)
+  lines.push(``)
+  lines.push(`| Day | Pools | Effective visits/wk |`)
+  lines.push(`|---|---|---|`)
+  const dayCount = new Map<number, { n: number; load: number }>()
+  for (const d of drafts) {
+    const c = d.draft.profile.cadence
+    if (c.kind !== "resolved") continue
+    for (const wd of c.weekdays) {
+      const cur = dayCount.get(wd) ?? { n: 0, load: 0 }
+      dayCount.set(wd, { n: cur.n + 1, load: cur.load + loadOf(c.frequency) })
+    }
+  }
+  for (const wd of [1, 2, 3, 4, 5, 6, 0]) {
+    const c = dayCount.get(wd)
+    if (c) lines.push(`| ${DAY[wd]} | ${c.n} | ${c.load.toFixed(1)} |`)
   }
   lines.push(``)
   lines.push(`Payment columns (card brand / last-4 / expiry / autopay) are deliberately NOT part of this pipeline — stored cards cannot be imported and re-authorization is its own human track (the sheet's "Payment Setup" tab).`)
