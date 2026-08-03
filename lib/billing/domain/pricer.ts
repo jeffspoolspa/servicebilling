@@ -31,9 +31,27 @@ export interface PricingTerms {
   readonly endsOn: string | null
 }
 
+/**
+ * A catalogue price, keyed the way the catalogue is: by ION's item id, with
+ * a validity window.
+ *
+ * RULED (Carter, 2026-08-03): accrual prices at the price in force WHEN IT
+ * RUNS, and that price becomes fixed when the invoice is created. So a
+ * re-accrual of an open month picks up a price change — which is the same
+ * "items re-price on accrue while drafts" rule the model doc states — and a
+ * billed month never moves, because the ledger is frozen at the document.
+ */
 export interface CatalogPrice {
-  readonly itemName: string
+  readonly itemId: string
   readonly unitPriceCents: number
+  readonly validFrom: string
+  readonly validTo: string | null
+}
+
+/** The price in force for this item on the given day, if any. */
+export function priceOn(catalog: readonly CatalogPrice[], itemId: string, date: string): number | undefined {
+  const hit = catalog.find((c) => c.itemId === itemId && c.validFrom <= date && (c.validTo === null || c.validTo > date))
+  return hit?.unitPriceCents
 }
 
 export interface PricedMonth {
@@ -61,10 +79,28 @@ export function priceMonth(args: {
   const { month, terms, sources, catalog, at } = args
   const items: BillableItem[] = []
   const refused: { source: BillableSource; reason: string }[] = []
-  const priceOf = new Map(catalog.map((c) => [c.itemName.trim().toLowerCase(), c.unitPriceCents]))
-
   const mine = sources.filter((s) => s.taskId === terms.taskId && s.serviceDate.startsWith(month.slice(0, 7)))
   const billableVisits = mine.filter((s) => s.sourceKind === "visit" && isBillable(s))
+
+  // BILLABLE-DAY COLLAPSE. Labour is charged per DAY SERVICED, not per log.
+  // ION writes a log per pool/pass, so a property with two bodies produces
+  // two completed visits on one day — and the customer agreed to a rate per
+  // visit to their pool, not per row in ION. [evidence: the July shadow —
+  // customer 8585's tasks each had exactly 2 logs per day and the live
+  // ledger billed half of them.]
+  //
+  // The extra logs are still CLAIMED, at zero, so no delivered visit is left
+  // unowned and I-B2 can be satisfied — the same reason a flat-rate month
+  // claims its visits.
+  const dayOf = new Map<string, typeof billableVisits>()
+  for (const v of billableVisits) dayOf.set(v.serviceDate, [...(dayOf.get(v.serviceDate) ?? []), v])
+  const chargedVisit = new Set<string>()
+  for (const [, sameDay] of dayOf) {
+    // The first log of the day carries the charge; deterministic by source id
+    // so a re-run collapses the same way every time.
+    const charged = [...sameDay].sort((a, b) => a.sourceId.localeCompare(b.sourceId))[0]
+    chargedVisit.add(charged.sourceId)
+  }
 
   /* ------------------------------- the labour ------------------------------ */
 
@@ -73,6 +109,7 @@ export function priceMonth(args: {
       for (const v of billableVisits) refused.push({ source: v, reason: "per-visit task has no rate — the catalog service type must price it" })
     } else {
       for (const v of billableVisits) {
+        const charged = chargedVisit.has(v.sourceId)
         items.push({
           sourceKind: "visit",
           sourceId: v.sourceId,
@@ -81,15 +118,17 @@ export function priceMonth(args: {
           serviceDate: v.serviceDate,
           itemName: v.itemName,
           qty: 1,
-          unitPriceCents: terms.amountCents,
-          amountCents: money(terms.amountCents),
+          unitPriceCents: charged ? terms.amountCents : 0,
+          amountCents: charged ? money(terms.amountCents) : 0,
           claimedAt: at,
         })
       }
     }
   } else {
-    // FLAT RATE: the month bills once, attributed to the last visit so the
-    // charge has a date and a source that can be claimed exclusively.
+    // FLAT RATE: the month bills once, as its OWN source (`flat`) keyed on
+    // the task-month — matching the live table. It deliberately does not
+    // consume a visit: a visit claimed for a flat charge could not also be
+    // claimed for its own labour, and I-B1 would then hide a real conflict.
     //
     // ponytail: a flat-rate month with only PART of the month served — a
     // start or a cancellation mid-month — is refused rather than guessed.
@@ -109,9 +148,26 @@ export function priceMonth(args: {
       refused.push({ source: billableVisits[billableVisits.length - 1], reason: "flat-rate task has no monthly amount" })
     } else {
       const anchor = billableVisits[billableVisits.length - 1]
+      // The visits are CLAIMED at zero: the flat charge is what bills, but
+      // every delivered visit must still be owned by a month or I-B2 can
+      // never be satisfied and a real visit sits unbilled and invisible.
+      for (const v of billableVisits) {
+        items.push({
+          sourceKind: "visit",
+          sourceId: v.sourceId,
+          taskId: v.taskId,
+          kind: "labor",
+          serviceDate: v.serviceDate,
+          itemName: v.itemName,
+          qty: 1,
+          unitPriceCents: 0,
+          amountCents: 0,
+          claimedAt: at,
+        })
+      }
       items.push({
-        sourceKind: "visit",
-        sourceId: anchor.sourceId,
+        sourceKind: "flat",
+        sourceId: `${terms.taskId}:${month.slice(0, 7)}`,
         taskId: anchor.taskId,
         kind: "labor",
         serviceDate: anchor.serviceDate,
@@ -126,11 +182,22 @@ export function priceMonth(args: {
 
   /* ----------------------------- the consumables --------------------------- */
 
-  if (terms.consumables === "separate") {
+  // BOTH modes charge for chemicals — ION's own labels are "list consumables"
+  // and "separate consumables", which differ in WHERE the charge appears
+  // (on the service invoice, or on its own), not in whether it is made.
+  // [evidence: the July shadow run — `listed` customers are billed for
+  // chemicals in the live ledger. The axis drives InvoiceType, not billability.]
+  {
     for (const u of mine.filter((s) => s.sourceKind === "usage")) {
-      const unit = u.unitPriceCents ?? priceOf.get(u.itemName.trim().toLowerCase())
+      // Priced as of the RUN, not the service date — see CatalogPrice.
+      const unit = u.unitPriceCents ?? (u.itemId ? priceOn(catalog, u.itemId, at.slice(0, 10)) : undefined)
       if (unit === undefined) {
-        refused.push({ source: u, reason: `no catalogue price for "${u.itemName}"` })
+        refused.push({
+          source: u,
+          reason: u.itemId
+            ? `no catalogue price in force for item ${u.itemId} ("${u.itemName}") as of ${at.slice(0, 10)}`
+            : `consumable "${u.itemName}" has no catalogue id to price by`,
+        })
         continue
       }
       items.push({
@@ -148,9 +215,6 @@ export function priceMonth(args: {
       })
     }
   }
-  // `included` consumables are already inside the service charge; listing them
-  // as billable items would charge twice for one bag of chlorine.
-
   return { items, refused }
 }
 

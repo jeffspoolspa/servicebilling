@@ -29,6 +29,7 @@ const src = (over: Partial<BillableSource> = {}): BillableSource => ({
   visitState: "completed",
   itemName: "POOL MAINTENANCE 65",
   qty: 1,
+  itemId: null,
   unitPriceCents: null,
   claimedByMonthId: null,
   ...over,
@@ -219,19 +220,60 @@ check("per-visit labour bills each visit; consumables round ONCE", () => {
   const sources = [
     src(),
     src({ sourceId: "v2", serviceDate: "2026-07-22" }),
-    src({ sourceId: "u1", sourceKind: "usage", itemName: "Chlorine Tabs", qty: 3, unitPriceCents: 433 }),
+    src({ sourceId: "u1", sourceKind: "usage", itemName: "Chlorine Tabs", itemId: "IT-1", qty: 3 }),
   ]
-  const { items, refused } = priceMonth({ month: "2026-07-01", terms: terms(), sources, catalog: [], at: AT })
+  const catalog = [{ itemId: "IT-1", unitPriceCents: 433, validFrom: "2026-01-01", validTo: null }]
+  const { items, refused } = priceMonth({ month: "2026-07-01", terms: terms(), sources, catalog, at: AT })
   assert.deepStrictEqual(refused, [])
   assert.strictEqual(items.filter((i) => i.kind === "labor").length, 2)
   const chem = items.find((i) => i.kind === "consumable")!
   assert.strictEqual(chem.amountCents, 1299, "3 x 433 rounded once, not per visit")
 })
 
-check("included consumables are not billed twice", () => {
-  const sources = [src(), src({ sourceId: "u1", sourceKind: "usage", itemName: "Chlorine Tabs", qty: 3, unitPriceCents: 433 })]
-  const { items } = priceMonth({ month: "2026-07-01", terms: terms({ consumables: "included" }), sources, catalog: [], at: AT })
-  assert.strictEqual(items.filter((i) => i.kind === "consumable").length, 0, "already inside the service charge")
+check("labour is charged per DAY SERVICED, not per ION log", () => {
+  // A property with two bodies gets two completed logs on one day. The
+  // customer agreed to a rate per visit to their pool, not per row in ION —
+  // so the day bills once, and the second log is claimed at zero so no
+  // delivered visit is left unowned.
+  const sources = [
+    src({ sourceId: "a1" }),
+    src({ sourceId: "a2" }),                                   // same date
+    src({ sourceId: "b1", serviceDate: "2026-07-22" }),
+  ]
+  const { items } = priceMonth({ month: "2026-07-01", terms: terms(), sources, catalog: [], at: AT })
+  assert.strictEqual(items.length, 3, "every log is claimed")
+  assert.strictEqual(items.filter((i) => i.amountCents > 0).length, 2, "but only two days are charged")
+  assert.strictEqual(items.reduce((s2, i) => s2 + i.amountCents, 0), 13000)
+  // Deterministic: the same log carries the charge on every re-run.
+  const again = priceMonth({ month: "2026-07-01", terms: terms(), sources: [...sources].reverse(), catalog: [], at: AT })
+  assert.deepStrictEqual(
+    again.items.filter((i) => i.amountCents > 0).map((i) => i.sourceId).sort(),
+    items.filter((i) => i.amountCents > 0).map((i) => i.sourceId).sort(),
+  )
+})
+
+check("the price is the one in force WHEN ACCRUAL RUNS, not at service", () => {
+  // A July visit re-accrued in August takes August's price; the freeze at
+  // invoice creation is what stops it moving again.
+  const sources = [src({ sourceId: "u1", sourceKind: "usage", itemName: "Tabs", itemId: "IT-1", qty: 2 })]
+  const catalog = [
+    { itemId: "IT-1", unitPriceCents: 400, validFrom: "2026-01-01", validTo: "2026-08-01" },
+    { itemId: "IT-1", unitPriceCents: 500, validFrom: "2026-08-01", validTo: null },
+  ]
+  const { items } = priceMonth({ month: "2026-07-01", terms: terms(), sources, catalog, at: AT })
+  assert.strictEqual(items[0].unitPriceCents, 500, "AT is 2026-08-02 — August's price")
+})
+
+check("both consumable modes CHARGE — they differ in where it appears", () => {
+  // ION: "list consumables" vs "separate consumables". Caught by the July
+  // shadow run: `listed` customers are billed for chemicals in the live
+  // ledger, so the axis drives InvoiceType, never billability.
+  const sources = [src(), src({ sourceId: "u1", sourceKind: "usage", itemName: "Chlorine Tabs", itemId: "IT-1", qty: 3 })]
+  const catalog = [{ itemId: "IT-1", unitPriceCents: 433, validFrom: "2026-01-01", validTo: null }]
+  for (const mode of ["included", "separate"] as const) {
+    const { items } = priceMonth({ month: "2026-07-01", terms: terms({ consumables: mode }), sources, catalog, at: AT })
+    assert.strictEqual(items.filter((i) => i.kind === "consumable").length, 1, `${mode} still bills the chemical`)
+  }
 })
 
 check("flat rate bills the MONTH once, not each visit", () => {
@@ -241,9 +283,15 @@ check("flat rate bills the MONTH once, not each visit", () => {
     terms: terms({ labor: "flat_rate", amountCents: 26000 }),
     sources, catalog: [], at: AT,
   })
-  assert.strictEqual(items.length, 1)
-  assert.strictEqual(items[0].amountCents, 26000)
-  assert.strictEqual(items[0].serviceDate, "2026-07-22", "anchored to the last visit, so the charge has a date")
+  // The flat charge bills; the visits are claimed at ZERO so none is left
+  // unowned — an unclaimed visit can never satisfy I-B2.
+  assert.strictEqual(items.length, 3, "two visits claimed + one monthly charge")
+  const flat = items.find((i) => i.sourceKind === "flat")!
+  assert.strictEqual(flat.amountCents, 26000)
+  assert.deepStrictEqual(items.filter((i) => i.sourceKind === "visit").map((i) => i.amountCents), [0, 0])
+  assert.strictEqual(items.reduce((s2, i) => s2 + i.amountCents, 0), 26000, "the month bills the rate once")
+  assert.strictEqual(flat.sourceId, "t1:2026-07", "keyed on the task-month, the thing charged once")
+  assert.strictEqual(flat.serviceDate, "2026-07-22", "dated by the last visit so the charge has a date")
 })
 
 check("what cannot be priced is REFUSED, never billed at zero", () => {
@@ -252,11 +300,11 @@ check("what cannot be priced is REFUSED, never billed at zero", () => {
   const unknown = priceMonth({
     month: "2026-07-01",
     terms: terms(),
-    sources: [src({ sourceId: "u9", sourceKind: "usage", itemName: "Mystery Jug", qty: 1, unitPriceCents: null })],
-    catalog: [], at: AT,
+    sources: [src({ sourceId: "u9", sourceKind: "usage", itemName: "Mystery Jug", itemId: "IT-9", qty: 1 })],
+    catalog: [{ itemId: "IT-9", unitPriceCents: 500, validFrom: "2027-01-01", validTo: null }], at: AT,
   })
   assert.strictEqual(unknown.items.length, 0)
-  assert.match(unknown.refused[0].reason, /no catalogue price for "Mystery Jug"/)
+  assert.match(unknown.refused[0].reason, /no catalogue price in force for item IT-9 .* as of 2026-08-02/)
 
   // A flat-rate month served only in part — an unmade business ruling.
   const partial = priceMonth({

@@ -8,7 +8,13 @@
  * the unique index backstops what the aggregate refuses.
  */
 
-export type SourceKind = "visit" | "usage"
+/**
+ * `flat` is a third kind on purpose (and it is what the live table already
+ * uses): a flat monthly charge does not consume a visit, so anchoring it to
+ * one would wrongly mark that visit's labour as claimed. Its source id is the
+ * TASK-month, because that is the thing being charged once.
+ */
+export type SourceKind = "visit" | "usage" | "flat"
 export type ItemKind = "labor" | "consumable"
 
 /** A thing that happened and might be billable. Delivery's fact, not ours. */
@@ -20,8 +26,10 @@ export interface BillableSource {
   /** Delivery's verdict. Billing reads it; it never writes it. */
   readonly visitState: "scheduled" | "completed" | "skipped" | "non_serviceable"
   readonly itemName: string
+  /** The catalogue key for a consumable. Labour has none. */
+  readonly itemId: string | null
   readonly qty: number
-  /** Set by the ingest for consumables; labour is priced from the agreement. */
+  /** Set by the ingest when it knows; otherwise the catalogue prices it. */
   readonly unitPriceCents: number | null
   /** Already claimed elsewhere, per the ledger — I-B1's evidence. */
   readonly claimedByMonthId?: string | null
