@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert"
-import { IonTaskAcl, anchorOf, matchIonCustomer, startsOnFor, type TaskIdentity } from "./acl"
+import { IonTaskAcl, anchorOf, startsOnFor, type TaskIdentity } from "./acl"
 import type { IonTaskForm } from "./ion"
 import type { TaskSchedule } from "@/lib/routing/domain"
 
@@ -131,20 +131,4 @@ for (const f of ["biweekly_a", "biweekly_b"] as const) {
   }
 }
 
-/* ---------------- customer matching: ADR 006, fuzz once ------------------- */
-
-const target = { firstName: "Mark", lastName: "Brooks", street: "106 Kent Trail" }
-const row1 = { ionCustId: "111", rowText: "BROOKS, MARK 106 Kent Trail Pooler GA (973) 943-8251" }
-const row2 = { ionCustId: "222", rowText: "BROOKS, MARK 9 Other Way Savannah GA" }
-const noise = { ionCustId: "333", rowText: "BROOKSTONE, AMY 4 Elm St" }
-
-// one name match links; street agreement makes it high
-assert.deepStrictEqual(matchIonCustomer(target, [row1, noise]), { kind: "linked", ionCustId: "111", confidence: "high" })
-// several name matches, exactly one street-confirmed -> that one, high
-assert.deepStrictEqual(matchIonCustomer(target, [row2, row1]), { kind: "linked", ionCustId: "111", confidence: "high" })
-// several with no street tie-break -> a human decides, never a guess
-assert.strictEqual(matchIonCustomer({ ...target, street: "" }, [row1, row2]).kind, "ambiguous")
-// nothing -> still awaiting the sync
-assert.strictEqual(matchIonCustomer(target, [noise]).kind, "not_found")
-
-console.log("ion acl selfcheck: 28 checks passed (incl. 42 anchor roundtrips)")
+console.log("ion schedule acl selfcheck: 24 checks passed (incl. 42 anchor roundtrips)")

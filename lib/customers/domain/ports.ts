@@ -52,3 +52,18 @@ export interface CustomerRepository {
   /** Customers whose billing identity exists but whose ION link does not. */
   awaitingIon(ids: readonly number[]): Promise<Customer[]>
 }
+
+/**
+ * What another system says this customer is, in OUR words. The application
+ * layer never learns which system, how it is searched, or what its rows look
+ * like — that is the anticorruption layer's business.
+ */
+export type CustomerMatch =
+  | { kind: "linked"; id: string; method: string; confidence: string }
+  | { kind: "ambiguous"; candidates: { id: string; name: string }[] }
+  | { kind: "not_found" }
+
+/** Resolve a customer's identity in an external system (today: ION). */
+export interface ExternalCustomerDirectory {
+  identify(customer: Customer): Promise<CustomerMatch>
+}

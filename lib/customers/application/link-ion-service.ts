@@ -13,9 +13,7 @@
  * button, or a script.
  */
 
-import { matchIonCustomer } from "@/lib/external/ion/acl"
-import type { IonCustomers } from "@/lib/external/ion/ion"
-import type { CustomerRepository } from "@/lib/customers/domain"
+import type { CustomerRepository, ExternalCustomerDirectory } from "@/lib/customers/domain"
 
 export interface LinkReport {
   linked: { accountId: number; displayName: string; ionCustId: string; confidence: string }[]
@@ -26,7 +24,7 @@ export interface LinkReport {
 export class LinkIonService {
   constructor(
     private readonly customers: CustomerRepository,
-    private readonly ion: IonCustomers,
+    private readonly directory: ExternalCustomerDirectory,
   ) {}
 
   async link(accountIds: number[], opts: { dryRun: boolean }): Promise<LinkReport> {
@@ -34,15 +32,14 @@ export class LinkIonService {
     const report: LinkReport = { linked: [], ambiguous: [], notFound: [] }
 
     for (const c of awaiting) {
-      const rows = await this.ion.search(c.name.last || c.displayName)
-      const match = matchIonCustomer({ firstName: c.name.first, lastName: c.name.last, street: c.billing.street }, rows)
+      const match = await this.directory.identify(c)
       const accountId = Number(c.id)
       if (match.kind === "linked") {
         // The aggregate records the match (and refuses a re-fuzz); we save it.
-        if (!opts.dryRun) await this.customers.save(c.linkIon({ ionCustId: match.ionCustId, method: "api_fuzzy", confidence: match.confidence }))
-        report.linked.push({ accountId, displayName: c.displayName, ionCustId: match.ionCustId, confidence: match.confidence })
+        if (!opts.dryRun) await this.customers.save(c.linkIon({ ionCustId: match.id, method: match.method, confidence: match.confidence }))
+        report.linked.push({ accountId, displayName: c.displayName, ionCustId: match.id, confidence: match.confidence })
       } else if (match.kind === "ambiguous") {
-        report.ambiguous.push({ accountId, displayName: c.displayName, candidates: match.candidates })
+        report.ambiguous.push({ accountId, displayName: c.displayName, candidates: match.candidates.map((x) => ({ ionCustId: x.id, rowText: x.name })) })
       } else {
         report.notFound.push({ accountId, displayName: c.displayName })
       }

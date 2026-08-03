@@ -10,8 +10,8 @@
  * task ingestion — this service writes nothing to our tables.
  */
 
-import { IonTaskAcl } from "@/lib/external/ion/acl"
 import { startsOnFor } from "@/lib/external/ion/acl"
+import type { IonTaskCreationAcl } from "@/lib/maintenance/infrastructure/ion-task-acl"
 import type { IonTasks } from "@/lib/external/ion/ion"
 import type { CustomerRepository } from "@/lib/customers/domain"
 
@@ -41,7 +41,7 @@ export class TaskOpeningService {
   constructor(
     private readonly customers: CustomerRepository,
     private readonly ion: IonTasks,
-    private readonly acl: IonTaskAcl,
+    private readonly acl: IonTaskCreationAcl,
   ) {}
 
   async open(

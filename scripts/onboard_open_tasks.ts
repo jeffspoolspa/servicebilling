@@ -13,7 +13,7 @@ import "./_env"
 import { readFileSync } from "node:fs"
 import { TaskOpeningService, type TaskToOpen } from "@/lib/customers/application/task-opening-service"
 import { SupabaseCustomerRepository } from "@/lib/customers/infrastructure/supabase-customer-repository"
-import { IonTaskAcl } from "@/lib/external/ion/acl"
+import { IonTaskCreationAcl } from "@/lib/maintenance/infrastructure/ion-task-acl"
 import { IonTasks } from "@/lib/external/ion/ion"
 import { triggerScriptSync } from "@/lib/windmill"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
@@ -47,7 +47,7 @@ async function main() {
   const service = new TaskOpeningService(
     new SupabaseCustomerRepository(createSupabaseAdmin() as unknown as ConstructorParameters<typeof SupabaseCustomerRepository>[0]),
     new IonTasks({ mint: (force) => triggerScriptSync("f/ION/api/get_session", { force_refresh: force }, { timeoutMs: 180000 }) }),
-    new IonTaskAcl(),
+    new IonTaskCreationAcl(),
   )
   const notBefore = new Date().toISOString().slice(0, 10)
 

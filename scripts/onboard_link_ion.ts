@@ -14,6 +14,7 @@ import { readFileSync } from "node:fs"
 import { LinkIonService } from "@/lib/customers/application/link-ion-service"
 import { SupabaseCustomerRepository } from "@/lib/customers/infrastructure/supabase-customer-repository"
 import { IonCustomers } from "@/lib/external/ion/ion"
+import { IonCustomerDirectory } from "@/lib/customers/infrastructure/ion-customer-directory"
 import { triggerScriptSync } from "@/lib/windmill"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 
@@ -28,9 +29,11 @@ async function main() {
 
   const service = new LinkIonService(
     new SupabaseCustomerRepository(createSupabaseAdmin() as unknown as ConstructorParameters<typeof SupabaseCustomerRepository>[0]),
-    new IonCustomers({
-      mint: (force) => triggerScriptSync("f/ION/api/get_session", { force_refresh: force }, { timeoutMs: 180000 }),
-    }),
+    new IonCustomerDirectory(
+      new IonCustomers({
+        mint: (force) => triggerScriptSync("f/ION/api/get_session", { force_refresh: force }, { timeoutMs: 180000 }),
+      }),
+    ),
   )
 
   const t0 = Date.now()
