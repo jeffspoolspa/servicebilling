@@ -45,7 +45,8 @@ function cents(v: number | null | undefined): string {
   return v == null ? "—" : formatCurrency(v / 100)
 }
 
-export function VisitCalendar({ customerId, month }: { customerId: number; month: string }) {
+export function VisitCalendar({ customerId, month, highlightDates }: { customerId: number; month: string; highlightDates?: string[] }) {
+  const hl = new Set((highlightDates ?? []).map((d) => d.slice(0, 10)))
   const [days, setDays] = useState<VisitDay[] | "loading" | "error">("loading")
 
   useEffect(() => {
@@ -107,7 +108,7 @@ export function VisitCalendar({ customerId, month }: { customerId: number; month
               return (
                 <TableHead
                   key={d.visit_date}
-                  className="text-right px-2"
+                  className={cn("text-right px-2", hl.has(d.visit_date.slice(0, 10)) && "bg-coral/15")}
                   title={d.service_names ?? undefined}
                 >
                   <span className="text-ink font-mono num">
@@ -146,6 +147,7 @@ export function VisitCalendar({ customerId, month }: { customerId: number; month
                     className={cn(
                       "text-right px-2 font-mono num",
                       v != null && "border-l border-line-soft/30",
+                      hl.has(d.visit_date.slice(0, 10)) && "bg-coral/[0.07]",
                     )}
                   >
                     {v ?? ""}
@@ -195,6 +197,7 @@ export function VisitCalendar({ customerId, month }: { customerId: number; month
                     className={cn(
                       "text-right px-2 font-mono num",
                       qty != null && "border-l border-line-soft/30",
+                      hl.has(d.visit_date.slice(0, 10)) && "bg-coral/[0.07]",
                     )}
                   >
                     {qty ?? ""}
@@ -222,6 +225,7 @@ export function VisitCalendar({ customerId, month }: { customerId: number; month
                     className={cn(
                       "text-right px-2 font-mono num",
                       amt > 0 && "border-l border-line-soft/30",
+                      hl.has(d.visit_date.slice(0, 10)) && "bg-coral/[0.07]",
                     )}
                   >
                     {amt > 0 ? formatCurrency(amt / 100) : ""}

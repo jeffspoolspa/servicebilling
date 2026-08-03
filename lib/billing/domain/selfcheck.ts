@@ -11,6 +11,7 @@ import { priceMonth, type PricingTerms } from "./pricer"
 import { reconcile, RECONCILE_TOLERANCE_CENTS } from "./reconciler"
 import { gate, type MonthGateFacts } from "./gate"
 import { auditConsumables } from "./consumables-audit"
+import { draftInvoice } from "./invoice-draft"
 
 let n = 0
 const check = (_name: string, fn: () => void) => {
@@ -581,23 +582,57 @@ check("a peer group too small to define normal flags NOTHING", () => {
   assert.strictEqual(auditConsumables(obs, new Map()).length, 0)
 })
 
-check("provision groups make the ONE rule cover both bucket cases", () => {
-  // RULED (Carter, 2026-08-03): no special bulk/provider rules — the task's
-  // provision IS its peer group, and every group is judged against its own
-  // distribution. A $350 bucket inside bulk_refill (where buckets are the
-  // group's normal) sits under that group's percentile; the same bucket on
-  // a weekly residential pool towers over its group and flags. (The rule is
-  // strictly-above-p95, so the top ~5% of EVERY group reviews — here the
-  // bulk_refill group is uniform $350 buckets, all at their own percentile,
-  // none above it.)
+check("bulk_refill is exempt from CPV; provides_chems is judged in its OWN group", () => {
+  // RULED (Carter, 2026-08-03): bulk_refill spend is deliveries — never
+  // CPV-flagged. provides_chems IS CPV-judged, against its own group,
+  // where normal is the small incidental spend of customers who buy their
+  // own chemicals — so $80 of chems flags THERE while being unremarkable
+  // among ordinary residentials. Both keep their spend out of everyone
+  // else's baselines.
   const obs = []
   for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `b${i}`, customerId: 100 + i, visitKey: `tb${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "bulk_refill", chemCents: 35000 }))
-  obs.push(ob({ monthId: "bX", customerId: 200, visitKey: "tbX:2026-07-08", serviceDate: "2026-07-08", peerKey: "bulk_refill", chemCents: 35000 }))
-  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `r${i}`, customerId: 300 + i, visitKey: `tr${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "weekly_residential", chemCents: 1000 }))
-  obs.push(ob({ monthId: "rX", customerId: 400, visitKey: "trX:2026-07-08", serviceDate: "2026-07-08", peerKey: "weekly_residential", chemCents: 35000 }))
+  obs.push(ob({ monthId: "bX", customerId: 200, visitKey: "tbX:2026-07-08", serviceDate: "2026-07-08", peerKey: "bulk_refill", chemCents: 160000 }))
+  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `p${i}`, customerId: 500 + i, visitKey: `tp${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "provides_chems", chemCents: 500 }))
+  obs.push(ob({ monthId: "pX", customerId: 201, visitKey: "tpX:2026-07-08", serviceDate: "2026-07-08", peerKey: "provides_chems", chemCents: 8000 }))
+  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `r${i}`, customerId: 300 + i, visitKey: `tr${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "weekly_residential", chemCents: 10000 }))
   const f = auditConsumables(obs, new Map())
-  assert.deepStrictEqual(f.map((x) => x.customerId), [400], "the bucket flags on the residential pool and only there")
-  assert.strictEqual(f[0].rule, "cpv_outlier", "one rule, one vocabulary")
+  assert.deepStrictEqual(f.map((x) => x.customerId).sort(), [201], "the towering bucket stays silent; the provider's $80 flags against its own $5 normal")
+})
+
+check("the draft invoice is the ledger regrouped — regenerating IS reading", () => {
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  // Two charged visits at $65, one same-day log claimed at zero...
+  m.claim(item({ sourceId: "v1", serviceDate: "2026-07-08" }), { claimedByMonthId: null }, AT)
+  m.claim(item({ sourceId: "v2", serviceDate: "2026-07-15" }), { claimedByMonthId: null }, AT)
+  m.claim(item({ sourceId: "v3", serviceDate: "2026-07-15", unitPriceCents: 0, amountCents: 0 }), { claimedByMonthId: null }, AT)
+  // ...and four buckets of the same chemical.
+  for (let i = 0; i < 4; i++) {
+    m.claim(item({ sourceKind: "usage", sourceId: `u${i}`, kind: "consumable", itemName: "CHLORINE TABLET 50LB", unitPriceCents: 35000, amountCents: 35000 }), { claimedByMonthId: null }, AT)
+  }
+  const d = draftInvoice(m)
+  assert.deepStrictEqual(
+    d.lines.map((l) => [l.itemName, l.qty, l.amountCents]),
+    [["POOL MAINTENANCE 65", 2, 13000], ["CHLORINE TABLET 50LB", 4, 140000]],
+    "one line per item at qty, labor first — the shape the live invoices read",
+  )
+  assert.strictEqual(d.claimedAtZero, 1, "the collapsed log is owned, not a line")
+  assert.strictEqual(d.subtotalCents, 153000)
+
+  // Edit the ledger; the NEXT draft is the new truth — nothing to invalidate.
+  m.release("usage", "u3", AT, "audit: mis-keyed bucket")
+  assert.strictEqual(draftInvoice(m).subtotalCents, 118000)
+
+  // Variances exist only once a document does (I-B3) — invoice first, then
+  // an unsent variance rides the draft as its own explained line.
+  const delivered = [src({ sourceId: "v1" }), src({ sourceId: "v2", serviceDate: "2026-07-15" }), src({ sourceId: "v3", serviceDate: "2026-07-15" })]
+  m.markReconciled(AT)
+  m.markGated([], AT)
+  m.markInvoiced(delivered, AUG, AT)
+  m.recordVariance({ sourceId: null, kind: "proration", origin: "visit", reason: "started mid-month", deltaCents: -49000, techId: null }, AT)
+  const d3 = draftInvoice(m)
+  const vline = d3.lines.find((l) => l.kind === "variance")
+  assert.ok(vline && vline.detail === "started mid-month", "the edit carries its reason onto the document")
+  assert.strictEqual(d3.subtotalCents, 118000 - 49000)
 })
 
 console.log(`billing domain selfcheck: ${n} checks passed`)

@@ -1,5 +1,6 @@
 import { createSupabaseServer } from "@/lib/supabase/server"
-import { FindingsTable, type FindingRow } from "../_components/findings-table"
+import { FindingsTable } from "../_components/findings-table"
+import type { FindingRow } from "../_lib/findings"
 
 /**
  * The audit's review queue: billing.findings via the v_findings_review read

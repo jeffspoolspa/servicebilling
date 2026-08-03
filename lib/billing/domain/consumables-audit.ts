@@ -57,6 +57,16 @@ export interface AuditPolicy {
   readonly selfFactor: number
   /** Customers with fewer historical visits than this skip the self bar. */
   readonly minSelfVisits: number
+  /**
+   * Peer groups the CPV check does NOT judge (RULED: Carter, 2026-08-03).
+   * bulk_refill only: its spend is deliveries, not per-visit usage, so a
+   * percentile says nothing useful. provides_chems IS judged — against its
+   * own group's distribution, where "normal" is the small incidental spend
+   * of customers who buy their own chemicals. Exempt groups still form
+   * their own peer group, keeping their spend OUT of everyone else's
+   * baselines.
+   */
+  readonly cpvExemptGroups: readonly string[]
 }
 
 /** The house numbers. A policy object so the UI can show and change them. */
@@ -65,6 +75,7 @@ export const AUDIT_POLICY: AuditPolicy = {
   minPeers: 20,
   selfFactor: 2,
   minSelfVisits: 6,
+  cpvExemptGroups: ["bulk_refill"],
 }
 
 export interface AuditFinding {
@@ -93,8 +104,12 @@ export function auditConsumables(
   histories: ReadonlyMap<number, ChemHistory>,
   policy: AuditPolicy = AUDIT_POLICY,
 ): AuditFinding[] {
+  const exempt = new Set(policy.cpvExemptGroups)
   const byPeer = new Map<string, number[]>()
-  for (const o of observations) byPeer.set(o.peerKey, [...(byPeer.get(o.peerKey) ?? []), o.chemCents])
+  for (const o of observations) {
+    if (exempt.has(o.peerKey)) continue
+    byPeer.set(o.peerKey, [...(byPeer.get(o.peerKey) ?? []), o.chemCents])
+  }
   const thresholds = new Map<string, number>()
   for (const [key, values] of byPeer) {
     if (values.length < policy.minPeers) continue // too few peers to define normal
@@ -103,6 +118,7 @@ export function auditConsumables(
 
   const findings: AuditFinding[] = []
   for (const o of observations) {
+    if (exempt.has(o.peerKey)) continue
     if (o.chemCents <= 0) continue
     const bar = thresholds.get(o.peerKey)
     if (bar === undefined || o.chemCents <= bar) continue
