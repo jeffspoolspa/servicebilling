@@ -124,20 +124,53 @@ export class SupabaseBillingFacts implements DeliveryFacts, AgreementTermsSource
     return out
   }
 
-  /** The terms in force for this customer's tasks — the two billing axes. */
-  async termsFor(customerId: number, month: string): Promise<PricingTerms[]> {
+  /**
+   * The terms in force for this customer's tasks AS OF a date.
+   *
+   * `maintenance.task_terms` is the history (valid_from/valid_to); the
+   * columns on `tasks` are only today's snapshot. Reading the history is what
+   * lets a past month be re-accrued to the same numbers it was billed —
+   * SJC PROPERTIES was $600/month through 1 July and $300 after, and reading
+   * the task row alone made June come out $300 short.
+   */
+  async termsFor(customerId: number, month: string, asOf: string): Promise<PricingTerms[]> {
     const { data, error } = await this.q("maintenance", "tasks")
       .select("id, billing_method, price_per_visit_cents, flat_rate_monthly_cents, consumables_mode, starts_on, ends_on, status")
       .eq("customer_id", customerId)
       .range(0, 199)
     if (error) throw new Error(`terms read failed: ${JSON.stringify(error).slice(0, 200)}`)
 
-    const { to } = monthBounds(month)
-    return ((data ?? []) as {
+    const taskRows = (data ?? []) as {
       id: string; billing_method: string | null; price_per_visit_cents: number | null
       flat_rate_monthly_cents: number | null; consumables_mode: string | null
       starts_on: string | null; ends_on: string | null; status: string | null
-    }[])
+    }[]
+
+    // The historical terms for those tasks, if any are recorded.
+    const day = asOf.slice(0, 10)
+    const historical = new Map<string, { billing_method: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; consumables_mode: string | null }>()
+    if (taskRows.length > 0) {
+      const { data: ttRows, error: ttErr } = await (this.q("maintenance", "task_terms") as unknown as {
+        select(c: string): { in(c2: string, v: unknown[]): { lte(c3: string, v3: string): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } } }
+      })
+        .select("task_id, billing_method, price_per_visit_cents, flat_rate_monthly_cents, consumables_mode, valid_from, valid_to")
+        .in("task_id", taskRows.map((t) => t.id))
+        .lte("valid_from", day)
+        .range(0, 999)
+      if (ttErr) throw new Error(`task_terms read failed: ${JSON.stringify(ttErr).slice(0, 200)}`)
+      for (const r of (ttRows ?? []) as {
+        task_id: string; billing_method: string | null; price_per_visit_cents: number | null
+        flat_rate_monthly_cents: number | null; consumables_mode: string | null
+        valid_from: string; valid_to: string | null
+      }[]) {
+        if (r.valid_to !== null && r.valid_to <= day) continue
+        historical.set(r.task_id, r)
+      }
+    }
+
+    const { to } = monthBounds(month)
+    return taskRows
+      .map((t) => ({ ...t, ...(historical.get(t.id) ?? {}) }))
       // A task that ended before the month began has no terms for it.
       .filter((t) => !t.ends_on || t.ends_on >= monthBounds(month).from)
       .filter((t) => !t.starts_on || t.starts_on < to)

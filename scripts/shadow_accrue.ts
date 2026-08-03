@@ -14,7 +14,13 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { SupabaseBillingFacts } from "@/lib/billing/infrastructure/supabase-billing-facts"
 import { BillingMonth, priceMonth } from "@/lib/billing/domain"
 
-const AT = new Date().toISOString()
+/**
+ * The accrual instant. Overridable so a PAST month can be re-accrued as it
+ * stood — terms and catalogue prices are both read as of this date, which is
+ * what makes the shadow a stable regression test rather than one that drifts
+ * every time a price moves.
+ */
+const AT = (process.argv.find((a) => a.startsWith("--as-of="))?.slice(8) ?? new Date().toISOString().slice(0, 10)) + "T12:00:00Z"
 
 async function main() {
   const month = process.argv[2] ?? "2026-07-01"
@@ -57,7 +63,7 @@ async function main() {
   for (const row of months) {
     const [sources, termsList] = await Promise.all([
       facts.sourcesFor(row.customer_id, month),
-      facts.termsFor(row.customer_id, month),
+      facts.termsFor(row.customer_id, month, AT),
     ])
     const bm = BillingMonth.open(row.id, row.customer_id, month)
 
@@ -88,7 +94,7 @@ async function main() {
   }
 
   const pct = (a: number, b: number) => (b === 0 ? "0" : ((a / b) * 100).toFixed(1))
-  console.log(`\n=== shadow accrual ${month} — ${months.length} customer-months ===`)
+  console.log(`\n=== shadow accrual ${month} — ${months.length} customer-months (as of ${AT.slice(0, 10)}) ===`)
   console.log(`task comparisons : ${tally.compared}`)
   console.log(`agree (<= $1)    : ${tally.agree}  (${pct(tally.agree, tally.compared)}%)`)
   console.log(`differ           : ${tally.differ}  (${pct(tally.differ, tally.compared)}%)`)

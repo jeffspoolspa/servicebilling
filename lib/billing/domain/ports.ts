@@ -27,9 +27,17 @@ export interface DeliveryFacts {
   sourcesFor(customerId: number, month: string): Promise<BillableSource[]>
 }
 
-/** What the customer agreed to pay. Agreements' published language. */
+/**
+ * What the customer agreed to pay. Agreements' published language.
+ *
+ * `asOf` is the accrual date, not the month: terms change, and accrual prices
+ * at what is in force WHEN IT RUNS (Carter's ruling), frozen at invoice
+ * creation. Passing it explicitly is what makes a past month re-accruable —
+ * "why did SJC pay $600 in June" has an answer only if we can ask the terms
+ * as they stood.
+ */
 export interface AgreementTermsSource {
-  termsFor(customerId: number, month: string): Promise<PricingTerms[]>
+  termsFor(customerId: number, month: string, asOf: string): Promise<PricingTerms[]>
 }
 
 export interface ConsumableCatalog {
