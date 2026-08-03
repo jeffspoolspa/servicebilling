@@ -14,6 +14,7 @@ import { startsOnFor } from "@/lib/external/ion/acl"
 import type { IonTaskCreationAcl } from "@/lib/maintenance/infrastructure/ion-task-acl"
 import type { IonTasks } from "@/lib/external/ion/ion"
 import type { CustomerRepository } from "@/lib/customers/domain"
+import type { SupabaseTaskRepository } from "@/lib/maintenance/infrastructure/supabase-task-repository"
 
 import { BillingTerms } from "@/lib/maintenance/domain"
 
@@ -42,11 +43,14 @@ export class TaskOpeningService {
     private readonly customers: CustomerRepository,
     private readonly ion: IonTasks,
     private readonly acl: IonTaskCreationAcl,
+    /** Where a verified creation is recorded. A create ION confirms that our
+     *  cache never hears about is a task nobody can route, bill, or see. */
+    private readonly tasks?: SupabaseTaskRepository,
   ) {}
 
   async open(
     tasks: TaskToOpen[],
-    opts: { ionTech: string; template: Record<string, string>; notBefore: string; dryRun: boolean },
+    opts: { ionTech: string; techEmployeeId?: string; template: Record<string, string>; notBefore: string; dryRun: boolean },
   ): Promise<OpenedTask[]> {
     const customers = await this.customers.byIds(tasks.map((t) => t.accountId))
     const out: OpenedTask[] = []
@@ -76,7 +80,22 @@ export class TaskOpeningService {
       )
       try {
         const r = await this.ion.createTask(create, { dryRun: opts.dryRun })
-        out.push({ accountId: t.accountId, displayName: t.displayName, accepted: r.accepted, ionTaskId: r.ionTaskId, detail: r.detail })
+        let detail = r.detail
+        // Record the READ-BACK-VERIFIED creation in the same breath, the way
+        // every other confirmed external write in this system does.
+        if (r.accepted && r.ionTaskId && !opts.dryRun && this.tasks) {
+          const rec = await this.tasks.recordCreated({
+            ionTaskId: r.ionTaskId,
+            customerId: t.accountId,
+            startsOn,
+            pricePerVisitCents: t.ratePerVisit === null ? null : Math.round(t.ratePerVisit * 100),
+            billingMethod: "per_visit",
+            ionInvoiceType: "Per Visit Itemized (separate consumables)",
+            slot: { weekday: t.weekday, techEmployeeId: opts.techEmployeeId ?? null, frequency: t.frequency },
+          })
+          detail += rec.created ? ", cached" : ", already cached"
+        }
+        out.push({ accountId: t.accountId, displayName: t.displayName, accepted: r.accepted, ionTaskId: r.ionTaskId, detail })
       } catch (err) {
         out.push({ accountId: t.accountId, displayName: t.displayName, accepted: false, detail: err instanceof Error ? err.message : String(err) })
       }
