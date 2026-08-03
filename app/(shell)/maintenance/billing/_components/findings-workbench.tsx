@@ -149,14 +149,14 @@ export function FindingsWorkbench({
             <input
               value={resolution}
               onChange={(e) => setResolution(e.target.value)}
-              placeholder="Resolution (required)"
-              className="h-8 w-[240px] bg-bg-elev border border-line rounded-lg px-2.5 text-[12px] text-ink outline-none focus:border-cyan"
+              placeholder="Resolution (required) — e.g. verified with tech: genuine treatment / mis-key, visit corrected in ION"
+              className="h-9 w-[420px] bg-bg-elev border border-line rounded-lg px-3 text-[12.5px] text-ink placeholder:text-ink-mute outline-none focus:border-cyan"
             />
             <button
               onClick={resolve}
               disabled={busy || !resolution.trim()}
               title={!resolution.trim() ? "A cleared flag needs a reason" : undefined}
-              className="h-8 px-3.5 rounded-lg bg-gradient-to-b from-cyan to-cyan-deep text-bg text-[12px] font-semibold hover:brightness-110 disabled:opacity-50"
+              className="h-9 px-3.5 rounded-lg bg-gradient-to-b from-cyan to-cyan-deep text-bg text-[12px] font-semibold hover:brightness-110 disabled:opacity-50"
             >
               {busy ? "Saving…" : "Mark Reviewed"}
             </button>
