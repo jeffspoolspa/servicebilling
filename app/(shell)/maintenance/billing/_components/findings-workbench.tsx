@@ -23,7 +23,7 @@ type DocLine =
   | { kind: "visit_break"; serviceDate: string }
   | { kind: "labor" | "consumable" | "variance"; itemName: string; qty: number; unitPriceCents: number; amountCents: number; serviceDate: string | null; detail: string | null }
 interface DocumentT {
-  kind: "service" | "consumables"
+  kind: "service" | "consumables" | "green"
   lines: DocLine[]
   subtotalCents: number
 }
@@ -52,6 +52,7 @@ export function FindingsWorkbench({
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | "loading" | "error">("loading")
   const [presentation, setPresentation] = useState<"itemized" | "summary" | null>(null)
+  const [docTab, setDocTab] = useState(0)
   const [provisionBusy, setProvisionBusy] = useState(false)
 
   const month = group.month.slice(0, 7)
@@ -76,6 +77,8 @@ export function FindingsWorkbench({
   }, [group.monthId, presentation])
 
   const docs = draft !== "loading" && draft !== "error" ? draft.documents : []
+  const activeDoc = docs[Math.min(docTab, Math.max(0, docs.length - 1))]
+  const DOC_LABEL: Record<string, string> = { service: "Service", consumables: "Consumables", green: "Green pool" }
   const subtotal = draft !== "loading" && draft !== "error" ? draft.subtotalCents / 100 : 0
   const shownPresentation = presentation ?? (draft !== "loading" && draft !== "error" ? draft.presentation : "itemized")
 
@@ -222,16 +225,23 @@ export function FindingsWorkbench({
           {draft === "error" && (
             <div className="px-5 py-8 text-center text-[12px] text-coral">Failed to build the draft invoice.</div>
           )}
-          {docs.map((doc, d) => (
+          {docs.length > 1 && (
+            <div className="flex gap-1 px-5 pb-1">
+              {docs.map((doc, d) => (
+                <button
+                  key={d}
+                  onClick={() => setDocTab(d)}
+                  className={`h-[24px] px-2.5 rounded-lg border text-[10.5px] font-semibold ${
+                    d === docTab ? "border-cyan text-cyan bg-cyan/10" : "border-line text-ink-dim hover:text-ink"
+                  }`}
+                >
+                  {DOC_LABEL[doc.kind]} · {formatCurrency(doc.subtotalCents / 100)}
+                </button>
+              ))}
+            </div>
+          )}
+          {(activeDoc ? [activeDoc] : []).map((doc, d) => (
             <div key={d}>
-              {docs.length > 1 && (
-                <div className="px-5 pt-3 pb-1 flex items-baseline justify-between">
-                  <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-cyan">
-                    {doc.kind === "service" ? "Service invoice" : "Consumables invoice"}
-                  </span>
-                  <span className="font-mono text-[10.5px] text-ink-dim">{formatCurrency(doc.subtotalCents / 100)}</span>
-                </div>
-              )}
               {doc.lines.map((ln, idx) =>
                 ln.kind === "visit_break" ? (
                   <div key={idx} className="px-5 pt-2.5 pb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-white/[0.015]">

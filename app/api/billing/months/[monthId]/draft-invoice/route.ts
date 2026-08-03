@@ -31,14 +31,16 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
   const { data: taskRows, error } = await sys
     .schema("maintenance")
     .from("tasks")
-    .select("id, billing_method, consumables_mode, ion_invoice_type")
+    .select("id, billing_method, consumables_mode, ion_invoice_type, category")
     .in("id", taskIds)
   if (error) return NextResponse.json({ error: String(error.message ?? error) }, { status: 500 })
-  const rows = (taskRows ?? []) as { id: string; billing_method: string | null; consumables_mode: string | null; ion_invoice_type: string | null }[]
+  const rows = (taskRows ?? []) as { id: string; billing_method: string | null; consumables_mode: string | null; ion_invoice_type: string | null; category: string | null }[]
   const terms: DocTerms[] = rows.map((t) => ({
     taskId: t.id,
     labor: t.billing_method === "flat_rate" ? "flat_rate" : "per_visit",
     consumables: t.consumables_mode === "separate" ? "separate" : "included",
+    qc: t.category === "quality_control",
+    green: t.category === "green_pool",
   }))
   const defaultPresentation = presentationOf(rows.find((t) => t.ion_invoice_type)?.ion_invoice_type ?? null)
   const presentation: InvoicePresentation = asked === "summary" || asked === "itemized" ? asked : defaultPresentation

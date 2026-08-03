@@ -685,4 +685,28 @@ check("documents: itemized groups by visit, summary collapses, separate splits i
   assert.strictEqual(presentationOf(null), "itemized")
 })
 
+check("QC prints at $0; a green-pool task is its OWN invoice, never combined", () => {
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item({ sourceId: "v1", serviceDate: "2026-07-08" }), { claimedByMonthId: null }, AT)
+  // QC visit: rate is genuinely zero — RULED: it belongs on the bill at $0.
+  m.claim(item({ sourceId: "vq", taskId: "tq", serviceDate: "2026-07-10", itemName: "QUALITY CONTROL", unitPriceCents: 0, amountCents: 0 }), { claimedByMonthId: null }, AT)
+  // Green-pool task: never combined.
+  m.claim(item({ sourceId: "vg", taskId: "tg", serviceDate: "2026-07-12", itemName: "GREEN POOL", unitPriceCents: 8500, amountCents: 8500 }), { claimedByMonthId: null }, AT)
+  m.claim(item({ sourceKind: "usage", sourceId: "ug", taskId: "tg", kind: "consumable", serviceDate: "2026-07-12", itemName: "LIQUID SHOCK 1GAL", qty: 2, unitPriceCents: 1310, amountCents: 2620 }), { claimedByMonthId: null }, AT)
+  const terms = [
+    { taskId: "t1", labor: "per_visit" as const, consumables: "included" as const },
+    { taskId: "tq", labor: "per_visit" as const, consumables: "included" as const, qc: true },
+    { taskId: "tg", labor: "per_visit" as const, consumables: "included" as const, green: true },
+  ]
+  const docs = documentsOf(m, terms, "itemized")
+  assert.deepStrictEqual(docs.map((d) => d.kind), ["service", "green"])
+  const svc = docs[0]
+  assert.ok(
+    svc.lines.some((l) => l.kind === "labor" && l.itemName === "QUALITY CONTROL" && l.amountCents === 0),
+    "the QC visit is a $0 line, visible to the customer",
+  )
+  assert.ok(!svc.lines.some((l) => l.kind !== "visit_break" && l.itemName.includes("GREEN")), "green never combines")
+  assert.strictEqual(docs[1].subtotalCents, 8500 + 2620, "the green invoice carries its own labor and chems")
+})
+
 console.log(`billing domain selfcheck: ${n} checks passed`)

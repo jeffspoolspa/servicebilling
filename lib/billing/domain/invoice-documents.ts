@@ -40,6 +40,10 @@ export interface DocTerms {
   readonly taskId: string
   readonly labor: "per_visit" | "flat_rate"
   readonly consumables: "included" | "separate"
+  /** Quality control: labor prints at $0 — the visit belongs on the bill. */
+  readonly qc?: boolean
+  /** Green pool: NEVER combined — the task gets its own invoice. */
+  readonly green?: boolean
 }
 
 export type DocLine =
@@ -55,8 +59,12 @@ export type DocLine =
     }
 
 export interface InvoiceDocument {
-  /** service = labor (+ listed consumables); consumables = the separate doc. */
-  readonly kind: "service" | "consumables"
+  /**
+   * service = labor (+ listed consumables); consumables = the separate doc;
+   * green = a green-pool task's OWN invoice — RULED: green pool visits are
+   * never combined with the maintenance invoice.
+   */
+  readonly kind: "service" | "consumables" | "green"
   readonly lines: DocLine[]
   readonly subtotalCents: number
 }
@@ -77,7 +85,7 @@ function summarize(items: readonly BillableItem[]): DocLine[] {
     .map((g) => ({ ...g, serviceDate: null, detail: null }))
 }
 
-function itemize(items: readonly BillableItem[]): DocLine[] {
+function itemize(items: readonly BillableItem[], qcTasks: ReadonlySet<string> = new Set()): DocLine[] {
   // Flat charges have no visit to sit under — they lead the document, qty 1
   // at the monthly price, and the visit breaks follow with whatever else
   // (consumables) each visit carries.
@@ -91,7 +99,13 @@ function itemize(items: readonly BillableItem[]): DocLine[] {
     const day = perVisit.filter((i) => i.serviceDate === date)
     // A charged labor row per visit-day (the billable-day collapse leaves
     // exactly one charged log; its $0 companions are claims, not lines).
-    const labor = day.filter((i) => i.kind === "labor" && i.amountCents > 0)
+    // EXCEPT quality control — RULED: the QC visit belongs ON the invoice,
+    // at $0, so the customer sees the service happened. One row per day.
+    let labor = day.filter((i) => i.kind === "labor" && i.amountCents > 0)
+    if (labor.length === 0) {
+      const qcLabor = day.find((i) => i.kind === "labor" && qcTasks.has(i.taskId))
+      if (qcLabor) labor = [qcLabor]
+    }
     const chems = day.filter((i) => i.kind === "consumable")
     if (labor.length === 0 && chems.length === 0) continue
     lines.push({ kind: "visit_break", serviceDate: date })
@@ -116,12 +130,19 @@ export function documentsOf(
   presentation: InvoicePresentation,
 ): InvoiceDocument[] {
   const separateTasks = new Set(terms.filter((t) => t.consumables === "separate").map((t) => t.taskId))
-  const billable = m.billableItems.filter((i) => i.amountCents !== 0 || i.sourceKind === "flat")
+  const qcTasks = new Set(terms.filter((t) => t.qc).map((t) => t.taskId))
+  const greenTasks = new Set(terms.filter((t) => t.green).map((t) => t.taskId))
+  // $0 items are claims, not lines — except QC labor, which prints at $0.
+  const billable = m.billableItems.filter(
+    (i) => i.amountCents !== 0 || i.sourceKind === "flat" || (i.kind === "labor" && qcTasks.has(i.taskId)),
+  )
 
-  const serviceItems = billable.filter((i) => i.kind === "labor" || !separateTasks.has(i.taskId))
-  const consumableItems = billable.filter((i) => i.kind === "consumable" && separateTasks.has(i.taskId))
+  const greenItems = billable.filter((i) => greenTasks.has(i.taskId))
+  const rest = billable.filter((i) => !greenTasks.has(i.taskId))
+  const serviceItems = rest.filter((i) => i.kind === "labor" || !separateTasks.has(i.taskId))
+  const consumableItems = rest.filter((i) => i.kind === "consumable" && separateTasks.has(i.taskId))
 
-  const render = (items: BillableItem[]) => (presentation === "summary" ? summarize(items) : itemize(items))
+  const render = (items: BillableItem[]) => (presentation === "summary" ? summarize(items) : itemize(items, qcTasks))
 
   const serviceLines = render(serviceItems)
   for (const { variance, needs } of m.pendingAmendments()) {
@@ -143,6 +164,13 @@ export function documentsOf(
   if (consumableItems.length > 0) {
     const lines = render(consumableItems)
     docs.push({ kind: "consumables", lines, subtotalCents: money(lines.filter((l) => l.kind !== "visit_break") as { amountCents: number }[]) })
+  }
+  // RULED: each green-pool task is its OWN invoice, never combined.
+  for (const taskId of greenTasks) {
+    const items = greenItems.filter((i) => i.taskId === taskId)
+    if (items.length === 0) continue
+    const lines = render(items)
+    docs.push({ kind: "green", lines, subtotalCents: money(lines.filter((l) => l.kind !== "visit_break") as { amountCents: number }[]) })
   }
   return docs
 }
