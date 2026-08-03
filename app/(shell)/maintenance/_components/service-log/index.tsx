@@ -109,11 +109,15 @@ export function ServiceLog({
   visits,
   period,
   className = "",
+  highlightDates,
 }: {
   visits: ServiceLogVisit[]
   period: ServiceLogPeriod
   className?: string
+  /** Visit dates (YYYY-MM-DD) to tint — e.g. the audit's flagged visits. */
+  highlightDates?: string[]
 }) {
+  const highlighted = new Set((highlightDates ?? []).map((d) => d.slice(0, 10)))
   const [openVisit, setOpenVisit] = useState<string | null>(null)
   const [summaryOpen, setSummaryOpen] = useState(false)
   const [activeBody, setActiveBody] = useState<string | null>(null)
@@ -428,11 +432,12 @@ export function ServiceLog({
           const chemCents = v.chems.reduce((s, c) => s + (c.cents ?? 0), 0)
           const otherReads = Object.entries(v.readings)
             .filter(([k, val]) => !CORE_NAMES.has(k) && val != null && val !== "")
+          const flagged = highlighted.has(v.visit_date.slice(0, 10))
           return (
-            <div key={v.visit_id} className="border-b border-line-soft last:border-0">
+            <div key={v.visit_id} className={`border-b border-line-soft last:border-0 ${flagged ? "bg-sun/[0.06]" : ""}`}>
               <div
                 onClick={() => setOpenVisit(open ? null : v.visit_id)}
-                className="flex flex-nowrap items-center gap-x-3 px-4 py-2 cursor-pointer hover:bg-white/[0.02]"
+                className={`flex flex-nowrap items-center gap-x-3 px-4 py-2 cursor-pointer ${flagged ? "hover:bg-sun/[0.09] border-l-2 border-l-sun" : "hover:bg-white/[0.02]"}`}
               >
                 <span className={`w-[7px] h-[7px] rounded-full flex-none ${warn ? "bg-coral" : "bg-grass"}`} />
                 <div className="w-[86px] flex-none">

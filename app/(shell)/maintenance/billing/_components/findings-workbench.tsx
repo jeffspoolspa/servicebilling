@@ -244,9 +244,12 @@ export function FindingsWorkbench({
             </div>
           </div>
 
-          {/* visit log — the same reusable ServiceLog, locked to the month */}
+          {/* visit log — the same reusable ServiceLog, flagged visits tinted */}
           <ServiceLog
             visits={visits}
+            highlightDates={group.findings
+              .map((f) => f.message.slice(0, 10))
+              .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))}
             period={{
               label: monthLabel,
               start: `${month}-01`,
