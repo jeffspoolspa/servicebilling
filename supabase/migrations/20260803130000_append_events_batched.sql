@@ -1,0 +1,4 @@
+-- Batched fact append: a loop over maintenance.append_event so every fact
+-- still enters through the one door (ADR 010), amortizing N round trips into
+-- one. A bulk month-run emits thousands of facts; one RPC per fact was the
+-- second-largest cost in the drain. Applied via MCP 2026-08-03.

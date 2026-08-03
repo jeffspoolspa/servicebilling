@@ -86,6 +86,40 @@ export class IonReportInvoiceFacts implements IonInvoiceFacts {
     return [...totals].map(([taskId, totalCents]) => ({ taskId, totalCents }))
   }
 
+  /** Month-wide totals for the BULK path: every customer at once. */
+  async perTaskTotalsForMonth(month: string): Promise<Map<number, { taskId: string; totalCents: number }[]>> {
+    const taskRows: { id: string; ion_task_id: string | null; customer_id: number | null }[] = []
+    for (let off = 0; ; off += 1000) {
+      const { data, error } = await (this.q("maintenance", "tasks") as unknown as {
+        select(c: string): { not(c2: string, op: string, v: unknown): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
+      }).select("id, ion_task_id, customer_id").not("ion_task_id", "is", null).range(off, off + 999)
+      if (error) throw new Error(`task map page failed: ${JSON.stringify(error).slice(0, 200)}`)
+      const rows = (data ?? []) as typeof taskRows
+      taskRows.push(...rows)
+      if (rows.length < 1000) break
+    }
+    const ours = new Map<string, { taskId: string; customerId: number }>()
+    for (const t of taskRows) if (t.ion_task_id && t.customer_id) ours.set(String(t.ion_task_id), { taskId: t.id, customerId: t.customer_id })
+
+    const out = new Map<number, Map<string, number>>()
+    for (let off = 0; ; off += 1000) {
+      const { data, error } = await (this.q("billing_audit", "ion_task_transactions") as unknown as {
+        select(c: string): { eq(c2: string, v: unknown): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
+      }).select("ion_task_id, amt_cents").eq("month", month).range(off, off + 999)
+      if (error) throw new Error(`ion report page failed: ${JSON.stringify(error).slice(0, 200)}`)
+      const rows = (data ?? []) as { ion_task_id: string; amt_cents: number | null }[]
+      for (const r of rows) {
+        const hit = ours.get(String(r.ion_task_id))
+        if (!hit) continue
+        const per = out.get(hit.customerId) ?? new Map<string, number>()
+        per.set(hit.taskId, (per.get(hit.taskId) ?? 0) + (r.amt_cents ?? 0))
+        out.set(hit.customerId, per)
+      }
+      if (rows.length < 1000) break
+    }
+    return new Map([...out].map(([cid, per]) => [cid, [...per].map(([taskId, totalCents]) => ({ taskId, totalCents }))]))
+  }
+
   /**
    * Go and read ION's report again — the Ion object does the work. Coalesced
    * per month for the life of this adapter, so a whole run costs one scrape

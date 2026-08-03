@@ -194,6 +194,117 @@ export class SupabaseBillingFacts implements DeliveryFacts, AgreementTermsSource
       })
   }
 
+  /**
+   * EVERY customer's sources for a month, in a handful of set-based reads.
+   * Same mapping as sourcesFor — one verdict per visit, chemicals inherit it
+   * — but paged over the whole month instead of filtered per customer.
+   */
+  async sourcesForMonth(month: string): Promise<Map<number, BillableSource[]>> {
+    const { from, to } = monthBounds(month)
+    const visits: {
+      id: string; customer_id: number | null; task_id: string | null; visit_date: string; status: string | null
+      is_serviceable: boolean | null; price_cents: number | null; service_type: string | null; ion_deleted_at: string | null
+    }[] = []
+    for (let off = 0; ; off += 1000) {
+      const { data, error } = await this.q("maintenance", "visits")
+        .select("id, customer_id, task_id, visit_date, status, is_serviceable, price_cents, service_type, ion_deleted_at")
+        .gte("visit_date", from).lt("visit_date", to).range(off, off + 999)
+      if (error) throw new Error(`visits page failed: ${JSON.stringify(error).slice(0, 200)}`)
+      const rows = (data ?? []) as typeof visits
+      visits.push(...rows)
+      if (rows.length < 1000) break
+    }
+
+    const byVisit = new Map(visits.map((v) => [v.id, v]))
+    const out = new Map<number, BillableSource[]>()
+    const push = (cid: number, s2: BillableSource) => out.set(cid, [...(out.get(cid) ?? []), s2])
+
+    for (const v of visits) {
+      if (!v.customer_id || !v.task_id) continue
+      push(v.customer_id, {
+        sourceKind: "visit", sourceId: v.id, taskId: v.task_id, serviceDate: v.visit_date,
+        visitState: stateOf(v), itemName: v.service_type ?? "POOL MAINTENANCE", itemId: null,
+        qty: 1, unitPriceCents: v.price_cents, claimedByMonthId: null,
+      })
+    }
+
+    const visitIds = visits.map((v) => v.id)
+    const CHUNK = 150
+    const chunks: string[][] = []
+    for (let i = 0; i < visitIds.length; i += CHUNK) chunks.push(visitIds.slice(i, i + CHUNK))
+    const usageResults = await Promise.all(chunks.map((c) =>
+      this.q("maintenance", "consumables_usage")
+        .select("id, visit_id, item_name, quantity, ion_item_id")
+        .in("visit_id", c).range(0, 4999),
+    ))
+    for (const { data, error } of usageResults) {
+      if (error) throw new Error(`usage page failed: ${JSON.stringify(error).slice(0, 200)}`)
+      for (const u of (data ?? []) as { id: string; visit_id: string; item_name: string | null; quantity: number | null; ion_item_id: string | null }[]) {
+        const v = byVisit.get(u.visit_id)
+        if (!v || !v.customer_id || !v.task_id) continue
+        push(v.customer_id, {
+          sourceKind: "usage", sourceId: u.id, taskId: v.task_id, serviceDate: v.visit_date,
+          visitState: stateOf(v), itemName: u.item_name ?? "", itemId: u.ion_item_id,
+          qty: u.quantity ?? 0, unitPriceCents: null, claimedByMonthId: null,
+        })
+      }
+    }
+    return out
+  }
+
+  /** Every customer's terms as of a date, in three set-based reads. */
+  async termsForMonth(month: string, asOf: string): Promise<Map<number, PricingTerms[]>> {
+    const tasks: {
+      id: string; customer_id: number | null; billing_method: string | null; price_per_visit_cents: number | null
+      flat_rate_monthly_cents: number | null; consumables_mode: string | null
+      starts_on: string | null; ends_on: string | null
+    }[] = []
+    for (let off = 0; ; off += 1000) {
+      const { data, error } = await this.q("maintenance", "tasks")
+        .select("id, customer_id, billing_method, price_per_visit_cents, flat_rate_monthly_cents, consumables_mode, starts_on, ends_on")
+        .range(off, off + 999)
+      if (error) throw new Error(`tasks page failed: ${JSON.stringify(error).slice(0, 200)}`)
+      const rows = (data ?? []) as typeof tasks
+      tasks.push(...rows)
+      if (rows.length < 1000) break
+    }
+
+    const day = asOf.slice(0, 10)
+    const historical = new Map<string, { billing_method: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; consumables_mode: string | null }>()
+    for (let off = 0; ; off += 1000) {
+      const { data, error } = await (this.q("maintenance", "task_terms") as unknown as {
+        select(c: string): { lte(c2: string, v: string): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
+      }).select("task_id, billing_method, price_per_visit_cents, flat_rate_monthly_cents, consumables_mode, valid_from, valid_to").lte("valid_from", day).range(off, off + 999)
+      if (error) throw new Error(`task_terms page failed: ${JSON.stringify(error).slice(0, 200)}`)
+      const rows = (data ?? []) as { task_id: string; valid_to: string | null; billing_method: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; consumables_mode: string | null }[]
+      for (const r of rows) {
+        if (r.valid_to !== null && r.valid_to <= day) continue
+        historical.set(r.task_id, r)
+      }
+      if (rows.length < 1000) break
+    }
+
+    const { from, to } = monthBounds(month)
+    const out = new Map<number, PricingTerms[]>()
+    for (const t0 of tasks) {
+      if (!t0.customer_id) continue
+      const t = { ...t0, ...(historical.get(t0.id) ?? {}) }
+      if (t.ends_on && t.ends_on < from) continue
+      if (t.starts_on && t.starts_on >= to) continue
+      const flat = t.billing_method === "flat_rate_monthly"
+      const terms: PricingTerms = {
+        taskId: t0.id,
+        labor: flat ? "flat_rate" : "per_visit",
+        consumables: t.consumables_mode === "included" || t.consumables_mode === "listed" ? "included" : "separate",
+        amountCents: flat ? t.flat_rate_monthly_cents : t.price_per_visit_cents,
+        startsOn: t.starts_on ?? "1970-01-01",
+        endsOn: t.ends_on,
+      }
+      out.set(t0.customer_id, [...(out.get(t0.customer_id) ?? []), terms])
+    }
+    return out
+  }
+
   /** The whole price book, with its validity windows — the Pricer picks. */
   async prices(): Promise<CatalogPrice[]> {
     if (this.catalogCache && Date.now() - this.catalogCache.at < 5 * 60_000) return this.catalogCache.prices

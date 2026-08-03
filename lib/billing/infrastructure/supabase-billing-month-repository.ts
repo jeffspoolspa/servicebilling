@@ -56,6 +56,10 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     return this.client.schema("billing").from(table) as unknown as Q
   }
 
+  private get clientRaw(): Db {
+    return this.client
+  }
+
   private async hydrate(row: MonthRow): Promise<BillingMonth> {
     const [{ data: itemRows, error }, { data: varRows, error: vErr }] = await Promise.all([
       this.q("billable_items")
@@ -233,6 +237,148 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     })
     // History failing must never undo a landed write; it is recorded, not gating.
     if (error) console.error(`billing fact ${fact.type} not appended: ${JSON.stringify(error).slice(0, 200)}`)
+  }
+
+  /** Every month in a period, hydrated in ~5 set-based reads. */
+  async allForMonth(month: string): Promise<BillingMonth[]> {
+    const rows: MonthRow[] = []
+    for (let off = 0; ; off += 1000) {
+      const { data, error } = await this.q("billing_months").select(MONTH_COLS).eq("month", month).range(off, off + 999)
+      if (error) throw new Error(`months page failed: ${JSON.stringify(error).slice(0, 200)}`)
+      const page = (data ?? []) as MonthRow[]
+      rows.push(...page)
+      if (page.length < 1000) break
+    }
+    const ids = rows.map((r) => r.id)
+    const CHUNK = 40
+    const itemChunks: Record<string, unknown>[][] = []
+    const varChunks: Record<string, unknown>[][] = []
+    const jobs: Promise<void>[] = []
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const c = ids.slice(i, i + CHUNK)
+      jobs.push((async () => {
+        const { data, error } = await this.q("billable_items")
+          .select("billing_month_id, source_kind, source_id, task_id, kind, service_date, item_name, qty, unit_price_cents, amount_cents, created_at")
+          .in("billing_month_id", c).range(0, 9999)
+        if (error) throw new Error(`items page failed: ${JSON.stringify(error).slice(0, 200)}`)
+        itemChunks.push((data ?? []) as Record<string, unknown>[])
+      })())
+      jobs.push((async () => {
+        const { data, error } = await this.q("variances")
+          .select("billing_month_id, source_id, kind, origin, reason, delta_cents, tech_id, disposition, recorded_at")
+          .in("billing_month_id", c).range(0, 9999)
+        if (error) throw new Error(`variances page failed: ${JSON.stringify(error).slice(0, 200)}`)
+        varChunks.push((data ?? []) as Record<string, unknown>[])
+      })())
+    }
+    await Promise.all(jobs)
+
+    const itemsBy = new Map<string, BillableItem[]>()
+    for (const chunk of itemChunks) for (const r of chunk) {
+      const mid = String(r.billing_month_id)
+      const row = rows.find((x) => x.id === mid)
+      itemsBy.set(mid, [...(itemsBy.get(mid) ?? []), {
+        sourceKind: r.source_kind as BillableItem["sourceKind"],
+        sourceId: String(r.source_id ?? `${r.task_id}:${(row?.month ?? month).slice(0, 7)}`),
+        taskId: String(r.task_id),
+        kind: r.kind as BillableItem["kind"],
+        serviceDate: String(r.service_date ?? month),
+        itemName: String(r.item_name ?? ""),
+        qty: Number(r.qty ?? 1),
+        unitPriceCents: Number(r.unit_price_cents ?? 0),
+        amountCents: Number(r.amount_cents ?? 0),
+        claimedAt: String(r.created_at ?? ""),
+      }])
+    }
+    const varsBy = new Map<string, Variance[]>()
+    for (const chunk of varChunks) for (const r of chunk) {
+      const mid = String(r.billing_month_id)
+      varsBy.set(mid, [...(varsBy.get(mid) ?? []), {
+        sourceId: r.source_id === null ? null : String(r.source_id),
+        kind: r.kind as Variance["kind"],
+        origin: r.origin as Variance["origin"],
+        reason: String(r.reason),
+        deltaCents: r.delta_cents === null ? null : Number(r.delta_cents),
+        techId: r.tech_id === null ? null : String(r.tech_id),
+        disposition: r.disposition as Variance["disposition"],
+        at: String(r.recorded_at),
+      }])
+    }
+
+    return rows.map((row) => BillingMonth.reconstitute({
+      id: row.id, customerId: row.customer_id, month: row.month,
+      items: itemsBy.get(row.id) ?? [],
+      reconciledAt: row.reconciled_at, disputedAt: row.disputed_at, disputes: row.disputes ?? [],
+      deliveryRefreshedAt: row.delivery_refreshed_at, gatedAt: row.gated_at, gateHeldFor: row.gate_held_for ?? [],
+      invoicedAt: row.invoiced_at, sentAt: row.sent_at, variances: varsBy.get(row.id) ?? [],
+    }))
+  }
+
+  /**
+   * Persist many months in a handful of statements: one state upsert, one
+   * item delete + one insert for the DIRTY months only, one batched fact
+   * append. This is what makes the bulk path seconds instead of minutes —
+   * the values differ per row, so it is bulk upserts, never one UPDATE.
+   */
+  async saveAll(months: readonly BillingMonth[]): Promise<{ statesWritten: number; itemsRewritten: number; factsAppended: number }> {
+    const dirty = months.filter((m) => m.hasDirtyItems && !m.isInvoiced)
+    const allFacts = months.flatMap((m) => m.pullFacts())
+    const changed = new Set([...dirty.map((m) => m.id), ...allFacts.map((f) => f.monthId)])
+    const toWrite = months.filter((m) => changed.has(m.id))
+
+    if (toWrite.length > 0) {
+      const up = this.client.schema("billing").from("billing_months") as unknown as {
+        upsert(v: unknown[], o: { onConflict: string }): { select(c: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+      }
+      const { data, error } = await up.upsert(
+        toWrite.map((m) => ({ id: m.id, customer_id: m.customerId, month: m.month, updated_at: new Date().toISOString(), ...this.statePatch(m) })),
+        { onConflict: "id" },
+      ).select("id")
+      if (error) throw new Error(`bulk state save failed: ${JSON.stringify(error).slice(0, 240)}`)
+      if (!data || data.length !== toWrite.length) {
+        throw new Error(`bulk state save wrote ${data?.length ?? 0} of ${toWrite.length} — filtered, not applied`)
+      }
+    }
+
+    let itemsRewritten = 0
+    if (dirty.length > 0) {
+      const del = this.client.schema("billing").from("billing_month_queue") as unknown
+      void del
+      for (let i = 0; i < dirty.length; i += 40) {
+        const c = dirty.slice(i, i + 40).map((m) => m.id)
+        const dq = this.client.schema("billing").from("billable_items") as unknown as {
+          delete(): { in(col: string, v: unknown[]): PromiseLike<{ error: unknown }> }
+        }
+        const { error } = await dq.delete().in("billing_month_id", c)
+        if (error) throw new Error(`bulk item clear failed: ${JSON.stringify(error).slice(0, 200)}`)
+      }
+      const rows = dirty.flatMap((m) => m.billableItems.map((i) => ({
+        billing_month_id: m.id, source_kind: i.sourceKind,
+        source_id: i.sourceKind === "flat" ? null : i.sourceId,
+        task_id: i.taskId, kind: i.kind, service_date: i.serviceDate, item_name: i.itemName,
+        qty: i.qty, unit_price_cents: i.unitPriceCents, amount_cents: i.amountCents,
+      })))
+      for (let i = 0; i < rows.length; i += 500) {
+        const ins = this.client.schema("billing").from("billable_items") as unknown as {
+          insert(v: unknown[]): { select(c: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+        }
+        const { data, error } = await ins.insert(rows.slice(i, i + 500)).select("id")
+        if (error) throw new Error(`bulk item insert failed: ${JSON.stringify(error).slice(0, 240)}`)
+        itemsRewritten += (data ?? []).length
+      }
+    }
+
+    let factsAppended = 0
+    for (let i = 0; i < allFacts.length; i += 200) {
+      const batch = allFacts.slice(i, i + 200).map((f) => ({
+        aggregate: "billing_month", aggregate_id: f.monthId, type: f.type, payload: f.payload, actor: "billing_pipeline", occurred_at: f.at,
+      }))
+      const { error } = await this.client.schema("maintenance").rpc("append_events", { p_events: batch })
+      if (error) console.error(`fact batch not appended: ${JSON.stringify(error).slice(0, 200)}`)
+      else factsAppended += batch.length
+    }
+
+    return { statesWritten: toWrite.length, itemsRewritten, factsAppended }
   }
 
   async customersWithDelivery(month: string): Promise<number[]> {
