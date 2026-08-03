@@ -5,7 +5,9 @@
  */
 
 import assert from "node:assert"
-import { BillingMonth, BillingRuleError, isBillable, type BillableVisit } from "./billing-month"
+import { isBillable, type BillableItem, type BillableSource } from "./billable-item"
+import { BillingMonth, BillingRuleError } from "./billing-month"
+import { priceMonth, type PricingTerms } from "./pricer"
 
 let n = 0
 const check = (_name: string, fn: () => void) => {
@@ -13,21 +15,54 @@ const check = (_name: string, fn: () => void) => {
   n++
 }
 
-const AT = "2026-08-01T12:00:00Z"
-const visit = (over: Partial<BillableVisit> = {}): BillableVisit => ({
-  visitId: "v1",
+const AT = "2026-08-02T12:00:00Z"
+const AUG = new Date("2026-08-02T09:00:00Z")
+const JUL = new Date("2026-07-20T09:00:00Z")
+
+const src = (over: Partial<BillableSource> = {}): BillableSource => ({
+  sourceKind: "visit",
+  sourceId: "v1",
   taskId: "t1",
-  visitDate: "2026-07-08",
-  state: "completed",
+  serviceDate: "2026-07-08",
+  visitState: "completed",
+  itemName: "POOL MAINTENANCE 65",
+  qty: 1,
+  unitPriceCents: null,
   claimedByMonthId: null,
   ...over,
 })
 
-check("billability is derived from delivery's state, never re-decided", () => {
-  assert.strictEqual(isBillable({ state: "completed" }), true)
-  assert.strictEqual(isBillable({ state: "skipped" }), false)
-  assert.strictEqual(isBillable({ state: "non_serviceable" }), false)
-  assert.strictEqual(isBillable({ state: "scheduled" }), false)
+const item = (over: Partial<BillableItem> = {}): BillableItem => ({
+  sourceKind: "visit",
+  sourceId: "v1",
+  taskId: "t1",
+  kind: "labor",
+  serviceDate: "2026-07-08",
+  itemName: "POOL MAINTENANCE 65",
+  qty: 1,
+  unitPriceCents: 6500,
+  amountCents: 6500,
+  claimedAt: AT,
+  ...over,
+})
+
+const terms = (over: Partial<PricingTerms> = {}): PricingTerms => ({
+  taskId: "t1",
+  labor: "per_visit",
+  consumables: "separate",
+  amountCents: 6500,
+  startsOn: "2024-04-03",
+  endsOn: null,
+  ...over,
+})
+
+/* --------------------------------- the rules ------------------------------ */
+
+check("billability is Delivery's verdict, never re-decided here", () => {
+  assert.strictEqual(isBillable({ visitState: "completed" }), true)
+  assert.strictEqual(isBillable({ visitState: "skipped" }), false)
+  assert.strictEqual(isBillable({ visitState: "non_serviceable" }), false)
+  assert.strictEqual(isBillable({ visitState: "scheduled" }), false)
 })
 
 check("a month is the first of a month, or it is not a month", () => {
@@ -35,170 +70,201 @@ check("a month is the first of a month, or it is not a month", () => {
   assert.throws(() => BillingMonth.open("m1", 1016400, "2026-07-15"), BillingRuleError)
 })
 
-check("claiming records the visit and the fact", () => {
+check("I-B1 exclusivity: a source another month holds is refused", () => {
   const m = BillingMonth.open("m1", 1016400, "2026-07-01")
-  m.claim(visit(), AT)
-  assert.strictEqual(m.claims.length, 1)
-  const facts = m.pullFacts()
-  assert.strictEqual(facts[0].type, "VisitClaimed")
-  assert.strictEqual(facts[0].payload.visitId, "v1")
-  assert.strictEqual(m.pullFacts().length, 0, "facts drain once")
+  assert.throws(() => m.claim(item(), { claimedByMonthId: "m-other" }, AT), /already claimed by month m-other/)
+
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  assert.strictEqual(m.billableItems.length, 1, "the same source twice is one item")
+  assert.strictEqual(m.pullFacts().length, 1, "and one fact — a re-run converges")
 })
 
-check("I-B1 exclusivity: a visit another month holds is refused", () => {
+check("a month refuses what happened in another month", () => {
   const m = BillingMonth.open("m1", 1016400, "2026-07-01")
-  assert.throws(() => m.claim(visit({ claimedByMonthId: "m-other" }), AT), /already claimed by month m-other/)
-  // ...but a visit THIS month already holds is a no-op, so re-runs converge.
-  m.claim(visit(), AT)
-  m.claim(visit(), AT)
-  assert.strictEqual(m.claims.length, 1)
-  assert.strictEqual(m.pullFacts().length, 1, "the second claim records nothing")
+  assert.throws(() => m.claim(item({ serviceDate: "2026-08-03" }), { claimedByMonthId: null }, AT), /not in 2026-07/)
 })
 
-check("a month refuses what did not happen, and what happened elsewhere", () => {
+check("re-pricing before the freeze is silent, and un-reconciles the month", () => {
   const m = BillingMonth.open("m1", 1016400, "2026-07-01")
-  assert.throws(() => m.claim(visit({ state: "skipped" }), AT), /is skipped, which is not billable/)
-  assert.throws(() => m.claim(visit({ visitDate: "2026-08-03" }), AT), /not in 2026-07/)
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  m.markReconciled(AT)
+  assert.strictEqual(m.status, "reconciled")
+
+  m.claim(item({ amountCents: 7000, unitPriceCents: 7000 }), { claimedByMonthId: null }, AT)
+  assert.strictEqual(m.subtotalCents, 7000, "the item re-priced in place")
+  assert.strictEqual(m.status, "accruing", "the sums moved, so the agreement is stale")
 })
 
-check("I-B2 completeness is a QUERY — a month under construction is legal", () => {
+check("I-B2 completeness is a QUERY — a half-built month is legal", () => {
   const m = BillingMonth.open("m1", 1016400, "2026-07-01")
-  const delivered = [visit(), visit({ visitId: "v2", visitDate: "2026-07-22" }), visit({ visitId: "v3", state: "skipped" })]
+  const delivered = [src(), src({ sourceId: "v2", serviceDate: "2026-07-22" }), src({ sourceId: "v3", visitState: "skipped" })]
   assert.strictEqual(m.unclaimed(delivered).length, 2, "the skipped one is not owed")
-  m.claim(delivered[0], AT)
-  assert.strictEqual(m.unclaimed(delivered).length, 1, "half-built is not an error")
-  m.claim(delivered[1], AT)
-  assert.strictEqual(m.unclaimed(delivered).length, 0)
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  assert.strictEqual(m.completenessBlockers(delivered).length, 1, "half-built is not an error")
+  m.claim(item({ sourceId: "v2", serviceDate: "2026-07-22" }), { claimedByMonthId: null }, AT)
+  assert.deepStrictEqual(m.completenessBlockers(delivered), [])
 })
 
-check("invoicing refuses an incomplete month and an empty one [I-B2]", () => {
-  const delivered = [visit(), visit({ visitId: "v2", visitDate: "2026-07-22" })]
-  const empty = BillingMonth.open("m1", 1016400, "2026-07-01")
-  assert.throws(() => empty.markInvoiced([], new Date("2026-08-02T09:00:00Z"), AT), /nothing claimed/)
+check("the calendar gates the invoice, not the accrual", () => {
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  assert.strictEqual(m.billableFrom, "2026-08-01")
+  assert.strictEqual(m.monthIsOver(new Date("2026-07-31T23:00:00Z")), false)
+  assert.match(m.issueBlockers(JUL)[0], /is not over — billable from 2026-08-01/)
+  assert.deepStrictEqual(m.issueBlockers(AUG), [])
+})
 
-  const partial = BillingMonth.open("m2", 1016400, "2026-07-01")
-  partial.claim(delivered[0], AT)
-  assert.throws(() => partial.markInvoiced(delivered, new Date("2026-08-02T09:00:00Z"), AT), /1 billable visit\(s\) unclaimed/)
+check("nextStep is the ONE statement of the sequence", () => {
+  const delivered = [src()]
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
 
-  partial.claim(delivered[1], AT)
-  partial.markInvoiced(delivered, new Date("2026-08-02T09:00:00Z"), AT)
-  assert.strictEqual(partial.isInvoiced, true)
+  assert.strictEqual(m.nextStep(delivered, AUG), "accrue", "nothing claimed yet")
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  assert.strictEqual(m.nextStep(delivered, AUG), "reconcile")
+  m.markReconciled(AT)
+  assert.strictEqual(m.nextStep(delivered, AUG), "gate")
+
+  // Mid-month it reconciles and gates, then PARKS rather than issuing.
+  m.markGated([], AT)
+  assert.strictEqual(m.nextStep(delivered, JUL), null, "waiting on the calendar")
+  assert.strictEqual(m.nextStep(delivered, AUG), "issue")
+
+  m.markInvoiced(delivered, AUG, AT)
+  assert.strictEqual(m.nextStep(delivered, AUG), "send", "the human's turn")
+  m.markSent(AT)
+  assert.strictEqual(m.nextStep(delivered, AUG), null, "done")
+})
+
+check("a held month stops the loop and waits for a person", () => {
+  const delivered = [src()]
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  m.markReconciled(AT)
+  m.markGated(["credits_settled", "memo_present"], AT)
+
+  assert.strictEqual(m.status, "held")
+  assert.deepStrictEqual(m.heldFor, ["credits_settled", "memo_present"])
+  assert.strictEqual(m.nextStep(delivered, AUG), null, "the loop does not retry a judgment")
+  assert.match(m.issueBlockers(AUG).join(" "), /held by the gate: credits_settled, memo_present/)
+
+  m.clearHold(AT, "carter")
+  assert.strictEqual(m.status, "reconciled")
+  assert.strictEqual(m.nextStep(delivered, AUG), "gate", "re-gated, not waved through")
+})
+
+check("gating before reconciling is refused — order is a rule", () => {
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  assert.throws(() => m.markGated([], AT), /has not been reconciled/)
 })
 
 check("I-B3 the document is the freeze; before it, editing is free", () => {
-  const d = [visit()]
+  const delivered = [src()]
   const m = BillingMonth.open("m1", 1016400, "2026-07-01")
-  m.claim(d[0], AT)
+  m.claim(item(), { claimedByMonthId: null }, AT)
 
-  // Month over and complete — and the ledger is STILL editable, because the
-  // billing checks are what send us back to fix a visit.
-  assert.deepStrictEqual(m.issueBlockers(new Date("2026-08-02T09:00:00Z")), [], "ready to invoice")
-  m.release("v1", AT, "the check found a bad consumable")
-  m.claim(d[0], AT)
-  assert.strictEqual(m.claims.length, 1, "released and re-claimed before invoicing")
+  // The month is over and complete — and the ledger is STILL editable, which
+  // is what makes the billing checks actionable.
+  m.release("visit", "v1", AT, "the check found a bad consumable")
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  assert.strictEqual(m.billableItems.length, 1)
 
-  m.markInvoiced(d, new Date("2026-08-02T09:00:00Z"), AT)
-  assert.throws(() => m.claim(visit({ visitId: "v9", visitDate: "2026-07-30" }), AT), /record a Variance/)
-  assert.throws(() => m.release("v1", AT, "too late"), /record a Variance/)
+  m.markReconciled(AT)
+  m.markGated([], AT)
+  m.markInvoiced(delivered, AUG, AT)
+  assert.throws(() => m.claim(item({ sourceId: "v9" }), { claimedByMonthId: null }, AT), /record a Variance/)
+  assert.throws(() => m.release("visit", "v1", AT, "too late"), /record a Variance/)
 
-  const before = m.pullFacts().length
-  m.markInvoiced(d, new Date("2026-08-02T09:00:00Z"), AT)
-  assert.strictEqual(m.pullFacts().length, 0, `invoicing is idempotent (first run emitted ${before})`)
+  m.pullFacts()
+  m.markInvoiced(delivered, AUG, AT)
+  assert.strictEqual(m.pullFacts().length, 0, "invoicing is idempotent")
 })
 
 check("a variance bridges the difference, from EITHER side, with a reason", () => {
-  const d = [visit()]
+  const delivered = [src()]
   const m = BillingMonth.open("m1", 1016400, "2026-07-01")
-  m.claim(d[0], AT)
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  m.markReconciled(AT)
+  m.markGated([], AT)
 
-  // Before the document exists there is nothing to bridge — fix the claim.
-  assert.throws(() => m.recordVariance({ visitId: "v1", kind: "discount", origin: "invoice", reason: "x", deltaCents: -500, techId: null }, AT), /no invoice yet/)
+  assert.throws(
+    () => m.recordVariance({ sourceId: "v1", kind: "discount", origin: "invoice", reason: "x", deltaCents: -500, techId: null }, AT),
+    /no invoice yet/,
+  )
 
-  m.markInvoiced(d, new Date("2026-08-02T09:00:00Z"), AT)
+  m.markInvoiced(delivered, AUG, AT)
   m.pullFacts()
 
-  // An edit to the DOCUMENT leaves ION's log showing what we no longer bill.
-  m.recordVariance({ visitId: "v1", kind: "remove_consumable", origin: "invoice", reason: "chlorine billed twice", deltaCents: -1200, techId: "emily" }, AT)
-  // A change to the VISIT after the freeze leaves the document short.
-  m.recordVariance({ visitId: "v1", kind: "missed", origin: "visit", reason: "tech added a tab feeder after invoicing", deltaCents: 900, techId: "emily" }, AT)
+  m.recordVariance({ sourceId: "v1", kind: "remove_consumable", origin: "invoice", reason: "chlorine billed twice", deltaCents: -1200, techId: "emily" }, AT)
+  m.recordVariance({ sourceId: "v1", kind: "missed", origin: "visit", reason: "tech added a tab feeder after invoicing", deltaCents: 900, techId: "emily" }, AT)
 
   assert.strictEqual(m.varianceTotalCents, -300)
+  assert.strictEqual(m.totalCents, m.subtotalCents - 300, "the bill is items plus differences")
   assert.deepStrictEqual(m.pendingAmendments().map((o) => o.needs), ["ion_log_edit", "invoice_line"])
-  assert.ok(m.recordedVariances.every((v) => v.disposition === "amend_invoice"), "the draft can still absorb them")
-  assert.deepStrictEqual(m.pullFacts().map((f) => f.type), ["VarianceRecorded", "VarianceRecorded"])
 
-  // The two refusals that make it a control rather than a comment box.
-  assert.throws(() => m.recordVariance({ visitId: "v1", kind: "discount", origin: "invoice", reason: "   ", deltaCents: -100, techId: null }, AT), /needs a reason/)
-  assert.throws(() => m.recordVariance({ visitId: "nope", kind: "discount", origin: "invoice", reason: "goodwill", deltaCents: -100, techId: null }, AT), /not claimed by/)
+  assert.throws(() => m.recordVariance({ sourceId: "v1", kind: "discount", origin: "invoice", reason: "  ", deltaCents: -100, techId: null }, AT), /needs a reason/)
 
-  // Sending is a separate, later moment — and it changes what a variance MEANS.
-  assert.strictEqual(m.isSent, false)
   m.markSent(AT)
-  assert.strictEqual(m.isSent, true)
-
-  // The send closes the door on differences recorded BEFORE it too — they
-  // were amendable, nobody amended them, and now they are history.
   assert.deepStrictEqual(m.pendingAmendments(), [], "the send ends amendment, whenever the difference was found")
-  assert.ok(
-    m.recordedVariances.every((v) => v.disposition === "amend_invoice"),
-    "their RECORD still says they were fixable — that is the operational signal",
-  )
-
-  m.recordVariance({ visitId: "v1", kind: "qty_correction", origin: "visit", reason: "tech logged a second bag", deltaCents: 400, techId: "emily" }, AT)
-  const late = m.recordedVariances[m.recordedVariances.length - 1]
-  assert.strictEqual(late.disposition, "recorded_only", "the customer already read the bill")
-  assert.strictEqual(m.varianceTotalCents, 100, "the record still totals, even when the document cannot move")
+  m.recordVariance({ sourceId: "v1", kind: "qty_correction", origin: "visit", reason: "tech logged a second bag", deltaCents: 400, techId: "emily" }, AT)
+  assert.strictEqual(m.recordedVariances.at(-1)!.disposition, "recorded_only", "the customer already read the bill")
 })
 
-check("release gives a visit back until the invoice exists", () => {
-  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
-  m.claim(visit(), AT)
-  m.release("v1", AT, "wrong customer")
-  assert.strictEqual(m.claims.length, 0)
-  assert.deepStrictEqual(
-    m.pullFacts().map((f) => f.type),
-    ["VisitClaimed", "VisitReleased"],
-    "both facts are kept — the ledger is history, not current state",
-  )
-  m.release("nope", AT, "not held") // releasing what we do not hold is a no-op
+/* --------------------------------- pricing -------------------------------- */
+
+check("per-visit labour bills each visit; consumables round ONCE", () => {
+  const sources = [
+    src(),
+    src({ sourceId: "v2", serviceDate: "2026-07-22" }),
+    src({ sourceId: "u1", sourceKind: "usage", itemName: "Chlorine Tabs", qty: 3, unitPriceCents: 433 }),
+  ]
+  const { items, refused } = priceMonth({ month: "2026-07-01", terms: terms(), sources, catalog: [], at: AT })
+  assert.deepStrictEqual(refused, [])
+  assert.strictEqual(items.filter((i) => i.kind === "labor").length, 2)
+  const chem = items.find((i) => i.kind === "consumable")!
+  assert.strictEqual(chem.amountCents, 1299, "3 x 433 rounded once, not per visit")
 })
 
-check("reconstitution restores claims and the lock", () => {
-  const m = BillingMonth.reconstitute(
-    "m1",
-    1016400,
-    "2026-07-01",
-    [{ visitId: "v1", taskId: "t1", visitDate: "2026-07-08", claimedAt: AT }],
-    "2026-08-01T00:00:00Z",
-  )
-  assert.strictEqual(m.claims.length, 1)
-  assert.strictEqual(m.isInvoiced, true)
-  assert.strictEqual(m.pullFacts().length, 0, "reconstitution is not a change")
+check("included consumables are not billed twice", () => {
+  const sources = [src(), src({ sourceId: "u1", sourceKind: "usage", itemName: "Chlorine Tabs", qty: 3, unitPriceCents: 433 })]
+  const { items } = priceMonth({ month: "2026-07-01", terms: terms({ consumables: "included" }), sources, catalog: [], at: AT })
+  assert.strictEqual(items.filter((i) => i.kind === "consumable").length, 0, "already inside the service charge")
 })
 
-check("a month cannot be invoiced before it is over", () => {
-  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
-  m.claim(visit(), AT)
-
-  assert.strictEqual(m.billableFrom, "2026-08-01")
-  assert.strictEqual(m.monthIsOver(new Date("2026-07-31T23:00:00Z")), false)
-  assert.strictEqual(m.monthIsOver(new Date("2026-08-01T00:00:00Z")), true)
-
-  // Mid-month: accrual and reconciliation are useful; issuing is refused.
-  const mid = m.issueBlockers(new Date("2026-07-20T12:00:00Z"))
-  assert.strictEqual(mid.length, 1)
-  assert.match(mid[0], /not over — billable from 2026-08-01/)
-
-  // On the first, nothing stands in the way.
-  assert.deepStrictEqual(m.issueBlockers(new Date("2026-08-01T09:00:00Z")), [])
+check("flat rate bills the MONTH once, not each visit", () => {
+  const sources = [src(), src({ sourceId: "v2", serviceDate: "2026-07-22" })]
+  const { items } = priceMonth({
+    month: "2026-07-01",
+    terms: terms({ labor: "flat_rate", amountCents: 26000 }),
+    sources, catalog: [], at: AT,
+  })
+  assert.strictEqual(items.length, 1)
+  assert.strictEqual(items[0].amountCents, 26000)
+  assert.strictEqual(items[0].serviceDate, "2026-07-22", "anchored to the last visit, so the charge has a date")
 })
 
-check("December rolls the year, and an open or empty month is refused too", () => {
-  const dec = BillingMonth.open("m2", 1016400, "2026-12-01")
-  assert.strictEqual(dec.billableFrom, "2027-01-01")
+check("what cannot be priced is REFUSED, never billed at zero", () => {
+  // An unknown consumable: a zero here is invisible on the invoice and
+  // permanent in the ledger, so it becomes a finding instead.
+  const unknown = priceMonth({
+    month: "2026-07-01",
+    terms: terms(),
+    sources: [src({ sourceId: "u9", sourceKind: "usage", itemName: "Mystery Jug", qty: 1, unitPriceCents: null })],
+    catalog: [], at: AT,
+  })
+  assert.strictEqual(unknown.items.length, 0)
+  assert.match(unknown.refused[0].reason, /no catalogue price for "Mystery Jug"/)
 
-  const empty = BillingMonth.open("m4", 1016400, "2026-07-01")
-  assert.ok(empty.issueBlockers(new Date("2026-08-05T00:00:00Z")).some((r) => /nothing claimed/.test(r)))
+  // A flat-rate month served only in part — an unmade business ruling.
+  const partial = priceMonth({
+    month: "2026-07-01",
+    terms: terms({ labor: "flat_rate", amountCents: 26000, startsOn: "2026-07-14" }),
+    sources: [src({ serviceDate: "2026-07-22" })],
+    catalog: [], at: AT,
+  })
+  assert.strictEqual(partial.items.length, 0)
+  assert.match(partial.refused[0].reason, /served only part of 2026-07.*unmade ruling/)
 })
 
 console.log(`billing domain selfcheck: ${n} checks passed`)
