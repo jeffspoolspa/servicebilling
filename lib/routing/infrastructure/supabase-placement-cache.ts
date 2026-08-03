@@ -12,7 +12,7 @@
  * and this must not invent a different convention.
  */
 
-import type { PlacementCache, TaskSchedule, Weekday } from "@/lib/domain/routing"
+import type { PlacementCache, TaskSchedule, Weekday } from "@/lib/routing/domain"
 import type { QueryClient } from "./supabase-quota-repository"
 
 interface SlotRow {

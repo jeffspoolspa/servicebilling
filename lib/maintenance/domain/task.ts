@@ -23,7 +23,7 @@
  * persist (see pullEvents + the ports file).
  */
 
-import type { Weekday } from "@/lib/domain/routing"
+import type { Weekday } from "@/lib/routing/domain"
 
 /** How a task charges. The header carries the money, not the slots. */
 export type BillingMethod = "per_visit" | "flat_rate_monthly"

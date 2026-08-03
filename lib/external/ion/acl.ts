@@ -13,7 +13,7 @@
  *  - our employees.id -> ION employee id is the only tech vocabulary ION takes
  */
 
-import type { TaskSchedule } from "@/lib/domain/routing"
+import type { TaskSchedule } from "@/lib/routing/domain"
 import type { IonTaskForm, WeekWrite, VerifiedWrite } from "./ion"
 
 const DAY_FIELD = ["day1", "day2", "day3", "day4", "day5", "day6", "day7"] as const

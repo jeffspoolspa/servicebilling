@@ -13,9 +13,9 @@
  * button, or a script.
  */
 
-import { matchIonCustomer } from "@/lib/infrastructure/ion/acl"
-import type { IonCustomers } from "@/lib/infrastructure/ion/ion"
-import type { SupabaseCustomerRepository } from "@/lib/infrastructure/customers/supabase-customer-repository"
+import { matchIonCustomer } from "@/lib/external/ion/acl"
+import type { IonCustomers } from "@/lib/external/ion/ion"
+import type { SupabaseCustomerRepository } from "@/lib/customers/infrastructure/supabase-customer-repository"
 
 export interface LinkReport {
   linked: { accountId: number; displayName: string | null; ionCustId: string; confidence: string }[]

@@ -16,8 +16,8 @@
  * leaves as it was, which for a moved visit means it gets served twice.
  */
 
-import type { DesiredWeek, Frequency, GatewayResult, TaskGateway } from "@/lib/domain/maintenance"
-import type { Weekday } from "@/lib/domain/routing"
+import type { DesiredWeek, Frequency, GatewayResult, TaskGateway } from "@/lib/maintenance/domain"
+import type { Weekday } from "@/lib/routing/domain"
 
 /** Sun..Sat, the ION form's per-day tech selects. */
 const DAY_FIELD = ["day1", "day2", "day3", "day4", "day5", "day6", "day7"] as const

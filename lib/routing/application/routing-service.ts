@@ -31,8 +31,8 @@ import {
   type StopProfile,
   type Weekday,
   type WeekIndex,
-} from "@/lib/domain/routing"
-import type { MaintenanceFact } from "@/lib/infrastructure/maintenance/supabase-event-log"
+} from "@/lib/routing/domain"
+import type { MaintenanceFact } from "@/lib/maintenance/infrastructure/supabase-event-log"
 
 export interface CoverageFinding {
   readonly quotaId: string

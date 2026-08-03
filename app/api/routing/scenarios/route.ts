@@ -1,15 +1,15 @@
 import { NextResponse } from "next/server"
 import { createSupabaseServer } from "@/lib/supabase/server"
-import { RoutingService } from "@/lib/application/routing/routing-service"
+import { RoutingService } from "@/lib/routing/application/routing-service"
 import {
   SupabaseQuotaRepository,
   type QueryClient,
-} from "@/lib/infrastructure/routing/supabase-quota-repository"
+} from "@/lib/routing/infrastructure/supabase-quota-repository"
 import {
   SupabaseScenarioRepository,
   type ScenarioClient,
-} from "@/lib/infrastructure/routing/supabase-scenario-repository"
-import type { RoutingEvent } from "@/lib/domain/routing"
+} from "@/lib/routing/infrastructure/supabase-scenario-repository"
+import type { RoutingEvent } from "@/lib/routing/domain"
 
 /**
  * Pending scenarios, each appraised against TODAY'S live plan — net weekly

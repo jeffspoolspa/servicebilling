@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert/strict"
-import type { Weekday } from "@/lib/domain/routing"
+import type { Weekday } from "@/lib/routing/domain"
 import { Task, TaskRuleError, type Terms } from "./task"
 
 let checks = 0
@@ -143,7 +143,7 @@ console.log("\nthe use case, driven through fake ports")
 async function serviceCheck() {
   // No database and no ION — the service is pure sequencing, so fakes prove
   // the whole path. This is the shape a UI, a script, or an agent would drive.
-  const { TaskService } = await import("../../application/maintenance/task-service")
+  const { TaskService } = await import("../application/task-service")
   const saved: Task[] = []
   const posted: Record<string, string>[] = []
   let minted = 0

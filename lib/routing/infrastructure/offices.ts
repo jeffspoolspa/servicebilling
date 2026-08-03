@@ -7,7 +7,7 @@
  * HOME_OFFICES constant did, and drifts the moment a branch opens or closes).
  */
 
-import { Pin } from "@/lib/domain/routing"
+import { Pin } from "@/lib/routing/domain"
 import type { QueryClient } from "./supabase-quota-repository"
 
 export interface Office {

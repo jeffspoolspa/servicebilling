@@ -15,10 +15,10 @@
  * communication), and the address resolver (mints place id + geocode).
  */
 
-import type { Customer } from "@/lib/domain/customers"
-import type { QboCustomers } from "@/lib/infrastructure/qbo/qbo"
+import type { Customer } from "@/lib/customers/domain"
+import type { QboCustomers } from "@/lib/external/qbo/qbo"
 import type { RawAddress, ResolveResult } from "@/lib/places/resolve"
-import type { SupabaseCustomerRepository } from "@/lib/infrastructure/customers/supabase-customer-repository"
+import type { SupabaseCustomerRepository } from "@/lib/customers/infrastructure/supabase-customer-repository"
 
 export type OnboardOutcome =
   | { outcome: "refused"; reasons: string[] }

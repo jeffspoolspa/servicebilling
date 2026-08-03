@@ -6,7 +6,7 @@
  * (Scenario.restore invalidates whatever the world moved out from under).
  */
 
-import type { RoutingEvent, ScenarioRepository, StoredScenario } from "@/lib/domain/routing"
+import type { RoutingEvent, ScenarioRepository, StoredScenario } from "@/lib/routing/domain"
 
 interface ScenarioQuery {
   select(columns: string): ScenarioQuery

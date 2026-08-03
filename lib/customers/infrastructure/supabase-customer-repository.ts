@@ -6,7 +6,7 @@
  * promise.
  */
 
-import type { Customer } from "@/lib/domain/customers"
+import type { Customer } from "@/lib/customers/domain"
 import type { ResolvedAddress } from "@/lib/places/resolve"
 
 interface Rpc {

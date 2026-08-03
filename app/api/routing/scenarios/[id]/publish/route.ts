@@ -1,15 +1,15 @@
 import { NextResponse } from "next/server"
 import { createSupabaseServer } from "@/lib/supabase/server"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
-import { PublishService } from "@/lib/application/routing/publish-service"
-import { SupabaseTaskStore } from "@/lib/infrastructure/routing/supabase-task-store"
-import { SupabaseScenarioRepository, type ScenarioClient } from "@/lib/infrastructure/routing/supabase-scenario-repository"
-import { SupabaseMaintenanceEventLog } from "@/lib/infrastructure/maintenance/supabase-event-log"
-import { TaskCacheRefresher } from "@/lib/infrastructure/maintenance/task-cache-refresher"
-import { IonTasks } from "@/lib/infrastructure/ion/ion"
-import { IonTaskAcl } from "@/lib/infrastructure/ion/acl"
+import { PublishService } from "@/lib/routing/application/publish-service"
+import { SupabaseTaskStore } from "@/lib/routing/infrastructure/supabase-task-store"
+import { SupabaseScenarioRepository, type ScenarioClient } from "@/lib/routing/infrastructure/supabase-scenario-repository"
+import { SupabaseMaintenanceEventLog } from "@/lib/maintenance/infrastructure/supabase-event-log"
+import { TaskCacheRefresher } from "@/lib/maintenance/infrastructure/task-cache-refresher"
+import { IonTasks } from "@/lib/external/ion/ion"
+import { IonTaskAcl } from "@/lib/external/ion/acl"
 import { triggerScriptSync } from "@/lib/windmill"
-import type { QueryClient } from "@/lib/infrastructure/routing/supabase-quota-repository"
+import type { QueryClient } from "@/lib/routing/infrastructure/supabase-quota-repository"
 
 /**
  * Publish a scenario to ION (ADR 012 shape). This route only wires ports;

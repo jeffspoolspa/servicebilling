@@ -7,8 +7,8 @@
 
 import { readFileSync, writeFileSync } from "node:fs"
 import { createClient } from "@supabase/supabase-js"
-import { RouteFactory, WEEKDAY_NAMES, weekOf } from "@/lib/domain/routing"
-import { SupabaseQuotaRepository, type QueryClient } from "@/lib/infrastructure/routing/supabase-quota-repository"
+import { RouteFactory, WEEKDAY_NAMES, weekOf } from "@/lib/routing/domain"
+import { SupabaseQuotaRepository, type QueryClient } from "@/lib/routing/infrastructure/supabase-quota-repository"
 
 function env(): Record<string, string> {
   const out: Record<string, string> = {}

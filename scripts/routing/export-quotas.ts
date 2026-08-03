@@ -14,8 +14,8 @@ import {
   weekOf,
   weekStart,
   type Quota,
-} from "@/lib/domain/routing"
-import { SupabaseQuotaRepository, type QueryClient } from "@/lib/infrastructure/routing/supabase-quota-repository"
+} from "@/lib/routing/domain"
+import { SupabaseQuotaRepository, type QueryClient } from "@/lib/routing/infrastructure/supabase-quota-repository"
 
 function env(): Record<string, string> {
   const out: Record<string, string> = {}

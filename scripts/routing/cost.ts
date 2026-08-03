@@ -6,10 +6,10 @@
  */
 import { readFileSync } from "node:fs"
 import { createClient } from "@supabase/supabase-js"
-import { CostModel, RouteFactory, RouteGeometry } from "@/lib/domain/routing"
-import { RoutingService } from "@/lib/application/routing/routing-service"
-import { SupabaseQuotaRepository, type QueryClient } from "@/lib/infrastructure/routing/supabase-quota-repository"
-import { listTechBases } from "@/lib/infrastructure/routing/offices"
+import { CostModel, RouteFactory, RouteGeometry } from "@/lib/routing/domain"
+import { RoutingService } from "@/lib/routing/application/routing-service"
+import { SupabaseQuotaRepository, type QueryClient } from "@/lib/routing/infrastructure/supabase-quota-repository"
+import { listTechBases } from "@/lib/routing/infrastructure/offices"
 
 function env(): Record<string, string> {
   const out: Record<string, string> = {}

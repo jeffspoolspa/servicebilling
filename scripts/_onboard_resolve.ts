@@ -9,9 +9,9 @@
  * side knows nothing about pools.
  */
 
-import { Customer, type CustomerInput, type Violation } from "@/lib/domain/customers"
-import { resolveCadence, loadOf, type Cadence, type CadenceResolution } from "@/lib/domain/maintenance"
-import { Pin } from "@/lib/domain/routing"
+import { Customer, type CustomerInput, type Violation } from "@/lib/customers/domain"
+import { resolveCadence, loadOf, type Cadence, type CadenceResolution } from "@/lib/maintenance/domain"
+import { Pin } from "@/lib/routing/domain"
 import { resolveServiceAddress, type ResolvedAddress } from "@/lib/places/resolve"
 
 export const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]

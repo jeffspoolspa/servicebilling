@@ -13,14 +13,23 @@ Reference implementation: `lib/domain/routing` + `lib/application/routing` +
 
 | Layer | Lives in | May import | Contains |
 | --- | --- | --- | --- |
-| Domain | `lib/domain/<module>` | nothing outside itself | aggregates, value objects, domain services, factories, events, PORT INTERFACES |
-| Application | `lib/application/<module>` | domain | one named service; one method per boundary-crossing use case |
-| Infrastructure | `lib/infrastructure/<module>` | domain (to implement its ports), vendor SDKs | repository/publisher implementations |
+| Domain | `lib/<module>/domain` | nothing outside itself | aggregates, value objects, domain services, factories, events, PORT INTERFACES |
+| Application | `lib/<module>/application` | its domain; one concrete infra type where there is exactly one (see below) | one named service; one method per boundary-crossing use case |
+| Infrastructure | `lib/<module>/infrastructure` | its domain, vendor SDKs | repository/cache/gateway implementations |
+| Integration | `lib/external/<system>` | nothing domain-specific | one object per external system + its ACL (ADR 012) |
 | UI | `app/` | domain (types + calls), application via API routes | formatting and gesture-wiring only |
 
-Dependencies point inward, always. The domain imports nothing from the other
-three. This is the rule that makes the domain runnable anywhere - including
-the browser, which the workbench pattern below depends on.
+The domain imports nothing from the other layers. That is the rule that makes
+it runnable anywhere - including the browser, which the workbench pattern
+below depends on.
+
+> **Attribution, so nobody cites the wrong book.** "Dependencies point inward,
+> always" is Hexagonal / Onion / Clean Architecture, not Evans. In the Blue
+> Book's layered architecture Infrastructure sits at the BOTTOM and serves the
+> layers above, so an application service using an infrastructure class is
+> ordinary Evans layering. We keep the stricter inward rule for the DOMAIN
+> (it buys testability and browser-portability) and relax it for the
+> application layer where a port would only rename one class.
 
 ## File layout: layer first, module second, one file per building block
 
@@ -47,10 +56,17 @@ aspirational: renaming a file inside the module cannot break a caller.
 
 Modules today: `routing` (reference), `customers`, `maintenance`.
 
-## External-system objects are NOT module-scoped (ADR 012)
+## External systems are BOUNDED CONTEXTS, not modules of ours (ADR 012)
 
-`lib/infrastructure/ion/` and `lib/infrastructure/qbo/` sit beside the module
-folders, not inside one, because a single ION object serves routing (publish
+`lib/external/ion/` and `lib/external/qbo/` sit beside the domain modules, not
+inside one, and they deliberately have NO `domain/` folder. QBO's customer
+model and ION's task model belong to those systems; ours is not the place to
+model them. What lives here is the RELATIONSHIP — in Evans' vocabulary we are
+Conformist to QBO on customer identity (it is the leader) and we run an
+Anticorruption Layer at both borders, which is his facade + adapter +
+translator, spelled `Ion`/`Qbo` (transport, auth) plus `acl.ts` (translation).
+
+One object per system also because a single ION object serves routing (publish
 a week), maintenance (open a task) and customers (resolve an id). Each holds:
 
 - `<system>.ts` — one class per system; ALL of its communication; no domain

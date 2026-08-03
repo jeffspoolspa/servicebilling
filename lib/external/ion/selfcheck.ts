@@ -6,7 +6,7 @@
 import assert from "node:assert"
 import { IonTaskAcl, anchorOf, matchIonCustomer, startsOnFor, type TaskIdentity } from "./acl"
 import type { IonTaskForm } from "./ion"
-import type { TaskSchedule } from "@/lib/domain/routing"
+import type { TaskSchedule } from "@/lib/routing/domain"
 
 const acl = new IonTaskAcl()
 const TECH = { caleb: "u-caleb", josh: "u-josh" }

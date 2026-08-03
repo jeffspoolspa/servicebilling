@@ -4,13 +4,13 @@
  * confirmed-cache — behind one port so the service reads as a sentence.
  */
 
-import type { Quota } from "@/lib/domain/routing"
-import type { TaskStore } from "@/lib/application/routing/publish-service"
-import type { TaskIdentity } from "@/lib/infrastructure/ion/acl"
+import type { Quota } from "@/lib/routing/domain"
+import type { TaskStore } from "@/lib/routing/application/publish-service"
+import type { TaskIdentity } from "@/lib/external/ion/acl"
 import { SupabaseQuotaRepository, type QueryClient } from "./supabase-quota-repository"
 import { SupabasePlacementCache } from "./supabase-placement-cache"
-import { TaskCacheRefresher } from "@/lib/infrastructure/maintenance/task-cache-refresher"
-import { weekOf } from "@/lib/domain/routing"
+import { TaskCacheRefresher } from "@/lib/maintenance/infrastructure/task-cache-refresher"
+import { weekOf } from "@/lib/routing/domain"
 
 const PAGE = 999
 

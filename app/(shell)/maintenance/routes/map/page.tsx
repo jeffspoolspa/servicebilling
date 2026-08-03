@@ -7,12 +7,12 @@
  */
 
 import { createSupabaseServer } from "@/lib/supabase/server"
-import { RoutingService } from "@/lib/application/routing/routing-service"
+import { RoutingService } from "@/lib/routing/application/routing-service"
 import {
   SupabaseQuotaRepository,
   type QueryClient,
-} from "@/lib/infrastructure/routing/supabase-quota-repository"
-import { listOffices, listTechBases } from "@/lib/infrastructure/routing/offices"
+} from "@/lib/routing/infrastructure/supabase-quota-repository"
+import { listOffices, listTechBases } from "@/lib/routing/infrastructure/offices"
 import { LiveMap } from "./live-map"
 
 export const metadata = { title: "Maintenance · Territory map" }

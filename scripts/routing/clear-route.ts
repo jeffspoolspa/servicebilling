@@ -5,9 +5,9 @@
  */
 import { readFileSync } from "node:fs"
 import { createClient } from "@supabase/supabase-js"
-import { RouteFactory, WEEKDAY_NAMES, weekOf, RouteGeometry, type Weekday } from "@/lib/domain/routing"
-import { RoutingService } from "@/lib/application/routing/routing-service"
-import { SupabaseQuotaRepository, type QueryClient } from "@/lib/infrastructure/routing/supabase-quota-repository"
+import { RouteFactory, WEEKDAY_NAMES, weekOf, RouteGeometry, type Weekday } from "@/lib/routing/domain"
+import { RoutingService } from "@/lib/routing/application/routing-service"
+import { SupabaseQuotaRepository, type QueryClient } from "@/lib/routing/infrastructure/supabase-quota-repository"
 
 async function main() {
   const env: Record<string, string> = {}

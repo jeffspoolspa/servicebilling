@@ -12,11 +12,11 @@
  * Those live in IonTasks and the ACL, or they do not exist.
  */
 
-import { Scenario, weekOf, type Quota } from "@/lib/domain/routing"
-import type { ScenarioRepository, InvalidChange } from "@/lib/domain/routing"
-import { IonTasks } from "@/lib/infrastructure/ion/ion"
-import { IonTaskAcl, type LandedChange, type TaskIdentity } from "@/lib/infrastructure/ion/acl"
-import type { MaintenanceFact } from "@/lib/infrastructure/maintenance/supabase-event-log"
+import { Scenario, weekOf, type Quota } from "@/lib/routing/domain"
+import type { ScenarioRepository, InvalidChange } from "@/lib/routing/domain"
+import { IonTasks } from "@/lib/external/ion/ion"
+import { IonTaskAcl, type LandedChange, type TaskIdentity } from "@/lib/external/ion/acl"
+import type { MaintenanceFact } from "@/lib/maintenance/infrastructure/supabase-event-log"
 
 /* ------------------------------- the ports ------------------------------- */
 

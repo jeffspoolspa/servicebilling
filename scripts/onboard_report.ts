@@ -9,8 +9,8 @@
 import "./_env"
 import { readFileSync, writeFileSync } from "node:fs"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
-import { SupabaseCustomerRepository } from "@/lib/infrastructure/customers/supabase-customer-repository"
-import { startsOnFor } from "@/lib/infrastructure/ion/acl"
+import { SupabaseCustomerRepository } from "@/lib/customers/infrastructure/supabase-customer-repository"
+import { startsOnFor } from "@/lib/external/ion/acl"
 import { loadOf, resolveAll, DAY, type Exported } from "./_onboard_resolve"
 
 async function main() {

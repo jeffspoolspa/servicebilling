@@ -18,7 +18,7 @@
  * write path per ADR 002, dry-run first. Nothing here talks to ION directly.
  */
 
-import type { PublishResult, RoutePublisher, TaskSchedule, Weekday } from "@/lib/domain/routing"
+import type { PublishResult, RoutePublisher, TaskSchedule, Weekday } from "@/lib/routing/domain"
 import type { QueryClient } from "./supabase-quota-repository"
 
 /** Sun..Sat — the ION form's day field names, by weekday index. */

@@ -3,8 +3,8 @@ import { createSupabaseServer } from "@/lib/supabase/server"
 import {
   SupabaseScenarioRepository,
   type ScenarioClient,
-} from "@/lib/infrastructure/routing/supabase-scenario-repository"
-import type { RoutingEvent, StoredScenario } from "@/lib/domain/routing"
+} from "@/lib/routing/infrastructure/supabase-scenario-repository"
+import type { RoutingEvent, StoredScenario } from "@/lib/routing/domain"
 
 /** One stored scenario, raw — the client restores it over its live plan. */
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {

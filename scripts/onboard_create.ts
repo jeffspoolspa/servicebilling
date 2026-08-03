@@ -12,9 +12,9 @@
 
 import "./_env"
 import { readFileSync, writeFileSync } from "node:fs"
-import { OnboardingService } from "@/lib/application/customers/onboarding-service"
-import { SupabaseCustomerRepository } from "@/lib/infrastructure/customers/supabase-customer-repository"
-import { QboCustomers } from "@/lib/infrastructure/qbo/qbo"
+import { OnboardingService } from "@/lib/customers/application/onboarding-service"
+import { SupabaseCustomerRepository } from "@/lib/customers/infrastructure/supabase-customer-repository"
+import { QboCustomers } from "@/lib/external/qbo/qbo"
 import { resolveServiceAddress } from "@/lib/places/resolve"
 import { triggerScriptSync } from "@/lib/windmill"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"

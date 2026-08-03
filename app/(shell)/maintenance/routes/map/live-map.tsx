@@ -19,7 +19,7 @@ import { OfficeFilter } from "../_components/office-filter"
 import { ScopeMenu } from "../_components/scope-menu"
 import { ChangesTable, type ChangeRow } from "./changes-table"
 import { TechSelect } from "./tech-select"
-import type { Office } from "@/lib/infrastructure/routing/offices"
+import type { Office } from "@/lib/routing/infrastructure/offices"
 import {
   baseIdOf,
   cadence,
@@ -43,8 +43,8 @@ import {
   type RoutingEvent,
   type SelectedStop,
   type Weekday,
-} from "@/lib/domain/routing"
-import type { EvaluatedScenario } from "@/lib/application/routing/routing-service"
+} from "@/lib/routing/domain"
+import type { EvaluatedScenario } from "@/lib/routing/application/routing-service"
 
 type Customer = { name: string; office: string | null; commercial: boolean }
 type LatLng = { lat: number; lng: number }

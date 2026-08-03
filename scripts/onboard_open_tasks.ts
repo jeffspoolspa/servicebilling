@@ -11,10 +11,10 @@
 
 import "./_env"
 import { readFileSync } from "node:fs"
-import { TaskOpeningService, type TaskToOpen } from "@/lib/application/customers/task-opening-service"
-import { SupabaseCustomerRepository } from "@/lib/infrastructure/customers/supabase-customer-repository"
-import { IonTaskAcl } from "@/lib/infrastructure/ion/acl"
-import { IonTasks } from "@/lib/infrastructure/ion/ion"
+import { TaskOpeningService, type TaskToOpen } from "@/lib/customers/application/task-opening-service"
+import { SupabaseCustomerRepository } from "@/lib/customers/infrastructure/supabase-customer-repository"
+import { IonTaskAcl } from "@/lib/external/ion/acl"
+import { IonTasks } from "@/lib/external/ion/ion"
 import { triggerScriptSync } from "@/lib/windmill"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 

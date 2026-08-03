@@ -11,9 +11,9 @@
 
 import "./_env"
 import { readFileSync } from "node:fs"
-import { LinkIonService } from "@/lib/application/customers/link-ion-service"
-import { SupabaseCustomerRepository } from "@/lib/infrastructure/customers/supabase-customer-repository"
-import { IonCustomers } from "@/lib/infrastructure/ion/ion"
+import { LinkIonService } from "@/lib/customers/application/link-ion-service"
+import { SupabaseCustomerRepository } from "@/lib/customers/infrastructure/supabase-customer-repository"
+import { IonCustomers } from "@/lib/external/ion/ion"
 import { triggerScriptSync } from "@/lib/windmill"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 

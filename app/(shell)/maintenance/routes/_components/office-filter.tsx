@@ -1,7 +1,7 @@
 "use client"
 
 import { OptionPills } from "@/components/ui/option-pills"
-import type { Office } from "@/lib/infrastructure/routing/offices"
+import type { Office } from "@/lib/routing/infrastructure/offices"
 
 /**
  * Multi-select office scope. Offices are fetched (listOffices), never hard-coded,

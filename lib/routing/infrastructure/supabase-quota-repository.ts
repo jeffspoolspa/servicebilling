@@ -23,7 +23,7 @@ import {
   type WeekIndex,
   isWeekday,
   weekOf,
-} from "@/lib/domain/routing"
+} from "@/lib/routing/domain"
 
 /** The narrow slice of a Supabase client this needs. */
 export interface Query {

@@ -10,10 +10,10 @@
  * task ingestion — this service writes nothing to our tables.
  */
 
-import { IonTaskAcl } from "@/lib/infrastructure/ion/acl"
-import { startsOnFor } from "@/lib/infrastructure/ion/acl"
-import type { IonTasks } from "@/lib/infrastructure/ion/ion"
-import type { SupabaseCustomerRepository } from "@/lib/infrastructure/customers/supabase-customer-repository"
+import { IonTaskAcl } from "@/lib/external/ion/acl"
+import { startsOnFor } from "@/lib/external/ion/acl"
+import type { IonTasks } from "@/lib/external/ion/ion"
+import type { SupabaseCustomerRepository } from "@/lib/customers/infrastructure/supabase-customer-repository"
 
 export interface TaskToOpen {
   accountId: number

@@ -11,17 +11,17 @@
 
 import { readFileSync } from "node:fs"
 import { createClient } from "@supabase/supabase-js"
-import { PublishService } from "@/lib/application/routing/publish-service"
-import { SupabaseTaskStore } from "@/lib/infrastructure/routing/supabase-task-store"
+import { PublishService } from "@/lib/routing/application/publish-service"
+import { SupabaseTaskStore } from "@/lib/routing/infrastructure/supabase-task-store"
 import {
   SupabaseScenarioRepository,
   type ScenarioClient,
-} from "@/lib/infrastructure/routing/supabase-scenario-repository"
-import { SupabaseMaintenanceEventLog } from "@/lib/infrastructure/maintenance/supabase-event-log"
-import { TaskCacheRefresher } from "@/lib/infrastructure/maintenance/task-cache-refresher"
-import { IonTasks } from "@/lib/infrastructure/ion/ion"
-import { IonTaskAcl } from "@/lib/infrastructure/ion/acl"
-import type { QueryClient } from "@/lib/infrastructure/routing/supabase-quota-repository"
+} from "@/lib/routing/infrastructure/supabase-scenario-repository"
+import { SupabaseMaintenanceEventLog } from "@/lib/maintenance/infrastructure/supabase-event-log"
+import { TaskCacheRefresher } from "@/lib/maintenance/infrastructure/task-cache-refresher"
+import { IonTasks } from "@/lib/external/ion/ion"
+import { IonTaskAcl } from "@/lib/external/ion/acl"
+import type { QueryClient } from "@/lib/routing/infrastructure/supabase-quota-repository"
 
 // No dotenv dependency — read .env.local directly.
 for (const line of readFileSync(".env.local", "utf8").split("\n")) {

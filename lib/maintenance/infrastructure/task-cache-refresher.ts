@@ -14,9 +14,9 @@
  * ION is only read for the tasks that are actually stale.
  */
 
-import type { QueryClient } from "@/lib/infrastructure/routing/supabase-quota-repository"
-import type { IonTasks } from "@/lib/infrastructure/ion/ion"
-import type { IonTaskAcl, TranslatedForm } from "@/lib/infrastructure/ion/acl"
+import type { QueryClient } from "@/lib/routing/infrastructure/supabase-quota-repository"
+import type { IonTasks } from "@/lib/external/ion/ion"
+import type { IonTaskAcl, TranslatedForm } from "@/lib/external/ion/acl"
 
 export interface RefreshReport {
   /** Tasks whose stamp was already inside the window — no ION call made. */

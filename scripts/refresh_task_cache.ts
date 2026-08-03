@@ -11,10 +11,10 @@
  */
 import { readFileSync } from "node:fs"
 import { createClient } from "@supabase/supabase-js"
-import { TaskCacheRefresher } from "@/lib/infrastructure/maintenance/task-cache-refresher"
-import type { QueryClient } from "@/lib/infrastructure/routing/supabase-quota-repository"
-import { IonTasks } from "@/lib/infrastructure/ion/ion"
-import { IonTaskAcl } from "@/lib/infrastructure/ion/acl"
+import { TaskCacheRefresher } from "@/lib/maintenance/infrastructure/task-cache-refresher"
+import type { QueryClient } from "@/lib/routing/infrastructure/supabase-quota-repository"
+import { IonTasks } from "@/lib/external/ion/ion"
+import { IonTaskAcl } from "@/lib/external/ion/acl"
 
 // No dotenv dependency — read .env.local directly (same idiom as publish_scenario).
 for (const line of readFileSync(".env.local", "utf8").split("\n")) {
