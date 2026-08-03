@@ -158,12 +158,36 @@ export function LiveMap({
   /** Transient notice (skipped moves etc.) — one per action, self-clearing. */
   const [toast, setToast] = useState<string | null>(null)
   const [publishBusy, setPublishBusy] = useState(false)
+  /** Armed = the user pressed Publish and is being asked to confirm in-app. */
+  const [publishArmed, setPublishArmed] = useState(false)
+  /** What the publish is doing right now, and for how long. Work the user
+   *  cannot see is work they assume has failed. */
+  const [publishPhase, setPublishPhase] = useState<string | null>(null)
+  const [publishSince, setPublishSince] = useState<number | null>(null)
+  const [publishElapsed, setPublishElapsed] = useState(0)
   const router = useRouter()
   useEffect(() => {
     if (toast === null) return
-    const t = setTimeout(() => setToast(null), 5000)
+    // Long messages are the ones carrying a reason; give them time to be read.
+    const t = setTimeout(() => setToast(null), toast.length > 90 ? 14000 : 5000)
     return () => clearTimeout(t)
   }, [toast])
+
+  // A publish takes tens of seconds; the clock is how the user knows it is
+  // still working rather than dead.
+  useEffect(() => {
+    if (publishSince === null) return
+    setPublishElapsed(0)
+    const t = setInterval(() => setPublishElapsed(Math.round((Date.now() - publishSince) / 1000)), 1000)
+    return () => clearInterval(t)
+  }, [publishSince])
+
+  // Arming is a question, not a state to be left in.
+  useEffect(() => {
+    if (!publishArmed) return
+    const t = setTimeout(() => setPublishArmed(false), 8000)
+    return () => clearTimeout(t)
+  }, [publishArmed])
 
   const [selected, setSelected] = useState<string | null>(null)
   /**
@@ -1237,18 +1261,15 @@ export function LiveMap({
    * vanishing into ION unattributed. The server closes it out on success.
    */
   const publishToIon = async () => {
-    if (changes.length === 0 || publishBusy) return
-    const count = changes.length
-    if (
-      !window.confirm(
-        `Write ${count} change${count === 1 ? "" : "s"} to ION?\n\n` +
-          `This edits the live schedule. Each affected task is rewritten with its ` +
-          `complete week, so unchanged days are preserved.`,
-      )
-    ) {
+    if (publishBusy) return
+    if (changes.length === 0) {
+      setToast("Nothing to publish — there are no unpublished changes")
       return
     }
+    setPublishArmed(false)
     setPublishBusy(true)
+    setPublishSince(Date.now())
+    setPublishPhase("Recording the scenario")
     try {
       // Make sure there is a scenario to publish and to close out afterwards.
       let scenarioId = viewing?.id ?? null
@@ -1272,6 +1293,9 @@ export function LiveMap({
         scenarioId = ((await made.json()) as { scenario: { id: string } }).scenario.id
       }
 
+      setPublishPhase(
+        `Checking ${changes.length} task${changes.length === 1 ? "" : "s"} against ION, then writing`,
+      )
       const res = await fetch(`/api/routing/scenarios/${scenarioId}/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1281,21 +1305,27 @@ export function LiveMap({
         error?: string
         committed?: boolean
         results?: { accepted: boolean; detail: string }[]
-        cached?: unknown[]
+        invalidated?: { reason: string }[]
       }
       if (!res.ok) throw new Error(report.error ?? `publish failed (${res.status})`)
 
       const accepted = (report.results ?? []).filter((r) => r.accepted).length
       const refused = (report.results ?? []).length - accepted
+      const dropped = report.invalidated ?? []
+      // A change that no longer makes sense against the refreshed plan was
+      // never sent. Saying "0 published" without saying WHY reads as a failure.
       setToast(
         report.committed
           ? `Published ${accepted} task${accepted === 1 ? "" : "s"} to ION — scenario closed`
-          : `Published ${accepted}, ${refused} refused — scenario left pending. ${
-              (report.results ?? []).find((r) => !r.accepted)?.detail ?? ""
-            }`,
+          : accepted === 0 && refused === 0 && dropped.length > 0
+            ? `Nothing to write — ${dropped.length} change${dropped.length === 1 ? "" : "s"} no longer valid against ION: ${dropped[0].reason}. The map now shows what ION actually has.`
+            : `Published ${accepted}, ${refused} refused${dropped.length ? `, ${dropped.length} invalidated` : ""} — scenario left pending. ${
+                (report.results ?? []).find((r) => !r.accepted)?.detail ?? dropped[0]?.reason ?? ""
+              }`,
       )
       // Our cache was refreshed for whatever landed, so re-read the plan
       // rather than trusting the in-memory scenario.
+      setPublishPhase("Re-reading the plan")
       setPlan(Scenario.from(base()))
       setViewing(null)
       setRestoreNote(null)
@@ -1305,6 +1335,8 @@ export function LiveMap({
       setToast(`Publish failed — ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setPublishBusy(false)
+      setPublishPhase(null)
+      setPublishSince(null)
     }
   }
 
@@ -1332,7 +1364,7 @@ export function LiveMap({
       setSuggestions(null)
       await refreshScenarios()
     } catch (err) {
-      alert(String(err instanceof Error ? err.message : err))
+      setToast(String(err instanceof Error ? err.message : err))
     } finally {
       setScenarioBusy(false)
     }
@@ -1355,7 +1387,7 @@ export function LiveMap({
           : null,
       )
     } catch (err) {
-      alert(String(err instanceof Error ? err.message : err))
+      setToast(String(err instanceof Error ? err.message : err))
     } finally {
       setScenarioBusy(false)
     }
@@ -1380,7 +1412,7 @@ export function LiveMap({
       if (viewing?.id === id) exitScenario()
       await refreshScenarios()
     } catch (err) {
-      alert(String(err instanceof Error ? err.message : err))
+      setToast(String(err instanceof Error ? err.message : err))
     } finally {
       setScenarioBusy(false)
     }
@@ -1511,9 +1543,9 @@ export function LiveMap({
         const events = all.filter((e) => !("to" in e) || realTech.has(e.to.techId))
         const needsTech = all.length - events.length
         if (needsTech > 0)
-          alert(`${needsTech} pool${needsTech === 1 ? "" : "s"} would land on a route with no natural tech — left in place (staffing signal)`)
+          setToast(`${needsTech} pool${needsTech === 1 ? "" : "s"} would land on a route with no natural tech — left in place (staffing signal)`)
         if (events.length === 0) {
-          alert("the draft matches the current plan — nothing to change")
+          setToast("the draft matches the current plan — nothing to change")
           return
         }
         let skipped = 0
@@ -1526,11 +1558,11 @@ export function LiveMap({
             skipped++
           }
         }
-        if (skipped > 0) alert(`${skipped} draft change${skipped === 1 ? "" : "s"} not legal against the current plan — skipped`)
+        if (skipped > 0) setToast(`${skipped} draft change${skipped === 1 ? "" : "s"} not legal against the current plan — skipped`)
         forceRender((n) => n + 1)
         setList("changes")
       } catch (err) {
-        alert(String(err instanceof Error ? err.message : err))
+        setToast(String(err instanceof Error ? err.message : err))
       } finally {
         setOptimalBusy(false)
       }
@@ -1576,7 +1608,7 @@ export function LiveMap({
       plan.moveStop(e.quotaId, e.from, e.to)
       forceRender((n) => n + 1)
     } catch (err) {
-      alert(String(err instanceof Error ? err.message : err))
+      setToast(String(err instanceof Error ? err.message : err))
     }
     setSuggestions((prev) => prev?.filter((x) => x !== m) ?? null)
   }
@@ -1591,7 +1623,7 @@ export function LiveMap({
       }
       forceRender((n) => n + 1)
     } catch (err) {
-      alert(String(err instanceof Error ? err.message : err))
+      setToast(String(err instanceof Error ? err.message : err))
     }
     setSuggestions(null)
   }
@@ -1780,14 +1812,32 @@ export function LiveMap({
             onRevert={revertChanges}
             headerExtra={
               <>
-                <button
-                  className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-[10.5px] font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
-                  title="write these changes to ION — each task is rewritten with its complete week"
-                  disabled={publishBusy || scenarioBusy}
-                  onClick={() => void publishToIon()}
-                >
-                  {publishBusy ? "Publishing…" : "Publish to ION"}
-                </button>
+                {publishArmed && !publishBusy ? (
+                  <span className="flex shrink-0 items-center gap-1">
+                    <button
+                      className="shrink-0 rounded-full border border-emerald-500/60 bg-emerald-500/25 px-2.5 py-0.5 text-[10.5px] font-medium text-emerald-200 hover:bg-emerald-500/35"
+                      title={`writes ${changes.length} change${changes.length === 1 ? "" : "s"} to the live ION schedule — each task is rewritten with its complete week, so unchanged days are preserved`}
+                      onClick={() => void publishToIon()}
+                    >
+                      {`Confirm — write ${changes.length} to ION`}
+                    </button>
+                    <button
+                      className="shrink-0 rounded-full border border-line px-2 py-0.5 text-[10.5px] text-dim hover:text-ink"
+                      onClick={() => setPublishArmed(false)}
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-[10.5px] font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
+                    title="write these changes to ION — each task is rewritten with its complete week"
+                    disabled={publishBusy || scenarioBusy}
+                    onClick={() => setPublishArmed(true)}
+                  >
+                    {publishBusy ? `Publishing… ${publishElapsed}s` : "Publish to ION"}
+                  </button>
+                )}
                 {saveName === null ? (
                 <button
                   className="shrink-0 rounded-full border border-violet-400/40 bg-violet-400/10 px-2.5 py-0.5 text-[10.5px] font-medium text-violet-300 hover:bg-violet-400/20 disabled:opacity-50"
@@ -2106,7 +2156,7 @@ export function LiveMap({
                                 setTourRoute(routeKey(toTechId, route.weekday))
                                 forceRender((n) => n + 1)
                               } catch (err) {
-                                alert(String(err instanceof Error ? err.message : err))
+                                setToast(String(err instanceof Error ? err.message : err))
                               }
                             }}
                           />
@@ -2175,7 +2225,7 @@ export function LiveMap({
                                           plan.unplaceStop(stop.quotaId, route.techId, route.weekday)
                                           forceRender((n) => n + 1)
                                         } catch (err) {
-                                          alert(String(err instanceof Error ? err.message : err))
+                                          setToast(String(err instanceof Error ? err.message : err))
                                         }
                                       }}
                                     >
@@ -2500,6 +2550,18 @@ export function LiveMap({
         </div>
       )}
 
+      {/* Running work is always visible: what it is doing, and for how long.
+          This one does NOT self-clear — it ends when the work does. */}
+      {publishPhase && (
+        <div
+          className={`absolute bottom-32 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2.5 border-emerald-400/40 px-3.5 py-2 text-[12px] text-emerald-200 ${glass}`}
+        >
+          <span className="h-3 w-3 animate-spin rounded-full border border-emerald-300/40 border-t-emerald-200" />
+          <span>{publishPhase}</span>
+          <span className="tabular-nums text-emerald-300/70">{publishElapsed}s</span>
+        </div>
+      )}
+
       {/* Transient notice — one line, self-clearing */}
       {toast && (
         <div
@@ -2552,7 +2614,7 @@ export function LiveMap({
                         plan.unplaceStop(selectedInfo.quota.id, p.stop.techId, p.stop.weekday)
                         forceRender((n) => n + 1)
                       } catch (err) {
-                        alert(String(err instanceof Error ? err.message : err))
+                        setToast(String(err instanceof Error ? err.message : err))
                       }
                     }}
                   >
@@ -2598,7 +2660,11 @@ export function LiveMap({
               onClick={() => {
                 const t = stopPillTech
                 const d = (document.getElementById("stop-pill-day") as HTMLSelectElement)?.value
-                if (!t || d === "" || !selectedInfo) return
+                if (!selectedInfo) return
+                if (!t || d === "") {
+                  setToast(`Pick a ${!t ? "tech" : "day"} before moving this stop`)
+                  return
+                }
                 try {
                   const first = selectedInfo.placements[0]
                   if (selectedInfo.quota.unmetCount() > 0 && !first) {
@@ -2612,7 +2678,7 @@ export function LiveMap({
                   }
                   forceRender((n) => n + 1)
                 } catch (err) {
-                  alert(String(err instanceof Error ? err.message : err))
+                  setToast(String(err instanceof Error ? err.message : err))
                 }
               }}
             >

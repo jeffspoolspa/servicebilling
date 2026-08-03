@@ -17,6 +17,7 @@ import type { TaskSchedule } from "@/lib/domain/routing"
 import type { WeekWrite, VerifiedWrite } from "./ion"
 
 const DAY_FIELD = ["day1", "day2", "day3", "day4", "day5", "day6", "day7"] as const
+const DAY_NAME = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const
 
 /** Cached frequencies that mean "ION renders a day picker for this task". */
 const WEEKLY_CLASS = ["weekly", "multi_week", "daily"]
@@ -24,6 +25,8 @@ const WEEKLY_CLASS = ["weekly", "multi_week", "daily"]
 /** Identity our side must supply: who is who, in both vocabularies. */
 export interface TaskIdentity {
   quotaId: string
+  /** Who this is, in words. A refusal naming a uuid prefix is unactionable. */
+  label: string
   ionTaskId: string
   ionCustId: string
   /** Our cached (refresh-verified) frequency rollup for this task. */
@@ -52,13 +55,13 @@ export class IonTaskAcl {
     for (const stop of schedule.stops) {
       const ionTech = id.ionTechOf(stop.techId)
       if (!ionTech) {
-        return { refusal: { quotaId: schedule.quotaId, reason: `tech ${stop.techId} has no ion_employee_id` } }
+        return { refusal: { quotaId: schedule.quotaId, reason: `${id.label}: tech ${stop.techId} has no ion_employee_id` } }
       }
       named.push({ weekday: stop.weekday, ionTech })
     }
 
     if (id.frequency === null) {
-      return { refusal: { quotaId: schedule.quotaId, reason: "no cached frequency — refresh could not verify this task" } }
+      return { refusal: { quotaId: schedule.quotaId, reason: `${id.label}: no cached frequency — refresh could not verify this task` } }
     }
 
     const changes: Record<string, string> = {}
@@ -74,14 +77,14 @@ export class IonTaskAcl {
     // anchor-preserving StartsOn (IonTasks.setStartDate) and is refused here —
     // loudly, never silently rebased (the 27-contract-dates lesson).
     if (named.length !== 1) {
-      return { refusal: { quotaId: schedule.quotaId, reason: `${id.frequency} task with ${named.length} days cannot be expressed by one start date` } }
+      return { refusal: { quotaId: schedule.quotaId, reason: `${id.label}: ${id.frequency} in ION is one anchor date with no day picker, but our schedule holds ${named.length} days (${named.map((n) => DAY_NAME[n.weekday]).join(" + ")}) — not expressible as a week write` } }
     }
     const currentDay = Object.keys(id.believedDays)[0]
     if (currentDay !== undefined && Number(currentDay) !== named[0].weekday) {
       return {
         refusal: {
           quotaId: schedule.quotaId,
-          reason: `${id.frequency} day move requires an anchor-preserving StartsOn (setStartDate) — refused, not silently rebased`,
+          reason: `${id.label}: ${id.frequency} day move requires an anchor-preserving StartsOn (setStartDate) — refused, not silently rebased`,
         },
       }
     }

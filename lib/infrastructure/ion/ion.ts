@@ -193,6 +193,9 @@ export class IonTasks extends Ion {
         await this.post(`/tasks/addTask.cfm?EventID=${w.ionTaskId}&isIFrame=1`, payload)
 
         // Read-back proof: every field we set must now be what ION reports.
+        // Prime again first — an unprimed form read 500s for some customers,
+        // which would report a LANDED write as failed.
+        if (w.ionCustId) await this.primeCustomer(w.ionCustId)
         const after = this.parseForm(await this.get(`/tasks/addTask.cfm?EventID=${w.ionTaskId}&isIFrame=1`))
         if (!after.rendered) {
           out.push({ key: w.key, accepted: false, detail: "read-back form did not render — write unproven, treat as failed" })

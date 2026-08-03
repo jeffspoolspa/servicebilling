@@ -13,6 +13,7 @@ const ION = { caleb: "40001", josh: "33323" }
 
 const id = (over: Partial<TaskIdentity> = {}): TaskIdentity => ({
   quotaId: "q1",
+  label: "HARRIS, DIANE",
   ionTaskId: "6026080",
   ionCustId: "2576995",
   frequency: "weekly",
