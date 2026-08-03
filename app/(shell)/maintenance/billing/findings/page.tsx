@@ -12,6 +12,9 @@ export default async function FindingsPage() {
     .schema("billing")
     .from("v_findings_review")
     .select("id, billing_month_id, month, customer_id, customer_name, phase, rule, severity, message, cents, detected_at, resolved_at, resolved_by, resolution, month_invoiced")
+    // The audit's queue only. The legacy check-suite rows (log_correction /
+    // bill_review phases) share the table but belong to the old pipeline.
+    .eq("phase", "audit")
     .order("detected_at", { ascending: false })
     .limit(2000)
   if (error) {

@@ -543,15 +543,14 @@ check("re-accrual REPLACES the month; a vanished source is released", () => {
   assert.deepStrictEqual(m.billableItems.map((i) => i.sourceId), ["new-1"])
 })
 
-const ob = (o: { monthId: string; customerId: number; visitKey: string; serviceDate: string; peerKey: string; chemCents: number; bulkCents?: number; bulkItems?: string[] }) =>
-  ({ bulkCents: 0, bulkItems: [], ...o })
+const ob = (o: { monthId: string; customerId: number; visitKey: string; serviceDate: string; peerKey: string; chemCents: number }) => o
 
 check("the audit flags a peer-group outlier, with the numbers in the sentence", () => {
   // 24 normal visits at $10, one at $200 — above p95 of the group, and the
   // customer has no history, so peers alone decide.
   const obs = []
-  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `m${i}`, customerId: i, visitKey: `t${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "POOL MAINTENANCE 65", chemCents: 1000 }))
-  obs.push(ob({ monthId: "mX", customerId: 99, visitKey: "tX:2026-07-15", serviceDate: "2026-07-15", peerKey: "POOL MAINTENANCE 65", chemCents: 20000 }))
+  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `m${i}`, customerId: i, visitKey: `t${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "weekly_residential", chemCents: 1000 }))
+  obs.push(ob({ monthId: "mX", customerId: 99, visitKey: "tX:2026-07-15", serviceDate: "2026-07-15", peerKey: "weekly_residential", chemCents: 20000 }))
   const f = auditConsumables(obs, new Map())
   assert.strictEqual(f.length, 1)
   assert.strictEqual(f[0].customerId, 99)
@@ -582,39 +581,23 @@ check("a peer group too small to define normal flags NOTHING", () => {
   assert.strictEqual(auditConsumables(obs, new Map()).length, 0)
 })
 
-check("a bulk bucket is a delivery on a bulk_refill task, a mis-bill everywhere else", () => {
-  // The same $350 bucket, two tasks. Marked bulk_refill: silence — deliveries
-  // are that task's normal. Unmarked: its own finding, unconditionally, even
-  // though the non-bulk CPV is a quiet $10 — and the finding tells the
-  // reviewer the fix (mark the task) if the delivery is genuine.
-  const obs = [
-    ob({ monthId: "mc", customerId: 1, visitKey: "tc:2026-07-08", serviceDate: "2026-07-08", peerKey: "bulk_refill", chemCents: 1000, bulkCents: 35000, bulkItems: ["CHLORINE TABLET 50LB"] }),
-    ob({ monthId: "mr", customerId: 2, visitKey: "tr:2026-07-08", serviceDate: "2026-07-08", peerKey: "weekly_residential", chemCents: 1000, bulkCents: 35000, bulkItems: ["CHLORINE TABLET 50LB"] }),
-  ]
+check("provision groups make the ONE rule cover both bucket cases", () => {
+  // RULED (Carter, 2026-08-03): no special bulk/provider rules — the task's
+  // provision IS its peer group, and every group is judged against its own
+  // distribution. A $350 bucket inside bulk_refill (where buckets are the
+  // group's normal) sits under that group's percentile; the same bucket on
+  // a weekly residential pool towers over its group and flags. (The rule is
+  // strictly-above-p95, so the top ~5% of EVERY group reviews — here the
+  // bulk_refill group is uniform $350 buckets, all at their own percentile,
+  // none above it.)
+  const obs = []
+  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `b${i}`, customerId: 100 + i, visitKey: `tb${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "bulk_refill", chemCents: 35000 }))
+  obs.push(ob({ monthId: "bX", customerId: 200, visitKey: "tbX:2026-07-08", serviceDate: "2026-07-08", peerKey: "bulk_refill", chemCents: 35000 }))
+  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `r${i}`, customerId: 300 + i, visitKey: `tr${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "weekly_residential", chemCents: 1000 }))
+  obs.push(ob({ monthId: "rX", customerId: 400, visitKey: "trX:2026-07-08", serviceDate: "2026-07-08", peerKey: "weekly_residential", chemCents: 35000 }))
   const f = auditConsumables(obs, new Map())
-  assert.strictEqual(f.length, 1)
-  assert.strictEqual(f[0].rule, "bulk_item_misbill")
-  assert.strictEqual(f[0].customerId, 2)
-  assert.strictEqual(f[0].cents, 35000)
-  assert.ok(f[0].message.includes("CHLORINE TABLET 50LB"), "names the item the tech keyed")
-  assert.ok(f[0].message.includes("single-unit"), "asks the actual question")
-})
-
-check("a provides-chems task billing chemicals is a finding on its face", () => {
-  // The customer buys their own. $12 of incidentals passes the tolerance;
-  // $88 does not — and no percentile is consulted, so the rule fires even
-  // where a demographic group would have called $88 normal.
-  const obs = [
-    ob({ monthId: "m1", customerId: 1, visitKey: "t1:2026-07-08", serviceDate: "2026-07-08", peerKey: "provides_chems", chemCents: 1200 }),
-    ob({ monthId: "m2", customerId: 2, visitKey: "t2:2026-07-08", serviceDate: "2026-07-08", peerKey: "provides_chems", chemCents: 8800 }),
-    // A bucket on a provides-chems task is the same offence, counted whole.
-    ob({ monthId: "m3", customerId: 3, visitKey: "t3:2026-07-08", serviceDate: "2026-07-08", peerKey: "provides_chems", chemCents: 0, bulkCents: 35000, bulkItems: ["CHLORINE TABLET 50LB"] }),
-  ]
-  const f = auditConsumables(obs, new Map())
-  assert.strictEqual(f.length, 2)
-  assert.ok(f.every((x) => x.rule === "chems_billed_to_provider"))
-  assert.deepStrictEqual(f.map((x) => x.customerId).sort(), [2, 3])
-  assert.strictEqual(f.find((x) => x.customerId === 3)!.cents, 35000, "bulk counts toward the provider total, not as a separate misbill")
+  assert.deepStrictEqual(f.map((x) => x.customerId), [400], "the bucket flags on the residential pool and only there")
+  assert.strictEqual(f[0].rule, "cpv_outlier", "one rule, one vocabulary")
 })
 
 console.log(`billing domain selfcheck: ${n} checks passed`)

@@ -27,14 +27,18 @@ export interface ChemObservation {
   /** One serviced day of one task — the same grain labour bills at. */
   readonly visitKey: string
   readonly serviceDate: string
-  /** The peer group: v_customer_peer_group's ruling for this customer. */
+  /**
+   * The peer group. The task's chem provision (bulk_refill,
+   * provides_chems) overrides the customer's demographic group
+   * (v_customer_peer_group) — RULED (Carter, 2026-08-03): provisions are
+   * PEER GROUPS, not special rules. A 50lb bucket on a bulk_refill task is
+   * unremarkable inside its own group's distribution; the same bucket on a
+   * weekly residential pool blows past that group's percentile and flags —
+   * one rule covers both.
+   */
   readonly peerKey: string
-  /** Chemicals dispensed on the visit, EXCLUDING bulk containers. */
+  /** ALL chemicals billed on the visit, buckets included. */
   readonly chemCents: number
-  /** Bulk-container spend on the visit (50lb buckets etc), kept apart. */
-  readonly bulkCents: number
-  /** The bulk items' names, for the finding's sentence. */
-  readonly bulkItems: readonly string[]
 }
 
 export interface ChemHistory {
@@ -53,21 +57,6 @@ export interface AuditPolicy {
   readonly selfFactor: number
   /** Customers with fewer historical visits than this skip the self bar. */
   readonly minSelfVisits: number
-  /**
-   * The peer group whose TASKS are marked bulk_refill: their service
-   * includes bucket deliveries, so a bulk container is expected there and a
-   * mis-bill everywhere else — the tech keyed the bucket instead of the
-   * single-unit item. Task attribute, set by review.
-   */
-  readonly bulkRefillGroup: string
-  /**
-   * The peer group whose tasks are marked customer_provides_chems: the
-   * customer buys their own chemicals, so ANY chem billing above the
-   * tolerance is a finding — no percentile involved.
-   */
-  readonly providerGroup: string
-  /** Small incidentals a provides-chems customer may still owe for. */
-  readonly providerToleranceCents: number
 }
 
 /** The house numbers. A policy object so the UI can show and change them. */
@@ -76,15 +65,12 @@ export const AUDIT_POLICY: AuditPolicy = {
   minPeers: 20,
   selfFactor: 2,
   minSelfVisits: 6,
-  bulkRefillGroup: "bulk_refill",
-  providerGroup: "provides_chems",
-  providerToleranceCents: 2500,
 }
 
 export interface AuditFinding {
   readonly monthId: string
   readonly customerId: number
-  readonly rule: "cpv_outlier" | "bulk_item_misbill" | "chems_billed_to_provider"
+  readonly rule: "cpv_outlier"
   readonly severity: "high"
   readonly sourceKey: string
   readonly message: string
@@ -117,49 +103,6 @@ export function auditConsumables(
 
   const findings: AuditFinding[] = []
   for (const o of observations) {
-    // THE PROVIDER RULE. A provides-chems task should bill (almost) no
-    // chemicals at all — the customer buys their own. Anything above the
-    // tolerance is a finding on its face, bulk or not, and the percentile
-    // machinery never touches this group.
-    if (o.peerKey === policy.providerGroup) {
-      const total = o.chemCents + o.bulkCents
-      if (total > policy.providerToleranceCents) {
-        findings.push({
-          monthId: o.monthId,
-          customerId: o.customerId,
-          rule: "chems_billed_to_provider",
-          severity: "high",
-          sourceKey: o.visitKey,
-          cents: total,
-          message:
-            `${o.serviceDate}: $${(total / 100).toFixed(2)} of chemicals billed on a visit to a ` +
-            `provides-their-own-chems customer — they buy their own; anything above ` +
-            `$${(policy.providerToleranceCents / 100).toFixed(2)} needs a reason`,
-        })
-      }
-      continue
-    }
-
-    // THE BULK RULE. Bulk spend is excluded from every CPV number — a
-    // legitimate delivery must not read as a chemical anomaly, and a
-    // mis-keyed bucket must not poison the baselines either. Instead, a
-    // bulk container on any task NOT marked bulk_refill is its own finding,
-    // unconditionally: no percentile can excuse a 50lb bucket on a
-    // residential pool.
-    if (o.bulkCents > 0 && o.peerKey !== policy.bulkRefillGroup) {
-      findings.push({
-        monthId: o.monthId,
-        customerId: o.customerId,
-        rule: "bulk_item_misbill",
-        severity: "high",
-        sourceKey: o.visitKey,
-        cents: o.bulkCents,
-        message:
-          `${o.serviceDate}: ${o.bulkItems.join(", ")} ($${(o.bulkCents / 100).toFixed(2)}) on a ` +
-          `${o.peerKey} task not marked bulk_refill — was this meant to be the single-unit item? ` +
-          `(if this customer genuinely gets bulk refills, mark the task and this stops firing)`,
-      })
-    }
     if (o.chemCents <= 0) continue
     const bar = thresholds.get(o.peerKey)
     if (bar === undefined || o.chemCents <= bar) continue

@@ -386,7 +386,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
    * over the trailing window, from the SAME priced items the months bill.
    * The repository owns the criteria; the domain only judges (Evans).
    */
-  async chemHistory(beforeMonth: string, excludeItems?: ReadonlySet<string>, windowMonths = 6): Promise<Map<number, { customerId: number; medianChemCents: number; visits: number }>> {
+  async chemHistory(beforeMonth: string, windowMonths = 6): Promise<Map<number, { customerId: number; medianChemCents: number; visits: number }>> {
     const [y, m] = beforeMonth.split("-").map(Number)
     const months: string[] = []
     for (let i = 1; i <= windowMonths; i++) {
@@ -414,9 +414,6 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       if (error) throw new Error(`history items failed: ${JSON.stringify(error).slice(0, 200)}`)
       for (const r of (data ?? []) as { billing_month_id: string; task_id: string | null; service_date: string | null; kind: string; item_name: string | null; amount_cents: number | null }[]) {
         if (r.kind !== "consumable" || !r.task_id || !r.service_date) continue
-        // Bulk containers are not "usage" — the baseline is what the pool
-        // consumes, so history excludes them the same way observations do.
-        if (excludeItems && r.item_name && excludeItems.has(r.item_name)) continue
         const key = `${r.billing_month_id}|${r.task_id}|${r.service_date}`
         const cur = perVisit.get(key) ?? { customerId: custOf.get(r.billing_month_id)!, cents: 0 }
         cur.cents += r.amount_cents ?? 0
@@ -461,16 +458,6 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       }
     }
     return out
-  }
-
-  /** The catalog's bulk containers, by name — the audit's exclusion set. */
-  async bulkItemNames(): Promise<Set<string>> {
-    const cat = this.client.schema("maintenance").from("consumables") as unknown as {
-      select(c: string): { eq(col: string, v: boolean): PromiseLike<{ data: unknown[] | null; error: unknown }> }
-    }
-    const { data, error } = await cat.select("item_name").eq("is_bulk", true)
-    if (error) throw new Error(`bulk items read failed: ${JSON.stringify(error).slice(0, 200)}`)
-    return new Set(((data ?? []) as { item_name: string }[]).map((r) => r.item_name))
   }
 
   async customerPeerGroups(customerIds: readonly number[]): Promise<Map<number, string>> {

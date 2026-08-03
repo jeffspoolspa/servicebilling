@@ -134,13 +134,12 @@ export class BillingRunService {
     const audit = { findings: 0, recorded: 0, alreadyOpen: 0 }
     {
       const taskIds = monthsAll.flatMap((m) => m.billableItems.map((i) => i.taskId)).filter((t): t is string => !!t)
-      const bulkNames = await this.months.bulkItemNames()
       const [peerGroups, provisions, histories] = await Promise.all([
         this.months.customerPeerGroups(monthsAll.map((m) => m.customerId)),
         this.months.taskChemProvision(taskIds),
-        this.months.chemHistory(month, bulkNames),
+        this.months.chemHistory(month),
       ])
-      const observations = observationsOf(monthsAll, peerGroups, bulkNames, provisions)
+      const observations = observationsOf(monthsAll, peerGroups, provisions)
       const found = auditConsumables(observations, histories)
       const wrote = await this.months.recordFindings(found)
       audit.findings = found.length
@@ -195,42 +194,32 @@ export class BillingRunService {
 export function observationsOf(
   months: readonly BillingMonth[],
   peerGroups: ReadonlyMap<number, string>,
-  bulkNames: ReadonlySet<string>,
   provisions: ReadonlyMap<string, string> = new Map(),
 ): ChemObservation[] {
   const out: ChemObservation[] = []
   for (const m of months) {
-    const byVisit = new Map<string, { chemCents: number; bulkCents: number; bulkItems: string[]; serviceDate: string }>()
+    const byVisit = new Map<string, { chemCents: number; serviceDate: string }>()
     for (const it of m.billableItems) {
       if (!it.taskId || !it.serviceDate || it.kind !== "consumable") continue
       const key = `${it.taskId}:${it.serviceDate}`
-      const v = byVisit.get(key) ?? { chemCents: 0, bulkCents: 0, bulkItems: [], serviceDate: it.serviceDate }
-      // Bulk containers are split out of the CPV number entirely — the
-      // domain decides whether their presence is a delivery or a mis-bill.
-      if (bulkNames.has(it.itemName)) {
-        v.bulkCents += it.amountCents
-        v.bulkItems.push(it.itemName)
-      } else {
-        v.chemCents += it.amountCents
-      }
+      const v = byVisit.get(key) ?? { chemCents: 0, serviceDate: it.serviceDate }
+      v.chemCents += it.amountCents
       byVisit.set(key, v)
     }
     for (const [key, v] of byVisit) {
-      if (v.chemCents <= 0 && v.bulkCents <= 0) continue
+      if (v.chemCents <= 0) continue
       const taskId = key.slice(0, key.lastIndexOf(":"))
       out.push({
         monthId: m.id,
         customerId: m.customerId,
         visitKey: key,
         serviceDate: v.serviceDate,
-        // The TASK's chem provision overrides the customer's demographic
-        // group: provides_chems and bulk_refill are their own peer groups
-        // with their own rules. Otherwise v_customer_peer_group — the
-        // already-ruled classification the live chem-flag medians use.
+        // The TASK's chem provision (bulk_refill / provides_chems) is its
+        // peer group; otherwise v_customer_peer_group — the already-ruled
+        // classification the live chem-flag medians use. One rule judges
+        // every group against its own distribution.
         peerKey: provisions.get(taskId) ?? peerGroups.get(m.customerId) ?? "unclassified",
         chemCents: v.chemCents,
-        bulkCents: v.bulkCents,
-        bulkItems: v.bulkItems,
       })
     }
   }
