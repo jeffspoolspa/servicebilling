@@ -431,24 +431,23 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   }
 
   /**
-   * The audit's peer groups: a task's classification (category + cadence),
-   * because "normal chemicals" only means something among pools serviced the
-   * same way. Service-type names proved useless as a key — mostly blank on
-   * per-visit tasks — so the criteria is the classification the tasks table
-   * already maintains.
+   * The audit's peer groups: billing_audit.v_customer_peer_group — the
+   * ALREADY-RULED classification the live chem-flag medians use, so the
+   * audit and the flags speak one vocabulary. Customer-level, from the whole
+   * task portfolio: commercial (company set) / high_freq_residential
+   * (any task >2 days a week) / low_freq (all monthly-biweekly) /
+   * weekly_residential (the rest).
    */
-  async taskPeerKeys(taskIds: readonly string[]): Promise<Map<string, string>> {
-    const out = new Map<string, string>()
-    const ids = [...new Set(taskIds)]
-    const tasks = this.client.schema("maintenance").from("tasks") as unknown as {
-      select(c: string): { in(col: string, vals: string[]): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+  async customerPeerGroups(customerIds: readonly number[]): Promise<Map<number, string>> {
+    const out = new Map<number, string>()
+    const ids = [...new Set(customerIds)]
+    const view = this.client.schema("billing_audit").from("v_customer_peer_group") as unknown as {
+      select(c: string): { in(col: string, vals: number[]): PromiseLike<{ data: unknown[] | null; error: unknown }> }
     }
     for (let i = 0; i < ids.length; i += 100) {
-      const { data, error } = await tasks.select("id, category, frequency").in("id", ids.slice(i, i + 100))
-      if (error) throw new Error(`task peer keys failed: ${JSON.stringify(error).slice(0, 200)}`)
-      for (const r of (data ?? []) as { id: string; category: string | null; frequency: string | null }[]) {
-        out.set(r.id, `${r.category ?? "unclassified"}/${r.frequency ?? "unknown"}`)
-      }
+      const { data, error } = await view.select("customer_id, peer_group").in("customer_id", ids.slice(i, i + 100))
+      if (error) throw new Error(`peer groups failed: ${JSON.stringify(error).slice(0, 200)}`)
+      for (const r of (data ?? []) as { customer_id: number; peer_group: string }[]) out.set(r.customer_id, r.peer_group)
     }
     return out
   }

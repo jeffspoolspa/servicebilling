@@ -133,9 +133,11 @@ export class BillingRunService {
     // in the same run — audit writes, gate holds.
     const audit = { findings: 0, recorded: 0, alreadyOpen: 0 }
     {
-      const taskIds = monthsAll.flatMap((m) => m.billableItems.map((i) => i.taskId)).filter((t): t is string => !!t)
-      const [peerKeys, histories] = await Promise.all([this.months.taskPeerKeys(taskIds), this.months.chemHistory(month)])
-      const observations = observationsOf(monthsAll, peerKeys)
+      const [peerGroups, histories] = await Promise.all([
+        this.months.customerPeerGroups(monthsAll.map((m) => m.customerId)),
+        this.months.chemHistory(month),
+      ])
+      const observations = observationsOf(monthsAll, peerGroups)
       const found = auditConsumables(observations, histories)
       const wrote = await this.months.recordFindings(found)
       audit.findings = found.length
@@ -187,7 +189,7 @@ export class BillingRunService {
  * service type's name), because "normal chemicals" only means something
  * within a service type.
  */
-export function observationsOf(months: readonly BillingMonth[], peerKeys: ReadonlyMap<string, string>): ChemObservation[] {
+export function observationsOf(months: readonly BillingMonth[], peerGroups: ReadonlyMap<number, string>): ChemObservation[] {
   const out: ChemObservation[] = []
   for (const m of months) {
     const byVisit = new Map<string, { chemCents: number; serviceDate: string; taskId: string }>()
@@ -205,10 +207,9 @@ export function observationsOf(months: readonly BillingMonth[], peerKeys: Readon
         customerId: m.customerId,
         visitKey: key,
         serviceDate: v.serviceDate,
-        // The task's classification (category/cadence) — service-type names
-        // proved mostly blank on per-visit tasks, so the tasks table's own
-        // classification is the peer axis.
-        peerKey: peerKeys.get(v.taskId) ?? "unclassified/unknown",
+        // v_customer_peer_group — the already-ruled customer classification
+        // the live chem-flag medians use; one vocabulary, two consumers.
+        peerKey: peerGroups.get(m.customerId) ?? "unclassified",
         chemCents: v.chemCents,
       })
     }
