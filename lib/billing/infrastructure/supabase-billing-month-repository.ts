@@ -57,11 +57,18 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   }
 
   private async hydrate(row: MonthRow): Promise<BillingMonth> {
-    const { data: itemRows, error } = await this.q("billable_items")
-      .select("source_kind, source_id, task_id, kind, service_date, item_name, qty, unit_price_cents, amount_cents, created_at")
-      .eq("billing_month_id", row.id)
-      .range(0, 4999)
+    const [{ data: itemRows, error }, { data: varRows, error: vErr }] = await Promise.all([
+      this.q("billable_items")
+        .select("source_kind, source_id, task_id, kind, service_date, item_name, qty, unit_price_cents, amount_cents, created_at")
+        .eq("billing_month_id", row.id)
+        .range(0, 4999),
+      this.q("variances")
+        .select("source_id, kind, origin, reason, delta_cents, tech_id, disposition, recorded_at")
+        .eq("billing_month_id", row.id)
+        .range(0, 999),
+    ])
     if (error) throw new Error(`billable_items read failed: ${JSON.stringify(error).slice(0, 200)}`)
+    if (vErr) throw new Error(`variances read failed: ${JSON.stringify(vErr).slice(0, 200)}`)
 
     const items: BillableItem[] = ((itemRows ?? []) as Record<string, unknown>[]).map((r) => ({
       sourceKind: r.source_kind as BillableItem["sourceKind"],
@@ -75,12 +82,6 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       amountCents: Number(r.amount_cents ?? 0),
       claimedAt: String(r.created_at ?? ""),
     }))
-
-    const { data: varRows, error: vErr } = await this.q("variances")
-      .select("source_id, kind, origin, reason, delta_cents, tech_id, disposition, recorded_at")
-      .eq("billing_month_id", row.id)
-      .range(0, 999)
-    if (vErr) throw new Error(`variances read failed: ${JSON.stringify(vErr).slice(0, 200)}`)
 
     const variances: Variance[] = ((varRows ?? []) as Record<string, unknown>[]).map((r) => ({
       sourceId: r.source_id === null ? null : String(r.source_id),
@@ -154,8 +155,8 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       throw new Error(`billing_month save touched NO rows (${month.id}) — the write was filtered, not applied`)
     }
 
-    if (!month.isInvoiced) await this.replaceItems(month)
-    await this.appendNewVariances(month)
+    if (!month.isInvoiced && month.hasDirtyItems) await this.replaceItems(month)
+    if (month.recordedVariances.length > 0) await this.appendNewVariances(month)
     for (const fact of month.pullFacts()) await this.appendFact(fact)
   }
 

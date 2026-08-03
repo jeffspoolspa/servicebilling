@@ -45,6 +45,10 @@ const monthBounds = (month: string) => {
 }
 
 export class SupabaseBillingFacts implements DeliveryFacts, AgreementTermsSource, ConsumableCatalog {
+  /** The price book changes on human timescales; refetching ~10k rows per
+   *  accrue command was the single largest read in the drain. */
+  private catalogCache: { at: number; prices: CatalogPrice[] } | null = null
+
   constructor(private readonly client: Db) {}
 
   private q(schema: string | null, table: string): Q {
@@ -192,11 +196,12 @@ export class SupabaseBillingFacts implements DeliveryFacts, AgreementTermsSource
 
   /** The whole price book, with its validity windows — the Pricer picks. */
   async prices(): Promise<CatalogPrice[]> {
+    if (this.catalogCache && Date.now() - this.catalogCache.at < 5 * 60_000) return this.catalogCache.prices
     const { data, error } = await this.q("maintenance", "consumable_prices")
       .select("ion_item_id, unit_price_cents, valid_from, valid_to")
       .range(0, 9999)
     if (error) throw new Error(`catalog read failed: ${JSON.stringify(error).slice(0, 200)}`)
-    return ((data ?? []) as { ion_item_id: string | null; unit_price_cents: number | null; valid_from: string | null; valid_to: string | null }[])
+    const out = ((data ?? []) as { ion_item_id: string | null; unit_price_cents: number | null; valid_from: string | null; valid_to: string | null }[])
       .filter((r) => r.ion_item_id && r.unit_price_cents !== null)
       .map((r) => ({
         itemId: String(r.ion_item_id),
@@ -204,5 +209,7 @@ export class SupabaseBillingFacts implements DeliveryFacts, AgreementTermsSource
         validFrom: r.valid_from ?? "1970-01-01",
         validTo: r.valid_to,
       }))
+    this.catalogCache = { at: Date.now(), prices: out }
+    return out
   }
 }

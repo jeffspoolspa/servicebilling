@@ -1,0 +1,6 @@
+-- Queue verbs (coalesced enqueue / SKIP LOCKED claim / finish-with-retry) and
+-- the statement-level dirty-month detector on maintenance.visits.
+-- Applied 2026-08-03. See EVENTS_AND_COMMANDS.md; detector rules per the
+-- 706k wake-trigger postmortem (statement-level, coalesced, transition
+-- tables split into INSERT/UPDATE twins because PG allows one event each).
+-- Full definitions applied via MCP migration billing_queue_rpcs_and_detector.

@@ -96,6 +96,9 @@ export type NextStep = "accrue" | "reconcile" | "refresh_delivery" | "gate" | "i
 
 export class BillingMonth {
   private facts: BillingMonthFact[] = []
+  /** Did the ITEM SET change since reconstitution? A no-op re-accrue must
+   *  not cost a delete+reinsert of every row. */
+  private itemsDirty = false
 
   private constructor(
     readonly id: string,
@@ -215,6 +218,7 @@ export class BillingMonth {
     if (existing && existing.amountCents === item.amountCents && existing.qty === item.qty) return
 
     this.items.set(key, item)
+    this.itemsDirty = true
     // The sums moved, so any agreement we had with the system of record is
     // stale — a month cannot stay "reconciled" through a change.
     this.unreconcile()
@@ -237,6 +241,7 @@ export class BillingMonth {
       throw new BillingRuleError(`${this.month} was invoiced — record a Variance for ${key} instead [I-B3]`)
     }
     if (!this.items.delete(key)) return
+    this.itemsDirty = true
     this.unreconcile()
     this.facts.push({ type: "SourceReleased", monthId: this.id, at, payload: { key, reason } })
   }
@@ -453,6 +458,10 @@ export class BillingMonth {
     return this.variances
       .filter((v) => v.disposition === "amend_invoice")
       .map((v) => ({ variance: v, needs: v.origin === "invoice" ? ("ion_log_edit" as const) : ("invoice_line" as const) }))
+  }
+
+  get hasDirtyItems(): boolean {
+    return this.itemsDirty
   }
 
   /** Facts this month recorded. Drained by whoever persists it. */

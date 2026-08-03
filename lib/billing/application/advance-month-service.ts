@@ -51,7 +51,6 @@ export class AdvanceMonthService {
     const at = now.toISOString()
     const month = await this.months.byId(monthId)
     if (!month) throw new Error(`no billing month ${monthId}`)
-
     const sources = await this.delivery.sourcesFor(month.customerId, month.month)
     const from = month.status
     const step = month.nextStep(sources, now)

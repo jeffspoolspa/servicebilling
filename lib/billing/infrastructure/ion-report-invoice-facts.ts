@@ -30,14 +30,20 @@ type Sel = {
 
 export class IonReportInvoiceFacts implements IonInvoiceFacts {
   /**
-   * The report is pulled ONCE PER RUN, not once per customer-month.
+   * The report is pulled once per FRESHNESS WINDOW, not once per month and
+   * not once per process.
    *
-   * It is a month-wide report, so one pull answers for all ~490 customers in
-   * it; pulling per reconcile would be ~490 chromium scrapes at ~15s each —
-   * two hours to learn the same thing. This memo gives every month in a run
-   * the same fresh report, and a new run pulls again.
+   * It is a month-wide report: one pull answers for all ~490 customers.
+   * The in-memory memo coalesces concurrent callers inside one process, but
+   * a DRAINER claims one command per job, so the memo dies between claims —
+   * the durable guard is `pulled_at` on the persisted rows: if the report
+   * was pulled within the window, the scrape is skipped. First claim of a
+   * drain pays ~15s; the other 488 read the same rows for free.
    */
   private pulls = new Map<string, Promise<{ pulledAt: string }>>()
+
+  /** How old the report may be before a reconcile refuses to trust it. */
+  static readonly MAX_REPORT_AGE_MINUTES = 60
 
   constructor(
     private readonly client: Db,
@@ -89,13 +95,18 @@ export class IonReportInvoiceFacts implements IonInvoiceFacts {
     const key = month.slice(0, 7)
     const existing = this.pulls.get(key)
     if (existing) return existing
-    const pull = this.reports
-      .pullTaskTransactions(month)
-      .then((p) => ({ pulledAt: p.pulledAt }))
-      .catch((e) => {
-        this.pulls.delete(key) // a failed pull must not poison the run
-        throw e
-      })
+    const pull = (async () => {
+      // Durable freshness check first — another job may have just pulled it.
+      const last = await this.pulledAt(month)
+      if (last && Date.now() - new Date(last).getTime() < IonReportInvoiceFacts.MAX_REPORT_AGE_MINUTES * 60_000) {
+        return { pulledAt: last }
+      }
+      const p = await this.reports.pullTaskTransactions(month)
+      return { pulledAt: p.pulledAt }
+    })().catch((e) => {
+      this.pulls.delete(key) // a failed pull must not poison the run
+      throw e
+    })
     this.pulls.set(key, pull)
     return pull
   }
