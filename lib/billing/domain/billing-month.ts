@@ -16,8 +16,14 @@
  *   I-B2 COMPLETENESS  every billable visit of a closed month is claimed.
  *                      Evaluated as a QUERY, not thrown — a month passes
  *                      through incomplete states while it is being built.
- *   I-B3 BILLED IS LOCKED  a locked month refuses all mutation. What was
- *                      invoiced must still read the same next year.
+ *   I-B3 SENT IS LOCKED  the ledger freezes when the invoice is SENT, not
+ *                      when the month ends and not when the document is
+ *                      created. The billing checks are exactly where a bad
+ *                      consumable or quantity surfaces, and fixing it means
+ *                      editing visits — so an earlier freeze would make the
+ *                      checks unactionable. Once the customer has it, what
+ *                      they read must still read the same next year, and a
+ *                      later correction becomes a Variance.
  *
  * Billing DERIVES billability from Delivery's facts; it never re-decides what
  * happened at the pool. Delivery states, Billing judges.
@@ -51,7 +57,7 @@ export interface Claim {
 }
 
 export interface BillingMonthFact {
-  readonly type: "VisitClaimed" | "VisitReleased" | "MonthLocked"
+  readonly type: "VisitClaimed" | "VisitReleased" | "MonthSent"
   readonly monthId: string
   readonly at: string
   readonly payload: Record<string, unknown>
@@ -78,7 +84,8 @@ export class BillingMonth {
     /** First day of the month, ISO. The month IS the period. */
     readonly month: string,
     private readonly claimed: Map<string, Claim>,
-    private lockedAt: string | null,
+    /** When the customer got it. Null while anything is still editable. */
+    private sentAt: string | null,
   ) {}
 
   static open(id: string, customerId: number, month: string): BillingMonth {
@@ -93,13 +100,14 @@ export class BillingMonth {
     customerId: number,
     month: string,
     claims: readonly Claim[],
-    lockedAt: string | null,
+    sentAt: string | null,
   ): BillingMonth {
-    return new BillingMonth(id, customerId, month, new Map(claims.map((c) => [c.visitId, c])), lockedAt)
+    return new BillingMonth(id, customerId, month, new Map(claims.map((c) => [c.visitId, c])), sentAt)
   }
 
-  get isLocked(): boolean {
-    return this.lockedAt !== null
+  /** Sent to the customer — the one irreversible moment. [I-B3] */
+  get isSent(): boolean {
+    return this.sentAt !== null
   }
 
   get claims(): readonly Claim[] {
@@ -115,8 +123,10 @@ export class BillingMonth {
    * a re-run of the builder must converge, not explode.
    */
   claim(v: BillableVisit, at: string): void {
-    if (this.isLocked) {
-      throw new BillingRuleError(`${this.month} is locked (${this.lockedAt}) — it cannot claim ${v.visitId}`)
+    if (this.isSent) {
+      throw new BillingRuleError(
+        `${this.month} was sent ${this.sentAt} — it cannot claim ${v.visitId}; a change now is a Variance [I-B3]`,
+      )
     }
     if (!isBillable(v)) {
       throw new BillingRuleError(`visit ${v.visitId} is ${v.state}, which is not billable`)
@@ -138,9 +148,15 @@ export class BillingMonth {
     })
   }
 
-  /** Give a visit back — only while the month is still open. [I-B3] */
+  /**
+   * Give a visit back. Legal right up until the invoice is sent — including
+   * AFTER the document exists, because a draft is still a draft and the
+   * billing checks routinely send us back to fix a visit. [I-B3]
+   */
   release(visitId: string, at: string, reason: string): void {
-    if (this.isLocked) throw new BillingRuleError(`${this.month} is locked — it cannot release ${visitId}`)
+    if (this.isSent) {
+      throw new BillingRuleError(`${this.month} was sent — it cannot release ${visitId}; a change now is a Variance [I-B3]`)
+    }
     if (!this.claimed.delete(visitId)) return
     this.facts.push({ type: "VisitReleased", monthId: this.id, at, payload: { visitId, reason } })
   }
@@ -160,8 +176,8 @@ export class BillingMonth {
     )
   }
 
-  /** Why this month may not be locked yet — empty means it may. */
-  lockBlockers(delivered: readonly BillableVisit[]): string[] {
+  /** Why this month is not yet complete — empty means every visit is claimed. */
+  completenessBlockers(delivered: readonly BillableVisit[]): string[] {
     const blockers: string[] = []
     const missing = this.unclaimed(delivered)
     if (missing.length > 0) {
@@ -171,16 +187,19 @@ export class BillingMonth {
     return blockers
   }
 
-  /** Freeze it. After this the month is history. [I-B3] */
-  lock(delivered: readonly BillableVisit[], at: string): void {
-    if (this.isLocked) return
-    const blockers = this.lockBlockers(delivered)
+  /**
+   * The customer now has it. THIS is the freeze — not month end, not document
+   * creation. Everything before here is reversible on purpose. [I-B3]
+   */
+  markSent(delivered: readonly BillableVisit[], now: Date, at: string): void {
+    if (this.isSent) return
+    const blockers = [...this.issueBlockers(now), ...this.completenessBlockers(delivered)]
     if (blockers.length > 0) {
-      throw new BillingRuleError(`${this.month} cannot lock: ${blockers.join("; ")}`)
+      throw new BillingRuleError(`${this.month} cannot be sent: ${blockers.join("; ")}`)
     }
-    this.lockedAt = at
+    this.sentAt = at
     this.facts.push({
-      type: "MonthLocked",
+      type: "MonthSent",
       monthId: this.id,
       at,
       payload: { customerId: this.customerId, month: this.month, claims: this.claimed.size },
@@ -216,7 +235,6 @@ export class BillingMonth {
     if (!this.monthIsOver(now)) {
       blockers.push(`${this.month.slice(0, 7)} is not over — billable from ${this.billableFrom}, today is ${now.toISOString().slice(0, 10)}`)
     }
-    if (!this.isLocked) blockers.push("the month is not closed — its ledger can still change [I-B3]")
     if (this.claimed.size === 0) blockers.push("nothing claimed — an empty month is not an invoice")
     return blockers
   }

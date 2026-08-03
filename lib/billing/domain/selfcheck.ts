@@ -71,34 +71,42 @@ check("I-B2 completeness is a QUERY — a month under construction is legal", ()
   assert.strictEqual(m.unclaimed(delivered).length, 0)
 })
 
-check("locking refuses an incomplete month and an empty one [I-B2]", () => {
+check("sending refuses an incomplete month and an empty one [I-B2]", () => {
   const delivered = [visit(), visit({ visitId: "v2", visitDate: "2026-07-22" })]
   const empty = BillingMonth.open("m1", 1016400, "2026-07-01")
-  assert.throws(() => empty.lock([], AT), /nothing claimed/)
+  assert.throws(() => empty.markSent([], new Date("2026-08-02T09:00:00Z"), AT), /nothing claimed/)
 
   const partial = BillingMonth.open("m2", 1016400, "2026-07-01")
   partial.claim(delivered[0], AT)
-  assert.throws(() => partial.lock(delivered, AT), /1 billable visit\(s\) unclaimed/)
+  assert.throws(() => partial.markSent(delivered, new Date("2026-08-02T09:00:00Z"), AT), /1 billable visit\(s\) unclaimed/)
 
   partial.claim(delivered[1], AT)
-  partial.lock(delivered, AT)
-  assert.strictEqual(partial.isLocked, true)
+  partial.markSent(delivered, new Date("2026-08-02T09:00:00Z"), AT)
+  assert.strictEqual(partial.isSent, true)
 })
 
-check("I-B3 billed is locked: a locked month refuses every mutation", () => {
+check("I-B3 the freeze is SEND — everything before it stays editable", () => {
   const d = [visit()]
   const m = BillingMonth.open("m1", 1016400, "2026-07-01")
   m.claim(d[0], AT)
-  m.lock(d, AT)
-  assert.throws(() => m.claim(visit({ visitId: "v9", visitDate: "2026-07-30" }), AT), /is locked/)
-  assert.throws(() => m.release("v1", AT, "oops"), /is locked/)
-  // Locking twice is a no-op, not a second fact — re-runs must converge.
+
+  // The month is over and complete, the document may exist — and the ledger
+  // is STILL editable, because the billing checks send us back to fix visits.
+  assert.deepStrictEqual(m.issueBlockers(new Date("2026-08-02T09:00:00Z")), [], "ready to invoice")
+  m.release("v1", AT, "the check found a bad consumable")
+  m.claim(d[0], AT)
+  assert.strictEqual(m.claims.length, 1, "released and re-claimed after the month closed")
+
+  m.markSent(d, new Date("2026-08-02T09:00:00Z"), AT)
+  assert.throws(() => m.claim(visit({ visitId: "v9", visitDate: "2026-07-30" }), AT), /was sent/)
+  assert.throws(() => m.release("v1", AT, "too late"), /Variance/)
+
   const before = m.pullFacts().length
-  m.lock(d, AT)
-  assert.strictEqual(m.pullFacts().length, 0, `lock is idempotent (first run emitted ${before})`)
+  m.markSent(d, new Date("2026-08-02T09:00:00Z"), AT)
+  assert.strictEqual(m.pullFacts().length, 0, `sending is idempotent (first run emitted ${before})`)
 })
 
-check("release gives a visit back while the month is open", () => {
+check("release gives a visit back until the invoice is sent", () => {
   const m = BillingMonth.open("m1", 1016400, "2026-07-01")
   m.claim(visit(), AT)
   m.release("v1", AT, "wrong customer")
@@ -120,15 +128,13 @@ check("reconstitution restores claims and the lock", () => {
     "2026-08-01T00:00:00Z",
   )
   assert.strictEqual(m.claims.length, 1)
-  assert.strictEqual(m.isLocked, true)
+  assert.strictEqual(m.isSent, true)
   assert.strictEqual(m.pullFacts().length, 0, "reconstitution is not a change")
 })
 
 check("a month cannot be invoiced before it is over", () => {
-  const d = [visit()]
   const m = BillingMonth.open("m1", 1016400, "2026-07-01")
-  m.claim(d[0], AT)
-  m.lock(d, AT)
+  m.claim(visit(), AT)
 
   assert.strictEqual(m.billableFrom, "2026-08-01")
   assert.strictEqual(m.monthIsOver(new Date("2026-07-31T23:00:00Z")), false)
@@ -146,11 +152,6 @@ check("a month cannot be invoiced before it is over", () => {
 check("December rolls the year, and an open or empty month is refused too", () => {
   const dec = BillingMonth.open("m2", 1016400, "2026-12-01")
   assert.strictEqual(dec.billableFrom, "2027-01-01")
-
-  const open = BillingMonth.open("m3", 1016400, "2026-07-01")
-  open.claim(visit(), AT)
-  const why = open.issueBlockers(new Date("2026-08-05T00:00:00Z"))
-  assert.ok(why.some((r) => /not closed/.test(r)), "an unfrozen ledger cannot be billed")
 
   const empty = BillingMonth.open("m4", 1016400, "2026-07-01")
   assert.ok(empty.issueBlockers(new Date("2026-08-05T00:00:00Z")).some((r) => /nothing claimed/.test(r)))

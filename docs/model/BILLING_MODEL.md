@@ -16,8 +16,11 @@ that reaches the customer. Stated as invariants the model must enforce:
 
 - I-B1  **exclusivity** — a visit is claimed by at most one invoice
 - I-B2  **completeness** — every billable visit of a closed month is claimed
-- I-B3  **billed is locked** — a claimed visit's billing-relevant facts are
-        immutable; a locked month refuses all mutation
+- I-B3  **sent is locked** — the freeze is the SEND, not month end and not
+        document creation. The billing checks are where a bad consumable or
+        quantity surfaces, and fixing one means editing visits, so an earlier
+        freeze makes the checks unactionable. After the send, a correction is
+        a Variance. [ruled 2026-08-03]
 
 ## Modules
 
