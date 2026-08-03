@@ -1,75 +1,53 @@
 import { NextResponse } from "next/server"
 import { createSupabaseServer } from "@/lib/supabase/server"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
-import { RoutingService } from "@/lib/application/routing/routing-service"
-import {
-  SupabaseQuotaRepository,
-  type QueryClient,
-} from "@/lib/infrastructure/routing/supabase-quota-repository"
-import {
-  SupabaseScenarioRepository,
-  type ScenarioClient,
-} from "@/lib/infrastructure/routing/supabase-scenario-repository"
-import { IonRoutePublisher } from "@/lib/infrastructure/routing/ion-route-publisher"
-import { SupabasePlacementCache } from "@/lib/infrastructure/routing/supabase-placement-cache"
+import { PublishService } from "@/lib/application/routing/publish-service"
+import { SupabaseTaskStore } from "@/lib/infrastructure/routing/supabase-task-store"
+import { SupabaseScenarioRepository, type ScenarioClient } from "@/lib/infrastructure/routing/supabase-scenario-repository"
 import { SupabaseMaintenanceEventLog } from "@/lib/infrastructure/maintenance/supabase-event-log"
 import { TaskCacheRefresher } from "@/lib/infrastructure/maintenance/task-cache-refresher"
+import { IonTasks } from "@/lib/infrastructure/ion/ion"
+import { IonTaskAcl } from "@/lib/infrastructure/ion/acl"
 import { triggerScriptSync } from "@/lib/windmill"
+import type { QueryClient } from "@/lib/infrastructure/routing/supabase-quota-repository"
 
 /**
- * Publish a scenario to ION.
- *
- * The UI hands over an id and nothing else: the service restores the scenario
- * over today's plan, refuses it if a quota's rules would break, and writes one
- * COMPLETE week per touched task so ION cannot drop the stops that did not
- * change. The next ION sync reflects the result back into the cache, which is
- * what refreshes the map.
- *
- * dry_run is the default. A live write requires { dry_run: false } explicitly,
- * and only marks the scenario committed if every task was accepted.
+ * Publish a scenario to ION (ADR 012 shape). This route only wires ports;
+ * the sentence lives in PublishService, ION quirks in IonTasks, translation
+ * in the ACL. dry_run is the default; a live write is explicit.
  */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const sb = await createSupabaseServer()
-  const {
-    data: { user },
-  } = await sb.auth.getUser()
+  const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { id } = await ctx.params
   const body = (await req.json().catch(() => ({}))) as { dry_run?: boolean }
   const dryRun = body.dry_run !== false
 
-  // System writes use the service-role client. Reconciling our cache with ION
-  // is the system correcting itself, not a user action — it must not inherit
-  // whatever row-level permissions the person clicking happens to hold. Reads
-  // stay on the user's session.
-  const sys = createSupabaseAdmin()
+  const sys = createSupabaseAdmin() // system writes: the system correcting itself
 
-  const service = new RoutingService(new SupabaseQuotaRepository(sb as unknown as QueryClient))
-  const scenarios = new SupabaseScenarioRepository(sb as unknown as ScenarioClient)
-  const publisher = new IonRoutePublisher(sb as unknown as QueryClient, {
-    // ION work runs through chromium when the session is stale, so give it room.
-    run: (path, args) => triggerScriptSync(path, args, { timeoutMs: 180000 }),
+  const ion = new IonTasks({
+    mint: async (forceRefresh) =>
+      triggerScriptSync("f/ION/api/get_session", { force_refresh: forceRefresh }, { timeoutMs: 180000 }),
   })
-  // Our copy is refreshed only for writes ION confirmed, so the map stops
-  // lying before the next ION sync catches up.
-  const cache = new SupabasePlacementCache(sys as unknown as QueryClient)
-  // History: one fact per schedule ION accepts (ADR 010).
-  // Freshness is its own action, asked for once as a precondition.
-  const freshness = new TaskCacheRefresher(sys as unknown as QueryClient, {
-    run: (path, args) => triggerScriptSync(path, args, { timeoutMs: 300000 }),
-  })
-  const events = new SupabaseMaintenanceEventLog(
-    sys as unknown as ConstructorParameters<typeof SupabaseMaintenanceEventLog>[0],
+  const service = new PublishService(
+    new SupabaseScenarioRepository(sb as unknown as ScenarioClient),
+    new SupabaseTaskStore(
+      sb as unknown as QueryClient,
+      sys as unknown as QueryClient,
+      new TaskCacheRefresher(sys as unknown as QueryClient, {
+        run: (path, args) => triggerScriptSync(path, args, { timeoutMs: 300000 }),
+      }),
+    ),
+    ion,
+    new IonTaskAcl(),
+    new SupabaseMaintenanceEventLog(sys as unknown as ConstructorParameters<typeof SupabaseMaintenanceEventLog>[0]),
   )
 
   try {
-    const report = await service.publishScenario(id, scenarios, publisher, { dryRun, cache, events, freshness })
-    return NextResponse.json(report)
+    return NextResponse.json(await service.publish(id, { dryRun }))
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
-      { status: 400 },
-    )
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 400 })
   }
 }
