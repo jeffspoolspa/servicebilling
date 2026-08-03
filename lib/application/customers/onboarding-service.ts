@@ -15,7 +15,7 @@
  * communication), and the address resolver (mints place id + geocode).
  */
 
-import { isBlocked, type CustomerDraft } from "@/lib/domain/customers/customer"
+import type { Customer } from "@/lib/domain/customers/customer"
 import type { QboCustomers } from "@/lib/infrastructure/qbo/qbo"
 import type { RawAddress, ResolveResult } from "@/lib/places/resolve"
 import type { SupabaseCustomerRepository } from "@/lib/infrastructure/customers/supabase-customer-repository"
@@ -33,13 +33,11 @@ export class OnboardingService {
     private readonly resolveAddress: (a: RawAddress) => Promise<ResolveResult>,
   ) {}
 
-  async onboard(draft: CustomerDraft, opts: { dryRun: boolean }): Promise<OnboardOutcome> {
-    // The factory's objections are final — this service never overrides them.
-    if (isBlocked(draft)) {
-      return {
-        outcome: "refused",
-        reasons: draft.violations.filter((v) => v.blocking).map((v) => `${v.rule}: ${v.detail}`),
-      }
+  async onboard(customer: Customer, opts: { dryRun: boolean }): Promise<OnboardOutcome> {
+    // A flagged customer never reaches an external system [I-C1]. The factory
+    // already refuses outbound; this is the belt for a rehydrated one.
+    if (customer.flagged) {
+      return { outcome: "refused", reasons: customer.violations.filter((v) => v.blocking).map((v) => `${v.rule}: ${v.detail}`) }
     }
 
     // The service location is an ENTITY whose identity is the rooftop place
@@ -47,12 +45,12 @@ export class OnboardingService {
     // required, in service area — or null), then dedup on that identity.
     // Same rooftop -> same row -> same account, exactly. The normalized
     // street comparison is only the fallback for unpinnable addresses.
-    const shape = draft.shape
-    const geo = await this.resolveAddress({ street: shape.street, city: shape.city, state: shape.state, zip: shape.zip })
+    const b = customer.billing
+    const geo = await this.resolveAddress({ street: b.street, city: b.city, state: b.state, zip: b.zip })
     const address = geo.resolved ? geo.address : null
 
     const existing = (address ? await this.customers.findByPlaceId(address.place_id) : null)
-      ?? (await this.customers.findByStreet(shape.street))
+      ?? (await this.customers.findByStreet(b.street))
     if (existing) {
       // Reuse — but a reused account with NO QBO id is a half-kept promise
       // (a prior run's deferral). Live re-runs finish the job here, which is
@@ -65,45 +63,45 @@ export class OnboardingService {
           qbo: existing.qboId ? "linked" : "unlinked",
         }
       }
-      const qbo = await this.ensureQbo(existing.accountId, draft, null)
+      const qbo = await this.ensureQbo(existing.accountId, customer, null)
       return { outcome: "already_ours", accountId: existing.accountId, displayName: existing.displayName, qbo: qbo === "deferred" ? "unlinked" : "linked" }
     }
 
     if (opts.dryRun) {
-      return { outcome: "dry_run", wouldCreate: `${draft.displayName} @ ${shape.street}, ${shape.city}${address ? "" : " (address NOT rooftop-resolvable — will create unpinned)"}` }
+      return { outcome: "dry_run", wouldCreate: `${customer.displayName} @ ${b.street}, ${b.city}${address ? "" : " (address NOT rooftop-resolvable — will create unpinned)"}` }
     }
 
-    const { accountId } = await this.customers.create(draft, address)
-    const qbo = await this.ensureQbo(accountId, draft, address)
+    const { accountId } = await this.customers.create(customer, address)
+    const qbo = await this.ensureQbo(accountId, customer, address)
     return { outcome: "created", accountId, qbo }
   }
 
   /** QBO, echo-verified; the stamp writes the fulfilled promise to our row. */
   private async ensureQbo(
     accountId: number,
-    draft: CustomerDraft,
+    customer: Customer,
     address: { street: string; city: string; state: string; zip: string } | null,
   ): Promise<"created" | "already_existed" | "deferred"> {
-    const s = draft.shape
+    const b = customer.billing
     try {
       const r = await this.qbo.createCustomer({
-        displayName: draft.displayName,
-        givenName: s.firstName,
-        familyName: s.lastName,
-        street: address?.street ?? s.street,
-        city: address?.city ?? s.city,
-        state: address?.state ?? s.state,
-        zip: address?.zip ?? s.zip,
-        email: s.email,
-        phone: s.phone,
-        notes: draft.profile.notes.join(" | "),
+        displayName: customer.displayName,
+        givenName: customer.name.first,
+        familyName: customer.name.last,
+        street: address?.street ?? b.street,
+        city: address?.city ?? b.city,
+        state: address?.state ?? b.state,
+        zip: address?.zip ?? b.zip,
+        email: customer.email?.address ?? null,
+        phone: customer.phone?.display ?? null,
+        notes: "",
       })
       await this.customers.stampQboId(accountId, r.qboId)
       return r.how
     } catch (err) {
       // Honest deferral: the account exists, the QBO id does not — a re-run
       // converges (duplicate DisplayName resolves to the existing customer).
-      console.error(`QBO create failed for ${draft.displayName}: ${err instanceof Error ? err.message : err}`)
+      console.error(`QBO create failed for ${customer.displayName}: ${err instanceof Error ? err.message : err}`)
       return "deferred"
     }
   }

@@ -4,120 +4,115 @@
  */
 
 import assert from "node:assert"
-import { anchorOf } from "@/lib/infrastructure/ion/acl"
-import {
-  Customer,
-  customerFit,
-  draftCustomer,
-  ionRefFrom,
-  isBlocked,
-  parseServiceDays,
-  resolveCadence,
-  type RawCustomerRow,
-} from "./customer"
+import { Customer, ionRefFrom, type CustomerInput } from "./customer"
+import { BillingAddress, Email, PersonName, Phone } from "./values"
 
 let n = 0
-const check = (name: string, fn: () => void) => {
+const check = (_name: string, fn: () => void) => {
   fn()
   n++
 }
 
-const row = (over: Partial<RawCustomerRow> = {}): RawCustomerRow => ({
+const input = (over: Partial<CustomerInput> = {}): CustomerInput => ({
   name: "Mark Brooks",
   street: "106 Kent Trail",
   city: "Pooler",
+  state: "GA",
   zip: "31322",
   phone: "(973) 943-8251",
   email: "CYBERJDB@gmail.com",
-  frequencyText: "Bi-Weekly",
-  serviceDaysText: "Monday",
-  weekText: "Week B",
-  ratePerVisit: 65,
-  monthly: 140.83,
-  gateCode: "",
-  poolType: "Salt Small Fiberglass",
-  segment: "Original Route",
-  billingNote: "$65 - Bi-Weekly",
   ...over,
 })
 
-check("a clean row drafts with no violations, normalized", () => {
-  const d = draftCustomer(row())
-  assert.deepStrictEqual(d.violations, [])
-  assert.strictEqual(d.displayName, "BROOKS, MARK")
-  assert.strictEqual(d.shape.email, "cyberjdb@gmail.com")
-  assert.deepStrictEqual(d.profile.cadence, { kind: "resolved", frequency: "biweekly_b", weekdays: [1] })
+/* ------------------------------ value objects ----------------------------- */
+
+check("a phone is PARSED into canonical digits, not merely checked", () => {
+  const p = Phone.parse("(973) 943-8251")
+  assert.ok(p instanceof Phone && p.digits === "9739438251")
+  // The canonical form is what makes cross-system agreement decidable (ADR 006).
+  assert.ok((Phone.parse("9739438251") as Phone).equals(p as Phone))
+  assert.ok((Phone.parse("1-973-943-8251") as Phone).equals(p as Phone))
+  assert.strictEqual((p as Phone).display, "(973) 943-8251")
+  assert.strictEqual(Phone.parse("555-1234"), "invalid")
+  assert.strictEqual(Phone.parse(""), null) // absent is not invalid
+  assert.strictEqual((Phone.parse("(978) 751-1245 / (347) 405-4406") as Phone).digits, "9787511245")
 })
 
-check("multi-word names keep everything before the last space as first name", () => {
-  assert.strictEqual(draftCustomer(row({ name: "Rohit D'Almeida" })).shape.lastName, "D'Almeida")
-  assert.strictEqual(draftCustomer(row({ name: "Anne  Kistler" })).shape.firstName, "Anne")
+check("an email is single, lower-cased, and shaped", () => {
+  assert.strictEqual((Email.parse(" Foo@Bar.COM ") as Email).address, "foo@bar.com")
+  // A crowded cell yields the PRIMARY, not a refusal — households list two.
+  assert.strictEqual((Email.parse("a@b.com / c@d.com") as Email).address, "a@b.com")
+  assert.strictEqual(Email.parse("nope"), "invalid")
+  assert.strictEqual(Email.parse(null), null)
 })
 
-check("the fit rules block what the systems downstream cannot survive", () => {
-  const base = draftCustomer(row()).shape
-  assert.ok(customerFit({ ...base, city: "" }).some((v) => v.blocking && v.rule === "service-city"))
-  assert.ok(customerFit({ ...base, zip: "3132" }).some((v) => v.blocking && v.rule === "service-zip"))
-  assert.ok(customerFit({ ...base, phone: null, email: null }).some((v) => v.blocking && v.rule === "contact"))
-  // missing email alone is advisory, not blocking
-  const emailOnly = customerFit({ ...base, email: null })
-  assert.ok(emailOnly.some((v) => v.rule === "email" && !v.blocking))
-  assert.ok(!emailOnly.some((v) => v.blocking))
+check("a billing address needs street, city and a 5-digit zip", () => {
+  assert.ok(BillingAddress.parse({ street: "1 A St", city: "Pooler", zip: "31322" }) instanceof BillingAddress)
+  assert.strictEqual(BillingAddress.parse({ street: "1 A St", city: "", zip: "31322" }), "invalid")
+  assert.strictEqual(BillingAddress.parse({ street: "1 A St", city: "Pooler", zip: "313" }), "invalid")
 })
 
-check("service day text parses across separators", () => {
-  assert.deepStrictEqual(parseServiceDays("Wednesday, Thursday"), [3, 4])
-  assert.deepStrictEqual(parseServiceDays("Thursday, Friday"), [4, 5])
-  assert.deepStrictEqual(parseServiceDays("Tuesday"), [2])
+check("a person name files as LAST, FIRST and keeps middle names in first", () => {
+  assert.strictEqual((PersonName.parse("Mark Brooks") as PersonName).displayName, "BROOKS, MARK")
+  assert.strictEqual((PersonName.parse("Rohit D'Almeida") as PersonName).last, "D'Almeida")
+  assert.strictEqual((PersonName.parse("Anne  Kistler") as PersonName).first, "Anne")
+  assert.strictEqual(PersonName.parse("Cher"), "invalid")
 })
 
-check("the sheet's Week A really is our biweekly_a (its own reference week)", () => {
-  // "the week beginning Mon Aug 3, 2026 ... = WEEK A" — pin the mapping.
-  assert.strictEqual(anchorOf("2026-08-03", "Bi-Weekly")!.frequency, "biweekly_a")
-  const d = resolveCadence({ frequencyText: "Bi-Weekly", serviceDaysText: "Tuesday", weekText: "Week A", ratePerVisit: 65, monthly: 140.83 })
-  assert.deepStrictEqual(d, { kind: "resolved", frequency: "biweekly_a", weekdays: [2] })
+/* -------------------------------- aggregate ------------------------------- */
+
+check("the factory returns a valid Customer or the blocking reasons — never both", () => {
+  const c = Customer.draft(input())
+  assert.ok(c instanceof Customer)
+  assert.strictEqual(c.displayName, "BROOKS, MARK")
+  assert.strictEqual(c.email?.address, "cyberjdb@gmail.com")
+  assert.deepStrictEqual(c.violations, [])
+  assert.strictEqual(c.onboarding, "drafted")
 })
 
-check("bi-weekly with two listed days is drift, not a schedule (I6)", () => {
-  const c = resolveCadence({ frequencyText: "Bi-Weekly", serviceDaysText: "Wednesday, Thursday", weekText: "Week A", ratePerVisit: 65, monthly: 140.83 })
-  assert.ok(c.kind === "ambiguous" && /I6/.test(c.reason) && c.candidates.length === 2)
+check("a blocking failure refuses; an advisory one rides along", () => {
+  const refused = Customer.draft(input({ city: "" }))
+  assert.ok(!(refused instanceof Customer) && refused.refused.some((v) => v.rule === "billing-address"))
+  // no email is advisory: the customer exists, flagged
+  const advisory = Customer.draft(input({ email: "" }))
+  assert.ok(advisory instanceof Customer && advisory.violations.some((v) => v.rule === "email" && !v.blocking))
+  assert.strictEqual((advisory as Customer).flagged, false)
+  // no contact at all is blocking
+  assert.ok(!(Customer.draft(input({ email: "", phone: "" })) instanceof Customer))
 })
 
-check("weekly with two days: the money decides drift vs genuinely two visits", () => {
-  const drift = resolveCadence({ frequencyText: "Weekly", serviceDaysText: "Wednesday, Thursday", weekText: "Every week", ratePerVisit: 60, monthly: 260 })
-  assert.strictEqual(drift.kind, "ambiguous") // 4.3 visits/month = one real day
-  const twice = resolveCadence({ frequencyText: "Weekly", serviceDaysText: "Wednesday, Thursday", weekText: "Every week", ratePerVisit: 60, monthly: 520 })
-  assert.deepStrictEqual(twice, { kind: "resolved", frequency: "weekly", weekdays: [3, 4] })
+check("a household listing two contacts is flagged, never refused", () => {
+  const c = Customer.draft(input({ phone: "(978) 751-1245 / (347) 405-4406", email: "a@b.com / c@d.com" }))
+  assert.ok(c instanceof Customer)
+  assert.strictEqual(c.phone?.digits, "9787511245")
+  assert.strictEqual(c.flagged, false)
+  assert.ok(c.violations.some((v) => v.rule === "phone" && /several/.test(v.detail)))
+  assert.ok(c.violations.some((v) => v.rule === "email" && /several/.test(v.detail)))
 })
 
-check("the Service Week field is the cadence authority, not the Frequency text", () => {
-  // junk frequency text resolves off the week letter
-  const c = resolveCadence({ frequencyText: "Weekly & Bi-Weekly", serviceDaysText: "Friday", weekText: "Week B", ratePerVisit: 65, monthly: 140 })
-  assert.deepStrictEqual(c, { kind: "resolved", frequency: "biweekly_b", weekdays: [5] })
-  // spa-flavored bi-weekly is still bi-weekly
-  const spa = resolveCadence({ frequencyText: "Bi-Weekly Indoor Spa", serviceDaysText: "Friday", weekText: "Week B", ratePerVisit: 65, monthly: 140 })
-  assert.ok(spa.kind === "resolved" && spa.frequency === "biweekly_b")
-  // "Every week" means weekly whatever the text says
-  const w = resolveCadence({ frequencyText: "Bi-Weekly", serviceDaysText: "Monday", weekText: "Every week", ratePerVisit: 60, monthly: 260 })
-  assert.ok(w.kind === "resolved" && w.frequency === "weekly")
-  // no week field at all is an honest ambiguity
-  assert.strictEqual(resolveCadence({ frequencyText: "Weekly", serviceDaysText: "Monday", weekText: null, ratePerVisit: 60, monthly: 260 }).kind, "ambiguous")
+check("the INBOUND door never refuses — it flags [two doors, one parser]", () => {
+  const born = Customer.rehydrate("c1", input({ city: "" }), { qbo: { state: "linked", id: "6532", method: "qbo", confidence: "high", at: "t" }, ion: { state: "unlinked" } })
+  assert.ok(born instanceof Customer)
+  assert.strictEqual(born.flagged, true) // exists, and known to break our rules
+  assert.ok(born.violations.some((v) => v.rule === "billing-address"))
 })
 
-check("a cadence ambiguity blocks the draft", () => {
-  const d = draftCustomer(row({ serviceDaysText: "Wednesday, Thursday" }))
-  assert.ok(isBlocked(d))
-})
-
-check("onboarding state derives from the refs; task creation waits for ION", () => {
-  const drafted = new Customer("c1", { state: "unlinked" }, { state: "unlinked" })
+check("onboarding is derived from the refs; task creation waits for ION [I-C3]", () => {
+  const drafted = Customer.draft(input()) as Customer
   assert.strictEqual(drafted.onboarding, "drafted")
-  const awaiting = new Customer("c1", { state: "linked", id: "6532", method: "pattern_d", confidence: "high", at: "t" }, { state: "unlinked" })
+  const awaiting = drafted.withIds("c1", { qbo: { state: "linked", id: "6532", method: "pattern_d", confidence: "high", at: "t" } })
   assert.strictEqual(awaiting.onboarding, "awaiting_ion")
   assert.match(awaiting.blocks("create_task")!, /unlinked/)
-  const linked = new Customer("c1", awaiting.qbo, ionRefFrom({ ion_cust_id: "2576995", ion_match_method: "report_exact", ion_match_confidence: "high", ion_matched_at: "t" }))
+  const linked = awaiting.withIds("c1", {
+    ion: ionRefFrom({ ion_cust_id: "2576995", ion_match_method: "api_fuzzy", ion_match_confidence: "high", ion_matched_at: "t" }),
+  })
   assert.strictEqual(linked.onboarding, "linked")
   assert.strictEqual(linked.blocks("create_task"), null)
+})
+
+check("a customer carries no service terms — those belong to the agreement", () => {
+  const c = Customer.draft(input()) as Customer
+  assert.ok(!("cadence" in c) && !("poolType" in c) && !("ratePerVisit" in c))
 })
 
 console.log(`customers domain selfcheck: ${n} checks passed`)

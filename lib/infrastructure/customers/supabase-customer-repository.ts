@@ -6,7 +6,7 @@
  * promise.
  */
 
-import type { CustomerDraft } from "@/lib/domain/customers/customer"
+import type { Customer } from "@/lib/domain/customers/customer"
 import type { ResolvedAddress } from "@/lib/places/resolve"
 
 interface Rpc {
@@ -96,8 +96,8 @@ export class SupabaseCustomerRepository {
     return this.streets.get(norm(street)) ?? null
   }
 
-  async create(draft: CustomerDraft, address: ResolvedAddress | null): Promise<{ accountId: number }> {
-    const s = draft.shape
+  async create(customer: Customer, address: ResolvedAddress | null): Promise<{ accountId: number }> {
+    const s = { firstName: customer.name.first, lastName: customer.name.last, email: customer.email?.address ?? null, phone: customer.phone?.display ?? null, ...customer.billing }
     const { data, error } = await this.client.rpc("create_account", {
       p_first_name: s.firstName,
       p_last_name: s.lastName,
@@ -117,12 +117,12 @@ export class SupabaseCustomerRepository {
       p_service_lat: address?.lat ?? null,
       p_service_lng: address?.lng ?? null,
     })
-    if (error) throw new Error(`create_account failed for ${draft.displayName}: ${error.message}`)
+    if (error) throw new Error(`create_account failed for ${customer.displayName}: ${error.message}`)
     const acct = data as { account_id?: number; id?: number }
     const accountId = acct.account_id ?? acct.id
-    if (!accountId) throw new Error(`create_account returned no id for ${draft.displayName}`)
+    if (!accountId) throw new Error(`create_account returned no id for ${customer.displayName}`)
     // The row must be findable immediately — a re-run reuses, never duplicates.
-    this.streets?.set(norm(s.street), { accountId, displayName: draft.displayName, qboId: null })
+    this.streets?.set(norm(s.street), { accountId, displayName: customer.displayName, qboId: null })
     return { accountId }
   }
 

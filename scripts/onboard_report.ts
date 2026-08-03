@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { SupabaseCustomerRepository } from "@/lib/infrastructure/customers/supabase-customer-repository"
 import { startsOnFor } from "@/lib/infrastructure/ion/acl"
-import { isBlocked, loadOf, resolveAll, DAY, type Exported } from "./_onboard_resolve"
+import { loadOf, resolveAll, DAY, type Exported } from "./_onboard_resolve"
 
 async function main() {
   const [jsonPath, outPath] = process.argv.slice(2)
@@ -22,13 +22,13 @@ async function main() {
   const store = new SupabaseCustomerRepository(createSupabaseAdmin() as unknown as ConstructorParameters<typeof SupabaseCustomerRepository>[0])
   const collisions: { name: string; street: string; hit: { accountId: number; displayName: string | null } }[] = []
   for (const r of rows) {
-    const hit = await store.findByStreet(r.draft.shape.street)
-    if (hit) collisions.push({ name: r.draft.displayName, street: r.draft.shape.street, hit })
+    const hit = await store.findByStreet(r.row["Service Address"] ?? "")
+    if (hit) collisions.push({ name: r.customer?.displayName ?? String(r.row["Customer"]), street: r.row["Service Address"] ?? "", hit })
   }
 
-  const clean = rows.filter((r) => !isBlocked(r.draft))
-  const blocked = rows.filter((r) => isBlocked(r.draft))
-  const advisories = rows.filter((r) => !isBlocked(r.draft) && r.draft.violations.length > 0)
+  const clean = rows.filter((r) => r.customer !== null && r.service.cadence.kind === "resolved")
+  const blocked = rows.filter((r) => r.customer === null || r.service.cadence.kind !== "resolved")
+  const advisories = rows.filter((r) => r.customer !== null && r.customer.violations.length > 0)
 
   const lines: string[] = []
   lines.push(`# Customer onboarding — validation report`)
@@ -49,8 +49,8 @@ async function main() {
     lines.push(`| # | Customer | Sheet says | Why refused |`)
     lines.push(`|---|---|---|---|`)
     for (const b of blocked) {
-      const why = b.draft.violations.filter((v) => v.blocking).map((v) => v.detail).join("; ")
-      lines.push(`| ${b.row["#"]} | ${b.draft.displayName} | ${b.row["Service Day(s)"]} / ${b.row["Frequency"]} / ${b.row["Service Week"] || "-"} | ${why} |`)
+      const why = [...b.refused.map((v) => v.detail), b.service.cadence.kind !== "resolved" ? b.service.cadence.reason : ""].filter(Boolean).join("; ")
+      lines.push(`| ${b.row["#"]} | ${b.customer?.displayName ?? b.row["Customer"]} | ${b.row["Service Day(s)"]} / ${b.row["Frequency"]} / ${b.row["Service Week"] || "-"} | ${why} |`)
     }
     lines.push(``)
   }
@@ -61,11 +61,11 @@ async function main() {
   lines.push(`|---|---|---|---|---|---|---|---|`)
   const today = new Date().toISOString().slice(0, 10)
   for (const c of clean) {
-    const cad = c.draft.profile.cadence
-    const starts = cad.kind === "resolved" ? startsOnFor(cad.frequency, cad.weekdays[0], today) : "?"
-    const cadence = cad.kind === "resolved" ? `${cad.frequency} ${cad.weekdays.map((w) => DAY[w]).join("+")}` : "UNRESOLVED"
-    const extra = [dayPicks.get(String(c.row["#"])), ...c.draft.violations.map((v) => v.rule)].filter(Boolean).join("; ") || "-"
-    lines.push(`| ${c.row["#"]} | ${c.draft.displayName} | ${c.draft.shape.city} | ${cadence} | ${starts} | $${c.draft.profile.ratePerVisit ?? "?"} | $${c.draft.profile.monthly ?? "?"} | ${extra} |`)
+    const cad = c.service.cadence
+    const starts = cad.kind === "resolved" ? startsOnFor(cad.cadence, cad.weekdays[0], today) : "?"
+    const cadence = cad.kind === "resolved" ? `${cad.cadence} ${cad.weekdays.map((w) => DAY[w]).join("+")}` : "UNRESOLVED"
+    const extra = [dayPicks.get(String(c.row["#"])), ...(c.customer?.violations ?? []).map((v) => v.rule)].filter(Boolean).join("; ") || "-"
+    lines.push(`| ${c.row["#"]} | ${c.customer!.displayName} | ${c.customer!.billing.city} | ${cadence} | ${starts} | $${c.service.ratePerVisit ?? "?"} | $${c.service.monthlyEstimate ?? "?"} | ${extra} |`)
   }
   lines.push(``)
 
@@ -75,11 +75,11 @@ async function main() {
   lines.push(`|---|---|---|`)
   const dayCount = new Map<number, { n: number; load: number }>()
   for (const r of rows) {
-    const c = r.draft.profile.cadence
+    const c = r.service.cadence
     if (c.kind !== "resolved") continue
     for (const wd of c.weekdays) {
       const cur = dayCount.get(wd) ?? { n: 0, load: 0 }
-      dayCount.set(wd, { n: cur.n + 1, load: cur.load + loadOf(c.frequency) })
+      dayCount.set(wd, { n: cur.n + 1, load: cur.load + loadOf(c.cadence) })
     }
   }
   for (const wd of [1, 2, 3, 4, 5, 6, 0]) {

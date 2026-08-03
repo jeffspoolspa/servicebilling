@@ -38,26 +38,31 @@ async function main() {
   const plan: Record<string, unknown>[] = []
   const tally = { created: 0, deferred: 0, already: 0, refused: 0, dry: 0 }
   for (const r of rows) {
-    const out = await service.onboard(r.draft, { dryRun: !live })
-    const c = r.draft.profile.cadence
+    if (!r.customer) {
+      plan.push({ num: r.row["#"], displayName: r.row["Customer"], outcome: "refused", accountId: null, qbo: null, reasons: r.refused.map((v) => `${v.rule}: ${v.detail}`) })
+      tally.refused++
+      console.log(`${String(r.row["#"]).padStart(3)} ${String(r.row["Customer"]).padEnd(24)} refused`)
+      continue
+    }
+    const out = await service.onboard(r.customer, { dryRun: !live })
+    const c = r.service.cadence
     plan.push({
       num: r.row["#"],
-      displayName: r.draft.displayName,
+      displayName: r.customer.displayName,
       outcome: out.outcome,
       accountId: "accountId" in out ? out.accountId : null,
       qbo: "qbo" in out ? out.qbo : null,
       reasons: "reasons" in out ? out.reasons : undefined,
-      profile:
+      agreement:
         c.kind === "resolved"
-          ? { frequency: c.frequency, weekday: c.weekdays[0], day: DAY[c.weekdays[0]], ratePerVisit: r.draft.profile.ratePerVisit, monthly: r.draft.profile.monthly }
+          ? { cadence: c.cadence, weekday: c.weekdays[0], day: DAY[c.weekdays[0]], ratePerVisit: r.service.ratePerVisit, monthly: r.service.monthlyEstimate, poolType: r.service.poolType, gateCode: r.service.gateCode }
           : null,
-      notes: r.draft.profile.notes,
     })
     if (out.outcome === "created") tally[out.qbo === "created" ? "created" : "deferred"]++
     else if (out.outcome === "already_ours") tally.already++
     else if (out.outcome === "refused") tally.refused++
     else tally.dry++
-    console.log(`${String(r.row["#"]).padStart(3)} ${r.draft.displayName.padEnd(24)} ${out.outcome}${"qbo" in out ? ` qbo=${out.qbo}` : ""}${"accountId" in out ? ` account=${out.accountId}` : ""}`)
+    console.log(`${String(r.row["#"]).padStart(3)} ${r.customer.displayName.padEnd(24)} ${out.outcome}${"qbo" in out ? ` qbo=${out.qbo}` : ""}${"accountId" in out ? ` account=${out.accountId}` : ""}`)
   }
 
   // The task step consumes this after the ION sync links everyone.

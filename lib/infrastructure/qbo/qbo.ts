@@ -107,7 +107,7 @@ export class QboCustomers extends Qbo {
       BillAddr: { ...addr },
     }
     if (f.email) body.PrimaryEmailAddr = { Address: f.email }
-    if (f.phone) body.PrimaryPhone = { FreeFormNumber: f.phone.slice(0, 21) }
+    if (f.phone) body.PrimaryPhone = { FreeFormNumber: f.phone }  // already canonical (Phone VO)
 
     try {
       const res = await this.request<{ Customer: QboCustomer }>("POST", "/customer", body)
