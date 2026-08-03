@@ -59,16 +59,23 @@ export class IonTaskAcl {
     const changes: Record<string, string> = {}
 
     if (isWeekly) {
+      // The plan was drawn on our cache. If ION's day picker disagrees with the
+      // cache on ANY day, the plan is stale — refuse; a fresh refresh makes this
+      // a true race, not routine.
+      const drift: string[] = []
+      for (let d = 0; d < 7; d++) {
+        const believed = id.believedDays[String(d)] ?? null
+        const actual = form.days[String(d)] ?? null
+        if (believed !== actual) drift.push(`dow${d} ION=${actual ?? "none"} cache=${believed ?? "none"}`)
+      }
+      if (drift.length > 0) {
+        return { refusal: { quotaId: schedule.quotaId, reason: `cache disagrees with ION: ${drift.join("; ")}` } }
+      }
       // Complete week: every day stated, blank where not served — a day left
       // out is a day ION keeps, which for a move means a double visit.
       for (const f of DAY_FIELD) changes[f] = ""
       for (const n of named) changes[DAY_FIELD[n.weekday]] = n.ionTech
-      // Preserve = days we carry over unchanged; only those must match ION.
-      const preserve: Record<string, string> = {}
-      for (const [d, tech] of Object.entries(id.believedDays)) {
-        if (changes[DAY_FIELD[Number(d)]] === tech) preserve[d] = tech
-      }
-      return { write: { key: schedule.quotaId, ionTaskId: id.ionTaskId, ionCustId: id.ionCustId, changes, preserve } }
+      return { write: { key: schedule.quotaId, ionTaskId: id.ionTaskId, ionCustId: id.ionCustId, changes, form } }
     }
 
     // Non-weekly: no day picker. Tech-only is AssignedTo; a DAY move needs an
@@ -87,7 +94,7 @@ export class IonTaskAcl {
       }
     }
     changes["AssignedTo"] = named[0].ionTech
-    return { write: { key: schedule.quotaId, ionTaskId: id.ionTaskId, ionCustId: id.ionCustId, changes, preserve: {} } }
+    return { write: { key: schedule.quotaId, ionTaskId: id.ionTaskId, ionCustId: id.ionCustId, changes, form } }
   }
 
   /** ION's verified answers -> our vocabulary. */

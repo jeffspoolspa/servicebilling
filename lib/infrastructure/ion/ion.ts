@@ -12,8 +12,9 @@
  *    never an empty schedule (acting on one nearly wiped 30 schedules)
  *  - a write is proven by READ-BACK, never by its status code (ION returns
  *    200 and silently drops what it dislikes)
- *  - the `preserve` check compares only days a write carries over unchanged —
- *    a day being set is being replaced, whoever sits on it is irrelevant
+ *  - one form read per task: the read the ACL translates from also serves the
+ *    drift preflight (in the ACL) and the merge here — never re-read a form
+ *    we already hold from seconds ago
  */
 
 import { parse } from "node-html-parser"
@@ -120,8 +121,9 @@ export interface WeekWrite {
   ionCustId: string
   /** Form fields to change (day1..day7 for weekly, AssignedTo for non-weekly). */
   changes: Record<string, string>
-  /** weekday -> ION employee id for days carried over unchanged. */
-  preserve: Record<string, string>
+  /** The form this write was translated FROM. One read serves the ACL's cadence
+   *  decision, the drift preflight, and the merge — never re-read what we hold. */
+  form: IonTaskForm
 }
 
 export interface VerifiedWrite {
@@ -142,51 +144,40 @@ export class IonTasks extends Ion {
   }
 
   /**
-   * Apply complete-week writes, one session for the batch. Each write:
-   * read the form (serves preserve-check AND merge), refuse on preserved-day
-   * drift, POST, then READ BACK and compare — the status code proves nothing.
+   * Apply complete-week writes, one session for the batch. The form each write
+   * carries was already read for translation (and drift was refused there) —
+   * this method spends its HTTP on the two things only it can do: the POST,
+   * and the READ-BACK that proves it. The status code proves nothing.
    */
   async applyWeeks(writes: WeekWrite[], opts: { dryRun: boolean }): Promise<VerifiedWrite[]> {
     const out: VerifiedWrite[] = []
     for (const w of writes) {
       try {
-        const form = await this.readTask(w.ionTaskId, w.ionCustId)
-
-        const drift = Object.entries(w.preserve).filter(([d, tech]) => (form.days[d] ?? null) !== tech)
-        if (drift.length > 0) {
-          out.push({
-            key: w.key,
-            accepted: false,
-            detail: `a day carried over unchanged is not what ION holds: ${drift
-              .map(([d, t]) => `dow${d} ION=${form.days[d] ?? "none"} ours=${t}`)
-              .join("; ")}`,
-          })
-          continue
-        }
-
         if (opts.dryRun) {
-          const changed = Object.keys(w.changes).filter((k) => form.fields[k] !== w.changes[k])
-          out.push({ key: w.key, accepted: true, detail: `dry run: ${changed.length} field(s) would change`, daysAfter: form.days })
+          const changed = Object.keys(w.changes).filter((k) => w.form.fields[k] !== w.changes[k])
+          out.push({ key: w.key, accepted: true, detail: `dry run: ${changed.length} field(s) would change`, daysAfter: w.form.days })
           continue
         }
 
-        const payload = { ...form.fields, ...w.changes }
+        const payload = { ...w.form.fields, ...w.changes }
         if (!payload["LinkUsed"]) payload["LinkUsed"] = "Save"
         if (!payload["Submit"]) payload["Submit"] = "Submit"
         await this.post(`/tasks/addTask.cfm?EventID=${w.ionTaskId}&isIFrame=1`, payload)
 
-        // Read-back proof: the day fields we set must now be what ION reports.
-        const after = await this.readTask(w.ionTaskId)
-        const wrongDay = DAY_SELECTS.map((f, dow) => ({ f, dow })).find(
-          ({ f, dow }) => f in w.changes && (after.days[String(dow)] ?? "") !== w.changes[f],
-        )
+        // Read-back proof: every field we set must now be what ION reports.
+        const after = this.parseForm(await this.get(`/tasks/addTask.cfm?EventID=${w.ionTaskId}&isIFrame=1`))
+        if (!after.rendered) {
+          out.push({ key: w.key, accepted: false, detail: "read-back form did not render — write unproven, treat as failed" })
+          continue
+        }
+        const wrong = Object.keys(w.changes).find((k) => (after.fields[k] ?? "") !== w.changes[k])
         out.push(
-          wrongDay
+          wrong
             ? {
                 key: w.key,
                 accepted: false,
                 daysAfter: after.days,
-                detail: `write did not land: ${wrongDay.f} wanted "${w.changes[wrongDay.f]}", ION holds "${after.days[String(wrongDay.dow)] ?? ""}"`,
+                detail: `write did not land: ${wrong} wanted "${w.changes[wrong]}", ION holds "${after.fields[wrong] ?? ""}"`,
               }
             : { key: w.key, accepted: true, daysAfter: after.days, detail: "written and read-back verified" },
         )

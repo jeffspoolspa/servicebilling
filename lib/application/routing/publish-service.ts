@@ -103,14 +103,9 @@ export class PublishService {
       }
     }
 
-    // ION object: rehearse, then commit only if the whole rehearsal passes
-    if (!opts.dryRun) {
-      const rehearsal = this.acl.fromIonResults(await this.ion.applyWeeks(writes, { dryRun: true }))
-      const refused = rehearsal.filter((r) => !r.accepted)
-      if (refused.length > 0) {
-        return { scenarioId, dryRun: false, committed: false, results: rehearsal, invalidated: restored.invalidated, refreshed }
-      }
-    }
+    // ION object: POST + read-back proof. Preflight already happened above —
+    // the form read the ACL translated from IS the rehearsal (fresh cache,
+    // fresh form, drift refused) — so no redundant re-read pass here.
     const results = this.acl.fromIonResults(await this.ion.applyWeeks(writes, { dryRun: opts.dryRun }))
 
     // the ones that landed: cache, then events
