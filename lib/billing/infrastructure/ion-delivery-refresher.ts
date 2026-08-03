@@ -1,9 +1,10 @@
 /**
  * DeliveryRefresher over the Ion object.
  *
- * A month's dispute buys exactly one of these, so it re-reads the whole
- * month's logs — the cheapest thing that is certainly sufficient, since a
- * difference can come from any day in it.
+ * Re-reads one day at a time. A month-wide pull is ~31 sequential ION
+ * scrapes, which exceeds the synchronous job gateway's patience (a real 504,
+ * seen 2026-08-03) — and it is unnecessary, because a dispute names tasks and
+ * we already know which days they were served on.
  */
 
 import type { DeliveryRefresher } from "@/lib/billing/domain"
@@ -12,11 +13,12 @@ import type { IonVisits } from "@/lib/external/ion/ion"
 export class IonDeliveryRefresher implements DeliveryRefresher {
   constructor(private readonly visits: IonVisits) {}
 
-  async refreshMonth(month: string): Promise<{ visitsTouched: number }> {
-    const [y, m] = month.split("-").map(Number)
-    const lastDay = new Date(Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 0)).getUTCDate()
-    const pad = (n: number) => String(n).padStart(2, "0")
-    const pull = await this.visits.refreshDays(`${y}-${pad(m)}-01`, `${y}-${pad(m)}-${pad(lastDay)}`)
-    return { visitsTouched: pull.visitsTouched }
+  async refreshDays(dates: readonly string[]): Promise<{ visitsTouched: number }> {
+    let touched = 0
+    for (const day of [...new Set(dates)].sort()) {
+      const pull = await this.visits.refreshDays(day, day)
+      touched += Math.max(0, pull.visitsTouched)
+    }
+    return { visitsTouched: touched }
   }
 }

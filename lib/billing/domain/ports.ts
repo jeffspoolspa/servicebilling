@@ -35,7 +35,13 @@ export interface DeliveryFacts {
  * anything is called an issue.
  */
 export interface DeliveryRefresher {
-  refreshMonth(month: string): Promise<{ visitsTouched: number }>
+  /**
+   * Re-read specific SERVICE DAYS. A dispute is about particular tasks, and
+   * we already know which days they were served on — re-reading a whole
+   * month to find a difference on four days is both slow enough to time out
+   * and more disruption than the question warrants.
+   */
+  refreshDays(dates: readonly string[]): Promise<{ visitsTouched: number }>
 }
 
 /**

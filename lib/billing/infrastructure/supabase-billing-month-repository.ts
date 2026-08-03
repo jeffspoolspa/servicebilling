@@ -13,8 +13,10 @@
 import { BillingMonth, type BillableItem, type BillingMonthRepository, type Variance } from "@/lib/billing/domain"
 
 interface Db {
-  schema(s: string): { from(t: string): Record<string, (...a: never[]) => unknown> }
-  rpc(fn: string, args: Record<string, unknown>): PromiseLike<{ error: unknown }>
+  schema(s: string): {
+    from(t: string): Record<string, (...a: never[]) => unknown>
+    rpc(fn: string, args: Record<string, unknown>): PromiseLike<{ error: unknown }>
+  }
 }
 
 type Q = {
@@ -218,7 +220,10 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   }
 
   private async appendFact(fact: { type: string; monthId: string; at: string; payload: Record<string, unknown> }): Promise<void> {
-    const { error } = await this.client.rpc("append_event", {
+    // append_event lives in the MAINTENANCE schema, not public — a bare
+    // .rpc() searches public and fails with PGRST202, silently losing the
+    // history (the same trip-up that dropped 78 routing facts on 2026-08-02).
+    const { error } = await this.client.schema("maintenance").rpc("append_event", {
       p_aggregate: "billing_month",
       p_aggregate_id: fact.monthId,
       p_type: fact.type,

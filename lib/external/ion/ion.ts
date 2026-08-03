@@ -467,12 +467,31 @@ export class IonVisits extends Ion {
     super(minter)
   }
 
-  /** Re-read the logs for a date range and upsert them, keyed on LogID. */
+  /**
+   * Re-read the logs for an INCLUSIVE ISO date range and upsert them, keyed
+   * on LogID.
+   *
+   * Callers speak ISO; the ingest wants MM/DD/YYYY and parses it by splitting
+   * on "/", so an ISO date silently becomes an invalid one, yields zero days
+   * and reports success having done nothing. Translating here is the whole
+   * point of the object — nothing above it should ever meet ION's date
+   * format, and a quiet zero is worse than an error.
+   */
   async refreshDays(from: string, to: string): Promise<DayLogPull> {
-    const res = await this.jobs.run<{ visits?: number; upserted?: number }>(
+    const usDate = (iso: string) => {
+      const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+      if (!m) throw new Error(`refreshDays wants an ISO date, got "${iso}"`)
+      return `${m[2]}/${m[3]}/${m[1]}`
+    }
+    const res = await this.jobs.run<Record<string, unknown>>(
       "f/ION/ingest_day_logs",
-      { start_date: from, end_date: to, dry_run: false },
+      { start_date: usDate(from), end_date: usDate(to), dry_run: false },
     )
-    return { from, to, visitsTouched: res.upserted ?? res.visits ?? 0 }
+    const days = Number((res.window as { days?: number } | undefined)?.days ?? 0)
+    if (days === 0) throw new Error(`ION ingest covered 0 days for ${from}..${to} — the pull did nothing`)
+    // The ingest reports per-day; take whichever total it offers rather than
+    // guessing one key and reporting a confident zero.
+    const n = Number(res.logs_built ?? res.upserted ?? res.visits ?? NaN)
+    return { from, to, visitsTouched: Number.isFinite(n) ? n : -1 }
   }
 }

@@ -154,3 +154,32 @@ export async function getJobResultMaybe<T = unknown>(
   const body = (await resp.json()) as { completed: boolean; result?: T }
   return body
 }
+
+/**
+ * Run a script and WAIT BY POLLING, not by holding an HTTP request open.
+ *
+ * `run_wait_result` dies at the gateway's timeout, which is shorter than any
+ * browser-driven ION job — a single day's log scrape 504s reliably. This
+ * fires the job, then polls, so the wait is bounded by the job rather than by
+ * a proxy nobody controls.
+ */
+export async function runScriptAndWait<T = unknown>(
+  scriptPath: string,
+  args: Record<string, unknown> = {},
+  opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<T> {
+  const timeoutMs = opts.timeoutMs ?? 900_000
+  const pollMs = opts.pollMs ?? 4_000
+  const { jobId } = await triggerScript(scriptPath, args)
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, pollMs))
+    const { completed, result } = await getJobResultMaybe<T>(jobId)
+    if (completed) {
+      const err = (result as { error?: { message?: string } } | undefined)?.error
+      if (err) throw new Error(`${scriptPath} failed: ${err.message ?? JSON.stringify(err).slice(0, 200)}`)
+      return result as T
+    }
+  }
+  throw new Error(`${scriptPath} did not finish within ${Math.round(timeoutMs / 1000)}s (job ${jobId})`)
+}

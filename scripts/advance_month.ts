@@ -15,7 +15,7 @@ import { SupabaseBillingFacts } from "@/lib/billing/infrastructure/supabase-bill
 import { IonReportInvoiceFacts } from "@/lib/billing/infrastructure/ion-report-invoice-facts"
 import { IonReports, IonVisits } from "@/lib/external/ion/ion"
 import { IonDeliveryRefresher } from "@/lib/billing/infrastructure/ion-delivery-refresher"
-import { triggerScriptSync } from "@/lib/windmill"
+import { runScriptAndWait, triggerScriptSync } from "@/lib/windmill"
 
 async function main() {
   const month = process.argv[2] ?? "2026-07-01"
@@ -28,7 +28,8 @@ async function main() {
   const facts = new SupabaseBillingFacts(sb as unknown as ConstructorParameters<typeof SupabaseBillingFacts>[0])
   const repo = new SupabaseBillingMonthRepository(sb as unknown as ConstructorParameters<typeof SupabaseBillingMonthRepository>[0])
   const mint = { mint: (force: boolean) => triggerScriptSync<{ ionOrigin: string; cookieHeader: string }>("f/ION/api/get_session", { force_refresh: force }, { timeoutMs: 180000 }) }
-  const jobs = { run: <T,>(path: string, args: Record<string, unknown>) => triggerScriptSync<T>(path, args, { timeoutMs: 900000 }) }
+  // Browser-driven ION jobs outlive any synchronous HTTP call — poll instead.
+  const jobs = { run: <T,>(path: string, args: Record<string, unknown>) => runScriptAndWait<T>(path, args, { timeoutMs: 900000 }) }
   const service = new AdvanceMonthService(
     repo, facts, facts, facts,
     new IonReportInvoiceFacts(

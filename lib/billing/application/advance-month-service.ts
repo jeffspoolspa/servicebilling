@@ -106,9 +106,12 @@ export class AdvanceMonthService {
         if (opts.dryRun) {
           return { monthId, from, step, to: from, detail: `dry run: would re-read ${month.month.slice(0, 7)} from ION`, again: false }
         }
-        const pulled = await this.deliveryRefresher.refreshMonth(month.month)
+        // Only the days this customer was actually served — we hold the
+        // sources already, so the refresh is as small as the question.
+        const days = [...new Set(sources.map((s2) => s2.serviceDate))].sort()
+        const pulled = await this.deliveryRefresher.refreshDays(days)
         month.markDeliveryRefreshed(at)
-        detail = `re-read ${pulled.visitsTouched} visit(s) from ION; will re-accrue and reconcile`
+        detail = `re-read ${days.length} day(s), ${pulled.visitsTouched} log(s) from ION; will re-accrue and reconcile`
         break
       }
 
