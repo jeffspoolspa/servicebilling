@@ -6,6 +6,7 @@ import { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/sup
 import { SupabaseBillingFacts } from "@/lib/billing/infrastructure/supabase-billing-facts"
 import { IonReportInvoiceFacts } from "@/lib/billing/infrastructure/ion-report-invoice-facts"
 import { IonDeliveryRefresher } from "@/lib/billing/infrastructure/ion-delivery-refresher"
+import { SupabaseMonthGateFacts } from "@/lib/billing/infrastructure/supabase-month-gate-facts"
 import { SupabaseBillingQueue } from "@/lib/billing/infrastructure/supabase-billing-queue"
 import { IonReports, IonVisits } from "@/lib/external/ion/ion"
 import { runScriptAndWait, triggerScriptSync } from "@/lib/windmill"
@@ -37,6 +38,7 @@ export async function POST(req: Request) {
     facts, facts, facts,
     new IonReportInvoiceFacts(sys as never, new IonReports(mint, jobs)),
     new IonDeliveryRefresher(sys as never, new IonVisits(mint, jobs)),
+    new SupabaseMonthGateFacts(sys as never),
   )
   const queue = new SupabaseBillingQueue(sys as never)
 

@@ -9,7 +9,7 @@ import { chemicalsBillable, isBillable, type BillableItem, type BillableSource }
 import { BillingMonth, BillingRuleError } from "./billing-month"
 import { priceMonth, type PricingTerms } from "./pricer"
 import { reconcile, RECONCILE_TOLERANCE_CENTS } from "./reconciler"
-import { gate, type GateFacts } from "./gate"
+import { gate, type MonthGateFacts } from "./gate"
 
 let n = 0
 const check = (_name: string, fn: () => void) => {
@@ -447,47 +447,51 @@ check("the three shapes of disagreement are named, not merged", () => {
 
 /* ---------------------------------- the gate ------------------------------ */
 
-const facts = (over: Partial<GateFacts> = {}): GateFacts => ({
-  invoiceVoided: false,
-  onHold: false,
-  enriched: true,
-  memo: "July pool maintenance",
-  qboClass: "Maintenance",
-  paymentRoute: "credit_card",
-  systemSubtotalCents: 6500,
-  undecidedCredits: [],
-  reconciled: true,
+const facts = (over: Partial<MonthGateFacts> = {}): MonthGateFacts => ({
+  qboCustomerId: "6532",
+  paymentRoute: "autopay",
+  activeHold: null,
+  openCredits: [],
+  blockingFindings: [],
   ...over,
 })
 
-check("the gate names every criterion, and says WHY it failed", () => {
+/** A month in the state the gate is asked in: claimed and reconciled. */
+const gateable = () => {
   const m = BillingMonth.open("m1", 1016400, "2026-07-01")
   m.claim(item(), { claimedByMonthId: null }, AT)
+  m.markReconciled(AT)
+  return m
+}
 
-  const ok = gate(m, facts())
+check("the gate names every criterion, and says WHY it failed", () => {
+  const ok = gate(gateable(), facts())
   assert.strictEqual(ok.cleared, true)
-  assert.strictEqual(ok.criteria.length, 10, "all ten are reported, not just failures")
+  assert.strictEqual(ok.criteria.length, 7, "all seven are reported, not just failures")
 
-  const held = gate(m, facts({ memo: null, paymentRoute: null }))
-  assert.deepStrictEqual(held.heldFor, ["memo_present", "route_resolved"])
-  assert.match(held.criteria.find((c) => c.name === "route_resolved")!.detail!, /we do not know how this customer pays/)
+  const held = gate(gateable(), facts({ qboCustomerId: null, paymentRoute: null }))
+  assert.deepStrictEqual(held.heldFor, ["billing_identity", "route_resolved"])
+  assert.match(held.criteria.find((c) => c.name === "route_resolved")!.detail!, /a bill could not reach them/)
+  assert.match(held.criteria.find((c) => c.name === "billing_identity")!.detail!, /nobody to address an invoice to/)
 })
 
 check("the buried SQL rules become sentences a person can read", () => {
-  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
-  m.claim(item(), { claimedByMonthId: null }, AT)
-
-  const credits = gate(m, facts({ undecidedCredits: [{ creditId: "P-9", unappliedCents: 12000 }] }))
+  const credits = gate(gateable(), facts({ openCredits: [{ paymentId: "P-9", unappliedCents: 12000 }] }))
   assert.deepStrictEqual(credits.heldFor, ["credits_settled"])
   assert.match(credits.criteria.find((c) => c.name === "credits_settled")!.detail!, /how a customer pays twice/)
 
-  // Our total INCLUDES variances, so the document must match the real bill.
-  const drift = gate(m, facts({ systemSubtotalCents: 9900 }))
-  assert.deepStrictEqual(drift.heldFor, ["subtotal_matches"])
-  assert.match(drift.criteria.find((c) => c.name === "subtotal_matches")!.detail!, /we bill 65.00 and the document says 99.00/)
+  const held = gate(gateable(), facts({ activeHold: "customer asked us to pause while insurance settles" }))
+  assert.deepStrictEqual(held.heldFor, ["not_on_hold"])
+  assert.match(held.criteria.find((c) => c.name === "not_on_hold")!.detail!, /insurance settles/)
 
-  // An unreconciled month never reaches a customer.
-  assert.deepStrictEqual(gate(m, facts({ reconciled: false })).heldFor, ["reconciled"])
+  const flagged = gate(gateable(), facts({ blockingFindings: [{ rule: "cpv_overcharge", message: "chems 4x peer baseline" }] }))
+  assert.deepStrictEqual(flagged.heldFor, ["findings_resolved"])
+
+  // An unreconciled month never reaches a customer — the gate defers to the
+  // reconciler by reading the month itself, not a passed-in flag.
+  const un = BillingMonth.open("m2", 1016400, "2026-07-01")
+  un.claim(item(), { claimedByMonthId: null }, AT)
+  assert.ok(gate(un, facts()).heldFor.includes("reconciled"))
 })
 
 check("a dispute buys ONE trip back to ION, then it is a person's problem", () => {

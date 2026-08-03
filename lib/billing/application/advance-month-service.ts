@@ -14,6 +14,7 @@
  */
 
 import {
+  gate,
   priceMonth,
   reconcile,
   type AgreementTermsSource,
@@ -24,6 +25,7 @@ import {
   type IonInvoiceFacts,
   type NextStep,
 } from "@/lib/billing/domain"
+import type { SupabaseMonthGateFacts } from "@/lib/billing/infrastructure/supabase-month-gate-facts"
 
 export interface AdvanceOutcome {
   monthId: string
@@ -44,6 +46,7 @@ export class AdvanceMonthService {
     private readonly systemInvoices: IonInvoiceFacts,
     /** The healing half — absent, a dispute can only ever be reported. */
     private readonly deliveryRefresher?: DeliveryRefresher,
+    private readonly gateFacts?: SupabaseMonthGateFacts,
   ) {}
 
   async advance(monthId: string, opts: { now?: Date; dryRun?: boolean } = {}): Promise<AdvanceOutcome> {
@@ -129,13 +132,24 @@ export class AdvanceMonthService {
         break
       }
 
-      case "gate":
+      case "gate": {
+        if (!this.gateFacts) {
+          return { monthId, from, step, to: from, detail: "gate context not wired for this caller", again: false }
+        }
+        const ctx = await this.gateFacts.forCustomers([month.customerId], new Map([[month.customerId, month.id]]), now)
+        const g = gate(month, ctx.get(month.customerId)!)
+        month.markGated(g.heldFor, at)
+        detail = g.cleared
+          ? "cleared the gate"
+          : `held: ${g.heldFor.join(", ")} — ${g.criteria.find((c) => !c.passed)?.detail ?? ""}`
+        break
+      }
+
       case "issue":
       case "send":
-        // Not yet wired: the gate needs its facts gathered, and issuing needs
-        // the invoice builder. Deliberately NOT stubbed as a no-op — a
-        // pipeline that silently "advances" past the money steps is worse
-        // than one that stops and says so.
+        // Issuing needs the invoice builder (Phase 4). Deliberately NOT a
+        // silent no-op — a pipeline that appears to advance past the money
+        // steps is worse than one that stops and says so.
         return {
           monthId, from, step, to: from,
           detail: `${step} is not wired yet — Phase 4`,

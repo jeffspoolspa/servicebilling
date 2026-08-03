@@ -11,10 +11,11 @@
  * throughput, not a replacement.
  */
 
-import { priceMonth, reconcile, type BillingMonth } from "@/lib/billing/domain"
+import { gate, priceMonth, reconcile } from "@/lib/billing/domain"
 import type { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
 import type { SupabaseBillingFacts } from "@/lib/billing/infrastructure/supabase-billing-facts"
 import type { IonReportInvoiceFacts } from "@/lib/billing/infrastructure/ion-report-invoice-facts"
+import type { SupabaseMonthGateFacts } from "@/lib/billing/infrastructure/supabase-month-gate-facts"
 
 export interface QueueWriter {
   /** Insert coalesced commands; returns how many were NEW rows. */
@@ -39,6 +40,7 @@ export class BillingRunService {
     private readonly queue: QueueWriter,
     private readonly facts?: SupabaseBillingFacts,
     private readonly systemInvoices?: IonReportInvoiceFacts,
+    private readonly gateFacts?: SupabaseMonthGateFacts,
   ) {}
 
   /** Open (or find) every customer-month with delivery, and enqueue them all. */
@@ -75,6 +77,14 @@ export class BillingRunService {
       this.facts.prices(),
       this.systemInvoices.perTaskTotalsForMonth(month),
     ])
+    // The gate's context: one MonthGateFacts per customer, bulk-loaded.
+    const gateContext = this.gateFacts
+      ? await this.gateFacts.forCustomers(
+          monthsAll.map((m) => m.customerId),
+          new Map(monthsAll.map((m) => [m.customerId, m.id])),
+          now,
+        )
+      : null
 
     const tally: Record<string, number> = {}
     const bump = (k: string) => (tally[k] = (tally[k] ?? 0) + 1)
@@ -110,8 +120,15 @@ export class BillingRunService {
           else m.markDisputed(r.findings.map((f) => `${f.rule}: ${f.message}`), at)
           continue
         }
-        // refresh_delivery (external, per-unit) and gate/issue/send (Phase 4)
-        // both leave the bulk path here.
+        if (step === "gate" && gateContext) {
+          const facts = gateContext.get(m.customerId)
+          if (!facts) break
+          const g = gate(m, facts)
+          m.markGated(g.heldFor, at)
+          continue
+        }
+        // refresh_delivery (external, per-unit) and issue/send (Phase 4)
+        // leave the bulk path here.
         break
       }
       bump(m.status)

@@ -1,16 +1,17 @@
 /**
- * The billing gate — a SPECIFICATION, not a boolean.
+ * The billing gate — a SPECIFICATION over a MONTH, asked before any invoice
+ * exists: what must be true before we ask this customer for money.
  *
- * This replaces `billing.invoice_gate_checks()`, which returned nine named
- * booleans from a SQL function. Two things move by bringing it here: the
- * rules become findable and testable, and the buried ones become sentences —
- * the six-month credit window and the memo pattern currently live four levels
- * deep in a `not exists`, where nobody can see them.
+ * Evans' point about specifications is the operational one: it says WHY it
+ * failed, not merely that it did. Every criterion is named and a failure
+ * carries a sentence, which is what lets a held month be WORKED rather than
+ * wondered about — and what makes shadow comparison name the diverging rule.
  *
- * Evans' point about specifications is the one that matters operationally:
- * a specification should be able to say WHY it failed, not merely that it
- * did. So this returns the named criteria, which is what lets a shadow run
- * report which rule diverged rather than "different".
+ * Scope note: these are the PRE-INVOICE checks. The old SQL gate
+ * (invoice_gate_checks) mixed these with DOCUMENT checks — memo present,
+ * class present, subtotal matches, not voided — which can only be asked once
+ * a document exists. Those return at issue/send in the invoice step; putting
+ * them here would hold every month on facts that cannot exist yet.
  */
 
 import type { BillingMonth } from "./billing-month"
@@ -30,71 +31,67 @@ export interface GateResult {
 }
 
 /**
- * Everything the gate needs to judge, gathered by the caller. Facts only:
- * the gate reads, it never fetches, so it stays pure and selfcheckable.
+ * The month's context, gathered by the caller — facts only. The gate reads,
+ * it never fetches, so it stays pure and selfcheckable.
  */
-export interface GateFacts {
-  /** The document exists on the other side and is not voided. */
-  readonly invoiceVoided: boolean
-  /** Somebody said hands off. */
-  readonly onHold: boolean
-  /** Pre-processing ran — memo, class, payment route resolved. */
-  readonly enriched: boolean
-  readonly memo: string | null
-  readonly qboClass: string | null
-  /** How they pay. An unresolved route means we cannot collect. */
-  readonly paymentRoute: "email" | "ach" | "credit_card" | null
-  /** What the other system says the invoice totals, in cents. */
-  readonly systemSubtotalCents: number | null
+export interface MonthGateFacts {
+  /** QBO customer id — without a billing identity there is nobody to invoice. */
+  readonly qboCustomerId: string | null
   /**
-   * Open credits on this customer with no terminal decision against this
-   * invoice. The window and the exclusions are the caller's to apply — see
-   * the note in the ACL/read model, where they are spelled out.
+   * How this customer pays, resolved from enrollment and payment methods:
+   * `autopay` = active enrollment with an active payment method;
+   * `email` = a manual invoice can reach them. Null = we cannot collect.
    */
-  readonly undecidedCredits: { creditId: string; unappliedCents: number }[]
-  /** Our reconciliation verdict, already computed. */
-  readonly reconciled: boolean
+  readonly paymentRoute: "autopay" | "email" | null
+  /** An unreleased hold naming this customer. Somebody said hands off. */
+  readonly activeHold: string | null
+  /**
+   * Open maintenance credits (unapplied, recent, maintenance-marked memo)
+   * with no decision. Billing more before deciding them is how a customer
+   * pays twice.
+   */
+  readonly openCredits: { paymentId: string; unappliedCents: number }[]
+  /** Unresolved blocking findings on this month — the audit's stop signs. */
+  readonly blockingFindings: { rule: string; message: string }[]
 }
 
-const SUBTOTAL_TOLERANCE_CENTS = 1
-
-/**
- * Judge a month. Every criterion is named, and a failure carries a sentence.
- *
- * The criteria are the nine from the SQL gate, restated: what must be true
- * before a customer is asked for money.
- */
-export function gate(month: BillingMonth, facts: GateFacts): GateResult {
+export function gate(month: BillingMonth, facts: MonthGateFacts): GateResult {
   const criteria: GateCriterion[] = []
   const check = (name: string, passed: boolean, detail?: string) =>
     criteria.push(passed ? { name, passed } : { name, passed, detail })
 
   check("has_items", month.billableItems.length > 0, "nothing claimed — an empty month is not an invoice")
-  check("reconciled", facts.reconciled, "our totals do not agree with the system of record, per task")
-  check("not_voided", !facts.invoiceVoided, "the invoice was voided")
-  check("not_on_hold", !facts.onHold, "somebody put this invoice on hold")
-  check("enriched", facts.enriched, "pre-processing has not run")
-  check("memo_present", facts.memo !== null && facts.memo.trim() !== "", "no memo — the customer would read a bill with no explanation")
-  check("class_present", facts.qboClass !== null, "no class — the revenue would land unattributed")
+  check(
+    "reconciled",
+    month.status === "reconciled" || month.status === "gated" || month.status === "held",
+    "our totals do not agree with the system of record — the gate never overrides the reconciler",
+  )
+  check(
+    "billing_identity",
+    facts.qboCustomerId !== null,
+    "no QBO customer id — there is nobody to address an invoice to (is the customer still awaiting its billing identity?)",
+  )
   check(
     "route_resolved",
     facts.paymentRoute !== null,
-    "no payment route — we do not know how this customer pays, so we cannot collect",
+    "no payment route — not enrolled in autopay and no email on file, so a bill could not reach them",
   )
-  check(
-    "subtotal_matches",
-    facts.systemSubtotalCents === null || Math.abs(month.totalCents - facts.systemSubtotalCents) <= SUBTOTAL_TOLERANCE_CENTS,
-    facts.systemSubtotalCents === null
-      ? undefined
-      : `we bill ${(month.totalCents / 100).toFixed(2)} and the document says ${(facts.systemSubtotalCents / 100).toFixed(2)}`,
-  )
+  check("not_on_hold", facts.activeHold === null, facts.activeHold ? `held: ${facts.activeHold}` : undefined)
   check(
     "credits_settled",
-    facts.undecidedCredits.length === 0,
-    `${facts.undecidedCredits.length} open credit(s) with no decision against this invoice: ${facts.undecidedCredits
+    facts.openCredits.length === 0,
+    `${facts.openCredits.length} open credit(s) with no decision: ${facts.openCredits
       .slice(0, 3)
-      .map((c) => `${c.creditId} ($${(c.unappliedCents / 100).toFixed(2)})`)
-      .join(", ")} — applying them after the bill goes out is how a customer pays twice`,
+      .map((c) => `${c.paymentId} ($${(c.unappliedCents / 100).toFixed(2)})`)
+      .join(", ")} — billing more before deciding them is how a customer pays twice`,
+  )
+  check(
+    "findings_resolved",
+    facts.blockingFindings.length === 0,
+    `${facts.blockingFindings.length} unresolved blocking finding(s): ${facts.blockingFindings
+      .slice(0, 3)
+      .map((f) => f.rule)
+      .join(", ")}`,
   )
 
   const heldFor = criteria.filter((c) => !c.passed).map((c) => c.name)
