@@ -131,6 +131,30 @@ export class IonTaskAcl {
     }
   }
 
+  /**
+   * OUR service profile -> the create-form fields for a NEW task. House
+   * defaults come from maintenanceDefaults (price-ladder ServiceType, salt vs
+   * tablet profile, Per Visit Itemized separate-consumables billing); the
+   * template carries only the send-flag radios and invoice date.
+   */
+  toIonCreate(
+    c: { frequency: string; weekday: number; startsOn: string; ratePerVisit: number | null; poolType: string; note: string },
+    id: { ionCustId: string; ionTech: string },
+    template: Record<string, string>,
+  ): { ionCustId: string; changes: Record<string, string>; expect: { serviceRepeat: string; startsOn: string } } {
+    const serviceRepeat = c.frequency === "weekly" ? "2" : c.frequency.startsWith("biweekly") ? "3" : "4"
+    const changes: Record<string, string> = {
+      ...template,
+      ...maintenanceDefaults({ poolType: c.poolType, ratePerVisit: c.ratePerVisit }).fields,
+      ServiceRepeat: serviceRepeat,
+      StartsOn: c.startsOn,
+      AssignedTo: id.ionTech,
+    }
+    if (c.note) changes["TaskNote"] = c.note.slice(0, 500)
+    if (serviceRepeat === "2") changes[DAY_FIELD[c.weekday]] = id.ionTech
+    return { ionCustId: id.ionCustId, changes, expect: { serviceRepeat, startsOn: c.startsOn } }
+  }
+
   /** ION's verified answers -> our vocabulary. */
   fromIonResults(results: VerifiedWrite[]): LandedChange[] {
     return results.map((r) => ({ quotaId: r.key, accepted: r.accepted, detail: r.detail }))
@@ -230,4 +254,58 @@ export function matchIonCustomer(
   }
   if (byStreet.length === 1) return { kind: "linked", ionCustId: byStreet[0].ionCustId, confidence: "high" }
   return { kind: "ambiguous", candidates: byName.map((r) => ({ ionCustId: r.ionCustId, rowText: r.rowText.slice(0, 120) })) }
+}
+
+/* ----------------------- maintenance task defaults ------------------------ */
+
+/**
+ * The house rules for a residential maintenance task, resolved from the
+ * pool's own facts (Carter, 2026-08-03):
+ *  - ServiceType comes from the PRICE LADDER (POOL MAINTENANCE 35..90, one
+ *    per rate) — never the itemcost override when a rung exists. itemcost
+ *    stays only for off-ladder rates (and spas, whose service type is $0).
+ *  - The cleaning profile follows the sanitizer: salt -> RESIDENTIAL
+ *    CLEANING SALT POOL, tablet/chlorine -> TABLET, spa -> CHLORINE SPA.
+ *  - Billing is Per Visit Itemized (separate consumables) — InvoiceType 6.
+ */
+const MAINT_LADDER: Record<string, string> = {
+  "35": "690630", "40": "690631", "45": "690632", "50": "690633", "55": "690634",
+  "60": "690635", "65": "690636", "70": "690628", "75": "690629", "80": "1200602",
+  "85": "1428955", "90": "1606389",
+}
+const PROFILE = { salt: "3347", tablet: "3348", spa: "10524" }
+const SPA_CLEAN = "690644"
+
+export function maintenanceDefaults(pool: { poolType: string; ratePerVisit: number | null }): {
+  fields: Record<string, string>
+  advisories: string[]
+} {
+  const advisories: string[] = []
+  const t = pool.poolType.toLowerCase()
+  const isSpa = t.includes("spa") && !t.includes("pool")
+
+  let profileid: string
+  if (isSpa) profileid = PROFILE.spa
+  else if (t.includes("salt")) profileid = PROFILE.salt
+  else if (t.includes("chlorine") || t.includes("tablet") || t.includes("bromine")) profileid = PROFILE.tablet
+  else {
+    profileid = PROFILE.tablet
+    advisories.push(`pool type "${pool.poolType}" names no sanitizer — defaulted to TABLET profile`)
+  }
+
+  const rate = pool.ratePerVisit
+  const rung = rate !== null ? MAINT_LADDER[String(rate)] : undefined
+  const fields: Record<string, string> = { profileid, InvoiceType: "6" }
+  if (isSpa) {
+    fields.ServiceType = SPA_CLEAN
+    fields.itemcost = rate !== null ? String(rate) : ""
+    advisories.push(`spa: SPA CLEAN service type prices by itemcost ($${rate ?? "?"})`)
+  } else if (rung) {
+    fields.ServiceType = rung
+    fields.itemcost = "" // the ladder prices it; the override must NOT linger
+  } else {
+    fields.itemcost = rate !== null ? String(rate) : ""
+    advisories.push(`rate $${rate ?? "?"} has no POOL MAINTENANCE rung — kept itemcost override`)
+  }
+  return { fields, advisories }
 }

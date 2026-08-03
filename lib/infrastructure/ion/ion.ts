@@ -87,6 +87,22 @@ export abstract class Ion {
     return res.text()
   }
 
+  /** POST returning the response body — for endpoints that answer with HTML. */
+  protected async postText(path: string, body: string): Promise<string> {
+    const k = await this.session()
+    const res = await fetch(`${k.ionOrigin}${path}`, {
+      method: "POST",
+      headers: this.headers(k, {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest",
+        Origin: k.ionOrigin,
+      }),
+      body,
+    })
+    if (!res.ok) throw new Error(`ION POST ${path} -> ${res.status}`)
+    return res.text()
+  }
+
   protected async post(path: string, body: Record<string, string>): Promise<number> {
     const k = await this.session()
     const res = await fetch(`${k.ionOrigin}${path}`, {
@@ -217,6 +233,68 @@ export class IonTasks extends Ion {
       }
     }
     return out
+  }
+
+  /** The customer's task ids, from the same list the ingester reads. */
+  async listTaskIds(ionCustId: string): Promise<Set<string>> {
+    await this.primeCustomer(ionCustId)
+    const html = await this.postText(`/tasks/taskList.cfm`, "limit=200")
+    const out = new Set<string>()
+    for (const m of html.matchAll(/EventID=(\d+)/g)) out.add(m[1])
+    return out
+  }
+
+  /**
+   * Create a recurring task. The blank form (EventID empty, CustomerID set by
+   * priming) supplies every default; our fields merge over it; the StartsOn
+   * proxy pre-set runs first (the UI always fires it on change). PROOF is the
+   * task-list diff: exactly one new EventID must appear, and its form must
+   * read back with the cadence, start date and assignment we sent.
+   */
+  async createTask(
+    t: {
+      ionCustId: string
+      changes: Record<string, string>
+      expect: { serviceRepeat: string; startsOn: string }
+    },
+    opts: { dryRun: boolean },
+  ): Promise<VerifiedWrite & { ionTaskId?: string }> {
+    const before = await this.listTaskIds(t.ionCustId)
+    const form = this.parseForm(await this.get(`/tasks/addTask.cfm?isIFrame=1`))
+    if (!form.rendered) return { key: t.ionCustId, accepted: false, detail: "blank create form did not render" }
+    if (form.fields["CustomerID"] !== t.ionCustId) {
+      return { key: t.ionCustId, accepted: false, detail: `create form is primed for customer ${form.fields["CustomerID"] ?? "?"}, not ${t.ionCustId} — refusing to create on the wrong account` }
+    }
+    if ((form.fields["EventID"] ?? "") !== "") {
+      return { key: t.ionCustId, accepted: false, detail: "create form carries an EventID — this would EDIT, not create" }
+    }
+
+    if (opts.dryRun) {
+      return { key: t.ionCustId, accepted: true, detail: `dry run: would create (${Object.keys(t.changes).length} fields over defaults)` }
+    }
+
+    await this.get(`/includes/_proxy.cfm?source=addtask&date=${encodeURIComponent(t.expect.startsOn)}&set=1&${this.cfEnvelope(1)}`)
+    const payload = { ...form.fields, ...t.changes }
+    if (!payload["LinkUsed"]) payload["LinkUsed"] = "Save"
+    if (!payload["Submit"]) payload["Submit"] = "Submit"
+    await this.post(`/tasks/addTask.cfm?isIFrame=1`, payload)
+
+    const after = await this.listTaskIds(t.ionCustId)
+    const fresh = [...after].filter((id) => !before.has(id))
+    if (fresh.length !== 1) {
+      return { key: t.ionCustId, accepted: false, detail: `expected exactly 1 new task, task list shows ${fresh.length} (${fresh.join(",")})` }
+    }
+    const ionTaskId = fresh[0]
+    const echo = await this.readTask(ionTaskId)
+    const wrong =
+      echo.serviceRepeat !== t.expect.serviceRepeat
+        ? `ServiceRepeat ${echo.serviceRepeat} != ${t.expect.serviceRepeat}`
+        : echo.startsOn !== t.expect.startsOn
+          ? `StartsOn ${echo.startsOn} != ${t.expect.startsOn}`
+          : Object.keys(t.changes).find((k) => k.startsWith("day") && (echo.fields[k] ?? "") !== t.changes[k])
+    return wrong
+      ? { key: t.ionCustId, accepted: false, ionTaskId, detail: `created ${ionTaskId} but read-back disagrees: ${wrong}` }
+      : { key: t.ionCustId, accepted: true, ionTaskId, daysAfter: echo.days, detail: `created ${ionTaskId}, read-back verified` }
   }
 
   /**
