@@ -1,0 +1,21 @@
+# tag: chromium — needs the browser only when the cached ION session is stale;
+# the per-task detail reads are plain HTTP through that session.
+tag: chromium
+summary: 'Backfill tasks.ion_invoice_type for tasks billed in a month (cached session + HTTP per task)'
+description: ''
+lock: ''
+kind: script
+schema:
+  $schema: 'https://json-schema.org/draft/2020-12/schema'
+  type: object
+  properties:
+    month:
+      type: string
+      default: '2026-07-01'
+    dry_run:
+      type: boolean
+      default: true
+    limit:
+      type: number
+      default: 600
+  required: []
