@@ -10,8 +10,10 @@
  * draft object: a flagged customer is a real customer that breaks our rules.
  *
  * What is NOT here:
- *  - the SERVICE address — that is the ServiceLocation entity, identified by
- *    its rooftop place id, referenced by the customer
+ *  - the SERVICE address — that is the ServiceLocation entity (also in this
+ *    domain: it is where the customer's pool is, and it exists whether or not
+ *    anyone services it), identified by its rooftop place id. Maintenance
+ *    only REFERENCES it by that id.
  *  - anything about pools, cadence or rates — those are the terms of a
  *    service agreement (maintenance module). A billing-only customer has
  *    none of them, and Customers must never depend on Maintenance.

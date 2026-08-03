@@ -51,7 +51,9 @@ em  = box("email",230,ph["y2"]+16,190,"«value object»","Email / PersonName",GR
       ["address: lower-cased, one","first / last -> displayName"],dashed=True)
 sp  = box("bill",28,er["y2"]+20,190,"«value object»","BillingAddress",GREY,
       ["street / city / state / zip","(the SERVICE address is an","  entity, not a value)"],dashed=True)
-cd  = box("draftfn",28,max(sp["y2"],em["y2"])+20,392,"«domain service»","customer.ts — parse, don't validate",PURPLE,
+sl  = box("loc",28,max(sp["y2"],em["y2"])+20,392,"«entity»","ServiceLocation",BLUE,
+      ["id                (service_locations.id)","account_id -> Customers.id","place_id: text     <- THE IDENTITY","latitude / longitude","geocode_status / place_provider","is_primary / is_active"])
+cd  = box("draftfn",28,sl["y2"]+20,392,"«domain service»","customer.ts — parse, don't validate",PURPLE,
       ["no I/O · selfchecked · both doors"],
       ["Customer.draft(input)  -> Customer | refused","Customer.rehydrate(id, input, refs)  flags","every field via a value object's parse()"],fill="#f7f2fa")
 ds  = cd
@@ -63,10 +65,7 @@ tk  = box("task",468,ag["y2"]+20,384,"«aggregate root»","Task   (maintenance)"
       ["id: uuid        (maintenance.tasks.id)","customer_id -> Customers.id","ion_task_id: text","frequency / days_per_week","price_per_visit_cents","~schedules: TaskSchedule[*]"])
 tsc = box("slot",468,tk["y2"]+18,384,"«entity»","TaskSchedule   (the slot)",BLUE,
       ["task_id -> tasks.id","day_of_week: 0..6","tech_employee_id -> employees.id","frequency: weekly|biweekly_a|_b|monthly","starts_on / active"])
-sl  = box("loc",468,tsc["y2"]+18,384,"«entity»","ServiceLocation",BLUE,
-      ["id                (service_locations.id)","account_id -> Customers.id","place_id: text     <- THE IDENTITY","latitude / longitude","geocode_status / place_provider","is_primary / is_active"])
-
-LANE_B = max(ds["y2"], sl["y2"]) + 18
+LANE_B = max(ds["y2"], tsc["y2"]) + 18
 INF_T  = LANE_B + 22
 qbo = box("qbo",28,INF_T+40,264,"«infra · gateway»","Qbo / QboCustomers",ORANGE,
       ["minter -> f/qbo/api/get_access_token","(the one rotating-token refresher)"],
@@ -94,8 +93,9 @@ comp(sp["cx"],    er["y2"], sp["cx"],   sp["y"], GREY)           # Customer <>- 
 comp(tsc["cx"],   tk["y2"], tsc["cx"],  tsc["y"])                # Task <>- TaskSchedule
 ref(ag["x"]+150, ag["y2"], tk["cx"], tk["y"]-2, "opens as", mid=(ag["x"]+215, ag["y2"]+13))
 ref(tk["x"], tk["rows"][1], c["x2"]+2, tk["rows"][1], "customer_id", mid=(444, tk["rows"][1]-9))
-ref(sl["x"], sl["rows"][1], c["x2"]+2, c["y"]+120, "account_id",
-    mid=(444, (sl["rows"][1]+c["y"]+120)/2), curve=(438, sl["rows"][1], 438, c["y"]+120))
+ref(sl["x"]+300, sl["y"], sl["x"]+300, c["y2"]+2, "account_id", mid=(sl["x"]+300, sl["y"]-8))
+ref(ag["x"], ag["rows"][1], sl["x2"]+2, sl["rows"][2], "placeId", mid=(446, (ag["rows"][1]+sl["rows"][2])/2),
+    curve=(440, ag["rows"][1], 440, sl["rows"][2]))
 ref(sv["x"], sv["y"]+46, rp["x2"]+2, sv["y"]+46, "uses", mid=(440, sv["y"]-6))
 ref(sv["x"]+120, sv["y"], ion["cx"], ion["y2"]+2, "calls", mid=(505, sv["y"]-14))
 ref(sv["x"]+40, sv["y"], qbo["cx"]+70, qbo["y2"]+2, "calls", mid=(330, sv["y"]-14))
