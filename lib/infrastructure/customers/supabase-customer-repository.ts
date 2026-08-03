@@ -36,15 +36,37 @@ export class SupabaseCustomerRepository {
   async findByStreet(street: string) {
     if (!this.streets) {
       this.streets = new Map()
+      // Customers.street plus the CANONICAL address home, service_locations
+      // (ADR 005) — an account's service address may live only there.
       for (let off = 0; ; off += 1000) {
-        const { data } = await this.client
+        const { data, error } = await this.client
           .from("Customers")
-          .select("id, display_name, qbo_customer_id, street, service_street")
+          .select("id, display_name, qbo_customer_id, street")
           .range(off, off + 999)
-        const rows = (data ?? []) as { id: number; display_name: string | null; qbo_customer_id: string | null; street: string | null; service_street: string | null }[]
+        // A silently-empty answer here once created 65 duplicate accounts:
+        // a bad column made every page an error, `data ?? []` swallowed it,
+        // and dedup saw an empty world. Errors THROW. Always.
+        if (error) throw new Error(`Customers dedup scan failed: ${JSON.stringify(error).slice(0, 200)}`)
+        const rows = (data ?? []) as { id: number; display_name: string | null; qbo_customer_id: string | null; street: string | null }[]
         for (const r of rows) {
-          for (const s of [r.street, r.service_street]) {
-            if (s) this.streets.set(norm(s), { accountId: r.id, displayName: r.display_name, qboId: r.qbo_customer_id })
+          if (r.street) this.streets.set(norm(r.street), { accountId: r.id, displayName: r.display_name, qboId: r.qbo_customer_id })
+        }
+        if (rows.length < 1000) break
+      }
+      const byId = new Map<number, { accountId: number; displayName: string | null; qboId: string | null }>()
+      for (const v of this.streets.values()) byId.set(v.accountId, v)
+      for (let off = 0; ; off += 1000) {
+        const { data, error } = await this.client
+          .from("service_locations")
+          .select("account_id, street")
+          .range(off, off + 999)
+        if (error) throw new Error(`service_locations dedup scan failed: ${JSON.stringify(error).slice(0, 200)}`)
+        const rows = (data ?? []) as { account_id: number | null; street: string | null }[]
+        for (const r of rows) {
+          if (!r.street || r.account_id === null) continue
+          const key = norm(r.street)
+          if (!this.streets.has(key)) {
+            this.streets.set(key, byId.get(r.account_id) ?? { accountId: r.account_id, displayName: null, qboId: null })
           }
         }
         if (rows.length < 1000) break

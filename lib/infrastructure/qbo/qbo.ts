@@ -95,15 +95,19 @@ export class QboCustomers extends Qbo {
    * resolved to the existing customer rather than surfaced as a failure.
    */
   async createCustomer(f: CustomerFields): Promise<CreatedCustomer> {
+    // The resolved SERVICE address is the shipping address — where the truck
+    // goes — and with no separate billing address it is copied to BillAddr.
+    const addr = { Line1: f.street, City: f.city, CountrySubDivisionCode: f.state, PostalCode: f.zip }
     const body: Record<string, unknown> = {
       DisplayName: f.displayName,
       GivenName: f.givenName,
       FamilyName: f.familyName,
       Notes: f.notes.slice(0, 4000),
-      BillAddr: { Line1: f.street, City: f.city, CountrySubDivisionCode: f.state, PostalCode: f.zip },
+      ShipAddr: addr,
+      BillAddr: { ...addr },
     }
     if (f.email) body.PrimaryEmailAddr = { Address: f.email }
-    if (f.phone) body.PrimaryPhone = { FreeFormNumber: f.phone }
+    if (f.phone) body.PrimaryPhone = { FreeFormNumber: f.phone.slice(0, 21) }
 
     try {
       const res = await this.request<{ Customer: QboCustomer }>("POST", "/customer", body)

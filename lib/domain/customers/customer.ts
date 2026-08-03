@@ -210,6 +210,14 @@ export function draftCustomer(row: RawCustomerRow): CustomerDraft {
   const firstName = lastSpace > 0 ? name.slice(0, lastSpace) : name
   const lastName = lastSpace > 0 ? name.slice(lastSpace + 1) : ""
 
+  // Real-world contact cells hold several values ("a@x.com / b@y.com").
+  // Downstream systems take ONE (QBO refuses a multi-email string outright,
+  // and its phone field caps at 21 chars) — so the first is primary and the
+  // rest ride along as notes instead of poisoning the write.
+  const split = (v: string) => v.split(/[\/;,]| or /i).map((t) => t.trim()).filter(Boolean)
+  const emails = split(row.email).map((e) => e.toLowerCase())
+  const phones = [...new Set(split(row.phone))]
+
   const shape: CustomerShape = {
     firstName,
     lastName,
@@ -217,8 +225,8 @@ export function draftCustomer(row: RawCustomerRow): CustomerDraft {
     city: row.city.trim(),
     state: "GA",
     zip: String(row.zip).trim(),
-    phone: row.phone.trim() || null,
-    email: row.email.trim().toLowerCase() || null,
+    phone: phones[0] ?? null,
+    email: emails[0] ?? null,
   }
 
   const cadence = resolveCadence(row)
@@ -231,6 +239,8 @@ export function draftCustomer(row: RawCustomerRow): CustomerDraft {
   }
 
   const notes = [
+    ...emails.slice(1).map((e) => `alt email: ${e}`),
+    ...phones.slice(1).map((ph) => `alt phone: ${ph}`),
     row.segment && `segment: ${row.segment}`,
     row.poolType && `pool: ${row.poolType}`,
     row.gateCode && `gate code: ${row.gateCode}`,

@@ -46,12 +46,19 @@ export class OnboardingService {
     // asked here first so the answer is a reuse, not an RPC error).
     const existing = await this.customers.findByStreet(draft.shape.street)
     if (existing) {
-      return {
-        outcome: "already_ours",
-        accountId: existing.accountId,
-        displayName: existing.displayName,
-        qbo: existing.qboId ? "linked" : "unlinked",
+      // Reuse — but a reused account with NO QBO id is a half-kept promise
+      // (a prior run's deferral). Live re-runs finish the job here, which is
+      // what makes deferrals converge instead of accumulating.
+      if (existing.qboId || opts.dryRun) {
+        return {
+          outcome: "already_ours",
+          accountId: existing.accountId,
+          displayName: existing.displayName,
+          qbo: existing.qboId ? "linked" : "unlinked",
+        }
       }
+      const qbo = await this.ensureQbo(existing.accountId, draft, null)
+      return { outcome: "already_ours", accountId: existing.accountId, displayName: existing.displayName, qbo: qbo === "deferred" ? "unlinked" : "linked" }
     }
 
     if (opts.dryRun) {
@@ -66,9 +73,17 @@ export class OnboardingService {
     const address = geo.resolved ? geo.address : null
 
     const { accountId } = await this.customers.create(draft, address)
+    const qbo = await this.ensureQbo(accountId, draft, address)
+    return { outcome: "created", accountId, qbo }
+  }
 
-    // QBO, echo-verified; the stamp writes the fulfilled promise to our row.
-    let qbo: "created" | "already_existed" | "deferred"
+  /** QBO, echo-verified; the stamp writes the fulfilled promise to our row. */
+  private async ensureQbo(
+    accountId: number,
+    draft: CustomerDraft,
+    address: { street: string; city: string; state: string; zip: string } | null,
+  ): Promise<"created" | "already_existed" | "deferred"> {
+    const s = draft.shape
     try {
       const r = await this.qbo.createCustomer({
         displayName: draft.displayName,
@@ -83,13 +98,12 @@ export class OnboardingService {
         notes: draft.profile.notes.join(" | "),
       })
       await this.customers.stampQboId(accountId, r.qboId)
-      qbo = r.how
+      return r.how
     } catch (err) {
       // Honest deferral: the account exists, the QBO id does not — a re-run
       // converges (duplicate DisplayName resolves to the existing customer).
       console.error(`QBO create failed for ${draft.displayName}: ${err instanceof Error ? err.message : err}`)
-      qbo = "deferred"
+      return "deferred"
     }
-    return { outcome: "created", accountId, qbo }
   }
 }
