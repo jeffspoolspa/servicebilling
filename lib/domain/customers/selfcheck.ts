@@ -84,18 +84,24 @@ check("bi-weekly with two listed days is drift, not a schedule (I6)", () => {
 })
 
 check("weekly with two days: the money decides drift vs genuinely two visits", () => {
-  const drift = resolveCadence({ frequencyText: "Weekly", serviceDaysText: "Wednesday, Thursday", weekText: null, ratePerVisit: 60, monthly: 260 })
+  const drift = resolveCadence({ frequencyText: "Weekly", serviceDaysText: "Wednesday, Thursday", weekText: "Every week", ratePerVisit: 60, monthly: 260 })
   assert.strictEqual(drift.kind, "ambiguous") // 4.3 visits/month = one real day
-  const twice = resolveCadence({ frequencyText: "Weekly", serviceDaysText: "Wednesday, Thursday", weekText: null, ratePerVisit: 60, monthly: 520 })
+  const twice = resolveCadence({ frequencyText: "Weekly", serviceDaysText: "Wednesday, Thursday", weekText: "Every week", ratePerVisit: 60, monthly: 520 })
   assert.deepStrictEqual(twice, { kind: "resolved", frequency: "weekly", weekdays: [3, 4] })
 })
 
-check("a frequency naming both cadences is a human's decision", () => {
-  const c = resolveCadence({ frequencyText: "Weekly & Bi-Weekly", serviceDaysText: "Friday", weekText: "Week A", ratePerVisit: 65, monthly: 140 })
-  assert.strictEqual(c.kind, "ambiguous")
+check("the Service Week field is the cadence authority, not the Frequency text", () => {
+  // junk frequency text resolves off the week letter
+  const c = resolveCadence({ frequencyText: "Weekly & Bi-Weekly", serviceDaysText: "Friday", weekText: "Week B", ratePerVisit: 65, monthly: 140 })
+  assert.deepStrictEqual(c, { kind: "resolved", frequency: "biweekly_b", weekdays: [5] })
   // spa-flavored bi-weekly is still bi-weekly
   const spa = resolveCadence({ frequencyText: "Bi-Weekly Indoor Spa", serviceDaysText: "Friday", weekText: "Week B", ratePerVisit: 65, monthly: 140 })
   assert.ok(spa.kind === "resolved" && spa.frequency === "biweekly_b")
+  // "Every week" means weekly whatever the text says
+  const w = resolveCadence({ frequencyText: "Bi-Weekly", serviceDaysText: "Monday", weekText: "Every week", ratePerVisit: 60, monthly: 260 })
+  assert.ok(w.kind === "resolved" && w.frequency === "weekly")
+  // no week field at all is an honest ambiguity
+  assert.strictEqual(resolveCadence({ frequencyText: "Weekly", serviceDaysText: "Monday", weekText: null, ratePerVisit: 60, monthly: 260 }).kind, "ambiguous")
 })
 
 check("a cadence ambiguity blocks the draft", () => {

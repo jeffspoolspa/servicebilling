@@ -161,3 +161,31 @@ export function anchorOf(startsOn: string, repeatText: string): { weekday: numbe
       : null
   return frequency ? { weekday: d.getUTCDay(), frequency } : null
 }
+
+/**
+ * The INVERSE of the anchor rule: the first date on/after `notBefore` that a
+ * new task must start on so ION generates visits on `weekday` in the right
+ * alternating week. No week arithmetic to get wrong — it walks forward and
+ * returns the first date that READS BACK (via anchorOf) as the desired
+ * (weekday, parity), so the writer and the reader cannot disagree.
+ *
+ * Carter's example, honored by construction: a biweekly_b Tuesday asked for
+ * on a Sunday whose coming Tuesday falls in an A week starts the FOLLOWING
+ * Tuesday, not the near one.
+ */
+export function startsOnFor(
+  frequency: "weekly" | "biweekly_a" | "biweekly_b" | "monthly",
+  weekday: number,
+  notBefore: string,
+): string {
+  const d = new Date(`${notBefore}T00:00:00Z`)
+  for (let i = 0; i < 28; i++) {
+    const iso = d.toISOString().slice(0, 10)
+    if (d.getUTCDay() === weekday) {
+      if (frequency === "weekly" || frequency === "monthly") return iso
+      if (anchorOf(iso, "Bi-Weekly")!.frequency === frequency) return iso
+    }
+    d.setUTCDate(d.getUTCDate() + 1)
+  }
+  throw new Error(`no ${frequency} start on weekday ${weekday} within 28 days of ${notBefore} — unreachable`)
+}

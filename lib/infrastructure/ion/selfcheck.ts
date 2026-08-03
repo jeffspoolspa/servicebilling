@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert"
-import { IonTaskAcl, anchorOf, type TaskIdentity } from "./acl"
+import { IonTaskAcl, anchorOf, startsOnFor, type TaskIdentity } from "./acl"
 import type { IonTaskForm } from "./ion"
 import type { TaskSchedule } from "@/lib/domain/routing"
 
@@ -109,4 +109,26 @@ assert("refusal" in acl.fromIonForm(form({ rendered: false }), ourTechOf))
 assert("refusal" in acl.fromIonForm(form({ days: {} }), ourTechOf))
 assert("refusal" in acl.fromIonForm(form({ serviceRepeat: "3", serviceRepeatText: "Bi-Weekly", startsOn: "" }), ourTechOf))
 
-console.log("ion acl selfcheck: 19 checks passed")
+/* ------------------ startsOnFor: the anchor rule, inverted ----------------- */
+
+// Carter's example: a biweekly_b Tuesday asked for on Sunday 2026-08-09. The
+// coming Tuesday (Aug 11) falls in the week of Mon Aug 10 — which is a B week —
+// so it starts Aug 11. Asked for biweekly_a instead, it waits for Aug 18.
+assert.strictEqual(startsOnFor("biweekly_b", 2, "2026-08-09"), "2026-08-11")
+assert.strictEqual(startsOnFor("biweekly_a", 2, "2026-08-09"), "2026-08-18")
+// weekly just takes the next such weekday; notBefore itself counts.
+assert.strictEqual(startsOnFor("weekly", 5, "2026-08-03"), "2026-08-07")
+assert.strictEqual(startsOnFor("weekly", 1, "2026-08-03"), "2026-08-03")
+
+// The property that makes it safe: every answer READS BACK as what was asked.
+for (const f of ["biweekly_a", "biweekly_b"] as const) {
+  for (let wd = 0; wd < 7; wd++) {
+    for (const from of ["2026-08-03", "2026-08-09", "2026-12-31"]) {
+      const date = startsOnFor(f, wd, from)
+      assert.ok(date >= from)
+      assert.deepStrictEqual(anchorOf(date, "Bi-Weekly"), { weekday: wd, frequency: f }, `${f} wd${wd} from ${from}`)
+    }
+  }
+}
+
+console.log("ion acl selfcheck: 24 checks passed (incl. 42 anchor roundtrips)")

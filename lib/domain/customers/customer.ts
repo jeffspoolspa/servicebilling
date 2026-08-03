@@ -112,11 +112,15 @@ export function parseServiceDays(raw: string): number[] {
 }
 
 /**
- * Sheet frequency text + days + week letter -> our cadence, or an honest
- * ambiguity. The rules this encodes:
+ * Sheet row -> our cadence, or an honest ambiguity. The rules this encodes:
+ *  - the SERVICE WEEK field is the cadence authority ("Every week" = weekly,
+ *    "Week A/B" = biweekly_a/b) — the Frequency text on this sheet mixes
+ *    cadence with flavor ("Weekly & Bi-Weekly", "Bi-Weekly Indoor Spa") and
+ *    is not trusted for the decision
  *  - a bi-weekly visit is ONE stop from one start date (invariant I6); two
- *    listed days is observed day-drift, not a schedule — a human picks
- *  - "Weekly" with two days is genuinely two visits ONLY if the money agrees
+ *    listed days is observed day-drift, not a schedule — the candidates go to
+ *    the drive-cost resolver, which picks the cheaper day
+ *  - "weekly" with two days is genuinely two visits ONLY if the money agrees
  *    (monthly ≈ rate x 8.66); otherwise it is the same drift
  *  - Week A/B maps to biweekly_a/b — verified against the ION anchor rule for
  *    the sheet's own reference week (Mon 2026-08-03 = their A = our a)
@@ -129,54 +133,42 @@ export function resolveCadence(args: {
   monthly: number | null
 }): CadenceResolution {
   const days = parseServiceDays(args.serviceDaysText)
-  const f = args.frequencyText.trim().toLowerCase()
-  const isBiweekly = /bi-?weekly/.test(f)
-  const isWeekly = /(?<!bi-)(?<!bi)weekly/.test(f)
+  const week = (args.weekText ?? "").trim().toLowerCase()
+  const frequency = /every\s*week/.test(week)
+    ? ("weekly" as const)
+    : /\ba\b/.test(week)
+      ? ("biweekly_a" as const)
+      : /\bb\b/.test(week)
+        ? ("biweekly_b" as const)
+        : null
 
+  if (!frequency) {
+    return { kind: "ambiguous", reason: `service week "${args.weekText}" is neither Every week nor Week A/B`, candidates: [] }
+  }
   if (days.length === 0) {
     return { kind: "ambiguous", reason: `no recognizable service day in "${args.serviceDaysText}"`, candidates: [] }
   }
-  if (isBiweekly && isWeekly) {
-    return {
-      kind: "ambiguous",
-      reason: `frequency "${args.frequencyText}" names both cadences — a human decides`,
-      candidates: days.map((d) => ({ frequency: "weekly", weekdays: [d] })),
-    }
-  }
-
-  if (isBiweekly) {
-    const week = (args.weekText ?? "").trim().toLowerCase()
-    const frequency = week.includes("a") ? "biweekly_a" : week.includes("b") ? "biweekly_b" : null
-    if (!frequency) {
-      return { kind: "ambiguous", reason: `bi-weekly but week "${args.weekText}" is neither A nor B`, candidates: [] }
-    }
-    if (days.length > 1) {
-      return {
-        kind: "ambiguous",
-        reason: `bi-weekly is one stop (I6) but the sheet lists ${days.length} days — observed drift, a human picks the day`,
-        candidates: days.map((d) => ({ frequency, weekdays: [d] })),
-      }
-    }
+  if (days.length === 1) {
     return { kind: "resolved", frequency, weekdays: days }
   }
 
-  if (isWeekly) {
-    if (days.length > 1) {
-      const visitsPerMonth = args.ratePerVisit && args.monthly ? args.monthly / args.ratePerVisit : null
-      // ~4.33 visits/month = one day a week whose day drifted; ~8.66 = truly two days.
-      if (visitsPerMonth !== null && visitsPerMonth > 6.5) {
-        return { kind: "resolved", frequency: "weekly", weekdays: days }
-      }
-      return {
-        kind: "ambiguous",
-        reason: `weekly with ${days.length} listed days but the money says ~${visitsPerMonth?.toFixed(1) ?? "?"} visits/month (one day) — drift, a human picks`,
-        candidates: days.map((d) => ({ frequency: "weekly", weekdays: [d] })),
-      }
+  if (frequency === "weekly") {
+    const visitsPerMonth = args.ratePerVisit && args.monthly ? args.monthly / args.ratePerVisit : null
+    // ~4.33 visits/month = one day a week whose day drifted; ~8.66 = truly two days.
+    if (visitsPerMonth !== null && visitsPerMonth > 6.5) {
+      return { kind: "resolved", frequency, weekdays: days }
     }
-    return { kind: "resolved", frequency: "weekly", weekdays: days }
+    return {
+      kind: "ambiguous",
+      reason: `weekly with ${days.length} listed days but the money says ~${visitsPerMonth?.toFixed(1) ?? "?"} visits/month (one day) — drift; pick the cheaper day`,
+      candidates: days.map((d) => ({ frequency, weekdays: [d] })),
+    }
   }
-
-  return { kind: "ambiguous", reason: `unrecognized frequency "${args.frequencyText}"`, candidates: [] }
+  return {
+    kind: "ambiguous",
+    reason: `bi-weekly is one stop (I6) but the sheet lists ${days.length} days — drift; pick the cheaper day`,
+    candidates: days.map((d) => ({ frequency, weekdays: [d] })),
+  }
 }
 
 /* ------------------------------- the factory ------------------------------ */
