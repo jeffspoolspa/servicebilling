@@ -168,6 +168,15 @@ export class Quota {
       // day is absurd for a pool and invisible to spacing() when minGap is 0.
       return "already served on that day"
     }
+    // I6 — a quota that fires every OTHER week (or monthly) is one visit from
+    // one start date. ION has no day picker for those cadences: the date is
+    // the day. A second stop is therefore not merely unwanted, it is
+    // unrepresentable — and when our cache grew one anyway (a visit that
+    // slipped a day, recorded as a permanent second stop) it made the whole
+    // task unpublishable. Refuse it where it starts.
+    if (this.req.intervalWeeks > 1 && this.stops.some((s) => !isIgnored(s))) {
+      return `a ${this.req.intervalWeeks === 2 ? "bi-weekly" : "monthly"} quota is one visit from one start date — it cannot hold a second stop`
+    }
     return null
   }
 

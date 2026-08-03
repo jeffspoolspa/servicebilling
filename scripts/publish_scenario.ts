@@ -58,15 +58,17 @@ async function main() {
     { auth: { persistSession: false, autoRefreshToken: false } },
   )
 
+  const ion = new IonTasks({ mint: (force) => windmill.run("f/ION/api/get_session", { force_refresh: force }) })
+  const acl = new IonTaskAcl()
   const service = new PublishService(
     new SupabaseScenarioRepository(sb as unknown as ScenarioClient),
     new SupabaseTaskStore(
       sb as unknown as QueryClient,
       sb as unknown as QueryClient,
-      new TaskCacheRefresher(sb as unknown as QueryClient, windmill),
+      new TaskCacheRefresher(sb as unknown as QueryClient, ion, acl),
     ),
-    new IonTasks({ mint: (force) => windmill.run("f/ION/api/get_session", { force_refresh: force }) }),
-    new IonTaskAcl(),
+    ion,
+    acl,
     new SupabaseMaintenanceEventLog(
       sb as unknown as ConstructorParameters<typeof SupabaseMaintenanceEventLog>[0],
     ),

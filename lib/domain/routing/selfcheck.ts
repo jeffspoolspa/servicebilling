@@ -757,18 +757,33 @@ check("a biweekly A→B flip seams by one week; a no-op shift does not seam", ()
   assert.equal(noop.anomalous, false)
 })
 
-check("in a scenario, a shift marks every route the quota rides as affected", () => {
-  const q = quotaOf("m1", { intervalWeeks: 2, anchorWeek: W0, requiredDays: 2 })
+check("in a scenario, a shift marks the route the quota rides as affected", () => {
+  // I6: an alternating-week quota rides exactly ONE route — ION holds its day
+  // in the start date, so a second stop is unrepresentable and now refused.
+  const q = quotaOf("m1", { intervalWeeks: 2, anchorWeek: W0, requiredDays: 1 })
   q.place("korey", 2 as Weekday)
-  q.place("dana", 4 as Weekday)
   q.pullEvents()
   const scenario = Scenario.from([q])
   const report = scenario.shiftAnchor("m1", W0 + 1, W0)
   assert.equal(report.anomalous, true)
-  assert.deepEqual(
-    scenario.affectedRoutes().map((r) => `${r.techId}|${r.weekday}`).sort(),
-    ["dana|4", "korey|2"],
-  )
+  assert.deepEqual(scenario.affectedRoutes().map((r) => `${r.techId}|${r.weekday}`), ["korey|2"])
+})
+
+check("I6 — an alternating-week quota refuses a second stop, on any day", () => {
+  const bi = quotaOf("i6", { intervalWeeks: 2, anchorWeek: W0, requiredDays: 1 })
+  bi.place("korey", 2 as Weekday)
+  assert.equal(bi.refusal("dana", 4 as Weekday), "a bi-weekly quota is one visit from one start date — it cannot hold a second stop")
+  assert.throws(() => bi.place("dana", 4 as Weekday), QuotaRuleError)
+  // Moving the one stop is still legal — it is the same visit, relocated.
+  bi.move({ techId: "korey", weekday: 2 as Weekday }, { techId: "dana", weekday: 4 as Weekday })
+  assert.deepEqual(bi.stops.map((s) => `${s.techId}|${s.weekday}`), ["dana|4"])
+  const monthly = quotaOf("i6m", { intervalWeeks: 4, anchorWeek: W0, requiredDays: 1 })
+  monthly.place("korey", 1 as Weekday)
+  assert.equal(monthly.refusal("korey", 3 as Weekday), "a monthly quota is one visit from one start date — it cannot hold a second stop")
+  // A weekly quota is unaffected: its days come from ION's own day picker.
+  const weekly = quotaOf("i6w", { requiredDays: 2 })
+  weekly.place("korey", 1 as Weekday)
+  assert.equal(weekly.refusal("dana", 4 as Weekday), null)
 })
 
 check("revision tracks edits, so a reader keyed on it cannot go stale", () => {

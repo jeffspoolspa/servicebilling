@@ -31,17 +31,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     mint: async (forceRefresh) =>
       triggerScriptSync("f/ION/api/get_session", { force_refresh: forceRefresh }, { timeoutMs: 180000 }),
   })
+  const acl = new IonTaskAcl()
   const service = new PublishService(
     new SupabaseScenarioRepository(sb as unknown as ScenarioClient),
     new SupabaseTaskStore(
       sb as unknown as QueryClient,
       sys as unknown as QueryClient,
-      new TaskCacheRefresher(sys as unknown as QueryClient, {
-        run: (path, args) => triggerScriptSync(path, args, { timeoutMs: 300000 }),
-      }),
+      new TaskCacheRefresher(sys as unknown as QueryClient, ion, acl),
     ),
     ion,
-    new IonTaskAcl(),
+    acl,
     new SupabaseMaintenanceEventLog(sys as unknown as ConstructorParameters<typeof SupabaseMaintenanceEventLog>[0]),
   )
 

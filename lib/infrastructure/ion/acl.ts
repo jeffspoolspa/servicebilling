@@ -14,7 +14,7 @@
  */
 
 import type { TaskSchedule } from "@/lib/domain/routing"
-import type { WeekWrite, VerifiedWrite } from "./ion"
+import type { IonTaskForm, WeekWrite, VerifiedWrite } from "./ion"
 
 const DAY_FIELD = ["day1", "day2", "day3", "day4", "day5", "day6", "day7"] as const
 const DAY_NAME = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const
@@ -40,6 +40,14 @@ export interface TaskIdentity {
 export type Translated =
   | { write: WeekWrite }
   | { refusal: { quotaId: string; reason: string } }
+
+/** A task's week as WE hold it: our frequency vocabulary, our employee ids. */
+export interface IonSchedule {
+  frequency: string
+  stops: { weekday: number; techId: string | null }[]
+}
+
+export type TranslatedForm = { schedule: IonSchedule } | { refusal: string }
 
 /** A confirmed outcome in OUR vocabulary, ready for cache + events. */
 export interface LandedChange {
@@ -92,8 +100,64 @@ export class IonTaskAcl {
     return { write: { key: schedule.quotaId, ionTaskId: id.ionTaskId, ionCustId: id.ionCustId, weekly: false, changes, believedDays: id.believedDays } }
   }
 
+  /**
+   * The inbound direction: ION's task form -> the week in OUR vocabulary.
+   *
+   * A day-picker cadence states its days directly. A non-picker cadence
+   * (bi-weekly, monthly) states them through the START DATE, which carries
+   * both the weekday and — for bi-weekly — which of the alternating weeks it
+   * falls in. So one date yields exactly ONE stop; a second day is not
+   * something ION can hold, and any second day on our side is our own drift.
+   */
+  fromIonForm(form: IonTaskForm, ourTechOf: (ionTech: string) => string | null): TranslatedForm {
+    if (!form.rendered) return { refusal: "the form did not render — a failed read, not a schedule" }
+
+    if (form.serviceRepeat === "2" || form.serviceRepeat === "1") {
+      const stops = Object.entries(form.days).map(([d, ionTech]) => ({ weekday: Number(d), techId: ourTechOf(String(ionTech)) }))
+      // A rendered picker with nothing selected is a failed read too: a live
+      // weekly task always serves some day. Acting on it would wipe a schedule.
+      if (stops.length === 0) return { refusal: "a weekly task reported no days — failed read, not an empty schedule" }
+      return { schedule: { frequency: "weekly", stops } }
+    }
+
+    const anchor = anchorOf(form.startsOn, form.serviceRepeatText)
+    if (!anchor) return { refusal: `${form.serviceRepeatText}: no usable start date ("${form.startsOn}")` }
+    const assigned = form.fields["AssignedTo"] ?? ""
+    return {
+      schedule: {
+        frequency: anchor.frequency,
+        stops: [{ weekday: anchor.weekday, techId: assigned ? ourTechOf(assigned) : null }],
+      },
+    }
+  }
+
   /** ION's verified answers -> our vocabulary. */
   fromIonResults(results: VerifiedWrite[]): LandedChange[] {
     return results.map((r) => ({ quotaId: r.key, accepted: r.accepted, detail: r.detail }))
   }
+}
+
+/**
+ * A non-weekly task's anchor date -> the weekday it serves and, for bi-weekly,
+ * which alternating week it belongs to.
+ *
+ * Parity rule mirrors the ingester (`f/ION/_lib/customer_tasks.ts`,
+ * isoWeekParity): whole weeks since the Monday of 1970-01-05, mod 2. The two
+ * must agree or A and B flip depending on which writer got there first.
+ */
+export function anchorOf(startsOn: string, repeatText: string): { weekday: number; frequency: string } | null {
+  const d = new Date(`${startsOn}T00:00:00Z`)
+  if (isNaN(+d)) return null
+  const weeks = Math.floor(
+    (Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - Date.UTC(1970, 0, 5)) / (7 * 86400000),
+  )
+  const r = repeatText.toLowerCase().replace(/-/g, "")
+  const frequency = r.includes("biweekly")
+    ? ((weeks % 2) + 2) % 2 === 0
+      ? "biweekly_a"
+      : "biweekly_b"
+    : r.includes("monthly")
+      ? "monthly"
+      : null
+  return frequency ? { weekday: d.getUTCDay(), frequency } : null
 }

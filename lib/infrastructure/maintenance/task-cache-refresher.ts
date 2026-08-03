@@ -15,10 +15,8 @@
  */
 
 import type { QueryClient } from "@/lib/infrastructure/routing/supabase-quota-repository"
-
-export interface WindmillRunner {
-  run<T>(path: string, args: Record<string, unknown>): Promise<T>
-}
+import type { IonTasks } from "@/lib/infrastructure/ion/ion"
+import type { IonTaskAcl, TranslatedForm } from "@/lib/infrastructure/ion/acl"
 
 export interface RefreshReport {
   /** Tasks whose stamp was already inside the window — no ION call made. */
@@ -36,20 +34,19 @@ interface TaskRow {
   ion_task_id: string | null
   frequency: string | null
   ion_verified_at: string | null
+  customer_id: number | null
 }
-
-type IonDays = Record<string, { dow: number; techId: string; techName: string }[]>
-/** ION's own answer for what a task IS — the field our cadence must follow. */
-type IonMeta = Record<string, { serviceRepeat: string; serviceRepeatText: string; startsOn: string }>
-
-/** ServiceRepeat values that render a day picker (Daily / Weekly). */
-const PICKER_REPEATS = ["1", "2"]
 
 export class TaskCacheRefresher {
   constructor(
     private readonly client: QueryClient,
-    private readonly windmill: WindmillRunner,
-    private readonly readScript = "f/ION/read_task_days",
+    /** ION is read through the one object that owns it (ADR 012) — which
+     *  PRIMES the customer first. The old Windmill reader passed an empty
+     *  customer id and 500'd on every task that needs priming, which is why
+     *  those tasks were never once verified. */
+    private readonly ion: IonTasks,
+    /** Translation is the ACL's job — this class only reconciles rows. */
+    private readonly acl: IonTaskAcl,
   ) {}
 
   /**
@@ -61,7 +58,7 @@ export class TaskCacheRefresher {
     const { data } = await this.client
       .schema("maintenance")
       .from("tasks")
-      .select("id, ion_task_id, frequency, ion_verified_at")
+      .select("id, ion_task_id, frequency, ion_verified_at, customer_id")
       .in("id", taskIds as string[])
       .range(0, 999)
     return ((data ?? []) as TaskRow[]).filter(
@@ -75,14 +72,12 @@ export class TaskCacheRefresher {
    * CADENCE COMES FROM ION, NOT FROM WHAT WE ALREADY BELIEVE. Reading only the
    * tasks we think are weekly is how a task ION had switched to Weekly stayed
    * biweekly in our cache forever, and a write down the wrong path silently did
-   * nothing. Every stale task is read; ION's ServiceRepeat decides what its
-   * answer means.
+   * nothing. Every stale task is read.
    *
-   * Only a task ION renders a day picker for can have its days reconciled: a
-   * non-weekly task reports no days, and treating that as truth would delete
-   * real slots (it nearly cost us thirty customers' schedules). Those are
-   * reported as skipped rather than quietly stamped — a stamp we did not earn
-   * is worse than no stamp.
+   * This method knows nothing about cadences, day pickers or start dates: it
+   * asks the ACL what ION's form MEANS in our vocabulary and reconciles rows
+   * against the answer. A form we cannot translate is reported as skipped
+   * rather than quietly stamped — a stamp we did not earn is worse than none.
    */
   async refresh(taskIds: readonly string[], maxAgeMinutes = 60): Promise<RefreshReport> {
     const verifiedAt = new Date().toISOString()
@@ -101,11 +96,6 @@ export class TaskCacheRefresher {
       return { alreadyFresh, read: 0, slotsChanged: 0, skipped, verifiedAt }
     }
 
-    const res = await this.windmill.run<{ days: IonDays; meta: IonMeta; failed: Record<string, string> }>(
-      this.readScript,
-      { ionTaskIds: readable.map((t) => t.ion_task_id!) },
-    )
-
     // ION employee id -> our employee id, so its answer can be stored as ours.
     const { data: emps } = await this.client
       .from("employees")
@@ -122,7 +112,7 @@ export class TaskCacheRefresher {
     const { data: slotRows } = await this.client
       .schema("maintenance")
       .from("task_schedules")
-      .select("id, task_id, day_of_week, tech_employee_id, active")
+      .select("id, task_id, day_of_week, tech_employee_id, active, frequency")
       .in("task_id", readable.map((t) => t.id))
       .range(0, 999)
     const slots = (slotRows ?? []) as {
@@ -131,54 +121,51 @@ export class TaskCacheRefresher {
       day_of_week: number | null
       tech_employee_id: string | null
       active: boolean
+      frequency: string | null
     }[]
+
+    const ourTechOf = (ionTech: string) => ourTechByIon.get(ionTech) ?? null
+
+    // ION context-loads per customer; an unprimed task form 500s for some of
+    // them, which is exactly why these tasks had never once been verified.
+    const custIds = [...new Set(readable.map((t) => t.customer_id).filter((c): c is number => c !== null))]
+    const { data: custRows } = custIds.length
+      ? await this.client.from("Customers").select("id, ion_cust_id").in("id", custIds).range(0, 999)
+      : { data: [] as unknown[] }
+    const ionCustOf = new Map(
+      ((custRows ?? []) as { id: number; ion_cust_id: string | null }[]).map((c) => [c.id, c.ion_cust_id]),
+    )
 
     let slotsChanged = 0
     const verified: string[] = []
     for (const task of readable) {
-      const ionDays = res.days?.[task.ion_task_id!]
-      const meta = res.meta?.[task.ion_task_id!]
-      if (!ionDays || !meta) {
-        skipped.push({ taskId: task.id, reason: res.failed?.[task.ion_task_id!] ?? "not returned" })
+      let translated: TranslatedForm
+      try {
+        translated = this.acl.fromIonForm(
+          await this.ion.readTask(task.ion_task_id!, task.customer_id !== null ? (ionCustOf.get(task.customer_id) ?? undefined) : undefined),
+          ourTechOf,
+        )
+      } catch (err) {
+        skipped.push({ taskId: task.id, reason: err instanceof Error ? err.message : String(err) })
         continue
       }
+      if ("refusal" in translated) {
+        skipped.push({ taskId: task.id, reason: translated.refusal })
+        continue
+      }
+      const want = new Map(translated.schedule.stops.map((st) => [st.weekday, st.techId]))
+      const slotFrequency = translated.schedule.frequency
 
-      // ION's ServiceRepeat is the cadence, whatever we believed walking in.
-      const cachedWeekly = task.frequency !== null && ["weekly", "multi_week", "daily"].includes(task.frequency)
-      const ionWeekly = PICKER_REPEATS.includes(meta.serviceRepeat)
-      if (!ionWeekly) {
-        // No picker: its day and parity live in StartsOn, which we cannot read
-        // back into slots. Unverifiable — but if we thought it WAS weekly, that
-        // disagreement is the dangerous one and must not stay silent.
-        skipped.push({
-          taskId: task.id,
-          reason: cachedWeekly
-            ? `cache says ${task.frequency} but ION says ${meta.serviceRepeatText} — cadence disagreement, days unverifiable`
-            : `${meta.serviceRepeatText} — ION exposes no day picker to read`,
-        })
-        continue
-      }
-      // An empty day list from a task that SHOULD have a picker means the form
-      // did not render — a failed read, not an empty schedule. Never act on it.
-      if (ionDays.length === 0) {
-        skipped.push({ taskId: task.id, reason: "ION returned no days for a weekly task — failed read" })
-        continue
-      }
-      // ION says weekly and our cache did not: correct the slots' cadence so the
-      // task's frequency rollup follows (trigger on task_schedules).
-      const fixCadence = !cachedWeekly
-
-      const want = new Map(ionDays.map((d) => [d.dow, ourTechByIon.get(d.techId) ?? null]))
       const mine = slots.filter((s) => s.task_id === task.id)
       const seen = new Set<number>()
       for (const s of mine) {
         if (s.day_of_week !== null && want.has(s.day_of_week)) {
           seen.add(s.day_of_week)
           const tech = want.get(s.day_of_week)!
-          if (!s.active || fixCadence || (tech && s.tech_employee_id !== tech)) {
+          if (!s.active || s.frequency !== slotFrequency || (tech && s.tech_employee_id !== tech)) {
             await this.update(s.id, {
               active: true,
-              ...(fixCadence ? { frequency: "weekly" } : {}),
+              frequency: slotFrequency,
               ...(tech ? { tech_employee_id: tech } : {}),
             })
             slotsChanged++
@@ -190,7 +177,7 @@ export class TaskCacheRefresher {
       }
       for (const [dow, tech] of want) {
         if (seen.has(dow)) continue
-        await this.insert(task.id, task.ion_task_id!, dow, tech)
+        await this.insert(task.id, task.ion_task_id!, dow, tech, slotFrequency)
         slotsChanged++
       }
       verified.push(task.id)
@@ -238,6 +225,7 @@ export class TaskCacheRefresher {
     ionTaskId: string,
     weekday: number,
     techId: string | null,
+    frequency: string,
   ): Promise<void> {
     const c = this.client as unknown as {
       schema(s: string): {
@@ -255,7 +243,7 @@ export class TaskCacheRefresher {
         day_of_week: weekday,
         tech_employee_id: techId,
         active: true,
-        frequency: "weekly", // only a day-picker task reaches here
+        frequency,
         external_source: "ion_verify",
       })
       .select("id")

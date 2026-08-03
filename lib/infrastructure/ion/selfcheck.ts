@@ -4,7 +4,8 @@
  */
 
 import assert from "node:assert"
-import { IonTaskAcl, type TaskIdentity } from "./acl"
+import { IonTaskAcl, anchorOf, type TaskIdentity } from "./acl"
+import type { IonTaskForm } from "./ion"
 import type { TaskSchedule } from "@/lib/domain/routing"
 
 const acl = new IonTaskAcl()
@@ -68,4 +69,44 @@ assert("refusal" in dayMove && /StartsOn/.test(dayMove.refusal.reason))
 assert("refusal" in acl.toIonWrite(week([{ weekday: 1, techId: "u-nobody" }]), id()))
 assert("refusal" in acl.toIonWrite(week([{ weekday: 1, techId: TECH.josh }]), id({ frequency: null })))
 
-console.log("ion acl selfcheck: 9 checks passed")
+/* --------------------- inbound: ION's form -> our week -------------------- */
+
+const ourTechOf = (t: string) => (t === ION.josh ? TECH.josh : t === ION.caleb ? TECH.caleb : null)
+const form = (over: Partial<IonTaskForm> = {}): IonTaskForm => ({
+  fields: {}, days: {}, serviceRepeat: "2", serviceRepeatText: "Weekly", startsOn: "2026-07-31", rendered: true, ...over,
+})
+
+// A day-picker cadence reports its days directly.
+const weekly = acl.fromIonForm(form({ days: { "5": ION.josh } }), ourTechOf)
+assert("schedule" in weekly)
+assert.deepStrictEqual(weekly.schedule, { frequency: "weekly", stops: [{ weekday: 5, techId: TECH.josh }] })
+
+// A non-picker cadence reports them through the start date — ONE stop, and the
+// start date's week decides A or B. These four dates are real ION anchors.
+const anchors: [string, string, number, string][] = [
+  ["2024-04-03", "Bi-Weekly", 3, "biweekly_a"], // CUSACK, KEVIN — a Wednesday
+  ["2025-09-29", "Bi-Weekly", 1, "biweekly_a"], // HUNTER, LIZ — a Monday
+  ["2024-08-09", "Bi-Weekly", 5, "biweekly_a"], // GALEGO, NORB — a Friday
+  ["2022-06-29", "Monthly", 3, "monthly"],      // STANLEY, TODD — a Wednesday
+]
+for (const [startsOn, repeat, weekday, frequency] of anchors) {
+  const t = acl.fromIonForm(
+    form({ serviceRepeat: "3", serviceRepeatText: repeat, startsOn, fields: { AssignedTo: ION.caleb } }),
+    ourTechOf,
+  )
+  assert("schedule" in t, startsOn)
+  assert.deepStrictEqual(t.schedule, { frequency, stops: [{ weekday, techId: TECH.caleb }] }, startsOn)
+}
+
+// Alternating weeks really do alternate: one week apart flips the bucket.
+const a = anchorOf("2026-08-03", "Bi-Weekly")!
+const b = anchorOf("2026-08-10", "Bi-Weekly")!
+assert.notStrictEqual(a.frequency, b.frequency)
+assert.strictEqual(a.weekday, b.weekday)
+
+// Failed reads are refusals, never empty schedules — acting on one wipes a route.
+assert("refusal" in acl.fromIonForm(form({ rendered: false }), ourTechOf))
+assert("refusal" in acl.fromIonForm(form({ days: {} }), ourTechOf))
+assert("refusal" in acl.fromIonForm(form({ serviceRepeat: "3", serviceRepeatText: "Bi-Weekly", startsOn: "" }), ourTechOf))
+
+console.log("ion acl selfcheck: 19 checks passed")
