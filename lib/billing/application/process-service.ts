@@ -25,6 +25,15 @@ export class ProcessRefused extends Error {}
 
 export interface ProcessDeps {
   issuedInvoices(monthId: string): Promise<{ qboInvoiceId: string; kind: string; subtotalCents: number }[]>
+  /**
+   * The invoice's OPEN BALANCE, read FRESH from QBO at the moment of truth
+   * — never the cache. QBO is the system of record for balance (ADR-010:
+   * applications are facts, balance is the fold, checksummed against QBO).
+   * This is the guard the Charge aggregate cannot be: our loop's identity
+   * (invoiceId:cycle) stops US double-charging, but only the balance knows
+   * about the check that arrived yesterday.
+   */
+  openBalance(qboInvoiceId: string): Promise<number>
   /** The instrument preprocess linked — resolved to its current state (a
    *  disable between preprocess and process must win). */
   instrument(paymentMethodId: string): Promise<PaymentInstrument | null>
@@ -60,7 +69,13 @@ export async function processMonth(m: BillingMonth, deps: ProcessDeps, now: Date
     const instrument = await deps.instrument(m.paymentMethodId)
     if (instrument?.active) {
       for (const inv of invoices) {
-        if (inv.subtotalCents <= 0) continue
+        // The moment-of-truth read: charge what is OWED, not what was
+        // billed. A check that arrived yesterday, a partial payment, a
+        // credit applied after issue — the balance knows; our cache and the
+        // subtotal do not. Zero balance = nothing to collect, fall through
+        // to sending.
+        const balanceCents = await deps.openBalance(inv.qboInvoiceId)
+        if (balanceCents <= 0) continue
 
         // One charge per invoice per CYCLE — a crashed run resumes ITS
         // charge; a re-decision after a decline mints a new cycle.
@@ -73,7 +88,7 @@ export async function processMonth(m: BillingMonth, deps: ProcessDeps, now: Date
             qboInvoiceId: inv.qboInvoiceId,
             customerId: m.customerId,
             paymentMethodId: instrument.paymentMethodId,
-            amountCents: inv.subtotalCents,
+            amountCents: balanceCents,
             cycle,
             at,
           })
