@@ -282,3 +282,37 @@ export class IonTasks extends Ion {
     }
   }
 }
+
+/* -------------------------------- customers ------------------------------- */
+
+export interface IonCustomerHit {
+  ionCustId: string
+  /** The list row's text — name, address, phone as ION renders them. */
+  rowText: string
+}
+
+export class IonCustomers extends Ion {
+  /**
+   * Search ION's customer list. ION's search box matches a single term best,
+   * so callers pass a surname and judge the candidate rows themselves —
+   * judging is translation (the ACL), not transport.
+   */
+  async search(term: string): Promise<IonCustomerHit[]> {
+    const html = await this.get(
+      `/customers/customerlist.cfm?officeid=0&techid=0&routeid=0&search=${encodeURIComponent(term)}&reset=1`,
+    )
+    const root = parse(html)
+    const out: IonCustomerHit[] = []
+    const seen = new Set<string>()
+    for (const a of root.querySelectorAll('a[href*="customerTabs"]')) {
+      const m = (a.getAttribute("href") || "").match(/customerid=(\d+)/)
+      if (!m || seen.has(m[1])) continue
+      seen.add(m[1])
+      interface NodeLike { tagName?: string; parentNode?: NodeLike | null; text?: string }
+      let row: NodeLike | null = a as unknown as NodeLike
+      for (let k = 0; k < 5 && row && row.tagName !== "TR"; k++) row = row.parentNode ?? null
+      out.push({ ionCustId: m[1], rowText: ((row?.text ?? a.text) || "").replace(/\s+/g, " ").trim() })
+    }
+    return out
+  }
+}

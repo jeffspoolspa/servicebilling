@@ -14,6 +14,11 @@ interface Rpc {
   from(t: string): {
     select(cols: string): {
       range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }>
+      in(c: string, v: unknown[]): {
+        is(c2: string, v2: null): {
+          not(c3: string, op: string, v3: null): PromiseLike<{ data: unknown[] | null; error: unknown }>
+        }
+      }
     }
     update(v: Record<string, unknown>): {
       eq(c: string, v: unknown): { select(cols: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
@@ -92,5 +97,42 @@ export class SupabaseCustomerRepository {
     this.streets?.forEach((v) => {
       if (v.accountId === accountId) v.qboId = qboId
     })
+  }
+
+  /** Customers holding a QBO id but no ION link yet — the Awaiting set. */
+  async awaitingIon(accountIds: number[]): Promise<{ accountId: number; displayName: string | null; firstName: string; lastName: string; street: string }[]> {
+    const { data } = await this.client
+      .from("Customers")
+      .select("id, display_name, first_name, last_name, service_street, street, ion_cust_id, qbo_customer_id")
+      .in("id", accountIds)
+      .is("ion_cust_id", null)
+      .not("qbo_customer_id", "is", null)
+    return ((data ?? []) as { id: number; display_name: string | null; first_name: string | null; last_name: string | null; service_street: string | null; street: string | null }[]).map(
+      (r) => ({
+        accountId: r.id,
+        displayName: r.display_name,
+        firstName: r.first_name ?? "",
+        lastName: r.last_name ?? "",
+        street: r.service_street ?? r.street ?? "",
+      }),
+    )
+  }
+
+  /** Persist a resolved ION link — ADR 006's four columns, fuzz once, never again. */
+  async linkIon(accountId: number, ionCustId: string, method: string, confidence: string): Promise<void> {
+    const { data, error } = await this.client
+      .from("Customers")
+      .update({
+        ion_cust_id: ionCustId,
+        ion_match_method: method,
+        ion_match_confidence: confidence,
+        ion_matched_at: new Date().toISOString(),
+      })
+      .eq("id", accountId)
+      .select("id")
+    if (error) throw new Error(`ion link stamp failed: ${JSON.stringify(error).slice(0, 200)}`)
+    if (!data || data.length === 0) {
+      throw new Error(`ion link stamp touched NO rows (account ${accountId}) — filtered, not applied`)
+    }
   }
 }

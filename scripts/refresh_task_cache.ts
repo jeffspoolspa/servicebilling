@@ -1,8 +1,9 @@
 /**
  * Make our copy of a task's schedule true again, straight from ION.
  *
- * `npx tsx scripts/refresh_task_cache.ts <ion_task_id> [...] `
- * `npx tsx scripts/refresh_task_cache.ts --phantom-slots`   (the whole cohort)
+ * `npx tsx scripts/refresh_task_cache.ts <ion_task_id> [...]`
+ * `npx tsx scripts/refresh_task_cache.ts --office "Brunswick"`  (a whole office)
+ * `npx tsx scripts/refresh_task_cache.ts --phantom-slots`       (the drift cohort)
  *
  * Thin caller: it resolves ids and wires the same TaskCacheRefresher that
  * publish uses. Every rule about what ION's form MEANS lives in the ACL, and
@@ -61,9 +62,11 @@ const PHANTOM_SQL = `
 async function main() {
   const args = process.argv.slice(2)
   const cohort = args.includes("--phantom-slots")
-  const ionIds = args.filter((a) => !a.startsWith("--"))
-  if (!cohort && ionIds.length === 0)
-    throw new Error("usage: refresh_task_cache.ts <ion_task_id> [...] | --phantom-slots")
+  const officeAt = args.indexOf("--office")
+  const office = officeAt >= 0 ? args[officeAt + 1] : null
+  const ionIds = args.filter((a, i) => !a.startsWith("--") && i !== officeAt + 1)
+  if (!cohort && !office && ionIds.length === 0)
+    throw new Error('usage: refresh_task_cache.ts <ion_task_id>... | --office "Brunswick" | --phantom-slots')
 
   const sb = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -72,7 +75,17 @@ async function main() {
   )
 
   let taskIds: string[]
-  if (cohort) {
+  if (office) {
+    // Every live task the office actually routes — the set whose stops must be
+    // trustworthy before anyone moves them.
+    const { data: slots } = await sb.schema("maintenance").from("task_schedules")
+      .select("task_id").eq("office", office).eq("active", true).range(0, 4999)
+    const ids = [...new Set(((slots ?? []) as { task_id: string }[]).map((s) => s.task_id))]
+    const { data: live } = await sb.schema("maintenance").from("tasks")
+      .select("id").eq("status", "active").in("id", ids).range(0, 4999)
+    taskIds = ((live ?? []) as { id: string }[]).map((t) => t.id)
+    console.log(`${office}: ${taskIds.length} active tasks`)
+  } else if (cohort) {
     const { data, error } = await sb.rpc("exec_readonly_sql" as never, { q: PHANTOM_SQL } as never)
     if (error) {
       // no generic SQL RPC — fall back to the two-step the same predicate implies

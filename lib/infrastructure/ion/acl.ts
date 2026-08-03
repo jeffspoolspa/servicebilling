@@ -189,3 +189,45 @@ export function startsOnFor(
   }
   throw new Error(`no ${frequency} start on weekday ${weekday} within 28 days of ${notBefore} — unreachable`)
 }
+
+/* ---------------------- customer identity resolution ---------------------- */
+
+/**
+ * ION's customer-list rows -> a link decision (ADR 006 rules, measured on 683
+ * known pairs: 98% match on normalized name exactly). Pure judgment over
+ * fetched rows — the fetch lives on IonCustomers.
+ *
+ *  - one row whose text carries the normalized name  -> linked (street
+ *    agreement upgrades confidence to high)
+ *  - several name matches, exactly one street-confirmed -> linked high
+ *  - several with no tie-break -> ambiguous, a human decides
+ *  - none -> not found (still awaiting the sync, or billing-only)
+ */
+export type CustomerMatch =
+  | { kind: "linked"; ionCustId: string; confidence: "high" | "medium" }
+  | { kind: "ambiguous"; candidates: { ionCustId: string; rowText: string }[] }
+  | { kind: "not_found" }
+
+const alnum = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "")
+
+export function matchIonCustomer(
+  target: { firstName: string; lastName: string; street: string },
+  rows: { ionCustId: string; rowText: string }[],
+): CustomerMatch {
+  const nameKey = alnum(`${target.lastName}${target.firstName}`)
+  const nameKeyFlip = alnum(`${target.firstName}${target.lastName}`)
+  const byName = rows.filter((r) => {
+    const t = alnum(r.rowText)
+    return t.includes(nameKey) || t.includes(nameKeyFlip)
+  })
+  if (byName.length === 0) return { kind: "not_found" }
+
+  const streetKey = alnum(target.street.split(/\s+/).slice(0, 2).join(""))
+  const byStreet = streetKey ? byName.filter((r) => alnum(r.rowText).includes(streetKey)) : []
+
+  if (byName.length === 1) {
+    return { kind: "linked", ionCustId: byName[0].ionCustId, confidence: byStreet.length === 1 ? "high" : "medium" }
+  }
+  if (byStreet.length === 1) return { kind: "linked", ionCustId: byStreet[0].ionCustId, confidence: "high" }
+  return { kind: "ambiguous", candidates: byName.map((r) => ({ ionCustId: r.ionCustId, rowText: r.rowText.slice(0, 120) })) }
+}
