@@ -41,26 +41,29 @@ def comp(x1,y1,x2,y2,color=TEAL):   # filled diamond at the OWNER end (x1,y1)
 
 # ---- domain: customers lane
 c   = box("cust",28,52,392,"«aggregate root»","Customer",TEAL,
-      ["id: uuid              (Customers.id)","displayName: text","shape: CustomerShape","qbo: ExternalRef","ion: ExternalRef","~onboarding: derived from the two refs"],
+      ["id: uuid              (Customers.id)","name: PersonName","billing: BillingAddress","phone: Phone | null","email: Email | null","violations: Violation[]   <- both doors","qbo: ExternalRef","ion: ExternalRef","~onboarding: derived from the two refs"],
       ["blocks('create_task'): string | null   [I-C3]","onboarding: drafted|awaiting_ion|linked"])
 er  = box("eref",28,c["y2"]+20,190,"«value object»","ExternalRef",GREY,
       ["unlinked","awaiting(since, attempts)","linked(id, method,","   confidence, at)","ambiguous(candidates[])"],dashed=True)
-cs  = box("shape",230,c["y2"]+20,190,"«value object»","CustomerShape",GREY,
-      ["firstName / lastName","street / city / state / zip","phone / email"],dashed=True)
-sp  = box("prof",28,er["y2"]+20,190,"«value object»","ServiceProfile",GREY,
-      ["cadence: resolved | ambiguous","ratePerVisit / monthly","poolType","notes[]"],dashed=True)
-cd  = box("draft",230,er["y2"]+20,190,"«entity»","CustomerDraft",BLUE,
-      ["shape: CustomerShape","profile: ServiceProfile","violations: Violation[]"])
-ds  = box("rules",28,max(sp["y2"],cd["y2"])+20,392,"«domain service»","customer.ts — pure rules",PURPLE,
-      ["no I/O · selfchecked"],
-      ["customerFit(shape) -> Violation[]  both doors","draftCustomer(row) -> CustomerDraft","resolveCadence(row) -> resolved|ambiguous","parseServiceDays(text) -> weekday[]"],fill="#f7f2fa")
+ph  = box("phone",230,c["y2"]+20,190,"«value object»","Phone",GREY,
+      ["digits: 10 canonical","display: (912) 480-7453","equals() — ADR 006 match"],dashed=True)
+em  = box("email",230,ph["y2"]+16,190,"«value object»","Email / PersonName",GREY,
+      ["address: lower-cased, one","first / last -> displayName"],dashed=True)
+sp  = box("bill",28,er["y2"]+20,190,"«value object»","BillingAddress",GREY,
+      ["street / city / state / zip","(the SERVICE address is an","  entity, not a value)"],dashed=True)
+cd  = box("draftfn",28,max(sp["y2"],em["y2"])+20,392,"«domain service»","customer.ts — parse, don't validate",PURPLE,
+      ["no I/O · selfchecked · both doors"],
+      ["Customer.draft(input)  -> Customer | refused","Customer.rehydrate(id, input, refs)  flags","every field via a value object's parse()"],fill="#f7f2fa")
+ds  = cd
 
 # ---- domain: maintenance lane
-tk  = box("task",468,52,384,"«aggregate root»","Task   (maintenance)",TEAL,
-      ["id: uuid          (maintenance.tasks.id)","customer_id -> Customers.id","ion_task_id: text","frequency / days_per_week","price_per_visit_cents","ion_invoice_type","~schedules: TaskSchedule[*]"])
-tsc = box("slot",468,tk["y2"]+20,384,"«entity»","TaskSchedule   (the slot)",BLUE,
+ag  = box("agree",468,52,384,"«aggregate root»","ServiceAgreement   (maintenance)",TEAL,
+      ["customerId -> Customers.id","placeId -> service_locations.place_id","cadence: weekly|biweekly_a|_b|monthly","weekday: 0..6","ratePerVisit / monthlyEstimate","poolType   gateCode","~what Task.open() consumes"])
+tk  = box("task",468,ag["y2"]+20,384,"«aggregate root»","Task   (maintenance)",TEAL,
+      ["id: uuid        (maintenance.tasks.id)","customer_id -> Customers.id","ion_task_id: text","frequency / days_per_week","price_per_visit_cents","~schedules: TaskSchedule[*]"])
+tsc = box("slot",468,tk["y2"]+18,384,"«entity»","TaskSchedule   (the slot)",BLUE,
       ["task_id -> tasks.id","day_of_week: 0..6","tech_employee_id -> employees.id","frequency: weekly|biweekly_a|_b|monthly","starts_on / active"])
-sl  = box("loc",468,tsc["y2"]+20,384,"«entity»","ServiceLocation",BLUE,
+sl  = box("loc",468,tsc["y2"]+18,384,"«entity»","ServiceLocation",BLUE,
       ["id                (service_locations.id)","account_id -> Customers.id","place_id: text     <- THE IDENTITY","latitude / longitude","geocode_status / place_provider","is_primary / is_active"])
 
 LANE_B = max(ds["y2"], sl["y2"]) + 18
@@ -85,10 +88,11 @@ H = INF_B + 14
 
 # ---- arrows
 comp(c["cx"]-104, c["y2"], c["cx"]-104, er["y"])                 # Customer <>- ExternalRef
-comp(cs["cx"],    c["y2"], cs["cx"],    cs["y"])                 # Customer <>- CustomerShape
-comp(cd["cx"],    cd["y"], cd["cx"],    cs["y2"], BLUE)          # Draft <>- CustomerShape
-comp(cd["x"],     cd["y"]+40, sp["x2"], cd["y"]+40, BLUE)        # Draft <>- ServiceProfile
+comp(ph["cx"],    c["y2"], ph["cx"],    ph["y"])                 # Customer <>- Phone
+comp(ph["cx"]+60, ph["y2"], ph["cx"]+60, em["y"], GREY)          # (name/email group)
+comp(sp["cx"],    er["y2"], sp["cx"],   sp["y"], GREY)           # Customer <>- BillingAddress
 comp(tsc["cx"],   tk["y2"], tsc["cx"],  tsc["y"])                # Task <>- TaskSchedule
+ref(ag["x"]+150, ag["y2"], tk["cx"], tk["y"]-2, "opens as", mid=(ag["x"]+215, ag["y2"]+13))
 ref(tk["x"], tk["rows"][1], c["x2"]+2, tk["rows"][1], "customer_id", mid=(444, tk["rows"][1]-9))
 ref(sl["x"], sl["rows"][1], c["x2"]+2, c["y"]+120, "account_id",
     mid=(444, (sl["rows"][1]+c["y"]+120)/2), curve=(438, sl["rows"][1], 438, c["y"]+120))
