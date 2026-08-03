@@ -1,6 +1,9 @@
 # Maintenance billing — domain model worksheet
 
 > Status: [draft]   working doc for modeling the month-end billing refactor.
+> **Built so far (2026-08-03):** `lib/billing/domain/billing-month.ts` — the
+> BillingMonth aggregate with I-B1/I-B2/I-B3 enforced and 10 selfchecks.
+> Still on paper: Pricer, Reconciler, the repository, the application service.
 > Organized by MODULES (DDD packaging of one domain layer: cohesive clusters,
 > named from the language, low coupling between them) — not bounded contexts.
 > Layer rules: [LAYERING.md](../conventions/LAYERING.md). Rulings recorded
@@ -37,10 +40,10 @@ that reaches the customer. Stated as invariants the model must enforce:
 
 | Block | Kind | Notes |
 |---|---|---|
-| BillingMonth | AGGREGATE | RULED: the conceptual unit is the CUSTOMER-month ("July pool maintenance" for this customer). Owns the CLAIMS (visit -> invoice assignments), the completeness verdict, and the month lock. Enforces I-B1/2/3: `claim()` refuses a second claim, `lock()` freezes. |
+| BillingMonth | AGGREGATE | **[built]** RULED: the conceptual unit is the CUSTOMER-month ("July pool maintenance" for this customer). Owns the CLAIMS (visit -> invoice assignments), the completeness verdict, and the month lock. Enforces I-B1/2/3: `claim()` refuses a second claim, `lock()` freezes. |
 | Invoice | entity (external fact) | ION builds ONE PER TASK — an implementation detail forced on us, not our concept. A customer-month with N tasks has N invoices; BillingMonth conceptualizes them together. Mirrored from QBO; ADR-010 event stream owns balance. |
 | billability | domain rule (Billing) | RULED: Billing derives it FROM Delivery state — `non_serviceable`/`skipped` -> not billable; `completed` -> billable, priced by Terms (a QC task's rate of 0 makes its labor $0 without a special case). Delivery states, Billing judges. |
-| Pricer | domain service | Terms + catalog + claimed visits -> expected cents |
+| Pricer | domain service | *[next]* Terms + catalog + claimed visits -> expected cents |
 | Reconciler | domain service | expected vs ION-built invoice -> typed findings; gates charging |
 
 ### payments — settling the money (already largely modeled)
