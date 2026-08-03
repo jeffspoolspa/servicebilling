@@ -46,6 +46,8 @@ interface MonthRow {
   sent_at: string | null
 }
 
+const data_of = (r: { data: unknown[] | null }) => r.data
+
 const MONTH_COLS =
   "id, customer_id, month, reconciled_at, disputed_at, disputes, delivery_refreshed_at, gated_at, gate_held_for, invoiced_at, sent_at"
 
@@ -479,20 +481,40 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     return out
   }
 
-  /** Task doc metadata for the issue step: terms axes + ION invoice type + category. */
+  /**
+   * Task doc metadata for the documents/issue path. The LABOR axis comes
+   * from maintenance.task_terms — the SAME terms history the pricer reads —
+   * because tasks.billing_method proved stale (53 ION-flat tasks carried
+   * per_visit there while their terms correctly said flat_rate_monthly).
+   * One truth: what prices the month formats the document.
+   */
   async taskDocMeta(taskIds: readonly string[]): Promise<Map<string, { labor: "per_visit" | "flat_rate"; consumables: "included" | "separate"; ionInvoiceType: string | null; category: string | null }>> {
     const out = new Map<string, { labor: "per_visit" | "flat_rate"; consumables: "included" | "separate"; ionInvoiceType: string | null; category: string | null }>()
     const ids = [...new Set(taskIds)]
     const tasks = this.client.schema("maintenance").from("tasks") as unknown as {
       select(c: string): { in(col: string, vals: string[]): PromiseLike<{ data: unknown[] | null; error: unknown }> }
     }
+    const termsQ = this.client.schema("maintenance").from("task_terms") as unknown as {
+      select(c: string): { in(col: string, vals: string[]): { is(col: string, v: null): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
+    }
     for (let i = 0; i < ids.length; i += 100) {
-      const { data, error } = await tasks.select("id, billing_method, consumables_mode, ion_invoice_type, category").in("id", ids.slice(i, i + 100))
-      if (error) throw new Error(`task doc meta failed: ${JSON.stringify(error).slice(0, 200)}`)
-      for (const r of (data ?? []) as { id: string; billing_method: string | null; consumables_mode: string | null; ion_invoice_type: string | null; category: string | null }[]) {
+      const chunk = ids.slice(i, i + 100)
+      const [taskRes, termRes] = await Promise.all([
+        tasks.select("id, billing_method, consumables_mode, ion_invoice_type, category").in("id", chunk),
+        termsQ.select("task_id, billing_method, consumables_mode").in("task_id", chunk).is("valid_to", null),
+      ])
+      if (taskRes.error) throw new Error(`task doc meta failed: ${JSON.stringify(taskRes.error).slice(0, 200)}`)
+      if (termRes.error) throw new Error(`task terms failed: ${JSON.stringify(termRes.error).slice(0, 200)}`)
+      const terms = new Map(
+        ((termRes.data ?? []) as { task_id: string; billing_method: string | null; consumables_mode: string | null }[]).map((t) => [t.task_id, t]),
+      )
+      for (const r of (data_of(taskRes) ?? []) as { id: string; billing_method: string | null; consumables_mode: string | null; ion_invoice_type: string | null; category: string | null }[]) {
+        const t = terms.get(r.id)
+        const method = t?.billing_method ?? r.billing_method
+        const consumables = t?.consumables_mode ?? r.consumables_mode
         out.set(r.id, {
-          labor: r.billing_method === "flat_rate" ? "flat_rate" : "per_visit",
-          consumables: r.consumables_mode === "separate" ? "separate" : "included",
+          labor: method != null && method.startsWith("flat") ? "flat_rate" : "per_visit",
+          consumables: consumables === "separate" ? "separate" : "included",
           ionInvoiceType: r.ion_invoice_type,
           category: r.category,
         })

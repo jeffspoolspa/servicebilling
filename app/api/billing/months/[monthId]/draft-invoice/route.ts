@@ -24,25 +24,23 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
   const month = await repo.byId(monthId)
   if (!month) return NextResponse.json({ error: "month not found" }, { status: 404 })
 
-  // The tasks' agreements decide the axes; ION's invoice-type string is
-  // translated at the ACL into our presentation default. The draft flip is
-  // a parameter, never state.
+  // The tasks' agreements decide the axes — the SAME taskDocMeta the issue
+  // step uses (labor from task_terms, the pricer's truth). ION's
+  // invoice-type string is translated at the ACL into our presentation
+  // default; the draft flip is a parameter, never state.
   const taskIds = [...new Set(month.billableItems.map((i) => i.taskId).filter(Boolean))]
-  const { data: taskRows, error } = await sys
-    .schema("maintenance")
-    .from("tasks")
-    .select("id, billing_method, consumables_mode, ion_invoice_type, category")
-    .in("id", taskIds)
-  if (error) return NextResponse.json({ error: String(error.message ?? error) }, { status: 500 })
-  const rows = (taskRows ?? []) as { id: string; billing_method: string | null; consumables_mode: string | null; ion_invoice_type: string | null; category: string | null }[]
-  const terms: DocTerms[] = rows.map((t) => ({
-    taskId: t.id,
-    labor: t.billing_method === "flat_rate" ? "flat_rate" : "per_visit",
-    consumables: t.consumables_mode === "separate" ? "separate" : "included",
-    qc: t.category === "quality_control",
-    green: t.category === "green_pool",
-  }))
-  const defaultPresentation = presentationOf(rows.find((t) => t.ion_invoice_type)?.ion_invoice_type ?? null)
+  const meta = await repo.taskDocMeta(taskIds)
+  const terms: DocTerms[] = taskIds.map((id) => {
+    const t = meta.get(id)
+    return {
+      taskId: id,
+      labor: t?.labor ?? "per_visit",
+      consumables: t?.consumables ?? "included",
+      qc: t?.category === "quality_control",
+      green: t?.category === "green_pool",
+    }
+  })
+  const defaultPresentation = presentationOf([...meta.values()].find((t) => t.ionInvoiceType)?.ionInvoiceType ?? null)
   const presentation: InvoicePresentation = asked === "summary" || asked === "itemized" ? asked : defaultPresentation
 
   // Resolve every labor line through the catalog — the same lookup the
