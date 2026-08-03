@@ -131,4 +131,27 @@ check("the aggregate records its own links, and refuses a re-fuzz [ADR 006]", ()
   assert.throws(() => withQbo.linkQbo("7777"), /refusing to relink/)
 })
 
+check("awaiting is a real state with a bounded clock, not a null column", () => {
+  const c = (Customer.draft(input()) as Customer).withIds("1016400").linkQbo("6532")
+  assert.strictEqual(c.onboarding, "awaiting_ion")
+
+  // Each failed sweep records a try; the count IS the give-up clock.
+  const one = c.ionLinkAttempted("2026-08-03T06:00:00Z")
+  assert.strictEqual((one.ion as { attempts: number }).attempts, 1)
+  const two = one.ionLinkAttempted("2026-08-04T06:00:00Z")
+  const three = two.ionLinkAttempted("2026-08-05T06:00:00Z")
+  assert.strictEqual(three.ionLinkExhausted, true, "three tries and a person looks")
+  assert.strictEqual(two.ionLinkExhausted, false)
+
+  // Due only when the window has passed — and never once exhausted.
+  assert.strictEqual(one.ionLinkDue(new Date("2026-08-03T12:00:00Z")), false, "same day, not due again")
+  assert.strictEqual(one.ionLinkDue(new Date("2026-08-04T06:00:00Z")), true)
+  assert.strictEqual(three.ionLinkDue(new Date("2026-09-01T00:00:00Z")), false, "exhausted is terminal")
+
+  // A successful link ends the clock; attempting after linking is a no-op.
+  const linked = two.linkIon({ ionCustId: "2581350", method: "api_fuzzy", confidence: "high" })
+  assert.strictEqual(linked.onboarding, "linked")
+  assert.strictEqual(linked.ionLinkAttempted(), linked)
+})
+
 console.log(`customers domain selfcheck: ${n} checks passed`)

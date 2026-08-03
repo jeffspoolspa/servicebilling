@@ -13,12 +13,12 @@
  * button, or a script.
  */
 
-import type { CustomerRepository, ExternalCustomerDirectory } from "@/lib/customers/domain"
+import type { Customer, CustomerRepository, ExternalCustomerDirectory } from "@/lib/customers/domain"
 
 export interface LinkReport {
   linked: { accountId: number; displayName: string; ionCustId: string; confidence: string }[]
   ambiguous: { accountId: number; displayName: string; candidates: { ionCustId: string; rowText: string }[] }[]
-  notFound: { accountId: number; displayName: string }[]
+  notFound: { accountId: number; displayName: string; attempts: number; exhausted: boolean }[]
 }
 
 export class LinkIonService {
@@ -27,8 +27,17 @@ export class LinkIonService {
     private readonly directory: ExternalCustomerDirectory,
   ) {}
 
+  /** Every customer still owed an attempt — the daily sweep's entry point. */
+  async linkDue(now: Date, opts: { dryRun: boolean }): Promise<LinkReport> {
+    return this.linkThese(await this.customers.dueForIonLink(now), opts)
+  }
+
+  /** Named customers — the button's entry point, no waiting-window check. */
   async link(accountIds: number[], opts: { dryRun: boolean }): Promise<LinkReport> {
-    const awaiting = await this.customers.awaitingIon(accountIds)
+    return this.linkThese(await this.customers.awaitingIon(accountIds), opts)
+  }
+
+  private async linkThese(awaiting: Customer[], opts: { dryRun: boolean }): Promise<LinkReport> {
     const report: LinkReport = { linked: [], ambiguous: [], notFound: [] }
 
     for (const c of awaiting) {
@@ -41,7 +50,11 @@ export class LinkIonService {
       } else if (match.kind === "ambiguous") {
         report.ambiguous.push({ accountId, displayName: c.displayName, candidates: match.candidates.map((x) => ({ ionCustId: x.id, rowText: x.name })) })
       } else {
-        report.notFound.push({ accountId, displayName: c.displayName })
+        // Not an error — ION has not synced them yet. Record the try; after
+        // Customer.ION_LINK_TRIES the aggregate says a person should look.
+        const tried = c.ionLinkAttempted()
+        if (!opts.dryRun) await this.customers.save(tried)
+        report.notFound.push({ accountId, displayName: c.displayName, attempts: (tried.ion as { attempts: number }).attempts, exhausted: tried.ionLinkExhausted })
       }
     }
     return report

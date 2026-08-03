@@ -30,14 +30,29 @@ export type ExternalRef =
   | { state: "linked"; id: string; method: string; confidence: string; at: string }
   | { state: "ambiguous"; candidates: { id: string; name: string }[] }
 
-/** ADR 006's four columns, read as one meaning. */
+/**
+ * ADR 006's four columns plus the attempt counters, read as ONE meaning.
+ *
+ * The distinction that matters: a customer with a billing identity but no ION
+ * link is not "unlinked" (we never tried) — it is AWAITING (we are trying, a
+ * bounded number of times). Those demand different actions, which is the
+ * whole reason ExternalRef has four states instead of a nullable column.
+ */
 export function ionRefFrom(row: {
   ion_cust_id: string | null
   ion_match_method: string | null
   ion_match_confidence: string | null
   ion_matched_at: string | null
+  ion_link_attempts?: number | null
+  ion_link_attempted_at?: string | null
+  qbo_customer_id?: string | null
 }): ExternalRef {
-  if (!row.ion_cust_id) return { state: "unlinked" }
+  if (!row.ion_cust_id) {
+    if (row.qbo_customer_id) {
+      return { state: "awaiting", since: row.ion_link_attempted_at ?? "", attempts: row.ion_link_attempts ?? 0 }
+    }
+    return { state: "unlinked" }
+  }
   return {
     state: "linked",
     id: row.ion_cust_id,
@@ -217,6 +232,37 @@ export class Customer {
     return this.withIds(this.id ?? "", {
       ion: { state: "linked", id: match.ionCustId, method: match.method, confidence: match.confidence, at },
     })
+  }
+
+  /**
+   * How many tries we give ION's sync before a person has to look. Three
+   * daily attempts: the sync is usually run the same day, and a customer
+   * still missing after three days is missing for a reason.
+   */
+  static readonly ION_LINK_TRIES = 3
+
+  /** Record a try that did not find them. The count is the give-up clock. */
+  ionLinkAttempted(at = new Date().toISOString()): Customer {
+    if (this.ion.state === "linked") return this
+    const attempts = this.ion.state === "awaiting" ? this.ion.attempts + 1 : 1
+    return this.withIds(this.id ?? "", { ion: { state: "awaiting", since: at, attempts } })
+  }
+
+  /** Tried enough. Not an error — a customer who needs a person. */
+  get ionLinkExhausted(): boolean {
+    return this.ion.state === "awaiting" && this.ion.attempts >= Customer.ION_LINK_TRIES
+  }
+
+  /**
+   * Should the sweep try this one now? A customer is due when we are still
+   * awaiting, have tries left, and have not tried within the window. The
+   * BUTTON bypasses the window — a person clicking it is saying "I just
+   * synced them", which is better information than a clock.
+   */
+  ionLinkDue(now: Date, windowHours = 20): boolean {
+    if (this.ion.state !== "awaiting" || this.ionLinkExhausted) return false
+    if (!this.ion.since) return true
+    return now.getTime() - new Date(this.ion.since).getTime() >= windowHours * 3_600_000
   }
 
   /** Several plausible ION matches and no tie-break — a person decides. */

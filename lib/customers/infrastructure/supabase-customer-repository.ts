@@ -37,10 +37,12 @@ interface CustomerRow {
   ion_match_method: string | null
   ion_match_confidence: string | null
   ion_matched_at: string | null
+  ion_link_attempts: number | null
+  ion_link_attempted_at: string | null
 }
 
 const COLS =
-  "id, first_name, last_name, display_name, street, city, state, zip, phone, email, qbo_customer_id, ion_cust_id, ion_match_method, ion_match_confidence, ion_matched_at"
+  "id, first_name, last_name, display_name, street, city, state, zip, phone, email, qbo_customer_id, ion_cust_id, ion_match_method, ion_match_confidence, ion_matched_at, ion_link_attempts, ion_link_attempted_at"
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "")
 
@@ -140,6 +142,22 @@ export class SupabaseCustomerRepository implements CustomerRepository {
     return [...all.values()].filter((c) => c.onboarding === "awaiting_ion")
   }
 
+  /**
+   * The sweep's question: who is still owed an ION link attempt? Answered by
+   * a state query, not by a subscription — a dropped signal costs latency,
+   * never correctness. The aggregate decides "due"; this narrows the scan.
+   */
+  async dueForIonLink(now: Date, limit = 500): Promise<Customer[]> {
+    const { data, error } = await (this.table("Customers").select(COLS) as unknown as {
+      is(c: string, v: null): { not(c2: string, op: string, v2: null): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
+    })
+      .is("ion_cust_id", null)
+      .not("qbo_customer_id", "is", null)
+      .range(0, limit - 1)
+    if (error) throw new Error(`due-for-ion-link scan failed: ${JSON.stringify(error).slice(0, 200)}`)
+    return (data ?? []).map((r) => toCustomer(r as CustomerRow)).filter((c) => c.ionLinkDue(now))
+  }
+
   async add(customer: Customer, place: PlaceIdentity | null): Promise<Customer> {
     const b = customer.billing
     const { data, error } = await this.client.rpc("create_account", {
@@ -183,6 +201,10 @@ export class SupabaseCustomerRepository implements CustomerRepository {
       patch.ion_match_method = customer.ion.method
       patch.ion_match_confidence = customer.ion.confidence
       patch.ion_matched_at = customer.ion.at
+    }
+    if (customer.ion.state === "awaiting") {
+      patch.ion_link_attempts = customer.ion.attempts
+      patch.ion_link_attempted_at = customer.ion.since || null
     }
     if (Object.keys(patch).length === 0) return
 

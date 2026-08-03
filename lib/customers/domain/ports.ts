@@ -51,6 +51,9 @@ export interface CustomerRepository {
 
   /** Customers whose billing identity exists but whose ION link does not. */
   awaitingIon(ids: readonly number[]): Promise<Customer[]>
+
+  /** Everyone still owed a link attempt — the sweep asks state, not a queue. */
+  dueForIonLink(now: Date, limit?: number): Promise<Customer[]>
 }
 
 /**
