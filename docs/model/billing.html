@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Billing — visits to money | JPS model</title>
+<style>
+  :root{
+    --bg:#fbfbfa; --fg:#1c1c1a; --muted:#6b6b66; --line:#e4e3df;
+    --accent:#0b6e6e; --accent-soft:#e6f1f1;
+    --code-bg:#f3f2ef; --code-fg:#3a3a36;
+    --why-bg:#eef4ff; --why-bar:#3b6fd4;
+    --break-bg:#fff4ec; --break-bar:#d4761f;
+    --agg:#0b6e6e; --ent:#3b6fd4; --vo:#7a7a72; --svc:#8a4fb0;
+    --maxw:920px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0; background:var(--bg); color:var(--fg);
+    font:16px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{display:grid; grid-template-columns:236px minmax(0,1fr); max-width:1280px; margin:0 auto;}
+  nav.toc{position:sticky; top:0; align-self:start; height:100vh; overflow:auto;
+    border-right:1px solid var(--line); padding:26px 18px 40px;}
+  nav.toc .brand{font-weight:700; font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:14px;}
+  nav.toc a{display:block; color:var(--fg); text-decoration:none; padding:5px 8px; border-radius:6px; font-size:14px;}
+  nav.toc a:hover{background:var(--accent-soft); color:var(--accent);}
+  main{padding:42px 52px 120px; max-width:var(--maxw);}
+  h1{font-size:31px; line-height:1.15; margin:0 0 4px;}
+  .kicker{color:var(--accent); font-weight:600; font-size:13px; letter-spacing:.07em; text-transform:uppercase; margin-bottom:10px;}
+  h2{font-size:21px; margin:46px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--line);}
+  p{margin:11px 0;}
+  .lead{font-size:18px; color:#333;}
+  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace; font-size:.86em;
+    background:var(--code-bg); color:var(--code-fg); padding:1px 5px; border-radius:4px;}
+  table{border-collapse:collapse; width:100%; margin:14px 0; font-size:14.5px;}
+  th,td{border:1px solid var(--line); padding:8px 11px; text-align:left; vertical-align:top;}
+  th{background:#f4f4f1; font-weight:650;}
+  .call{border-left:4px solid var(--line); border-radius:0 8px 8px 0; padding:11px 15px; margin:16px 0; font-size:14.7px;}
+  .call .tag{font-weight:700; font-size:11px; letter-spacing:.06em; text-transform:uppercase; display:block; margin-bottom:3px;}
+  .why{background:var(--why-bg); border-color:var(--why-bar);} .why .tag{color:var(--why-bar);}
+  .brk{background:var(--break-bg); border-color:var(--break-bar);} .brk .tag{color:var(--break-bar);}
+  /* UML */
+  .uml{border:1px solid var(--line); border-radius:10px; background:#fff; padding:10px; margin:16px 0; overflow-x:auto;}
+  .uml svg{display:block; min-width:820px;}
+  .legend{display:flex; gap:14px; flex-wrap:wrap; font-size:12.5px; color:var(--muted); margin:6px 4px 0;}
+  .legend b{font-weight:650;}
+  .sw{display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px;}
+  /* layer flow */
+  .lflow{margin:16px 0;}
+  .step{display:grid; grid-template-columns:220px 1fr; gap:0; border:1px solid var(--line); border-radius:9px; background:#fff; margin:8px 0; overflow:hidden;}
+  .step .name{padding:10px 14px; font-weight:650; font-size:14.5px; background:#f7f7f5; border-right:1px solid var(--line);}
+  .step .name span{display:block; font-weight:400; font-size:12px; color:var(--muted);}
+  .step .body{padding:10px 14px; font-size:13.8px;}
+  .chip{display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.05em; border-radius:4px; padding:1px 7px; margin-right:6px; vertical-align:1px;}
+  .chip.dom{background:var(--accent-soft); color:var(--accent);}
+  .chip.inf{background:#f0e9f7; color:var(--svc);}
+  .step .row{margin:3px 0;}
+  .arrowdown{ text-align:center; color:var(--muted); font-size:16px; margin:-2px 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="toc">
+  <div class="brand">JPS · Billing model</div>
+  <a href="#decision">The decision</a>
+  <a href="#uml">Object model</a>
+  <a href="#checks">Checks &amp; the gate</a>
+  <a href="#moments">Claim vs settle</a>
+  <a href="#phases">Migration phases</a>
+  <a href="#flow">Workflow by layer</a>
+  <a href="#flags">Flagged bills</a>
+  <a href="#schema">Schema fit</a>
+  <a href="#open">Open questions</a>
+</nav>
+<main>
+  <div class="kicker">Domain model &#183; draft for agreement</div>
+  <h1>Billing: visits to money</h1>
+  <p class="lead">We build the invoices ourselves from visits. BillingMonth is the
+  interface between the billing and maintenance modules: it turns delivery facts
+  into billable items, groups them into invoices, and answers to ION only through
+  the per-task reconcile. QuickBooks holds issued invoices and echoes line ids back.</p>
+
+  <h2 id="decision">The decision and what it deletes</h2>
+  <div class="call why"><span class="tag">Ruled</span>
+  Self-build. The old write-ahead promise, ION invoice matching, and
+  expected-vs-actual gates existed only to audit ION's invoices &#8212; gone. The
+  Reconciler survives with one job: <b>sum the month's billable items by task and
+  agree with ION's per-task invoice facts on labor pricing and consumable
+  completeness.</b> Our invoice grouping never enters that comparison.</div>
+
+  <h2 id="uml">Object model</h2>
+  <div class="uml">
+  <svg viewBox="0 0 880 1046" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Inter,sans-serif">
+    <defs>
+      <marker id="ref" markerWidth="11" markerHeight="9" refX="10" refY="4.5" orient="auto">
+        <path d="M0,0 L10,4.5 L0,9" fill="none" stroke="#6b6b66" stroke-width="1.4"/>
+      </marker>
+      <marker id="comp" markerWidth="14" markerHeight="10" refX="13" refY="5" orient="auto">
+        <path d="M1,5 L7,1.5 L13,5 L7,8.5 Z" fill="#1c1c1a"/>
+      </marker>
+    </defs>
+    <rect x="12" y="14" width="270" height="1020" rx="12" fill="#f4f7f6" stroke="#dfe7e5"/>
+    <text x="26" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#0b6e6e">DELIVERY</text>
+    <rect x="298" y="14" width="250" height="1020" rx="12" fill="#f5f5f9" stroke="#e2e2ec"/>
+    <text x="312" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#3b6fd4">AGREEMENTS &#183; SHARED</text>
+    <rect x="564" y="14" width="304" height="1020" rx="12" fill="#faf6f2" stroke="#ece2d8"/>
+    <text x="578" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#d4761f">BILLING</text>
+
+    <rect x="34" y="62" width="226" height="260" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
+    <text x="147" y="80" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
+    <text x="147" y="97" font-size="15" font-weight="700" text-anchor="middle">Visit</text>
+    <line x1="34" y1="106" x2="260" y2="106" stroke="#e4e3df"/>
+    <text x="46" y="118" font-size="12" fill="#3a3a36">task_id</text>
+    <text x="46" y="134" font-size="12" fill="#3a3a36">customer_id</text>
+    <text x="46" y="150" font-size="12" fill="#3a3a36">visit_date</text>
+    <text x="46" y="166" font-size="12" fill="#3a3a36">started_at</text>
+    <text x="46" y="182" font-size="12" fill="#3a3a36">ended_at</text>
+    <text x="46" y="198" font-size="12" fill="#3a3a36">actual_tech_id</text>
+    <text x="46" y="214" font-size="12" fill="#d4761f">state &#8592; gen(status, serviceable)</text>
+    <text x="46" y="230" font-size="12" fill="#d4761f">settled_at  [add]</text>
+    <text x="46" y="246" font-size="12" fill="#6b6b66">readings: Reading[*]</text>
+    <text x="46" y="262" font-size="12" fill="#6b6b66">checklist: ChecklistItem[*]</text>
+    <text x="46" y="278" font-size="12" fill="#6b6b66">usage: ConsumableUsage[*]</text>
+    <line x1="34" y1="292" x2="260" y2="292" stroke="#e4e3df"/>
+    <text x="46" y="306" font-size="12" fill="#3a3a36">settle()</text>
+    <rect x="34" y="352" width="226" height="102" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="147" y="370" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="147" y="387" font-size="15" font-weight="700" text-anchor="middle">ConsumableUsage</text>
+    <line x1="34" y1="396" x2="260" y2="396" stroke="#e4e3df"/>
+    <text x="46" y="408" font-size="12" fill="#3a3a36">ion_item_id</text>
+    <text x="46" y="424" font-size="12" fill="#3a3a36">quantity</text>
+    <text x="46" y="440" font-size="12" fill="#3a3a36">base_quantity</text>
+    <rect x="34" y="484" width="226" height="102" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.2" stroke-dasharray="4 3"/>
+    <text x="147" y="502" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;value object&#187;</text>
+    <text x="147" y="519" font-size="15" font-weight="700" text-anchor="middle">Reading</text>
+    <line x1="34" y1="528" x2="260" y2="528" stroke="#e4e3df"/>
+    <text x="46" y="540" font-size="12" fill="#3a3a36">name</text>
+    <text x="46" y="556" font-size="12" fill="#3a3a36">value</text>
+    <text x="46" y="572" font-size="12" fill="#3a3a36">reading_id &#8594; definition</text>
+    <line x1="147" y1="352" x2="147" y2="322" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
+    <path d="M34 521 L26 521 L26 312 L33 312" fill="none" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
+
+    <rect x="320" y="62" width="206" height="150" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="423" y="80" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="423" y="97" font-size="15" font-weight="700" text-anchor="middle">Customer</text>
+    <line x1="320" y1="106" x2="526" y2="106" stroke="#e4e3df"/>
+    <text x="332" y="118" font-size="12" fill="#3a3a36">id</text>
+    <text x="332" y="134" font-size="12" fill="#3a3a36">display_name</text>
+    <text x="332" y="150" font-size="12" fill="#3a3a36">qbo_customer_id</text>
+    <text x="332" y="166" font-size="12" fill="#3a3a36">ion_cust_id</text>
+    <text x="332" y="182" font-size="12" fill="#3a3a36">office_id</text>
+    <text x="332" y="198" font-size="12" fill="#3a3a36">preferred_payment_type</text>
+    <rect x="320" y="242" width="206" height="198" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="423" y="260" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="423" y="277" font-size="15" font-weight="700" text-anchor="middle">Task</text>
+    <line x1="320" y1="286" x2="526" y2="286" stroke="#e4e3df"/>
+    <text x="332" y="298" font-size="12" fill="#3a3a36">customer_id</text>
+    <text x="332" y="314" font-size="12" fill="#3a3a36">ion_task_id</text>
+    <text x="332" y="330" font-size="12" fill="#3a3a36">status</text>
+    <text x="332" y="346" font-size="12" fill="#3a3a36">billing_method: per_visit | flat</text>
+    <text x="332" y="362" font-size="12" fill="#3a3a36">price_per_visit_cents</text>
+    <text x="332" y="378" font-size="12" fill="#3a3a36">flat_rate_monthly_cents</text>
+    <text x="332" y="394" font-size="12" fill="#3a3a36">starts_on</text>
+    <text x="332" y="410" font-size="12" fill="#3a3a36">ends_on</text>
+    <text x="332" y="426" font-size="12" fill="#d4761f">consumables_mode  [add]</text>
+    <rect x="320" y="470" width="206" height="134" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="423" y="488" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="423" y="505" font-size="15" font-weight="700" text-anchor="middle">CatalogItem</text>
+    <line x1="320" y1="514" x2="526" y2="514" stroke="#e4e3df"/>
+    <text x="332" y="526" font-size="12" fill="#3a3a36">ion_item_id</text>
+    <text x="332" y="542" font-size="12" fill="#3a3a36">item_name</text>
+    <text x="332" y="558" font-size="12" fill="#3a3a36">category</text>
+    <text x="332" y="574" font-size="12" fill="#3a3a36">unit_price_cents</text>
+    <text x="332" y="590" font-size="12" fill="#3a3a36">qbo_item_id</text>
+    <rect x="320" y="634" width="206" height="148" rx="8" fill="#faf7fd" stroke="#8a4fb0" stroke-width="1.2"/>
+    <text x="423" y="653" font-size="11" text-anchor="middle" fill="#8a4fb0">&#171;domain services&#187;</text>
+    <text x="332" y="675" font-size="13.5" font-weight="700" fill="#3a3a36">InvoiceBuilder</text>
+    <text x="332" y="690" font-size="11.5" fill="#6b6b66">grouping + format strategies</text>
+    <text x="332" y="712" font-size="13.5" font-weight="700" fill="#3a3a36">Reconciler</text>
+    <text x="332" y="727" font-size="11.5" fill="#6b6b66">items by task vs IonInvoice</text>
+    <text x="332" y="749" font-size="13.5" font-weight="700" fill="#3a3a36">BillChecks</text>
+    <text x="332" y="764" font-size="11.5" fill="#6b6b66">misbilling + high-bill flag, any time</text>
+
+    <rect x="586" y="62" width="260" height="244" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
+    <text x="716" y="80" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
+    <text x="716" y="97" font-size="15" font-weight="700" text-anchor="middle">BillingMonth</text>
+    <text x="838" y="80" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW TABLE</text>
+    <line x1="586" y1="106" x2="846" y2="106" stroke="#e4e3df"/>
+    <text x="598" y="118" font-size="12" fill="#3a3a36">customer_id</text>
+    <text x="598" y="134" font-size="12" fill="#3a3a36">month</text>
+    <text x="598" y="150" font-size="12" fill="#3a3a36">flag</text>
+    <text x="598" y="166" font-size="12" fill="#3a3a36">processing_status</text>
+    <text x="598" y="182" font-size="12" fill="#3a3a36">closed_at</text>
+    <text x="598" y="198" font-size="12" fill="#6b6b66">items: BillableItem[*]</text>
+    <text x="598" y="214" font-size="12" fill="#6b6b66">invoices: Invoice[*]</text>
+    <line x1="586" y1="228" x2="846" y2="228" stroke="#e4e3df"/>
+    <text x="598" y="242" font-size="12" fill="#3a3a36">accrue(visits) &#8594; items</text>
+    <text x="598" y="258" font-size="12" fill="#3a3a36">regroup(strategy)</text>
+    <text x="598" y="274" font-size="12" fill="#3a3a36">issue(invoice)</text>
+    <text x="598" y="290" font-size="12" fill="#3a3a36">close() &#8212; refuses gaps</text>
+    <rect x="586" y="336" width="260" height="182" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="716" y="354" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="716" y="371" font-size="15" font-weight="700" text-anchor="middle">BillableItem</text>
+    <text x="838" y="354" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW TABLE</text>
+    <line x1="586" y1="380" x2="846" y2="380" stroke="#e4e3df"/>
+    <text x="598" y="392" font-size="12" fill="#3a3a36">source_id (visit | usage &#8212; UNIQUE)</text>
+    <text x="598" y="408" font-size="12" fill="#3a3a36">task_id</text>
+    <text x="598" y="424" font-size="12" fill="#3a3a36">kind: labor | consumable</text>
+    <text x="598" y="440" font-size="12" fill="#3a3a36">qty</text>
+    <text x="598" y="456" font-size="12" fill="#3a3a36">unit_price_cents</text>
+    <text x="598" y="472" font-size="12" fill="#3a3a36">amount_cents</text>
+    <text x="598" y="488" font-size="12" fill="#6b6b66">qbo_invoice_id (null until issued)</text>
+    <text x="598" y="504" font-size="12" fill="#6b6b66">qbo_line_id (echoed at issue)</text>
+    <rect x="586" y="548" width="260" height="180" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="716" y="566" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity &#183; draft in memory&#187;</text>
+    <text x="716" y="583" font-size="15" font-weight="700" text-anchor="middle">Invoice</text>
+    <line x1="586" y1="592" x2="846" y2="592" stroke="#e4e3df"/>
+    <text x="598" y="604" font-size="12" fill="#6b6b66">= billing.invoices (QBO mirror)</text>
+    <text x="598" y="620" font-size="12" fill="#d4761f">draft: IN MEMORY, never stored</text>
+    <text x="598" y="636" font-size="12" fill="#3a3a36">doc_number (OURS, minted at issue)</text>
+    <text x="598" y="652" font-size="12" fill="#3a3a36">qbo_invoice_id (key after issue)</text>
+    <text x="598" y="668" font-size="12" fill="#3a3a36">status: derived (v_invoice_state)</text>
+    <line x1="586" y1="682" x2="846" y2="682" stroke="#e4e3df"/>
+    <text x="598" y="696" font-size="12" fill="#3a3a36">readyToSend()</text>
+    <text x="598" y="712" font-size="12" fill="#3a3a36">recordDelivered() &#8658; settles visits</text>
+    <rect x="586" y="758" width="260" height="102" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.2" stroke-dasharray="4 3"/>
+    <text x="716" y="776" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;value object &#183; ION fact&#187;</text>
+    <text x="716" y="793" font-size="15" font-weight="700" text-anchor="middle">IonInvoice</text>
+    <line x1="586" y1="802" x2="846" y2="802" stroke="#e4e3df"/>
+    <text x="598" y="814" font-size="12" fill="#3a3a36">ion_task_id</text>
+    <text x="598" y="830" font-size="12" fill="#3a3a36">ion_invoice_number</text>
+    <text x="598" y="846" font-size="12" fill="#3a3a36">amount_cents</text>
+    <rect x="586" y="890" width="260" height="118" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="716" y="908" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="716" y="925" font-size="15" font-weight="700" text-anchor="middle">Variance</text>
+    <text x="838" y="908" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW TABLE</text>
+    <line x1="586" y1="934" x2="846" y2="934" stroke="#e4e3df"/>
+    <text x="598" y="946" font-size="12" fill="#3a3a36">visit_id</text>
+    <text x="598" y="962" font-size="12" fill="#3a3a36">tech_id</text>
+    <text x="598" y="978" font-size="12" fill="#3a3a36">kind: discount | missed_corr</text>
+    <text x="598" y="994" font-size="12" fill="#3a3a36">amount_cents</text>
+    <line x1="716" y1="336" x2="716" y2="306" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
+    <path d="M846 592 L860 592 L860 290 L847 290" fill="none" stroke="#1c1c1a" stroke-width="1.4" marker-end="url(#comp)"/>
+
+    <path d="M260 110 C 292 110 292 290 320 290" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="288" y="212" font-size="10.5" text-anchor="middle" fill="#6b6b66">task_id</text>
+    <path d="M260 126 C 292 126 292 100 320 100" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="288" y="96" font-size="10.5" text-anchor="middle" fill="#6b6b66">customer_id</text>
+    <line x1="423" y1="242" x2="423" y2="221" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="432" y="232" font-size="10.5" fill="#6b6b66">customer_id</text>
+    <line x1="586" y1="112" x2="530" y2="112" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="558" y="104" font-size="10.5" text-anchor="middle" fill="#6b6b66">customer_id</text>
+    <path d="M260 408 C 292 408 292 540 320 540" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="288" y="476" font-size="10.5" text-anchor="middle" fill="#6b6b66">ion_item_id</text>
+    <path d="M586 392 C 460 392 420 227 262 190" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="400" y="223" font-size="10.5" fill="#6b6b66">source_id &#8594; visit | usage</text>
+    <path d="M586 408 C 556 408 556 362 530 362" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="560" y="424" font-size="10.5" text-anchor="middle" fill="#6b6b66">task_id</text>
+    <path d="M846 494 C 858 494 858 618 846 618" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="864" y="558" font-size="10.5" text-anchor="end" fill="#6b6b66">grouped &#8594; (memory)</text>
+    <path d="M530 722 C 558 722 558 818 586 818" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="556" y="716" font-size="10.5" text-anchor="middle" fill="#6b6b66">consumes</text>
+    <path d="M586 946 C 300 1016 20 866 20 420 C 20 340 26 320 33 310" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ref)"/>
+    <text x="300" y="990" font-size="10.5" fill="#6b6b66">visit_id</text>
+  </svg>
+  <div class="legend">
+    <span><span class="sw" style="background:#0b6e6e"></span><b>aggregate root</b></span>
+    <span><span class="sw" style="background:#3b6fd4"></span><b>entity</b></span>
+    <span><span class="sw" style="background:#7a7a72"></span><b>value object</b> (dashed)</span>
+    <span><span class="sw" style="background:#8a4fb0"></span><b>domain service</b></span>
+    <span>box = name | attributes | operations &nbsp;&#183;&nbsp; &#9670;&#8212; composition: the attribute holds the child OBJECTS &nbsp;&#183;&nbsp; - -&#8594; reference: the attribute holds only an ID</span>
+  </div>
+  </div>
+
+  <div class="call why"><span class="tag">The shape, in one paragraph</span>
+  <b>BillingMonth</b> (customer &#215; month) is the aggregate root and the module
+  boundary: billing's own representation of a month of delivered service. It OWNS
+  the <b>BillableItems</b> (billing's translation of visits/usage &#8212; priced,
+  claimable; <code>source_id</code> references delivery by id only) and OWNS the
+  <b>Invoices</b> (1..N &#8212; normally one, splits allowed; each provably covering
+  the month because the aggregate closes over all of them). <b>IonInvoice</b> is
+  demoted to a value object: an immutable external fact
+  <code>{ion_task_id, number, amount}</code> consumed by the Reconciler for the
+  per-task check. ION doc numbers live only there; our invoices mint our own.</div>
+
+  <div class="call brk"><span class="tag">The billable item is the tracking backbone</span>
+  One row per billed thing: <code>source_id</code> (UNIQUE &#8212; exclusivity I-B1),
+  <code>task_id</code> (the reconcile grain), <code>invoice_id</code> (grouping),
+  <code>qbo_line_id</code> (QBO's echo at issue). "Where was this visit billed" is
+  one indexed lookup; the visit itself carries only <code>settled_at</code>.</div>
+
+
+  <h2 id="processing">Processing model &#8212; one loop, composed policies</h2>
+  <div class="uml">
+  <svg viewBox="0 0 880 710" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Inter,sans-serif">
+    <defs>
+      <marker id="gen" markerWidth="14" markerHeight="12" refX="12" refY="6" orient="auto">
+        <path d="M1,1 L12,6 L1,11 Z" fill="#fff" stroke="#3a3a36" stroke-width="1.2"/>
+      </marker>
+    </defs>
+    <rect x="12" y="14" width="286" height="682" rx="12" fill="#faf6f2" stroke="#ece2d8"/>
+    <text x="26" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#d4761f">THE DOCUMENT</text>
+    <rect x="314" y="14" width="272" height="682" rx="12" fill="#f4f7f6" stroke="#dfe7e5"/>
+    <text x="328" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#0b6e6e">COLLECTION &#183; PORTS</text>
+    <rect x="602" y="14" width="266" height="682" rx="12" fill="#f5f5f9" stroke="#e2e2ec"/>
+    <text x="616" y="40" font-size="12" font-weight="700" letter-spacing="1.5" fill="#3b6fd4">MONEY &#183; QBO MIRRORS</text>
+    <rect x="34" y="62" width="242" height="212" rx="8" fill="#fff" stroke="#d4761f" stroke-width="1.3"/>
+    <text x="155.0" y="80" font-size="11" text-anchor="middle" fill="#d4761f">&#171;abstract &#183; entity&#187;</text>
+    <text x="155.0" y="97" font-size="15" font-weight="700" text-anchor="middle">Invoice</text>
+    <line x1="34" y1="106" x2="276" y2="106" stroke="#e4e3df"/>
+    <text x="46" y="118" font-size="12" fill="#3a3a36">customer: Customer</text>
+    <text x="46" y="134" font-size="12" fill="#3a3a36">month</text>
+    <text x="46" y="150" font-size="12" fill="#3a3a36">lines: InvoiceLine[*]</text>
+    <text x="46" y="166" font-size="12" fill="#3a3a36">status: draft&#8594;&#8230;&#8594;settled</text>
+    <text x="46" y="182" font-size="12" fill="#3a3a36">collection: CollectionPolicy</text>
+    <text x="46" y="198" font-size="12" fill="#6b6b66">events: recorded, pulled at save</text>
+    <line x1="34" y1="208" x2="276" y2="208" stroke="#e4e3df"/>
+    <text x="46" y="222" font-size="12" fill="#3a3a36">issue() &#8212; refuses empty</text>
+    <text x="46" y="238" font-size="12" fill="#3a3a36">markDelivered(via)</text>
+    <text x="46" y="254" font-size="12" fill="#3a3a36">applyPayment() &#8212; fold; settles at 0</text>
+    <rect x="34" y="320" width="242" height="86" rx="8" fill="#fff" stroke="#d4761f" stroke-width="1.3"/>
+    <text x="155.0" y="338" font-size="11" text-anchor="middle" fill="#d4761f">&#171;entity&#187;</text>
+    <text x="155.0" y="355" font-size="15" font-weight="700" text-anchor="middle">MaintenanceInvoice</text>
+    <line x1="34" y1="364" x2="276" y2="364" stroke="#e4e3df"/>
+    <text x="46" y="376" font-size="12" fill="#3a3a36">source: BillingMonth items</text>
+    <text x="46" y="392" font-size="12" fill="#6b6b66">builder: rollup, round-once</text>
+    <rect x="34" y="426" width="242" height="86" rx="8" fill="#fff" stroke="#d4761f" stroke-width="1.3"/>
+    <text x="155.0" y="444" font-size="11" text-anchor="middle" fill="#d4761f">&#171;entity&#187;</text>
+    <text x="155.0" y="461" font-size="15" font-weight="700" text-anchor="middle">ServiceInvoice</text>
+    <line x1="34" y1="470" x2="276" y2="470" stroke="#e4e3df"/>
+    <text x="46" y="482" font-size="12" fill="#3a3a36">source: work order</text>
+    <text x="46" y="498" font-size="12" fill="#3a3a36">work_order_number</text>
+    <path d="M155,320 L155,288" fill="none" stroke="#3a3a36" stroke-width="1.4" marker-end="url(#gen)"/>
+    <path d="M70,426 L70,282 L155,282" fill="none" stroke="#3a3a36" stroke-width="1.4"/>
+    <rect x="34" y="538" width="242" height="118" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="155.0" y="556" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="155.0" y="573" font-size="15" font-weight="700" text-anchor="middle">Variance</text>
+    <line x1="34" y1="582" x2="276" y2="582" stroke="#e4e3df"/>
+    <text x="46" y="594" font-size="12" fill="#3a3a36">visit_id / tech_id</text>
+    <text x="46" y="610" font-size="12" fill="#3a3a36">kind: remove_consumable |</text>
+    <text x="46" y="626" font-size="12" fill="#3a3a36">&#160;&#160;qty_correction | discount | missed</text>
+    <text x="46" y="642" font-size="12" fill="#6b6b66">requiresIonEdit() &#8594; the ruled split</text>
+    <rect x="336" y="62" width="228" height="84" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="450.0" y="80" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;interface&#187;</text>
+    <text x="450.0" y="97" font-size="15" font-weight="700" text-anchor="middle">CollectionPolicy</text>
+    <line x1="336" y1="106" x2="564" y2="106" stroke="#e4e3df"/>
+    <line x1="336" y1="112" x2="564" y2="112" stroke="#e4e3df"/>
+    <text x="348" y="126" font-size="12" fill="#3a3a36">collect(invoice, to, ports)</text>
+    <rect x="336" y="186" width="228" height="116" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.3"/>
+    <text x="450.0" y="204" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;policy&#187;</text>
+    <text x="450.0" y="221" font-size="15" font-weight="700" text-anchor="middle">AutopayCollection</text>
+    <line x1="336" y1="230" x2="564" y2="230" stroke="#e4e3df"/>
+    <text x="348" y="242" font-size="12" fill="#3a3a36">method: PaymentMethod</text>
+    <line x1="336" y1="252" x2="564" y2="252" stroke="#e4e3df"/>
+    <text x="348" y="266" font-size="12" fill="#3a3a36">collect: charge FIRST,</text>
+    <text x="348" y="282" font-size="12" fill="#3a3a36">&#160;then receipt; decline &#8658; HELD</text>
+    <rect x="336" y="322" width="228" height="84" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.3"/>
+    <text x="450.0" y="340" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;policy&#187;</text>
+    <text x="450.0" y="357" font-size="15" font-weight="700" text-anchor="middle">ManualCollection</text>
+    <line x1="336" y1="366" x2="564" y2="366" stroke="#e4e3df"/>
+    <line x1="336" y1="372" x2="564" y2="372" stroke="#e4e3df"/>
+    <text x="348" y="386" font-size="12" fill="#3a3a36">collect: deliver + wait</text>
+    <path d="M450,186 L450,158" fill="none" stroke="#0b6e6e" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#gen)"/>
+    <path d="M370,322 L370,152 L450,152" fill="none" stroke="#0b6e6e" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <rect x="336" y="440" width="228" height="100" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="450.0" y="458" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;interface &#183; outlet&#187;</text>
+    <text x="450.0" y="475" font-size="15" font-weight="700" text-anchor="middle">DeliveryChannel</text>
+    <line x1="336" y1="484" x2="564" y2="484" stroke="#e4e3df"/>
+    <line x1="336" y1="490" x2="564" y2="490" stroke="#e4e3df"/>
+    <text x="348" y="504" font-size="12" fill="#3a3a36">deliver(invoice, to, pdf?)</text>
+    <text x="348" y="520" font-size="12" fill="#6b6b66">EmailChannel / SmsChannel plug in</text>
+    <rect x="336" y="560" width="228" height="84" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="450.0" y="578" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;interface &#183; outlet&#187;</text>
+    <text x="450.0" y="595" font-size="15" font-weight="700" text-anchor="middle">PaymentGateway</text>
+    <line x1="336" y1="604" x2="564" y2="604" stroke="#e4e3df"/>
+    <line x1="336" y1="610" x2="564" y2="610" stroke="#e4e3df"/>
+    <text x="348" y="624" font-size="12" fill="#3a3a36">charge(method, cents, ref)</text>
+    <rect x="336" y="664" width="228" height="116" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="450.0" y="682" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;interface &#183; outlet&#187;</text>
+    <text x="450.0" y="699" font-size="15" font-weight="700" text-anchor="middle">IonLogEditor</text>
+    <line x1="336" y1="708" x2="564" y2="708" stroke="#e4e3df"/>
+    <line x1="336" y1="714" x2="564" y2="714" stroke="#e4e3df"/>
+    <text x="348" y="728" font-size="12" fill="#3a3a36">removeConsumable(log, item)</text>
+    <text x="348" y="744" font-size="12" fill="#3a3a36">setConsumableQuantity(&#8230;)</text>
+    <text x="348" y="760" font-size="12" fill="#6b6b66">script pending: update_log_items</text>
+    <rect x="624" y="62" width="222" height="148" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="735.0" y="80" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;value object &#183; mirror&#187;</text>
+    <text x="735.0" y="97" font-size="15" font-weight="700" text-anchor="middle">PaymentMethod</text>
+    <line x1="624" y1="106" x2="846" y2="106" stroke="#e4e3df"/>
+    <text x="636" y="118" font-size="12" fill="#3a3a36">qbo_payment_method_id</text>
+    <text x="636" y="134" font-size="12" fill="#3a3a36">kind: card | bank</text>
+    <text x="636" y="150" font-size="12" fill="#3a3a36">brand / last_four</text>
+    <text x="636" y="166" font-size="12" fill="#3a3a36">active, autopay_enrolled</text>
+    <line x1="624" y1="176" x2="846" y2="176" stroke="#e4e3df"/>
+    <text x="636" y="190" font-size="12" fill="#3a3a36">chargeable() &#8212; the loop&#8217;s one rule</text>
+    <rect x="624" y="234" width="222" height="102" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="735.0" y="252" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;fact &#183; mirror&#187;</text>
+    <text x="735.0" y="269" font-size="15" font-weight="700" text-anchor="middle">Payment</text>
+    <line x1="624" y1="278" x2="846" y2="278" stroke="#e4e3df"/>
+    <text x="636" y="290" font-size="12" fill="#3a3a36">qbo_payment_id</text>
+    <text x="636" y="306" font-size="12" fill="#3a3a36">amount_cents / txn_date</text>
+    <text x="636" y="322" font-size="12" fill="#3a3a36">was_charged (autopay?)</text>
+    <rect x="624" y="360" width="222" height="102" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="735.0" y="378" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;fact &#183; mirror&#187;</text>
+    <text x="735.0" y="395" font-size="15" font-weight="700" text-anchor="middle">PaymentApplication</text>
+    <line x1="624" y1="404" x2="846" y2="404" stroke="#e4e3df"/>
+    <text x="636" y="416" font-size="12" fill="#3a3a36">qbo_payment_id</text>
+    <text x="636" y="432" font-size="12" fill="#3a3a36">applied_cents</text>
+    <text x="636" y="448" font-size="12" fill="#3a3a36">applied_at</text>
+    <rect x="624" y="486" width="222" height="132" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="735.0" y="504" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;base &#183; ADR 010&#187;</text>
+    <text x="735.0" y="521" font-size="15" font-weight="700" text-anchor="middle">EventRecorder</text>
+    <line x1="624" y1="530" x2="846" y2="530" stroke="#e4e3df"/>
+    <text x="636" y="542" font-size="12" fill="#6b6b66">uncommitted: DomainEvent[*]</text>
+    <line x1="624" y1="552" x2="846" y2="552" stroke="#e4e3df"/>
+    <text x="636" y="566" font-size="12" fill="#3a3a36">record(fact)</text>
+    <text x="636" y="582" font-size="12" fill="#3a3a36">pullEvents() &#8212; clears; repo</text>
+    <text x="636" y="598" font-size="12" fill="#3a3a36">&#160;appends to billing.events</text>
+    <path d="M276,150 L336,110" fill="none" stroke="#6b6b66" stroke-width="1.3" marker-end="url(#ref)"/>
+    <text x="279" y="122" font-size="10.5" fill="#6b6b66">collection</text>
+    <path d="M564,216 L624,186" fill="none" stroke="#6b6b66" stroke-width="1.3" marker-end="url(#ref)"/>
+    <text x="566" y="196" font-size="10.5" fill="#6b6b66">method</text>
+  </svg>
+  </div>
+
+  <p class="note">Fallback: abstract <b>Invoice</b> (lines, lifecycle, payment fold,
+  event recording) is extended by <b>MaintenanceInvoice</b> (built from a
+  BillingMonth&#8217;s items) and <b>ServiceInvoice</b> (from a work order). Payment
+  handling is NOT a subclass &#8212; it is a composed <b>CollectionPolicy</b>:
+  <code>AutopayCollection</code> charges the stored <b>PaymentMethod</b> first (a
+  decline HOLDS, the delivery becomes a receipt); <code>ManualCollection</code>
+  delivers and waits. The processing loop calls
+  <code>invoice.collection.collect(&#8230;)</code> &#8212; dynamic dispatch, no
+  if-statements, no {kind} &#215; {autopay} class explosion. Outlets (ports):
+  <b>DeliveryChannel</b> (email/SMS plugs), <b>PaymentGateway</b>,
+  <b>IonLogEditor</b> (the Variance edit path; Windmill script pending).
+  Money objects are views of the existing QBO mirrors &#8212; no new tables.</p>
+
+
+  <h2 id="checks">Checks, the gate, and how an invoice gets made</h2>
+  <p>The question this section settles: <b>what tells the system a month is
+  good to invoice</b> &#8212; and the answer is nothing stamps a status. Checks
+  write FACTS (findings). Readiness is a rule the aggregate evaluates over
+  those facts, at the moment of issuing. Same discipline as everywhere else:
+  derive, never stamp.</p>
+
+  <div class="uml">
+  <svg viewBox="0 0 880 704" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Inter,sans-serif">
+    <defs>
+      <marker id="ref" markerWidth="11" markerHeight="9" refX="10" refY="4.5" orient="auto">
+        <path d="M0,0 L10,4.5 L0,9" fill="none" stroke="#6b6b66" stroke-width="1.4"/>
+      </marker>
+      <marker id="comp" markerWidth="14" markerHeight="10" refX="1" refY="5" orient="auto">
+        <path d="M1,5 L7,1.5 L13,5 L7,8.5 Z" fill="#1c1c1a"/>
+      </marker>
+    </defs>
+    <rect x="12" y="14" width="284" height="676" rx="12" fill="#f4f7f6" stroke="#dfe7e5"/>
+    <text x="26" y="34" font-size="12" font-weight="700" letter-spacing="1.5" fill="#0b6e6e">THE MONTH &#183; aggregate</text>
+    <rect x="304" y="14" width="290" height="676" rx="12" fill="#f7f2fa" stroke="#ece0f3"/>
+    <text x="318" y="34" font-size="12" font-weight="700" letter-spacing="1.5" fill="#8a4fb0">CHECKS &#183; domain services</text>
+    <rect x="602" y="14" width="266" height="676" rx="12" fill="#faf6f2" stroke="#ece2d8"/>
+    <text x="616" y="34" font-size="12" font-weight="700" letter-spacing="1.5" fill="#d4761f">GATE &#8594; ISSUE</text>
+    <rect x="24" y="68" width="248" height="212" rx="8" fill="#fff" stroke="#0b6e6e" stroke-width="1.6"/>
+    <text x="148.0" y="86" font-size="11" text-anchor="middle" fill="#0b6e6e">&#171;aggregate root&#187;</text>
+    <text x="148.0" y="103" font-size="15" font-weight="700" text-anchor="middle">BillingMonth</text>
+    <line x1="24" y1="112" x2="272" y2="112" stroke="#e4e3df"/>
+    <text x="36" y="124" font-size="12" fill="#3a3a36">customer_id</text>
+    <text x="36" y="140" font-size="12" fill="#3a3a36">month</text>
+    <text x="36" y="156" font-size="12" fill="#3a3a36">closed_at</text>
+    <text x="36" y="172" font-size="12" fill="#6b6b66">items: BillableItem[*]</text>
+    <text x="36" y="188" font-size="12" fill="#6b6b66">findings: Finding[*]</text>
+    <line x1="24" y1="198" x2="272" y2="198" stroke="#e4e3df"/>
+    <text x="36" y="212" font-size="12" fill="#3a3a36">accrue(visits, terms, catalog)</text>
+    <text x="36" y="228" font-size="12" fill="#3a3a36">expectations()</text>
+    <text x="36" y="244" font-size="12" fill="#d4761f">gate(findings) &#8594; GateVerdict</text>
+    <text x="36" y="260" font-size="12" fill="#3a3a36">close(unbilled)</text>
+    <rect x="24" y="294" width="248" height="166" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="148.0" y="312" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="148.0" y="329" font-size="15" font-weight="700" text-anchor="middle">BillableItem</text>
+    <line x1="24" y1="338" x2="272" y2="338" stroke="#e4e3df"/>
+    <text x="36" y="350" font-size="12" fill="#3a3a36">source_id  UNIQUE = the claim</text>
+    <text x="36" y="366" font-size="12" fill="#3a3a36">task_id</text>
+    <text x="36" y="382" font-size="12" fill="#3a3a36">kind: labor | consumable</text>
+    <text x="36" y="398" font-size="12" fill="#3a3a36">qty</text>
+    <text x="36" y="414" font-size="12" fill="#3a3a36">amount_cents</text>
+    <text x="36" y="430" font-size="12" fill="#3a3a36">qbo_invoice_id  (null till issue)</text>
+    <text x="36" y="446" font-size="12" fill="#3a3a36">qbo_line_id  (the LOCK)</text>
+    <rect x="24" y="490" width="248" height="150" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="148.0" y="508" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity&#187;</text>
+    <text x="148.0" y="525" font-size="15" font-weight="700" text-anchor="middle">Finding</text>
+    <line x1="24" y1="534" x2="272" y2="534" stroke="#e4e3df"/>
+    <text x="36" y="546" font-size="12" fill="#3a3a36">phase: log_correction | bill_review</text>
+    <text x="36" y="562" font-size="12" fill="#3a3a36">rule</text>
+    <text x="36" y="578" font-size="12" fill="#3a3a36">severity: error | warning | info</text>
+    <text x="36" y="594" font-size="12" fill="#3a3a36">source_id</text>
+    <text x="36" y="610" font-size="12" fill="#3a3a36">message / cents</text>
+    <text x="36" y="626" font-size="12" fill="#3a3a36">resolved_at  (null = OPEN)</text>
+    <rect x="316" y="68" width="266" height="150" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="449.0" y="86" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;value object &#183; input&#187;</text>
+    <text x="449.0" y="103" font-size="15" font-weight="700" text-anchor="middle">MonthContext</text>
+    <line x1="316" y1="112" x2="582" y2="112" stroke="#e4e3df"/>
+    <text x="328" y="124" font-size="12" fill="#3a3a36">items / visits / terms</text>
+    <text x="328" y="140" font-size="12" fill="#3a3a36">customer (residential derived)</text>
+    <text x="328" y="156" font-size="12" fill="#3a3a36">itemProfiles</text>
+    <text x="328" y="172" font-size="12" fill="#3a3a36">customerProvidesChems</text>
+    <text x="328" y="188" font-size="12" fill="#3a3a36">peer + self chem medians</text>
+    <text x="328" y="204" font-size="12" fill="#3a3a36">ionConfig (verified-at)</text>
+    <rect x="316" y="258" width="266" height="116" rx="8" fill="#fff" stroke="#8a4fb0" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="449.0" y="276" font-size="11" text-anchor="middle" fill="#8a4fb0">&#171;interface&#187;</text>
+    <text x="449.0" y="293" font-size="15" font-weight="700" text-anchor="middle">BillingCheck</text>
+    <line x1="316" y1="302" x2="582" y2="302" stroke="#e4e3df"/>
+    <text x="328" y="314" font-size="12" fill="#3a3a36">name</text>
+    <text x="328" y="330" font-size="12" fill="#3a3a36">phase</text>
+    <line x1="316" y1="340" x2="582" y2="340" stroke="#e4e3df"/>
+    <text x="328" y="354" font-size="12" fill="#3a3a36">evaluate(ctx) &#8594; Finding[]</text>
+    <text x="330" y="404" font-size="12" fill="#8a4fb0" font-weight="600">LOG_CORRECTION_CHECKS &#8212; 8 rules</text>
+    <text x="330" y="421" font-size="11.5" fill="#6b6b66">fix in ION, re-ingest &#8212; BEFORE invoicing</text>
+    <text x="330" y="446" font-size="12" fill="#8a4fb0" font-weight="600">BILL_REVIEW_CHECKS &#8212; 3 rules</text>
+    <text x="330" y="463" font-size="11.5" fill="#6b6b66">explain / discount &#8212; never edits the log</text>
+    <text x="330" y="600" font-size="11.5" fill="#6b6b66">runChecks(ctx, suite) = flatMap evaluate</text>
+    <text x="330" y="617" font-size="11.5" fill="#6b6b66">pure: no I/O, no clock, no queries</text>
+    <rect x="614" y="68" width="242" height="102" rx="8" fill="#fff" stroke="#7a7a72" stroke-width="1.3" stroke-dasharray="4 3"/>
+    <text x="735.0" y="86" font-size="11" text-anchor="middle" fill="#7a7a72">&#171;value object&#187;</text>
+    <text x="735.0" y="103" font-size="15" font-weight="700" text-anchor="middle">GateVerdict</text>
+    <text x="848" y="86" font-size="9.5" font-weight="700" text-anchor="end" fill="#d4761f">NEW</text>
+    <line x1="614" y1="112" x2="856" y2="112" stroke="#e4e3df"/>
+    <text x="626" y="124" font-size="12" fill="#d4761f">ready: boolean</text>
+    <text x="626" y="140" font-size="12" fill="#d4761f">blockers: Finding[*]</text>
+    <text x="626" y="156" font-size="12" fill="#d4761f">reason</text>
+    <rect x="614" y="258" width="242" height="180" rx="8" fill="#fff" stroke="#3b6fd4" stroke-width="1.3"/>
+    <text x="735.0" y="276" font-size="11" text-anchor="middle" fill="#3b6fd4">&#171;entity &#183; draft in memory&#187;</text>
+    <text x="735.0" y="293" font-size="15" font-weight="700" text-anchor="middle">Invoice</text>
+    <line x1="614" y1="302" x2="856" y2="302" stroke="#e4e3df"/>
+    <text x="626" y="314" font-size="12" fill="#3a3a36">customer / month</text>
+    <text x="626" y="330" font-size="12" fill="#6b6b66">lines: InvoiceLine[*]</text>
+    <text x="626" y="346" font-size="12" fill="#3a3a36">status: draft &#8594; issued &#8594; &#8230;</text>
+    <text x="626" y="362" font-size="12" fill="#3a3a36">collection: CollectionPolicy</text>
+    <line x1="614" y1="372" x2="856" y2="372" stroke="#e4e3df"/>
+    <text x="626" y="386" font-size="12" fill="#3a3a36">issue(qboId, docNo)</text>
+    <text x="626" y="402" font-size="12" fill="#3a3a36">markDelivered(via)</text>
+    <text x="626" y="418" font-size="12" fill="#3a3a36">applyPayment(app)</text>
+    <path d="M148,264 L148,294" fill="none" stroke="#3a3a36" stroke-width="1.4" marker-start="url(#comp)"/>
+    <path d="M24,210 L18,210 L18,540 L24,540" fill="none" stroke="#3a3a36" stroke-width="1.4" marker-start="url(#comp)"/>
+    <path d="M272,96 L316,96" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#ref)"/>
+    <path d="M449,218 L449,258" fill="none" stroke="#3a3a36" stroke-width="1.3" marker-end="url(#ref)"/>
+    <text x="455" y="243" font-size="10.5" fill="#6b6b66">ctx</text>
+    <path d="M560,374 L560,556 L272,556" fill="none" stroke="#3a3a36" stroke-width="1.3" marker-end="url(#ref)"/>
+    <text x="392" y="550" font-size="10.5" fill="#6b6b66">produces findings</text>
+    <path d="M272,80 L288,80 L288,50 L735,50 L735,68" fill="none" stroke="#0b6e6e" stroke-width="1.5" marker-end="url(#ref)"/>
+    <text x="430" y="63" font-size="11" fill="#0b6e6e" font-weight="600">gate(open findings)</text>
+    <path d="M735,170 L735,258" fill="none" stroke="#d4761f" stroke-width="1.5" marker-end="url(#ref)"/>
+    <text x="742" y="202" font-size="10.5" fill="#d4761f" font-weight="600">ready &#8658; build + issue</text>
+    <text x="742" y="218" font-size="10.5" fill="#6b6b66">blocked &#8658; stays a worklist</text>
+    <path d="M614,500 L290,500 L290,410 L272,410" fill="none" stroke="#6b6b66" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#ref)"/>
+    <text x="392" y="494" font-size="10.5" fill="#6b6b66">issue stamps qbo_invoice_id / qbo_line_id</text>
+  </svg>
+  </div>
+  <p class="note"><b>Legend.</b> Teal 1.6px = aggregate root &#183; blue =
+  entity &#183; grey dashed = value object &#183; purple dashed = interface /
+  domain service. Solid line with a filled diamond = composition (the month
+  OWNS its items and findings; both cascade with it). Dashed open arrow =
+  reference or dataflow across a boundary. Orange rows are proposed, not yet
+  in code.</p>
+
+  <div class="cal why"><span class="tag">RULED &#183; the signal mechanism</span>
+  A check never enqueues anything and never marks a month "ready". It writes
+  findings. <b>Readiness is derived</b> &#8212; a month is issuable when it has
+  items, has no BLOCKING open findings, and has not already been issued. The
+  transition that enqueues downstream work is the <b>issue</b> itself (items
+  gain <code>qbo_invoice_id</code>), never the check. This keeps three
+  properties: re-running checks is free and side-effect-less, a stale
+  "ready" flag cannot exist, and authorization stays with the human who
+  dispositions the findings.</div>
+
+  <h3>When it runs, and on what</h3>
+  <p><code>checkMonth(customerId, month)</code> is re-runnable at any time and
+  has no side effect except replacing that month&#8217;s OPEN findings. It runs
+  after every accrual &#8212; month-end sweep, a variance re-accrual, a
+  reconcile-driven refresh, or a human pressing re-check in the workbench.
+  Its whole input is <code>MonthContext</code>, assembled by the application
+  layer so the rules stay pure: the month&#8217;s items, visits and terms, the
+  customer (residential derived in its constructor), item profiles with
+  typical quantities, the peer and self chem baselines, and what ION says
+  about each task&#8217;s config.</p>
+
+  <h3>The rules (11 today; adding one appends a class)</h3>
+  <table>
+    <tr><th>Rule</th><th>Fires when</th><th>Sev</th><th>Blocks?</th></tr>
+    <tr><td colspan="4" style="background:#f4f7f6"><b>PHASE A &#8212; log correction</b> &#183; remedy: fix in ION, re-ingest, re-accrue</td></tr>
+    <tr><td><code>task_config_drift</code></td><td>our task config disagrees with ION, or was never verified / verified &gt; 7 days ago</td><td>error / warning</td><td>error only</td></tr>
+    <tr><td><code>high_value_residential_visit</code></td><td>a residential visit&#8217;s chemicals exceed $100 (p95 of real visits)</td><td>error</td><td>yes</td></tr>
+    <tr><td><code>quantity_outlier</code></td><td>a quantity 4x+ that item&#8217;s historical norm &#8212; fat finger</td><td>error</td><td>yes</td></tr>
+    <tr><td><code>unpriced_consumable</code></td><td>an item with no catalog price (or unrecognised entirely)</td><td>error</td><td>yes</td></tr>
+    <tr><td><code>expired_task_billed</code></td><td>accrual on a task whose window closed before the month</td><td>error</td><td>yes</td></tr>
+    <tr><td><code>non_serviceable_billed</code></td><td>labor on a non-serviceable day &#8212; impossible by construction; audit belt</td><td>error</td><td>yes</td></tr>
+    <tr><td><code>zero_rate_labor</code></td><td>a per-visit task at $0 with real visits &#8212; rate never configured (QC is legitimately $0)</td><td>warning</td><td>no</td></tr>
+    <tr><td><code>flat_zero_visits</code></td><td>a flat charge with zero visits &#8212; bills fine, but logs may sit on a sibling task</td><td>warning</td><td>no</td></tr>
+    <tr><td colspan="4" style="background:#fff4ec"><b>PHASE B &#8212; bill review</b> &#183; remedy: explain / discount &#183; the chemicals are already in the pool</td></tr>
+    <tr><td><code>customer_provides_chems</code></td><td>chemicals billed to a customer who supplies their own</td><td>error</td><td>until dispositioned</td></tr>
+    <tr><td><code>high_chem_vs_peer</code></td><td>chem bill &gt; 2x the peer-group median and over $150</td><td>warning</td><td>until dispositioned</td></tr>
+    <tr><td><code>high_chem_vs_self</code></td><td>chem bill &gt; 2x this customer&#8217;s own trailing normal and over $150</td><td>warning</td><td>until dispositioned</td></tr>
+  </table>
+
+  <h3>The gate lives on the aggregate</h3>
+  <p><code>BillingMonth.gate(findings) &#8594; GateVerdict</code>. It is a
+  domain rule about the month&#8217;s own readiness, so it belongs to the object
+  that owns the items &#8212; not to a query, a view, or the UI. The verdict
+  carries its blockers, so &#8220;why is this month not invoiced&#8221; is
+  answerable without re-deriving anything.</p>
+  <table>
+    <tr><th>Invariant</th><th>Rule</th><th>Enforced by</th></tr>
+    <tr><td>I-G1</td><td>A month with no items is not issuable &#8212; there is nothing to bill</td><td>gate</td></tr>
+    <tr><td>I-G2</td><td>Any OPEN <code>log_correction</code> <b>error</b> blocks: reality is wrong, and an invoice would print the wrong reality</td><td>gate</td></tr>
+    <tr><td>I-G3</td><td>Any OPEN <code>bill_review</code> finding blocks until DISPOSITIONED (approved / discounted / letter attached). Judgement, not correctness</td><td>gate</td></tr>
+    <tr><td>I-G4</td><td>Warnings never block &#8212; they inform the reviewer (495 never-verified configs must not stop 495 invoices)</td><td>gate</td></tr>
+    <tr><td>I-G5</td><td>A month already carrying <code>qbo_invoice_id</code> on its items is not re-issuable</td><td>gate + WAL</td></tr>
+    <tr><td>I-G6</td><td>No unpriced item may reach a line</td><td>builder throws</td></tr>
+  </table>
+  <div class="cal brk"><span class="tag">WHY THE GATE IS RE-EVALUATED AT ISSUE TIME</span>
+  A month can be enqueued as ready and stop being ready before the worker
+  claims it &#8212; a re-ingest lands new chemicals, someone reopens a finding.
+  So <code>issueMonth</code> loads findings and calls the gate itself rather
+  than trusting the queue row. This is the same claim-time-read rule the
+  workflow architecture already applies to charging: the queue row is an
+  envelope naming a unit, never a snapshot of its state.</div>
+
+  <h3>Issuing: the month goes in, an invoice comes out</h3>
+  <div class="step"><div class="name">accrueMonth<span>re-runnable</span></div><div class="body">
+    <div class="row"><span class="chip inf">infra</span>load visits, terms (effective-dated), price book</div>
+    <div class="row"><span class="chip dom">domain</span><code>month.accrue(...)</code> &#8212; the one writer of items</div>
+    <div class="row"><span class="chip inf">infra</span>diff-persist; never touches a locked (invoiced) item</div>
+  </div></div>
+  <div class="step"><div class="name">checkMonth<span>re-runnable &#183; no side effects</span></div><div class="body">
+    <div class="row"><span class="chip inf">infra</span>assemble MonthContext (profiles, baselines, ION config)</div>
+    <div class="row"><span class="chip dom">domain</span><code>runChecks(ctx, LOG_CORRECTION)</code> + <code>(ctx, BILL_REVIEW)</code></div>
+    <div class="row"><span class="chip inf">infra</span>replace this month&#8217;s OPEN findings</div>
+  </div></div>
+  <div class="step"><div class="name">human disposition<span>the authorization step</span></div><div class="body">
+    <div class="row"><span class="chip inf">infra</span>worklists read <code>billing.findings</code>; log fixes go to ION then re-accrue</div>
+    <div class="row"><span class="chip inf">infra</span>bill-review: approve, discount, or attach the drafted letter &#8594; <code>resolved_at</code></div>
+  </div></div>
+  <div class="step"><div class="name">issueMonth<span>IRREVERSIBLE &#183; needs a WAL</span></div><div class="body">
+    <div class="row"><span class="chip dom">domain</span><code>month.gate(findings)</code> &#8212; blocked stops here, with reasons</div>
+    <div class="row"><span class="chip dom">domain</span><code>MaintenanceInvoiceBuilder.build(month, items)</code> &#8594; draft</div>
+    <div class="row"><span class="chip inf">infra</span>WAL the intent (deterministic doc number per customer-month)</div>
+    <div class="row"><span class="chip inf">infra</span>create in QBO &#8594; <code>invoice.issue(qboId, docNo)</code> &#8594; stamp items</div>
+    <div class="row"><span class="chip inf">infra</span>the stamp is the transition that enqueues charge/send</div>
+  </div></div>
+  <div class="step"><div class="name">process (live)<span>IRREVERSIBLE &#183; already built</span></div><div class="body">
+    <div class="row"><span class="chip inf">infra</span><code>maint_charge_queue</code> &#8594; <code>process_maint_charges</code>, self-draining</div>
+    <div class="row"><span class="chip dom">domain</span>sentence: resolve &#8594; credits &#8594; charge or send &#8594; deliver</div>
+    <div class="row"><span class="chip inf">infra</span>idempotency in <code>charge_and_record</code> (WAL + Intuit Request-Id)</div>
+  </div></div>
+
+  <div class="cal why"><span class="tag">RULED &#183; checks never hand off directly</span>
+  Checks do not pass passing months to processing. Three reasons, each
+  load-bearing: bill-review findings need a HUMAN between detection and
+  money; coupling detection to processing would make a re-check a
+  side-effectful act; and the workflow architecture requires authorization to
+  happen BEFORE enqueue, because a queue row means &#8220;safe to process&#8221;.</div>
+
+  <h2 id="moments">Claim vs settle &#8212; two moments, not one</h2>
+  <table>
+    <tr><th></th><th>Claim (BillableItem created)</th><th>Settle (SEND)</th></tr>
+    <tr><th>Means</th><td>the month owns this visit/usage &#8212; no other item may take it</td><td>facts frozen forever</td></tr>
+    <tr><th>Enforced by</th><td>aggregate refuses a duplicate source within the month; unique index on <code>billable_items.source_id</code> backstops across months</td><td><code>visit.settle()</code>; edits refused</td></tr>
+    <tr><th>Reversible?</th><td>yes &#8212; items re-price on accrue; regrouping between invoices is free while drafts</td><td>no &#8212; changes become <b>Variance</b> rows, attributed to the tech</td></tr>
+  </table>
+
+  <h2 id="phases">Migration phases (reconcile is decoupled from grouping)</h2>
+  <table>
+    <tr><th>Phase</th><th>What runs</th><th>Check</th></tr>
+    <tr><td><b>1 &#8212; shadow</b></td><td>accrue + group + draft only; ION still bills</td><td>Reconciler: items summed by task vs IonInvoice facts &#8212; exact match per task = the <b>green light</b>. Our grouping is irrelevant to the check, so any strategy can run from day one.</td></tr>
+    <tr><td><b>2 &#8212; issue</b></td><td>one invoice per customer-month (builder policy, not invariant); our doc numbers; ION display-only</td><td>price-agreement checks continue while ION still prices tasks</td></tr>
+  </table>
+
+  <h2 id="flow">Workflow through the layers</h2>
+  <div class="lflow">
+    <div class="step"><div class="name">ingestServiceLogs<span>daily</span></div><div class="body">
+      <div class="row"><span class="chip inf">infra</span>ION day logs &#8594; mapper</div>
+      <div class="row"><span class="chip dom">domain</span>Visit construction, state from ION flags</div></div></div>
+    <div class="arrowdown">&#8595;</div>
+    <div class="step"><div class="name">accrueMonth<span>continuous; re-runnable</span></div><div class="body">
+      <div class="row"><span class="chip inf">infra</span>load visits, tasks, catalog, month</div>
+      <div class="row"><span class="chip dom">domain</span>month.accrue(): billability + pricing &#8594; BillableItems; expected total is LIVE mid-month</div></div></div>
+    <div class="arrowdown">&#8595;</div>
+    <div class="step"><div class="name">groupInvoices<span>re-arrangeable while draft</span></div><div class="body">
+      <div class="row"><span class="chip dom">domain</span>InvoiceBuilder strategy assigns items &#8594; draft Invoice(s)</div></div></div>
+    <div class="arrowdown">&#8595;</div>
+    <div class="step"><div class="name">reconcile + checkBills<span>any time; phase-1 gate</span></div><div class="body">
+      <div class="row"><span class="chip inf">infra</span>load IonInvoice facts (ion_task_transactions)</div>
+      <div class="row"><span class="chip dom">domain</span>items by task vs ION &#183; misbilling findings &#183; high-bill flags</div></div></div>
+    <div class="arrowdown">&#8595;</div>
+    <div class="step"><div class="name">issueInvoice<span>creates it in QBO</span></div><div class="body">
+      <div class="row"><span class="chip dom">domain</span>month.issue(invoice) &#8212; has items, month open</div>
+      <div class="row"><span class="chip inf">infra</span>qbo.create &#8594; echo: qbo_invoice_id, line ids</div>
+      <div class="row"><span class="chip dom">domain</span>echo lands on items (qbo_line_id)</div></div></div>
+    <div class="arrowdown">&#8595;</div>
+    <div class="step"><div class="name">explainFlag<span>human on demand</span></div><div class="body">
+      <div class="row"><span class="chip inf">infra</span>LLM port: email/PDF from the month's visit data</div>
+      <div class="row">human reviews, edits, attaches &#8212; or pushes through without</div></div></div>
+    <div class="arrowdown">&#8595;</div>
+    <div class="step"><div class="name">processMonth<span>IRREVERSIBLE &#8212; money moves</span></div><div class="body">
+      <div class="row"><span class="chip dom">domain</span>credit eligibility (polymorphic match) &#183; chargeable checks</div>
+      <div class="row"><span class="chip inf">infra</span>QBO credits &#8226; autopay charge &#8226; Channel send</div>
+      <div class="row"><span class="chip dom">domain</span>SEND &#8658; visit.settle() &#8212; after this, variances only</div></div></div>
+    <div class="arrowdown">&#8595;</div>
+    <div class="step"><div class="name">closeMonth<span>completeness gate</span></div><div class="body">
+      <div class="row"><span class="chip dom">domain</span>refuses while a billable visit lacks an item, or an item lacks an invoice</div></div></div>
+  </div>
+
+  <h2 id="flags">Flagged bills (replaces discounts)</h2>
+  <p>High-bill flag &#8594; flagged view/table &#8594; on demand, AI drafts the explanation
+  from the month's visits (what drove it, what to do, or one-time) &#8594; human
+  review/edit &#8594; sent with the invoice, or pushed through without.</p>
+
+  <h2 id="schema">Schema fit &#8212; model vs the live database</h2>
+  <table>
+    <tr><th>Model object</th><th>Lives today</th><th>Delta needed</th></tr>
+    <tr><td>Customer</td><td><code>public."Customers"</code> (QBO mirror + ion_cust_id, office, payment prefs)</td><td>none</td></tr>
+    <tr><td>Visit + children</td><td><code>maintenance.visits</code>, <code>visit_readings</code>, <code>visit_tasks</code>, <code>consumables_usage</code></td>
+        <td>generated <code>state</code>; <code>settled_at</code>. Backrefs NOT needed &#8212; the BillableItem row is the tracking record.</td></tr>
+    <tr><td>Task</td><td><code>maintenance.tasks</code></td><td><code>consumables_mode</code> (incl | separate)</td></tr>
+    <tr><td>CatalogItem</td><td><code>maintenance.consumables</code> (has <code>qbo_item_id</code>)</td><td>none</td></tr>
+    <tr><td>BillingMonth</td><td>&#8212;</td><td>new <code>billing.billing_months</code> (customer_id, month UNIQUE; flag; processing_status; closed_at)</td></tr>
+    <tr><td>BillableItem</td><td>&#8212; (nearest ancestor: the promise's jsonb consumables)</td><td>new <code>billing.billable_items</code> &#8212; <code>billing_month_id</code>, UNIQUE <code>source_id</code>, task_id, kind, qty, unit_price_cents, amount_cents, invoice_id NULL, qbo_line_id</td></tr>
+    <tr><td>Invoice</td><td><b><code>billing.invoices</code></b> &#8212; the real QBO mirror, where sent/paid/credit machinery already lives</td><td><b>none.</b> Drafts are DERIVED state &#8212; in memory, rebuilt from the month whenever needed. <code>issue()</code> writes QBO; the echo lands in the mirror (existing sync). Status derives via <code>v_invoice_state</code>.</td></tr>
+    <tr><td>IonInvoice</td><td><code>billing_audit.ion_task_transactions</code></td><td>none &#8212; consumed as facts by the Reconciler</td></tr>
+    <tr><td>Variance</td><td>&#8212;</td><td>new <code>billing.variances</code></td></tr>
+  </table>
+  <div class="call brk"><span class="tag">One invoice table: the mirror. Drafts are never stored.</span>
+  A draft invoice is a pure function of the month &#8212; items + grouping
+  strategy &#8212; so it lives in memory and is rebuilt on demand, exactly like
+  routes and the routing Optimal draft (derived state gets no table). The only
+  durable invoice row is <code>billing.invoices</code>, the QBO mirror, written
+  by the echo when <code>issue()</code> creates the real thing. The durable
+  record of grouping is on the ITEMS: <code>qbo_invoice_id</code> +
+  <code>qbo_line_id</code>, stamped at issue. <code>task_billing_periods</code>,
+  <code>billing_audit.maintenance_invoices</code>, and
+  <code>maintenance_invoice_line_items</code> all retire after phase 2.</div>
+
+  <div class="call why"><span class="tag">Parents hold objects, never id lists</span>
+  BillingMonth has no <code>invoice_ids</code> attribute. In memory it holds the
+  child OBJECTS (<code>items[*]</code>, <code>invoices[*]</code> &#8212; the muted
+  rows the diamonds anchor to). In storage the reference always lives on the
+  CHILD as its FK (<code>invoices.billing_month_id</code>,
+  <code>billable_items.billing_month_id</code>) &#8212; the repository finds
+  children by querying that FK, never by reading a list off the parent. An
+  id-array column on the parent would be a second copy of the same fact,
+  guaranteed to drift. Cross-aggregate references are the id attribute on the
+  REFERRING side, drawn as the dashed arrows.</div>
+
+  <div class="call why"><span class="tag">How object references work in code</span>
+  <b>Composition (filled diamond):</b> the owner's attribute holds the child
+  objects &#8212; <code>month.items</code> is an in-memory array of BillableItem
+  instances, loaded and saved with the month as one unit. <b>Reference (dashed
+  arrow):</b> the attribute holds ONLY the id as plain data &#8212;
+  <code>item.source_id</code> is a string; turning it into a Visit is a separate
+  act through a repository. Same storage either way (rows + FKs); the difference
+  is what gets reconstituted into memory together.</div>
+
+  <h2 id="open">Open questions</h2>
+  <table>
+    <tr><td>1</td><td>Doc-number sequence for our invoices (format, per-office or global)</td></tr>
+    <tr><td>2</td><td>Human gate before <code>issue()</code> pushes to QBO, or automatic once checks pass?</td></tr>
+    <tr><td>3</td><td>Glossary word-by-word: Visit &#183; Billable Item &#183; Claim &#183; Settle &#183; Issue &#183; Variance &#183; Billing Month &#183; Flag</td></tr>
+  </table>
+</main>
+</div>
+</body>
+</html>
