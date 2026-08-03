@@ -51,8 +51,9 @@ that reaches the customer. Stated as invariants the model must enforce:
 | BillingMonth | AGGREGATE | **[built]** RULED: the conceptual unit is the CUSTOMER-month ("July pool maintenance" for this customer). Owns the CLAIMS (visit -> invoice assignments), the completeness verdict, and the month lock. Enforces I-B1/2/3: `claim()` refuses a second claim, `lock()` freezes. |
 | Invoice | entity (external fact) | ION builds ONE PER TASK — an implementation detail forced on us, not our concept. A customer-month with N tasks has N invoices; BillingMonth conceptualizes them together. Mirrored from QBO; ADR-010 event stream owns balance. |
 | billability | domain rule (Billing) | RULED: Billing derives it FROM Delivery state — `non_serviceable`/`skipped` -> not billable; `completed` -> billable, priced by Terms (a QC task's rate of 0 makes its labor $0 without a special case). Delivery states, Billing judges. |
-| Pricer | domain service | *[next]* Terms + catalog + claimed visits -> expected cents |
-| Reconciler | domain service | expected vs ION-built invoice -> typed findings; gates charging |
+| Pricer | domain service | **[built]** Terms + catalog + claimed visits -> priced items; billable-day collapse; refuse-with-reason, never a silent zero |
+| Reconciler | domain service | **[built]** expected vs ION's own transactions report -> typed findings; a dispute buys ONE delivery refresh, then surfaces |
+| ConsumablesAudit | domain service | **[built]** the pre-invoice billing check: chem-per-visit vs the peer group's percentile (peer = task category/cadence) AND the customer's own trailing median (both bars must be crossed). Repository selects the criteria rows (`chemHistory`, `taskPeerKeys`), `observationsOf` is the factory, the domain judges. Findings -> `billing.findings`, which is what the gate's `findings_resolved` criterion holds on — audit writes, gate holds. Policy (percentile, min peers, self factor, min history) is an explicit `AUDIT_POLICY` object. |
 
 ### payments — settling the money (already largely modeled)
 

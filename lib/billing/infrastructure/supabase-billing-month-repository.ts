@@ -381,6 +381,111 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     return { statesWritten: toWrite.length, itemsRewritten, factsAppended }
   }
 
+  /**
+   * The audit's self-history: each customer's median chemicals-per-visit
+   * over the trailing window, from the SAME priced items the months bill.
+   * The repository owns the criteria; the domain only judges (Evans).
+   */
+  async chemHistory(beforeMonth: string, windowMonths = 6): Promise<Map<number, { customerId: number; medianChemCents: number; visits: number }>> {
+    const [y, m] = beforeMonth.split("-").map(Number)
+    const months: string[] = []
+    for (let i = 1; i <= windowMonths; i++) {
+      const d = new Date(Date.UTC(y, m - 1 - i, 1))
+      months.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`)
+    }
+    const monthRows: { id: string; customer_id: number }[] = []
+    for (const mm of months) {
+      for (let off = 0; ; off += 1000) {
+        const { data, error } = await this.q("billing_months").select("id, customer_id").eq("month", mm).range(off, off + 999)
+        if (error) throw new Error(`history months failed: ${JSON.stringify(error).slice(0, 200)}`)
+        const page = (data ?? []) as { id: string; customer_id: number }[]
+        monthRows.push(...page)
+        if (page.length < 1000) break
+      }
+    }
+    const custOf = new Map(monthRows.map((r) => [r.id, r.customer_id]))
+    const perVisit = new Map<string, { customerId: number; cents: number }>()
+    const ids = monthRows.map((r) => r.id)
+    for (let i = 0; i < ids.length; i += 40) {
+      const c = ids.slice(i, i + 40)
+      const { data, error } = await this.q("billable_items")
+        .select("billing_month_id, task_id, service_date, kind, amount_cents")
+        .in("billing_month_id", c).range(0, 19999)
+      if (error) throw new Error(`history items failed: ${JSON.stringify(error).slice(0, 200)}`)
+      for (const r of (data ?? []) as { billing_month_id: string; task_id: string | null; service_date: string | null; kind: string; amount_cents: number | null }[]) {
+        if (r.kind !== "consumable" || !r.task_id || !r.service_date) continue
+        const key = `${r.billing_month_id}|${r.task_id}|${r.service_date}`
+        const cur = perVisit.get(key) ?? { customerId: custOf.get(r.billing_month_id)!, cents: 0 }
+        cur.cents += r.amount_cents ?? 0
+        perVisit.set(key, cur)
+      }
+    }
+    const byCustomer = new Map<number, number[]>()
+    for (const v of perVisit.values()) byCustomer.set(v.customerId, [...(byCustomer.get(v.customerId) ?? []), v.cents])
+    const out = new Map<number, { customerId: number; medianChemCents: number; visits: number }>()
+    for (const [cid, arr] of byCustomer) {
+      const sorted = arr.sort((a, b) => a - b)
+      out.set(cid, { customerId: cid, medianChemCents: sorted[Math.floor(sorted.length / 2)], visits: sorted.length })
+    }
+    return out
+  }
+
+  /**
+   * The audit's peer groups: a task's classification (category + cadence),
+   * because "normal chemicals" only means something among pools serviced the
+   * same way. Service-type names proved useless as a key — mostly blank on
+   * per-visit tasks — so the criteria is the classification the tasks table
+   * already maintains.
+   */
+  async taskPeerKeys(taskIds: readonly string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>()
+    const ids = [...new Set(taskIds)]
+    const tasks = this.client.schema("maintenance").from("tasks") as unknown as {
+      select(c: string): { in(col: string, vals: string[]): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+    }
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data, error } = await tasks.select("id, category, frequency").in("id", ids.slice(i, i + 100))
+      if (error) throw new Error(`task peer keys failed: ${JSON.stringify(error).slice(0, 200)}`)
+      for (const r of (data ?? []) as { id: string; category: string | null; frequency: string | null }[]) {
+        out.set(r.id, `${r.category ?? "unclassified"}/${r.frequency ?? "unknown"}`)
+      }
+    }
+    return out
+  }
+
+  /**
+   * Record audit findings, deduped against what is already OPEN: the same
+   * visit flagged twice is one finding, and a resolved finding never
+   * resurrects — resolution is a human decision the audit must respect.
+   */
+  async recordFindings(findings: readonly { monthId: string; customerId: number; rule: string; severity: string; sourceKey: string; message: string; cents: number }[]): Promise<{ recorded: number; alreadyOpen: number }> {
+    if (findings.length === 0) return { recorded: 0, alreadyOpen: 0 }
+    const monthIds = [...new Set(findings.map((f) => f.monthId))]
+    const existing = new Set<string>()
+    for (let i = 0; i < monthIds.length; i += 40) {
+      const c = monthIds.slice(i, i + 40)
+      const { data, error } = await this.q("findings").select("billing_month_id, rule, message").in("billing_month_id", c).range(0, 4999)
+      if (error) throw new Error(`findings read failed: ${JSON.stringify(error).slice(0, 200)}`)
+      for (const r of (data ?? []) as { billing_month_id: string; rule: string; message: string | null }[]) {
+        const dateKey = (r.message ?? "").slice(0, 10)
+        existing.add(`${r.billing_month_id}|${r.rule}|${dateKey}`)
+      }
+    }
+    const fresh = findings.filter((f) => !existing.has(`${f.monthId}|${f.rule}|${f.message.slice(0, 10)}`))
+    if (fresh.length > 0) {
+      const ins = this.client.schema("billing").from("findings") as unknown as {
+        insert(v: unknown[]): { select(c: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+      }
+      const { data, error } = await ins.insert(fresh.map((f) => ({
+        billing_month_id: f.monthId, phase: "audit", rule: f.rule, severity: f.severity,
+        customer_id: f.customerId, message: f.message, cents: f.cents,
+      }))).select("id")
+      if (error) throw new Error(`findings insert failed: ${JSON.stringify(error).slice(0, 240)}`)
+      if (!data || data.length !== fresh.length) throw new Error(`findings insert wrote ${data?.length ?? 0} of ${fresh.length}`)
+    }
+    return { recorded: fresh.length, alreadyOpen: findings.length - fresh.length }
+  }
+
   async customersWithDelivery(month: string): Promise<number[]> {
     const { data, error } = await this.q("billing_months").select("customer_id").eq("month", month).range(0, 4999)
     if (error) throw new Error(`month scan failed: ${JSON.stringify(error).slice(0, 200)}`)

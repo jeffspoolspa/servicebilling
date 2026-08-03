@@ -11,7 +11,9 @@
  * throughput, not a replacement.
  */
 
-import { gate, priceMonth, reconcile } from "@/lib/billing/domain"
+import { auditConsumables, gate, priceMonth, reconcile } from "@/lib/billing/domain"
+import type { ChemObservation } from "@/lib/billing/domain"
+import type { BillingMonth } from "@/lib/billing/domain"
 import type { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
 import type { SupabaseBillingFacts } from "@/lib/billing/infrastructure/supabase-billing-facts"
 import type { IonReportInvoiceFacts } from "@/lib/billing/infrastructure/ion-report-invoice-facts"
@@ -28,6 +30,7 @@ export interface AdvanceAllOutcome {
   months: number
   tally: Record<string, number>
   disputedQueued: number
+  audit: { findings: number; recorded: number; alreadyOpen: number }
   statesWritten: number
   itemsRewritten: number
   factsAppended: number
@@ -77,26 +80,22 @@ export class BillingRunService {
       this.facts.prices(),
       this.systemInvoices.perTaskTotalsForMonth(month),
     ])
-    // The gate's context: one MonthGateFacts per customer, bulk-loaded.
-    const gateContext = this.gateFacts
-      ? await this.gateFacts.forCustomers(
-          monthsAll.map((m) => m.customerId),
-          new Map(monthsAll.map((m) => [m.customerId, m.id])),
-          now,
-        )
-      : null
-
     const tally: Record<string, number> = {}
     const bump = (k: string) => (tally[k] = (tally[k] ?? 0) + 1)
     const disputed: string[] = []
     const settled: string[] = []
 
+    // PHASE A — accrue and reconcile every month in memory. The loop parks at
+    // the gate on purpose: the AUDIT sits between reconcile and gate, and it
+    // needs the WHOLE run's items to exist before any month is judged,
+    // because this run's population IS the peer group.
     for (const m of monthsAll) {
       const sources = sourcesBy.get(m.customerId) ?? []
       // Advance until the month parks: a bounded loop, because nextStep can
       // only move forward or stop.
       for (let pass = 0; pass < 4; pass++) {
         const step = m.nextStep(sources, now)
+        if (step === "gate") break // phase B — after the audit
         if (step === "accrue") {
           const priced = new Set<string>()
           for (const t of termsBy.get(m.customerId) ?? []) {
@@ -120,16 +119,46 @@ export class BillingRunService {
           else m.markDisputed(r.findings.map((f) => `${f.rule}: ${f.message}`), at)
           continue
         }
-        if (step === "gate" && gateContext) {
-          const facts = gateContext.get(m.customerId)
-          if (!facts) break
-          const g = gate(m, facts)
-          m.markGated(g.heldFor, at)
-          continue
-        }
         // refresh_delivery (external, per-unit) and issue/send (Phase 4)
         // leave the bulk path here.
         break
+      }
+    }
+
+    // THE AUDIT — the pre-invoice billing check. Repository selected the
+    // rows (this run's items + the trailing self-history), the aggregates
+    // shaped them, the domain judges: normalized chem-per-visit against the
+    // peer group's percentile AND the customer's own median. Findings are
+    // recorded BEFORE the gate context loads, so findings_resolved sees them
+    // in the same run — audit writes, gate holds.
+    const audit = { findings: 0, recorded: 0, alreadyOpen: 0 }
+    {
+      const taskIds = monthsAll.flatMap((m) => m.billableItems.map((i) => i.taskId)).filter((t): t is string => !!t)
+      const [peerKeys, histories] = await Promise.all([this.months.taskPeerKeys(taskIds), this.months.chemHistory(month)])
+      const observations = observationsOf(monthsAll, peerKeys)
+      const found = auditConsumables(observations, histories)
+      const wrote = await this.months.recordFindings(found)
+      audit.findings = found.length
+      audit.recorded = wrote.recorded
+      audit.alreadyOpen = wrote.alreadyOpen
+    }
+
+    // The gate's context: one MonthGateFacts per customer, bulk-loaded —
+    // AFTER the audit, so this run's own findings are in it.
+    const gateContext = this.gateFacts
+      ? await this.gateFacts.forCustomers(
+          monthsAll.map((m) => m.customerId),
+          new Map(monthsAll.map((m) => [m.customerId, m.id])),
+          now,
+        )
+      : null
+
+    // PHASE B — the gate, now that the audit has spoken.
+    for (const m of monthsAll) {
+      const sources = sourcesBy.get(m.customerId) ?? []
+      if (gateContext && m.nextStep(sources, now) === "gate") {
+        const facts = gateContext.get(m.customerId)
+        if (facts) m.markGated(gate(m, facts).heldFor, at)
       }
       bump(m.status)
       if (m.status === "disputed" && !m.deliveryWasRefreshed) disputed.push(m.id)
@@ -144,8 +173,45 @@ export class BillingRunService {
       months: monthsAll.length,
       tally,
       disputedQueued: q.enqueued,
+      audit,
       ...persisted,
       seconds: Math.round((Date.now() - t0) / 1000),
     }
   }
+}
+
+/**
+ * The FACTORY: month aggregates in, audit observations out. One observation
+ * per serviced task-day — the same grain labour bills at — with the chem
+ * total summed and the peer group taken from that day's labour line (the
+ * service type's name), because "normal chemicals" only means something
+ * within a service type.
+ */
+export function observationsOf(months: readonly BillingMonth[], peerKeys: ReadonlyMap<string, string>): ChemObservation[] {
+  const out: ChemObservation[] = []
+  for (const m of months) {
+    const byVisit = new Map<string, { chemCents: number; serviceDate: string; taskId: string }>()
+    for (const it of m.billableItems) {
+      if (!it.taskId || !it.serviceDate || it.kind !== "consumable") continue
+      const key = `${it.taskId}:${it.serviceDate}`
+      const v = byVisit.get(key) ?? { chemCents: 0, serviceDate: it.serviceDate, taskId: it.taskId }
+      v.chemCents += it.amountCents
+      byVisit.set(key, v)
+    }
+    for (const [key, v] of byVisit) {
+      if (v.chemCents <= 0) continue
+      out.push({
+        monthId: m.id,
+        customerId: m.customerId,
+        visitKey: key,
+        serviceDate: v.serviceDate,
+        // The task's classification (category/cadence) — service-type names
+        // proved mostly blank on per-visit tasks, so the tasks table's own
+        // classification is the peer axis.
+        peerKey: peerKeys.get(v.taskId) ?? "unclassified/unknown",
+        chemCents: v.chemCents,
+      })
+    }
+  }
+  return out
 }

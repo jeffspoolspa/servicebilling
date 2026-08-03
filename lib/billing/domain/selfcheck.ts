@@ -10,6 +10,7 @@ import { BillingMonth, BillingRuleError } from "./billing-month"
 import { priceMonth, type PricingTerms } from "./pricer"
 import { reconcile, RECONCILE_TOLERANCE_CENTS } from "./reconciler"
 import { gate, type MonthGateFacts } from "./gate"
+import { auditConsumables } from "./consumables-audit"
 
 let n = 0
 const check = (_name: string, fn: () => void) => {
@@ -540,6 +541,42 @@ check("re-accrual REPLACES the month; a vanished source is released", () => {
   m.release("usage", "old-1", AT, "source no longer delivered — re-accrued")
   assert.strictEqual(m.subtotalCents, 5499, "one charge, not two")
   assert.deepStrictEqual(m.billableItems.map((i) => i.sourceId), ["new-1"])
+})
+
+check("the audit flags a peer-group outlier, with the numbers in the sentence", () => {
+  // 24 normal visits at $10, one at $200 — above p95 of the group, and the
+  // customer has no history, so peers alone decide.
+  const obs = []
+  for (let i = 0; i < 24; i++) obs.push({ monthId: `m${i}`, customerId: i, visitKey: `t${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "POOL MAINTENANCE 65", chemCents: 1000 })
+  obs.push({ monthId: "mX", customerId: 99, visitKey: "tX:2026-07-15", serviceDate: "2026-07-15", peerKey: "POOL MAINTENANCE 65", chemCents: 20000 })
+  const f = auditConsumables(obs, new Map())
+  assert.strictEqual(f.length, 1)
+  assert.strictEqual(f[0].customerId, 99)
+  assert.ok(f[0].message.startsWith("2026-07-15: $200.00"), "the finding leads with the date+dollars — the dedupe key and the sentence a person reads")
+  assert.ok(f[0].message.includes("95th percentile"), "says WHICH bar was crossed")
+})
+
+check("self history VETOES the peers — a pool that always eats chlorine is not an outlier", () => {
+  const obs = []
+  for (let i = 0; i < 24; i++) obs.push({ monthId: `m${i}`, customerId: i, visitKey: `t${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "P", chemCents: 1000 })
+  obs.push({ monthId: "mX", customerId: 99, visitKey: "tX:2026-07-15", serviceDate: "2026-07-15", peerKey: "P", chemCents: 20000 })
+  // $200 is under 2x this customer's own $150 median: their normal, not a finding.
+  const history = new Map([[99, { customerId: 99, medianChemCents: 15000, visits: 12 }]])
+  assert.strictEqual(auditConsumables(obs, history).length, 0)
+  // ...but a thin history (below minSelfVisits) cannot veto.
+  const thin = new Map([[99, { customerId: 99, medianChemCents: 15000, visits: 2 }]])
+  assert.strictEqual(auditConsumables(obs, thin).length, 1)
+})
+
+check("a peer group too small to define normal flags NOTHING", () => {
+  // 3 visits is not a distribution. Flagging against it would be noise with
+  // a percentile attached.
+  const obs = [
+    { monthId: "a", customerId: 1, visitKey: "t1:2026-07-01", serviceDate: "2026-07-01", peerKey: "RARE", chemCents: 100 },
+    { monthId: "b", customerId: 2, visitKey: "t2:2026-07-01", serviceDate: "2026-07-01", peerKey: "RARE", chemCents: 100 },
+    { monthId: "c", customerId: 3, visitKey: "t3:2026-07-01", serviceDate: "2026-07-01", peerKey: "RARE", chemCents: 99999 },
+  ]
+  assert.strictEqual(auditConsumables(obs, new Map()).length, 0)
 })
 
 console.log(`billing domain selfcheck: ${n} checks passed`)
