@@ -30,6 +30,14 @@ type Q = {
   range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }>
 }
 
+/** Delivery's verdict, read in priority order — deletion outranks all. */
+const stateOf = (v: { ion_deleted_at: string | null; is_serviceable: boolean | null; status: string | null }) =>
+  v.ion_deleted_at !== null ? ("deleted" as const)
+  : v.is_serviceable === false ? ("non_serviceable" as const)
+  : v.status === "completed" ? ("completed" as const)
+  : v.status === "skipped" ? ("skipped" as const)
+  : ("scheduled" as const)
+
 const monthBounds = (month: string) => {
   const [y, m] = month.split("-").map(Number)
   const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`
@@ -52,7 +60,7 @@ export class SupabaseBillingFacts implements DeliveryFacts, AgreementTermsSource
   async sourcesFor(customerId: number, month: string): Promise<BillableSource[]> {
     const { from, to } = monthBounds(month)
     const { data: vRows, error: vErr } = await this.q("maintenance", "visits")
-      .select("id, task_id, visit_date, status, is_serviceable, price_cents, service_type")
+      .select("id, task_id, visit_date, status, is_serviceable, price_cents, service_type, ion_deleted_at")
       .eq("customer_id", customerId)
       .gte("visit_date", from)
       .lt("visit_date", to)
@@ -62,6 +70,7 @@ export class SupabaseBillingFacts implements DeliveryFacts, AgreementTermsSource
     const visits = (vRows ?? []) as {
       id: string; task_id: string | null; visit_date: string; status: string | null
       is_serviceable: boolean | null; price_cents: number | null; service_type: string | null
+      ion_deleted_at: string | null
     }[]
 
     const out: BillableSource[] = visits
@@ -71,11 +80,7 @@ export class SupabaseBillingFacts implements DeliveryFacts, AgreementTermsSource
         sourceId: v.id,
         taskId: v.task_id as string,
         serviceDate: v.visit_date,
-        visitState:
-          v.is_serviceable === false ? ("non_serviceable" as const)
-          : v.status === "completed" ? ("completed" as const)
-          : v.status === "skipped" ? ("skipped" as const)
-          : ("scheduled" as const),
+        visitState: stateOf(v),
         itemName: v.service_type ?? "POOL MAINTENANCE",
         itemId: null,
         qty: 1,
@@ -105,11 +110,8 @@ export class SupabaseBillingFacts implements DeliveryFacts, AgreementTermsSource
         serviceDate: v.visit_date,
         // A consumable inherits the visit's verdict: chemicals on a visit
         // that never happened are not billable either.
-        visitState:
-          v.is_serviceable === false ? "non_serviceable"
-          : v.status === "completed" ? "completed"
-          : v.status === "skipped" ? "skipped"
-          : "scheduled",
+        // A consumable inherits the visit's verdict, deletion included.
+        visitState: stateOf(v),
         itemName: u.item_name ?? "",
         itemId: u.ion_item_id,
         qty: u.quantity ?? 0,

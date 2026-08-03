@@ -77,6 +77,8 @@ export interface BillingMonthFact {
     | "SourceClaimed"
     | "SourceReleased"
     | "MonthReconciled"
+    | "MonthDisputed"
+    | "DeliveryRefreshed"
     | "MonthGated"
     | "MonthInvoiced"
     | "VarianceRecorded"
@@ -87,10 +89,10 @@ export interface BillingMonthFact {
 }
 
 /** Where the month is. Derived from what has happened, never stamped. */
-export type MonthStatus = "accruing" | "reconciled" | "held" | "gated" | "invoiced" | "sent"
+export type MonthStatus = "accruing" | "disputed" | "reconciled" | "held" | "gated" | "invoiced" | "sent"
 
 /** The next COMMAND this month is owed. Null = nothing to do, or a human's turn. */
-export type NextStep = "accrue" | "reconcile" | "gate" | "issue" | "send" | null
+export type NextStep = "accrue" | "reconcile" | "refresh_delivery" | "gate" | "issue" | "send" | null
 
 export class BillingMonth {
   private facts: BillingMonthFact[] = []
@@ -102,6 +104,9 @@ export class BillingMonth {
     readonly month: string,
     private readonly items: Map<string, BillableItem>,
     private reconciledAt: string | null,
+    private disputedAt: string | null,
+    private disputes: string[],
+    private deliveryRefreshedAt: string | null,
     private gatedAt: string | null,
     private gateHeldFor: string[],
     private invoicedAt: string | null,
@@ -113,7 +118,7 @@ export class BillingMonth {
     if (!/^\d{4}-\d{2}-01$/.test(month)) {
       throw new BillingRuleError(`a billing month is the first of a month, got "${month}"`)
     }
-    return new BillingMonth(id, customerId, month, new Map(), null, null, [], null, null, [])
+    return new BillingMonth(id, customerId, month, new Map(), null, null, [], null, null, [], null, null, [])
   }
 
   static reconstitute(args: {
@@ -122,6 +127,9 @@ export class BillingMonth {
     month: string
     items?: readonly BillableItem[]
     reconciledAt?: string | null
+    disputedAt?: string | null
+    disputes?: readonly string[]
+    deliveryRefreshedAt?: string | null
     gatedAt?: string | null
     gateHeldFor?: readonly string[]
     invoicedAt?: string | null
@@ -134,6 +142,9 @@ export class BillingMonth {
       args.month,
       new Map((args.items ?? []).map((i) => [sourceKeyOf(i), i])),
       args.reconciledAt ?? null,
+      args.disputedAt ?? null,
+      [...(args.disputes ?? [])],
+      args.deliveryRefreshedAt ?? null,
       args.gatedAt ?? null,
       [...(args.gateHeldFor ?? [])],
       args.invoicedAt ?? null,
@@ -157,6 +168,7 @@ export class BillingMonth {
     if (this.invoicedAt) return "invoiced"
     if (this.gateHeldFor.length > 0) return "held"
     if (this.gatedAt) return "gated"
+    if (this.disputedAt) return "disputed"
     if (this.reconciledAt) return "reconciled"
     return "accruing"
   }
@@ -289,6 +301,9 @@ export class BillingMonth {
     if (this.isSent) return null
     if (this.isInvoiced) return "send"
     if (this.gateHeldFor.length > 0) return null
+    // A dispute buys ONE trip back to the system of record; a second one is
+    // a real issue for a person, not something to retry forever.
+    if (this.disputedAt) return this.deliveryRefreshedAt ? null : "refresh_delivery"
     if (this.completenessBlockers(delivered).length > 0) return "accrue"
     if (!this.reconciledAt) return "reconcile"
     if (!this.gatedAt) return "gate"
@@ -300,6 +315,8 @@ export class BillingMonth {
   /** Our sums agreed with the system of record, per task. */
   markReconciled(at: string): void {
     if (this.isInvoiced) throw new BillingRuleError(`${this.month} is already invoiced`)
+    this.disputedAt = null
+    this.disputes = []
     this.reconciledAt = at
     this.facts.push({ type: "MonthReconciled", monthId: this.id, at, payload: { items: this.items.size, subtotalCents: this.subtotalCents } })
   }
@@ -307,8 +324,45 @@ export class BillingMonth {
   /** A change after reconciliation invalidates it — the sums moved. */
   private unreconcile(): void {
     this.reconciledAt = null
+    this.disputedAt = null
+    this.disputes = []
     this.gatedAt = null
     this.gateHeldFor = []
+  }
+
+  get disputeReasons(): readonly string[] {
+    return [...this.disputes]
+  }
+
+  /**
+   * Our sums did NOT agree. Not an error and not yet a person's problem: the
+   * usual cause is that our copy of delivery is stale — ION deletes a log or
+   * a tech adds a chemical after we last read it. So the first answer is to
+   * go and look again, ONCE, and only a second disagreement is a real issue.
+   */
+  markDisputed(reasons: readonly string[], at: string): void {
+    if (this.isInvoiced) throw new BillingRuleError(`${this.month} is already invoiced`)
+    this.reconciledAt = null
+    this.disputedAt = at
+    this.disputes = [...reasons]
+    this.facts.push({ type: "MonthDisputed", monthId: this.id, at, payload: { reasons: this.disputes, refreshed: this.deliveryRefreshedAt !== null } })
+  }
+
+  /**
+   * We went back to the system of record for this month's tasks. Marked so it
+   * happens at most once per dispute cycle — a repull that does not resolve
+   * the difference must surface, not loop.
+   */
+  markDeliveryRefreshed(at: string): void {
+    this.deliveryRefreshedAt = at
+    this.disputedAt = null
+    this.disputes = []
+    this.facts.push({ type: "DeliveryRefreshed", monthId: this.id, at, payload: { month: this.month, customerId: this.customerId } })
+  }
+
+  /** Has the one automatic repull already been spent? */
+  get deliveryWasRefreshed(): boolean {
+    return this.deliveryRefreshedAt !== null
   }
 
   /**

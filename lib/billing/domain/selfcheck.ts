@@ -294,6 +294,30 @@ check("flat rate bills the MONTH once, not each visit", () => {
   assert.strictEqual(flat.serviceDate, "2026-07-22", "dated by the last visit so the charge has a date")
 })
 
+check("a deleted visit bills nothing — its chemicals included", () => {
+  // Found live: a July visit deleted in ION on 2 August still had its four
+  // consumables in our ledger. Filtering visits alone is not enough.
+  const sources = [
+    src({ sourceId: "v1" }),
+    src({ sourceId: "u1", sourceKind: "usage", itemName: "Acid", itemId: "IT-1", qty: 1 }),
+    src({ sourceId: "vX", visitState: "deleted" }),
+    src({ sourceId: "uX", sourceKind: "usage", itemName: "Acid", itemId: "IT-1", qty: 1, visitState: "deleted" }),
+  ]
+  const catalog = [{ itemId: "IT-1", unitPriceCents: 1299, validFrom: "2026-01-01", validTo: null }]
+  const { items } = priceMonth({ month: "2026-07-01", terms: terms(), sources, catalog, at: AT })
+  assert.strictEqual(items.filter((i) => i.kind === "consumable").length, 1, "only the live visit's chemical")
+  assert.strictEqual(items.reduce((s2, i) => s2 + i.amountCents, 0), 6500 + 1299)
+
+  // The same is true of a skipped visit's chemicals.
+  const skipped = priceMonth({
+    month: "2026-07-01",
+    terms: terms(),
+    sources: [src({ sourceId: "u2", sourceKind: "usage", itemName: "Acid", itemId: "IT-1", qty: 1, visitState: "skipped" })],
+    catalog, at: AT,
+  })
+  assert.strictEqual(skipped.items.length, 0)
+})
+
 check("a task with no price is QUALITY CONTROL — it bills at nothing", () => {
   // Ruled 2026-08-03. The visit is still claimed and its chemicals still
   // bill; only the labour is zero.
@@ -450,6 +474,39 @@ check("the buried SQL rules become sentences a person can read", () => {
 
   // An unreconciled month never reaches a customer.
   assert.deepStrictEqual(gate(m, facts({ reconciled: false })).heldFor, ["reconciled"])
+})
+
+check("a dispute buys ONE trip back to ION, then it is a person's problem", () => {
+  // The usual cause of a mismatch is that our copy of delivery is stale —
+  // ION deleted a log or a tech added a chemical after we last read it. So
+  // the first answer is to look again, not to raise an alarm.
+  const delivered = [src()]
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  assert.strictEqual(m.nextStep(delivered, AUG), "reconcile")
+
+  m.markDisputed(["task t1: ours $65.00 vs theirs $95.00"], AT)
+  assert.strictEqual(m.status, "disputed")
+  assert.strictEqual(m.nextStep(delivered, AUG), "refresh_delivery", "go and look again")
+
+  m.markDeliveryRefreshed(AT)
+  assert.strictEqual(m.deliveryWasRefreshed, true)
+  assert.strictEqual(m.nextStep(delivered, AUG), "reconcile", "then try again on fresh facts")
+
+  // A SECOND dispute is real: it stops, with its reasons, for a person.
+  m.markDisputed(["task t1: still $30.00 apart"], AT)
+  assert.strictEqual(m.nextStep(delivered, AUG), null, "no infinite retry")
+  assert.deepStrictEqual(m.disputeReasons, ["task t1: still $30.00 apart"])
+
+  // Agreement clears it, and the sequence resumes.
+  m.markReconciled(AT)
+  assert.strictEqual(m.status, "reconciled")
+  assert.strictEqual(m.nextStep(delivered, AUG), "gate")
+  assert.deepStrictEqual(
+    m.pullFacts().map((f) => f.type),
+    ["SourceClaimed", "MonthDisputed", "DeliveryRefreshed", "MonthDisputed", "MonthReconciled"],
+    "every attempt is history — 'why did this month take three passes' is answerable",
+  )
 })
 
 console.log(`billing domain selfcheck: ${n} checks passed`)

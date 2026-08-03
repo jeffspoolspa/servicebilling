@@ -182,7 +182,12 @@ export function priceMonth(args: {
   // [evidence: the July shadow run — `listed` customers are billed for
   // chemicals in the live ledger. The axis drives InvoiceType, not billability.]
   {
-    for (const u of mine.filter((s) => s.sourceKind === "usage")) {
+    // Chemicals inherit the visit's verdict: a bag of chlorine recorded
+    // against a visit that was skipped, non-serviceable or DELETED did not
+    // happen either. Filtering visits alone let a deleted July visit keep
+    // billing its four consumables — the last $24.93 the shadow could not
+    // explain.
+    for (const u of mine.filter((s) => s.sourceKind === "usage" && isBillable(s))) {
       // Priced as of the RUN, not the service date — see CatalogPrice.
       const unit = u.unitPriceCents ?? (u.itemId ? priceOn(catalog, u.itemId, at.slice(0, 10)) : undefined)
       if (unit === undefined) {

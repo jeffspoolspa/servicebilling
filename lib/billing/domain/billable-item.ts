@@ -15,6 +15,14 @@
  * TASK-month, because that is the thing being charged once.
  */
 export type SourceKind = "visit" | "usage" | "flat"
+
+/**
+ * `deleted` is ION removing the log after the fact — it did not happen, so it
+ * bills nothing AND its chemicals bill nothing. Found live: a July visit
+ * deleted on 2 August still had its four consumables in our ledger, which is
+ * the whole $24.93 the shadow run could not explain.
+ */
+export type VisitState = "scheduled" | "completed" | "skipped" | "non_serviceable" | "deleted"
 export type ItemKind = "labor" | "consumable"
 
 /** A thing that happened and might be billable. Delivery's fact, not ours. */
@@ -24,7 +32,7 @@ export interface BillableSource {
   readonly taskId: string
   readonly serviceDate: string
   /** Delivery's verdict. Billing reads it; it never writes it. */
-  readonly visitState: "scheduled" | "completed" | "skipped" | "non_serviceable"
+  readonly visitState: VisitState
   readonly itemName: string
   /** The catalogue key for a consumable. Labour has none. */
   readonly itemId: string | null
