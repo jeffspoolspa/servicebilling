@@ -60,11 +60,13 @@ export interface IonWriteTarget {
   /** ION form fields: every weekday, blank where the quota is not served. */
   changes: Record<string, string>
   /**
-   * What our cache believes ION holds RIGHT NOW (weekday -> ION employee id),
-   * sent so ION can refuse the write if our picture is stale. A complete-week
-   * write from a wrong picture silently re-adds days ION had dropped.
+   * Days this write CARRIES OVER unchanged (weekday -> ION employee id).
+   *
+   * Only these are worth checking against ION at write time. A day we are
+   * deliberately setting is being replaced, so who sits on it now is
+   * irrelevant — checking the whole week instead refuses legitimate moves.
    */
-  expectDays: Record<string, string>
+  preserve: Record<string, string>
 }
 
 /** Runs a Windmill script and returns its result. */
@@ -83,7 +85,7 @@ export class IonRoutePublisher implements RoutePublisher {
   constructor(
     private readonly client: QueryClient,
     private readonly windmill: WindmillRunner,
-    private readonly scriptPath = "f/ION/api/update_task",
+    private readonly scriptPath = "f/ION/apply_task_schedules",
   ) {}
 
   async publish(
@@ -136,59 +138,61 @@ export class IonRoutePublisher implements RoutePublisher {
     return this.attempt(schedules, targets, opts.dryRun)
   }
 
-  /** One pass over the batch. Assumes every target already resolved. */
+  /**
+   * One pass over the batch — ONE Windmill job, one ION session.
+   *
+   * Was one job per task, which meant 78 cold starts and 78 timeouts to trip;
+   * the slow ones returned 504 and looked like refusals. Batching mirrors what
+   * read_task_days already does for reads.
+   */
   private async attempt(
     schedules: readonly TaskSchedule[],
     targets: Map<string, IonWriteTarget | { reason: string }>,
     dryRun: boolean,
   ): Promise<PublishResult[]> {
-    const results: PublishResult[] = []
-    for (const schedule of schedules) {
-      const target = targets.get(schedule.quotaId) as IonWriteTarget
-      try {
-        const res = await this.windmill.run<{
-          committed?: boolean
-          changed?: unknown[]
-          refused?: string
-          drift?: { weekday: string; ion: string | null; expected: string | null }[]
-        }>(this.scriptPath, {
-          ionTaskId: target.ionTaskId,
-          ionCustId: target.ionCustId,
-          changes: target.changes,
-          dry_run: dryRun,
-          // Only weekly tasks expose a day picker to compare against.
-          expect_days: target.expectDays,
-        })
-        if (res.refused === "stale_picture") {
-          const drift = (res.drift ?? [])
-            .map((d) => `${WEEKDAY[Number(d.weekday)] ?? d.weekday}: ION ${d.ion ?? "none"} vs ours ${d.expected ?? "none"}`)
-            .join("; ")
-          results.push({
-            quotaId: schedule.quotaId,
-            accepted: false,
-            detail: `stale cache — ${drift}. Reconcile before publishing.`,
-          })
-          continue
-        }
-        const n = Array.isArray(res.changed) ? res.changed.length : 0
-        results.push({
-          quotaId: schedule.quotaId,
-          accepted: dryRun ? true : res.committed === true,
-          detail: dryRun
-            ? `dry run: ${n} field(s) would change on ION task ${target.ionTaskId}`
-            : res.committed === true
-              ? `wrote ${n} field(s) to ION task ${target.ionTaskId}`
-              : `ION refused the write to task ${target.ionTaskId}`,
-        })
-      } catch (err) {
-        results.push({
-          quotaId: schedule.quotaId,
-          accepted: false,
-          detail: err instanceof Error ? err.message : String(err),
-        })
+    const writes = schedules.map((s) => {
+      const t = targets.get(s.quotaId) as IonWriteTarget
+      return {
+        key: s.quotaId,
+        ionTaskId: t.ionTaskId,
+        ionCustId: t.ionCustId,
+        changes: t.changes,
+        preserve: t.preserve,
       }
+    })
+
+    try {
+      const res = await this.windmill.run<{
+        results: {
+          key: string
+          accepted: boolean
+          detail: string
+          drift?: { weekday: string; ion: string | null; expected: string }[]
+        }[]
+      }>(this.scriptPath, { writes, dry_run: dryRun })
+
+      const byKey = new Map((res.results ?? []).map((r) => [r.key, r]))
+      return schedules.map((s) => {
+        const r = byKey.get(s.quotaId)
+        if (!r) {
+          return { quotaId: s.quotaId, accepted: false, detail: "no result returned for this task" }
+        }
+        if (r.drift && r.drift.length > 0) {
+          const drift = r.drift
+            .map((d) => `${WEEKDAY[Number(d.weekday)] ?? d.weekday}: ION ${d.ion ?? "none"} vs ours ${d.expected}`)
+            .join("; ")
+          return {
+            quotaId: s.quotaId,
+            accepted: false,
+            detail: `a day we are keeping does not match ION — ${drift}. Refresh the cache.`,
+          }
+        }
+        return { quotaId: s.quotaId, accepted: r.accepted, detail: r.detail }
+      })
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      return schedules.map((s) => ({ quotaId: s.quotaId, accepted: false, detail }))
     }
-    return results
   }
 
   /** quotaId -> everything the write needs, or why it cannot be written. */
@@ -286,6 +290,20 @@ export class IonRoutePublisher implements RoutePublisher {
       ]),
     )
 
+    /**
+     * The days this write is NOT changing: our believed tech equals the tech we
+     * are about to write. Those are the ones ION must still agree about,
+     * because we are carrying them over rather than restating a decision.
+     */
+    const preservedOf = (quotaId: string, changes: Record<string, string>) => {
+      const believedDays = believed.get(quotaId) ?? {}
+      const keep: Record<string, string> = {}
+      for (const [weekday, tech] of Object.entries(believedDays)) {
+        if (changes[DAY_FIELD[Number(weekday) as Weekday]] === tech) keep[weekday] = tech
+      }
+      return keep
+    }
+
     const out = new Map<string, IonWriteTarget | { reason: string }>()
     for (const schedule of schedules) {
       const task = taskById.get(schedule.quotaId)
@@ -367,9 +385,10 @@ export class IonRoutePublisher implements RoutePublisher {
         ionTaskId: task.ion_task_id,
         ionCustId,
         changes,
-        // Only weekly tasks expose days for ION to confirm; comparing a picker
-        // that does not render would refuse every non-weekly write.
-        expectDays: isWeekly ? (believed.get(schedule.quotaId) ?? {}) : {},
+        // Check ONLY the days this write carries over unchanged. A day we are
+        // setting is being replaced deliberately. Non-weekly tasks expose no
+        // day picker at all, so there is nothing to compare and we send none.
+        preserve: isWeekly ? preservedOf(schedule.quotaId, changes) : {},
       })
     }
     return out

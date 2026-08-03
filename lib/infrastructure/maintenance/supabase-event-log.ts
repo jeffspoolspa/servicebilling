@@ -11,7 +11,6 @@
  * it is a log line. Reads verify, diffs testify.
  */
 
-import type { QueryClient } from "@/lib/infrastructure/routing/supabase-quota-repository"
 
 export interface MaintenanceFact {
   aggregate: "task" | "schedule"
@@ -25,9 +24,15 @@ export interface MaintenanceFact {
   occurredAt?: string
 }
 
-/** An RPC-capable client — the append function is the only write path. */
-type RpcClient = QueryClient & {
-  rpc(fn: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>
+/**
+ * An RPC-capable client. The append function lives in the `maintenance`
+ * schema, NOT public — rpc() defaults to public and returns PGRST202
+ * ("function not found") if the schema is not named.
+ */
+export interface RpcClient {
+  schema(name: string): {
+    rpc(fn: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>
+  }
 }
 
 export class SupabaseMaintenanceEventLog {
@@ -43,7 +48,7 @@ export class SupabaseMaintenanceEventLog {
     const failed: string[] = []
     let written = 0
     for (const f of facts) {
-      const { error } = await this.client.rpc("append_event", {
+      const { error } = await this.client.schema("maintenance").rpc("append_event", {
         p_aggregate: f.aggregate,
         p_aggregate_id: f.aggregateId,
         p_type: f.type,
