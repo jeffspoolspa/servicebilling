@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils/format"
 import { ServiceLog, type ServiceLogVisit } from "../../_components/service-log"
 import { ChemHistoryContext, type FlagContext } from "./chem-history-context"
+import { LetterPanel, type InitialLetter } from "./letter-panel"
 
 /**
  * Bill-review workbench — first draft of Carter's design 2a ("Remix"):
  * narrow invoice ledger (per-line usage vs the customer's usual month, inline
  * $/%/comp adjustments with required reason) + service-log evidence rail
- * (expandable visit rows: readings, chems sold, notes, PHOTOS) + AI analysis
- * placeholder. Data is all real; adjustments are DRAFT-ONLY (local state, not
+ * (expandable visit rows: readings, chems sold, notes, PHOTOS) + the
+ * customer-letter panel (AI-drafted, reviewer-framed, PDF via print). Data is all real; adjustments are DRAFT-ONLY (local state, not
  * written to QBO yet). Photos: public S3 thumbs, click-through to full size
  * via /api/maintenance-billing/photo (ProEdge signed URL).
  */
@@ -30,12 +31,6 @@ export interface WorkbenchInvoice {
 }
 
 export type WorkbenchVisit = ServiceLogVisit
-
-export interface BillAnalysis {
-  result: { driver?: string; normal?: string; recommend?: string }
-  model: string | null
-  created_at: string
-}
 
 export interface WatchEntry {
   id: number
@@ -91,7 +86,7 @@ export function ReviewWorkbench({
   invoices,
   visits,
   usual,
-  initialAnalysis = null,
+  initialLetter = null,
   queue = [],
   flagContext = null,
   watchlist = [],
@@ -108,7 +103,7 @@ export function ReviewWorkbench({
   invoices: WorkbenchInvoice[]
   visits: WorkbenchVisit[]
   usual: UsualItem[]
-  initialAnalysis: BillAnalysis | null
+  initialLetter?: InitialLetter | null
   queue: { customerId: number; name: string }[]
   flagContext: FlagContext | null
   watchlist: WatchEntry[]
@@ -124,9 +119,6 @@ export function ReviewWorkbench({
   const [releasing, setReleasing] = useState(false)
   const [applying, setApplying] = useState(false)
   const [applyState, setApplyState] = useState("")
-  const [analysis, setAnalysis] = useState<BillAnalysis | null>(initialAnalysis)
-  const [analyzing, setAnalyzing] = useState(false)
-  const [analysisErr, setAnalysisErr] = useState("")
   const [watch, setWatch] = useState<WatchEntry[]>(watchlist)
   const [watchOpen, setWatchOpen] = useState(false)
   const [watchReason, setWatchReason] = useState("watch")
@@ -360,29 +352,6 @@ export function ReviewWorkbench({
       setReleasing(false)
     }
   }
-
-  async function analyze() {
-    setAnalyzing(true)
-    setAnalysisErr("")
-    try {
-      const r = await fetch("/api/maintenance-billing/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customer_id: customerId, qbo_customer_id: qboCustomerId, month }),
-      })
-      const j = await r.json()
-      if (!r.ok) throw new Error(j.error ?? "analysis trigger failed")
-      const result = await pollJob(`/api/maintenance-billing/analyze?job=${j.jobId}`, 120000)
-      setAnalysis({ result: result.result, model: null, created_at: new Date().toISOString() })
-    } catch (e) {
-      setAnalysisErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setAnalyzing(false)
-    }
-  }
-
-
-
 
   const seg = (on: boolean) =>
     on ? "bg-cyan text-bg" : "bg-transparent text-ink-dim"
@@ -651,60 +620,14 @@ export function ReviewWorkbench({
 
         {/* RIGHT: analysis + visit log */}
         <div className="p-4 lg:p-5 bg-bg-elev/40 flex flex-col gap-3.5 min-h-0">
-          {/* AI bill analysis */}
-          <div className="bg-bg border border-line rounded-xl overflow-hidden flex-none">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-line-soft">
-              <span className="font-display text-[15px]">Bill analysis</span>
-              <span className="text-[11px] text-ink-mute truncate">
-                {notes.length > 0 ? notes.join(" · ") : reasons.map((r) => r.replaceAll("_", " ")).join(", ")}
-              </span>
-              <div className="flex-1" />
-              {analysis && !analyzing && (
-                <span className="font-mono text-[9.5px] text-ink-mute">
-                  {new Date(analysis.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })}
-                </span>
-              )}
-              <button
-                onClick={analyze}
-                disabled={analyzing}
-                className={
-                  analysis
-                    ? "h-6 px-2.5 rounded-md border border-line bg-bg-elev text-ink-dim text-[10.5px] hover:border-cyan hover:text-cyan disabled:opacity-50"
-                    : "h-7 px-3 rounded-lg bg-gradient-to-b from-cyan to-cyan-deep text-bg text-[12px] font-semibold hover:brightness-110 disabled:opacity-50"
-                }
-              >
-                {analyzing ? "Analyzing…" : analysis ? "Re-run" : "Analyze this bill"}
-              </button>
-            </div>
-            {analyzing && (
-              <div className="px-4 py-3 flex items-center gap-2.5 text-[12px] text-cyan">
-                <span className="inline-block w-3 h-3 rounded-full border-2 border-cyan/25 border-t-cyan animate-spin" />
-                Reading {visits.length} visit logs, history, and photos…
-              </div>
-            )}
-            {analysisErr && !analyzing && (
-              <div className="px-4 py-3 text-[12px] text-coral">{analysisErr}</div>
-            )}
-            {!analysis && !analyzing && !analysisErr && (
-              <div className="px-4 py-3 text-[12px] text-ink-mute leading-relaxed">
-                Sends this bill + {visits.length} visit logs + monthly history + peer stats
-                {" "}+ photos to the model. Returns the likely driver, whether it&apos;s normal
-                for this customer, and a recommended action.
-              </div>
-            )}
-            {analysis && !analyzing && (
-              <div className="px-4 py-3 flex flex-col gap-2.5">
-                {([["Driver", "text-sun", analysis.result.driver],
-                   ["Normal?", "text-teal", analysis.result.normal],
-                   ["Recommend", "text-cyan", analysis.result.recommend]] as const).map(([k, cls, v]) => (
-                  <div key={k} className="grid grid-cols-[86px_1fr] gap-2.5 items-baseline">
-                    <span className={`font-mono text-[9.5px] uppercase tracking-[0.1em] ${cls}`}>{k}</span>
-                    <span className="text-[12.5px] leading-relaxed text-ink">{v ?? "—"}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* customer letter — AI-drafted, human-framed, printed to PDF */}
+          <LetterPanel
+            customerId={customerId}
+            customerName={customerName}
+            month={month}
+            monthLabel={monthLabel}
+            initial={initialLetter}
+          />
 
           {/* visit log — the reusable ServiceLog component (period locked to
               the invoice month in this context) */}

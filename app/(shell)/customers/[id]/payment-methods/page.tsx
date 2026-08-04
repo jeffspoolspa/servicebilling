@@ -6,8 +6,11 @@ import { getCustomerById } from "@/lib/queries/dashboard"
 import { createAnon } from "@/lib/supabase/anon"
 import { requireModuleAccess } from "@/lib/auth/access"
 import { PaymentMethodsTable, type PaymentMethodRow } from "./PaymentMethodsTable"
+import { AddCardPanel } from "./AddCardPanel"
 
 export const dynamic = "force-dynamic"
+
+const CARD_VAULT_URL = process.env.NEXT_PUBLIC_CARD_VAULT_URL || "https://secure.jeffspoolspa.com"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -54,6 +57,9 @@ export default async function CustomerPaymentMethodsPage({ params }: PageProps) 
           is used instead. Existing invoice payment-method assignments refresh
           automatically. QBO is unaffected.
         </p>
+        {access.canWrite("service") && customer.qbo_customer_id && (
+          <AddCardPanel customerId={id} vaultUrl={CARD_VAULT_URL} />
+        )}
         <PaymentMethodsTable
           rows={rows}
           customerId={id}
@@ -69,7 +75,7 @@ async function loadPaymentMethods(qboCustomerId: string): Promise<PaymentMethodR
   const { data } = await sb
     .from("customer_payment_methods")
     .select(
-      "id, type, card_brand, last_four, is_default, is_active, deactivated_at, fetched_at",
+      "id, type, card_brand, last_four, is_default, is_active, deactivated_at, fetched_at, expires_on",
     )
     .eq("qbo_customer_id", qboCustomerId)
     // Active (in QBO) and user-active first; recently-added first within each

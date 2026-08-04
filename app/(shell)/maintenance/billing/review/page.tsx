@@ -4,6 +4,7 @@ import {
   listBillingMonths,
   listBillingPeriods,
   listChemFlags,
+  listFindingSummaries,
   formatMonth,
   type BillingPeriodRow,
 } from "../_lib/queries"
@@ -52,9 +53,10 @@ export default async function NeedsReviewPage({
     new Date().toISOString().slice(0, 7)
   const monthDate = `${selected}-01`
 
-  const [periods, chemFlags] = await Promise.all([
+  const [periods, chemFlags, findingSummaries] = await Promise.all([
     listBillingPeriods(monthDate),
     listChemFlags(monthDate),
+    listFindingSummaries(monthDate).catch(() => []),
   ])
   const held = periods.filter((p) => p.processing_status === "needs_review")
   const chemByCustomer = new Map(chemFlags.map((f) => [f.customer_id, f]))
@@ -99,6 +101,9 @@ export default async function NeedsReviewPage({
           .map((d) => `#${d}`)
           .join(", "),
         month: selected,
+        findings: list[0].customer_id != null
+          ? findingSummaries.filter((f) => f.customer_id === list[0].customer_id)
+          : [],
         chem: chem
           ? {
               total_usd: chem.total_usd ?? 0,

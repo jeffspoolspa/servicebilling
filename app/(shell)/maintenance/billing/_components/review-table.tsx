@@ -14,6 +14,8 @@ import { ReviewQueueActions } from "./review-queue-actions"
 
 export interface ReviewRow extends ReviewSheetRow {
   qbo_docs: string
+  /** Open findings from the new check pipeline, rolled up phase x severity. */
+  findings?: { phase: string; severity: string; n: number }[]
 }
 
 export function ReviewTable({ rows }: { rows: ReviewRow[] }) {
@@ -36,6 +38,11 @@ export function ReviewTable({ rows }: { rows: ReviewRow[] }) {
             </Pill>
           ))}
           {row.original.chem && <Pill tone="sun">{row.original.chem.x_median}x median</Pill>}
+          {(row.original.findings ?? []).map((f) => (
+            <Pill key={`${f.phase}-${f.severity}`} tone={f.phase === "log_correction" ? "coral" : "sun"}>
+              {f.n} {f.phase === "log_correction" ? (f.n === 1 ? "log fix" : "log fixes") : (f.n === 1 ? "review" : "reviews")}
+            </Pill>
+          ))}
         </div>
       ),
       filterFn: (row, _id, value) =>

@@ -19,6 +19,8 @@ export interface PaymentMethodRow {
   is_active: boolean
   deactivated_at: string | null
   fetched_at: string
+  /** Last day the card is chargeable. Null for ACH / unknown expiry. */
+  expires_on: string | null
 }
 
 interface Props {
@@ -58,7 +60,12 @@ function Row({
   canWrite: boolean
 }) {
   const isUserDeactivated = row.deactivated_at !== null
-  const isQboInactive = !row.is_active
+  // Expiry and QBO-removal both land as is_active = false, but they need
+  // different actions: an expired card means "ask the customer for a new one",
+  // a removed one means "it's gone upstream". Check expiry FIRST so an expired
+  // card is never mislabelled "Removed in QBO".
+  const isExpired = row.expires_on !== null && row.expires_on < new Date().toISOString().slice(0, 10)
+  const isQboInactive = !row.is_active && !isExpired
 
   return (
     <div className="border border-line-soft rounded-lg p-3 bg-bg-elev/40 flex items-center gap-3">
@@ -70,12 +77,16 @@ function Row({
             {row.last_four ? ` ····${row.last_four}` : ""}
           </span>
           {row.is_default && <Pill tone="cyan">QBO default</Pill>}
+          {isExpired && <Pill tone="coral">Expired</Pill>}
           {isQboInactive && <Pill tone="sun">Removed in QBO</Pill>}
           {isUserDeactivated && <Pill tone="coral">User-deactivated</Pill>}
-          {!isQboInactive && !isUserDeactivated && <Pill tone="grass">Usable</Pill>}
+          {!isExpired && !isQboInactive && !isUserDeactivated && <Pill tone="grass">Usable</Pill>}
         </div>
         <div className="text-ink-mute text-xs">
           Last synced {formatDate(row.fetched_at)}
+          {row.expires_on && (
+            <> · {isExpired ? "Expired" : "Expires"} {formatDate(row.expires_on)}</>
+          )}
           {isUserDeactivated && (
             <> · Deactivated {formatDate(row.deactivated_at!)}</>
           )}

@@ -292,3 +292,38 @@ export function formatMonth(monthDate: string): string {
     timeZone: "UTC",
   }).format(d)
 }
+
+export interface FindingSummaryRow {
+  customer_id: number
+  phase: "log_correction" | "bill_review"
+  severity: "error" | "warning" | "info"
+  n: number
+}
+
+/**
+ * Open findings from the NEW check pipeline (billing.findings), rolled up per
+ * customer x phase x severity for the month. Feeds the queue's finding chips.
+ */
+export async function listFindingSummaries(month: string): Promise<FindingSummaryRow[]> {
+  const supabase = await createSupabaseServer()
+  const { data, error } = await supabase
+    .schema("billing")
+    .from("findings")
+    .select("customer_id, phase, severity, billing_months!inner(month)")
+    .eq("billing_months.month", month)
+    .is("resolved_at", null)
+  if (error) throw new Error(error.message)
+  const agg = new Map<string, FindingSummaryRow>()
+  for (const r of (data ?? []) as unknown as { customer_id: number; phase: string; severity: string }[]) {
+    const key = `${r.customer_id}|${r.phase}|${r.severity}`
+    const held = agg.get(key)
+    if (held) held.n++
+    else agg.set(key, {
+      customer_id: r.customer_id,
+      phase: r.phase as FindingSummaryRow["phase"],
+      severity: r.severity as FindingSummaryRow["severity"],
+      n: 1,
+    })
+  }
+  return [...agg.values()]
+}
