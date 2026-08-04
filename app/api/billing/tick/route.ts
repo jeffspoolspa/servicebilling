@@ -37,7 +37,10 @@ export const maxDuration = 300
  * over successive drains.
  */
 export async function POST(req: Request) {
-  const machineToken = process.env.INVOICE_DRAIN_TOKEN
+  // The machine door takes the SHARED machine token (WINDMILL_TOKEN, already
+  // in the app's env) — one token to rotate, per the standing rule. A
+  // dedicated INVOICE_DRAIN_TOKEN still wins when set.
+  const machineToken = process.env.INVOICE_DRAIN_TOKEN || process.env.WINDMILL_TOKEN
   const presented = req.headers.get("x-drain-token")
   const machineOk = Boolean(machineToken && presented && presented === machineToken)
   if (!machineOk) {

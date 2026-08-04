@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   // Two doors, both authenticated: a signed-in person, or the wake relay
   // presenting the machine token (Windmill -> here, per the service-billing
   // wake pattern). No token configured = machine door closed.
-  const machineToken = process.env.INVOICE_DRAIN_TOKEN
+  const machineToken = process.env.INVOICE_DRAIN_TOKEN || process.env.WINDMILL_TOKEN
   const presented = req.headers.get("x-drain-token")
   const machineOk = Boolean(machineToken && presented && presented === machineToken)
   if (!machineOk) {

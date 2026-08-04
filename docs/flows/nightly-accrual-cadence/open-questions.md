@@ -5,11 +5,14 @@
 
 ## Arming checklist (phase 1 is built and UNARMED — each step is Carter's)
 
-1. Merge/deploy the branch; set `INVOICE_DRAIN_TOKEN` in Vercel env (value in `.env.local`).
-2. Windmill UI: create variables `f/billing/INVOICE_DRAIN_URL` (point at
-   `https://<app>/api/billing/tick`) and `f/billing/INVOICE_DRAIN_TOKEN` — the deployed
-   `f/billing/wake_invoice_drainer` relay is the one wake for the whole nightly
-   orchestration (the tick route drains invoices too).
+No Windmill variables and no new Vercel env: the machine door accepts the SHARED
+machine token (`WINDMILL_TOKEN`, already in the app's Vercel env), and the tick wakes
+the app directly via pg_net — the `wake_invoice_drainer` relay is no longer needed.
+
+1. Merge/deploy the branch.
+2. Store the wake target in Vault (token value = the app's `WINDMILL_TOKEN` from `.env.local`):
+   `SELECT vault.create_secret('https://<app-domain>/api/billing/tick', 'billing_tick_url');`
+   `SELECT vault.create_secret('<WINDMILL_TOKEN value>', 'billing_tick_token');`
 3. Optional supervised issue-day: `UPDATE billing.policy_flags SET enabled=false WHERE key='auto_charge';`
    — invoices issue, the machine parks before every charge; flip back to resume.
 4. Arm the tick:
