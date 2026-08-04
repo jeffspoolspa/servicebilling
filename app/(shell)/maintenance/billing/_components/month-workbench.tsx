@@ -20,15 +20,23 @@ import { visitBreakLabel } from "@/lib/billing/domain/invoice-documents"
 import { cn } from "@/lib/utils/cn"
 import { ServiceLog, type ServiceLogVisit } from "../../_components/service-log"
 import { MONTH_STAGES, stepperStage, type MonthOverviewRow } from "../_lib/months"
+import {
+  InvoiceDetailModal,
+  type AppliedPayment,
+  type InvoiceDetail,
+  type InvoiceEvent,
+} from "./invoice-detail-modal"
 
 /**
  * The billing-month workbench — the month's detail in the work-order-detail
- * shape: header, progression, then TABS — one per INVOICE (with its sent
- * and paid status) plus the Billing month tab holding the history table
- * (every event where the month is aggregate or participant) and the
- * ServiceLog. Pre-issue months show a Draft invoice tab instead, with the
- * itemized/summary flip. RULED: the month's own lifecycle ends at invoice
- * creation — everything after is its invoices' story, folded back here.
+ * shape: header, progression, the month tab (history + ServiceLog, now
+ * full-width — the visits get the room), and pre-issue a Draft tab with
+ * the itemized/summary flip. Issued INVOICES live in the right-rail
+ * Invoices card; clicking one opens the invoice DETAIL MODAL (the cached
+ * document formatted, its applied payments, its machine history). The
+ * payment method lives on each invoice now — the old placeholder card is
+ * gone. RULED: the month's own lifecycle ends at invoice creation —
+ * everything after is its invoices' story, folded back here.
  */
 
 export interface HistoryEvent {
@@ -41,16 +49,7 @@ export interface HistoryEvent {
   payload: Record<string, unknown> | null
 }
 
-export interface InvoiceDetail {
-  qbo_invoice_id: string
-  doc_number: string | null
-  txn_date: string | null
-  subtotal: number | null
-  total_amt: number | null
-  balance: number | null
-  email_status: string | null
-  line_items: { name?: string; item?: string; description?: string; qty?: number; quantity?: number; unit_price?: number; amount?: number }[] | null
-}
+export type { InvoiceDetail }
 
 type DocLine =
   | { kind: "visit_break"; serviceDate: string }
@@ -150,14 +149,19 @@ export function MonthWorkbench({
   visits,
   history,
   invoices,
+  invoicePayments,
+  invoiceHistory,
 }: {
   m: MonthOverviewRow
   visits: ServiceLogVisit[]
   history: HistoryEvent[]
   invoices: InvoiceDetail[]
+  invoicePayments: Record<string, AppliedPayment[]>
+  invoiceHistory: Record<string, InvoiceEvent[]>
 }) {
   const monthLabel = m.month.slice(0, 7)
   const [tab, setTab] = useState<string>("month")
+  const [openInvoice, setOpenInvoice] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | "loading" | "error" | null>(null)
   const [presentation, setPresentation] = useState<"itemized" | "summary" | null>(null)
 
@@ -179,6 +183,8 @@ export function MonthWorkbench({
   }, [tab, presentation, m.id, hasInvoices])
 
   const seg = (on: boolean) => (on ? "bg-cyan text-bg" : "bg-transparent text-ink-dim")
+
+  const allPayments = invoices.flatMap((inv) => (invoicePayments[inv.qbo_invoice_id] ?? []).map((p) => ({ inv, p })))
 
   const fold = {
     totalBalance: invoices.reduce((s, i) => s + Number(i.balance ?? 0), 0),
@@ -231,18 +237,6 @@ export function MonthWorkbench({
               >
                 Billing month {monthLabel}
               </button>
-              {invoices.map((inv) => (
-                <button
-                  key={inv.qbo_invoice_id}
-                  onClick={() => setTab(inv.qbo_invoice_id)}
-                  className={cn(
-                    "pb-2.5 -mb-px border-b-2 text-[12px] uppercase tracking-[0.08em]",
-                    tab === inv.qbo_invoice_id ? "text-ink border-cyan font-medium" : "text-ink-mute border-transparent hover:text-ink",
-                  )}
-                >
-                  Invoice {inv.doc_number ?? inv.qbo_invoice_id}
-                </button>
-              ))}
               {!hasInvoices && (
                 <button
                   onClick={() => setTab("draft")}
@@ -255,26 +249,9 @@ export function MonthWorkbench({
                 </button>
               )}
               <span className="ml-auto flex items-center gap-1.5 pb-2">
-                {tab === "month" ? (
-                  <>
-                    {m.status === "disputed" && <Pill tone="coral">disputed</Pill>}
-                    {m.status === "held" && <Pill tone="sun">held</Pill>}
-                    <Pill tone="cyan">{m.status}</Pill>
-                  </>
-                ) : (
-                  invoices
-                    .filter((i) => i.qbo_invoice_id === tab)
-                    .map((i) => (
-                      <span key={i.qbo_invoice_id} className="flex items-center gap-1.5">
-                        <Pill tone={i.email_status === "EmailSent" ? "grass" : "neutral"}>
-                          {i.email_status === "EmailSent" ? "sent" : "not sent"}
-                        </Pill>
-                        <Pill tone={(i.balance ?? 1) <= 0 ? "grass" : "sun"}>
-                          {(i.balance ?? 1) <= 0 ? "paid" : `balance ${formatCurrency(Number(i.balance ?? 0))}`}
-                        </Pill>
-                      </span>
-                    ))
-                )}
+                {m.status === "disputed" && <Pill tone="coral">disputed</Pill>}
+                {m.status === "held" && <Pill tone="sun">held</Pill>}
+                <Pill tone="cyan">{m.status}</Pill>
               </span>
             </div>
 
@@ -300,55 +277,6 @@ export function MonthWorkbench({
                 />
               </CardBody>
             )}
-
-            {/* invoice tabs: field grid + lines */}
-            {invoices
-              .filter((inv) => tab === inv.qbo_invoice_id)
-              .map((inv) => (
-                <CardBody key={inv.qbo_invoice_id} className="space-y-4">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
-                    <Field label="Customer">{m.customer_name ?? m.customer_id}</Field>
-                    <Field label="Invoice date">{inv.txn_date ?? "—"}</Field>
-                    <Field label="Subtotal">
-                      <span className="font-mono num">{formatCurrency(Number(inv.subtotal ?? 0))}</span>
-                    </Field>
-                    <Field label="Total">
-                      <span className="font-mono num">{formatCurrency(Number(inv.total_amt ?? 0))}</span>
-                    </Field>
-                  </div>
-                  <Table className="text-[11.5px]">
-                    <TableHeader>
-                      <TableRow className="hover:bg-transparent">
-                        <TableHead>Item</TableHead>
-                        <TableHead>Description</TableHead>
-                        <TableHead className="text-right">Qty</TableHead>
-                        <TableHead className="text-right">Unit</TableHead>
-                        <TableHead className="text-right">Amount</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(inv.line_items ?? []).map((l, i) => (
-                        <TableRow key={i} className="text-ink-dim">
-                          <TableCell>{l.name ?? l.item ?? "—"}</TableCell>
-                          <TableCell className="text-ink-mute">{l.description ?? ""}</TableCell>
-                          <TableCell className="text-right font-mono num">{l.qty ?? l.quantity ?? ""}</TableCell>
-                          <TableCell className="text-right font-mono num">{l.unit_price != null ? formatCurrency(Number(l.unit_price)) : ""}</TableCell>
-                          <TableCell className="text-right font-mono num text-ink">{l.amount != null ? formatCurrency(Number(l.amount)) : ""}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                    <TableFooter>
-                      <TableRow className="text-ink hover:bg-transparent">
-                        <TableCell>Subtotal</TableCell>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell className="text-right font-mono num font-semibold">{formatCurrency(Number(inv.subtotal ?? 0))}</TableCell>
-                      </TableRow>
-                    </TableFooter>
-                  </Table>
-                </CardBody>
-              ))}
 
             {/* draft tab */}
             {!hasInvoices && tab === "draft" && (
@@ -396,15 +324,36 @@ export function MonthWorkbench({
             )}
           </Card>
 
-          {/* payments & credits — fed per invoice once the process step emits */}
+          {/* payments & credits — QBO's own linkage, across the month's invoices */}
           <Card>
             <CardHeader>
               <CardTitle>Payments &amp; credits</CardTitle>
             </CardHeader>
-            <CardBody className="text-ink-mute text-sm">
-              {hasInvoices
-                ? "No payments or credits touch these invoices yet."
-                : "Payments and credits appear once the invoice exists — credit checks and payment resolution run per invoice."}
+            <CardBody className="text-sm">
+              {allPayments.length === 0 ? (
+                <span className="text-ink-mute">
+                  {hasInvoices
+                    ? "No payments or credits touch these invoices yet."
+                    : "Payments and credits appear once the invoice exists — credit checks and payment resolution run per invoice."}
+                </span>
+              ) : (
+                <div className="space-y-1.5">
+                  {allPayments.map(({ inv, p }) => (
+                    <div key={`${inv.qbo_invoice_id}-${p.qbo_payment_id}`} className="flex items-center gap-2.5 text-[12px]">
+                      <span className="text-ink">Payment #{p.qbo_payment_id}</span>
+                      <span className="font-mono text-[10px] text-ink-mute">{p.txn_date ?? ""}</span>
+                      {p.payment_method_name && <span className="text-[10.5px] text-ink-dim">{p.payment_method_name}</span>}
+                      <button
+                        onClick={() => setOpenInvoice(inv.qbo_invoice_id)}
+                        className="font-mono text-[10px] text-ink-mute hover:text-cyan underline underline-offset-2"
+                      >
+                        {inv.doc_number}
+                      </button>
+                      <span className="ml-auto font-mono num text-grass">{formatCurrency(Number(p.applied_amount ?? 0))}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardBody>
           </Card>
         </div>
@@ -441,30 +390,33 @@ export function MonthWorkbench({
                   <Pill tone="sun">{m.open_findings}</Pill>
                 </div>
               )}
-              {invoices.map((inv) => (
-                <div key={inv.qbo_invoice_id} className="flex items-center gap-2 pt-1 border-t border-line-soft/60 text-[12px]">
-                  <span className="font-mono text-ink-mute">{inv.doc_number}</span>
-                  <span className="text-ink-mute">·</span>
-                  <span className={inv.email_status === "EmailSent" ? "text-grass" : "text-ink-mute"}>
-                    {inv.email_status === "EmailSent" ? "sent" : "not sent"}
-                  </span>
-                  <span className={cn("ml-auto font-mono num", (inv.balance ?? 0) > 0 ? "text-sun" : "text-grass")}>
-                    {formatCurrency(Number(inv.balance ?? 0))}
-                  </span>
-                </div>
-              ))}
             </CardBody>
           </Card>
 
+          {/* the month's invoices — click for the full detail modal; the
+              payment method rides each invoice's memo and machine now */}
           <Card>
             <CardHeader>
-              <CardTitle>Payment method</CardTitle>
+              <CardTitle>Invoices</CardTitle>
             </CardHeader>
-            <CardBody className="text-[13px]">
-              <span className="text-ink-mute">
-                Resolved per invoice at its credit-check step — each invoice&apos;s
-                machine links (or declines to link) the active instrument.
-              </span>
+            <CardBody className="space-y-1">
+              {!hasInvoices && <span className="text-[12.5px] text-ink-mute">None issued — the draft is the preview.</span>}
+              {invoices.map((inv) => (
+                <button
+                  key={inv.qbo_invoice_id}
+                  onClick={() => setOpenInvoice(inv.qbo_invoice_id)}
+                  className="w-full flex items-center gap-2 rounded px-2 py-1.5 -mx-2 text-left hover:bg-white/[0.03]"
+                >
+                  <span className="font-mono text-[12px] text-ink">{inv.doc_number ?? inv.qbo_invoice_id}</span>
+                  <Pill tone={inv.email_status === "EmailSent" ? "grass" : "neutral"}>
+                    {inv.email_status === "EmailSent" ? "sent" : "not sent"}
+                  </Pill>
+                  <Pill tone={(inv.balance ?? 1) <= 0 ? "grass" : "sun"}>{(inv.balance ?? 1) <= 0 ? "paid" : "open"}</Pill>
+                  <span className={cn("ml-auto font-mono num text-[12px]", (inv.balance ?? 0) > 0 ? "text-sun" : "text-grass")}>
+                    {formatCurrency(Number(inv.total_amt ?? 0))}
+                  </span>
+                </button>
+              ))}
             </CardBody>
           </Card>
 
@@ -475,6 +427,13 @@ export function MonthWorkbench({
           />
         </div>
       </div>
+
+      <InvoiceDetailModal
+        invoice={invoices.find((i) => i.qbo_invoice_id === openInvoice) ?? null}
+        payments={openInvoice ? (invoicePayments[openInvoice] ?? []) : []}
+        history={openInvoice ? (invoiceHistory[openInvoice] ?? []) : []}
+        onClose={() => setOpenInvoice(null)}
+      />
     </div>
   )
 }

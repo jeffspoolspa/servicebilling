@@ -21,15 +21,26 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
   if (!m) notFound()
 
   const monthDate = `${m.month.slice(0, 7)}-01`
-  const [visitsRes, historyRes, ...invoiceRes] = await Promise.all([
+  const issued = m.issued_invoices ?? []
+  const [visitsRes, historyRes, ...perInvoice] = await Promise.all([
     sb.rpc("maint_billing_review_visits", { p_customer_id: m.customer_id, p_month: monthDate }),
     sb.rpc("billing_month_history", { p_month_id: m.id }),
-    ...(m.issued_invoices ?? []).map((inv) => sb.rpc("maint_billing_invoice_detail", { p_qbo_invoice_id: inv.qbo_invoice_id })),
+    ...issued.flatMap((inv) => [
+      sb.rpc("maint_billing_invoice_detail", { p_qbo_invoice_id: inv.qbo_invoice_id }),
+      sb.rpc("maint_billing_invoice_payments", { p_qbo_invoice_id: inv.qbo_invoice_id }),
+      sb.rpc("maint_billing_invoice_history", { p_qbo_invoice_id: inv.qbo_invoice_id }),
+    ]),
   ])
 
-  const invoices = invoiceRes
-    .map((r) => ((r.data ?? []) as InvoiceDetail[])[0])
-    .filter((x): x is InvoiceDetail => Boolean(x))
+  const invoices: InvoiceDetail[] = []
+  const invoicePayments: Record<string, unknown[]> = {}
+  const invoiceHistory: Record<string, unknown[]> = {}
+  issued.forEach((inv, i) => {
+    const detail = ((perInvoice[i * 3].data ?? []) as InvoiceDetail[])[0]
+    if (detail) invoices.push(detail)
+    invoicePayments[inv.qbo_invoice_id] = perInvoice[i * 3 + 1].data ?? []
+    invoiceHistory[inv.qbo_invoice_id] = perInvoice[i * 3 + 2].data ?? []
+  })
 
   return (
     <div className="px-7 pt-6 pb-10">
@@ -38,6 +49,8 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
         visits={(visitsRes.data ?? []) as ServiceLogVisit[]}
         history={(historyRes.data ?? []) as HistoryEvent[]}
         invoices={invoices}
+        invoicePayments={invoicePayments as never}
+        invoiceHistory={invoiceHistory as never}
       />
     </div>
   )
