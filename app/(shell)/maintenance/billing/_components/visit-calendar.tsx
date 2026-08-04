@@ -57,26 +57,55 @@ export interface ChemItemCompareRow {
 
 const fmtQty = (n: number) => (n >= 10 ? String(Math.round(n)) : String(Math.round(n * 10) / 10))
 
-/** 'avg  +220%' — the monthly average with a color-coded delta of this month vs it. */
-function CompareCell({ thisVal, avgVal, fmt = formatCurrency, eps = 0.5 }: { thisVal: number; avgVal: number; fmt?: (n: number) => string; eps?: number }) {
-  if (avgVal < eps) {
-    return (
-      <TableCell className="text-right px-2 font-mono num text-ink-mute border-l border-line-soft/30 whitespace-nowrap">
-        {thisVal > eps ? <span className="text-coral">new</span> : ""}
-      </TableCell>
-    )
-  }
-  const pct = Math.round(((thisVal - avgVal) / avgVal) * 100)
-  const tone =
-    pct >= 100 ? "text-coral" : pct >= 25 ? "text-sun" : pct <= -25 ? "text-grass" : "text-ink-mute"
+/** This month vs an average: the signed % delta, or 'new' when there's no history. */
+function pctOf(thisVal: number, avgVal: number, eps: number): number | "new" | null {
+  if (avgVal < eps) return thisVal > eps ? "new" : null
+  return Math.round(((thisVal - avgVal) / avgVal) * 100)
+}
+
+function AvgCell({ border, children }: { border?: boolean; children?: React.ReactNode }) {
   return (
-    <TableCell className="text-right px-2 font-mono num border-l border-line-soft/30 whitespace-nowrap">
-      <span className="text-ink-mute">{fmt(avgVal)}</span>{" "}
-      <span className={tone}>
-        {pct >= 0 ? "+" : ""}
-        {pct}%
-      </span>
+    <TableCell
+      className={cn(
+        "text-right px-2 font-mono num text-ink-mute whitespace-nowrap",
+        border && "border-l border-line-soft/30",
+      )}
+    >
+      {children}
     </TableCell>
+  )
+}
+
+function DiffCell({ pct }: { pct: number | "new" | null }) {
+  const tone =
+    pct === "new" || (typeof pct === "number" && pct >= 100)
+      ? "text-coral"
+      : typeof pct === "number" && pct >= 25
+        ? "text-sun"
+        : typeof pct === "number" && pct <= -25
+          ? "text-grass"
+          : "text-ink-mute"
+  return (
+    <TableCell className={cn("text-right px-2 font-mono num whitespace-nowrap", tone)}>
+      {pct === null ? "" : pct === "new" ? "new" : `${pct >= 0 ? "+" : ""}${pct}%`}
+    </TableCell>
+  )
+}
+
+/** The six comparison cells: self qty | self $ | self Δ, then the same for peers. */
+function CompareCells({ thisQty, thisUsd, avgQty, avgUsd, qtyless }: { thisQty: number | null; thisUsd: number; avgQty: number | null; avgUsd: number; qtyless?: boolean }) {
+  return (
+    <>
+      <AvgCell border>{!qtyless && avgQty != null && avgQty >= 0.05 ? fmtQty(avgQty) : ""}</AvgCell>
+      <AvgCell>{avgUsd >= 0.005 ? formatCurrency(avgUsd) : ""}</AvgCell>
+      <DiffCell
+        pct={
+          qtyless || thisQty == null
+            ? pctOf(thisUsd, avgUsd, 0.5)
+            : pctOf(thisQty, avgQty ?? 0, 0.05)
+        }
+      />
+    </>
   )
 }
 
@@ -87,6 +116,7 @@ export function VisitCalendar({ customerId, month, highlightDates, compare, item
   const [hiddenGroups, setHiddenGroups] = useState<Set<string>>(new Set())
   const [showReadings, setShowReadings] = useState(true)
   const [showChems, setShowChems] = useState(true)
+  const [showCmp, setShowCmp] = useState(true)
 
   useEffect(() => {
     let alive = true
@@ -136,8 +166,8 @@ export function VisitCalendar({ customerId, month, highlightDates, compare, item
   })
   const groupOf = (cat: string | null) => CHEM_TAG[cat ?? ""]?.label ?? "other"
   const cmpByItem = new Map((itemCompare ?? []).map((c) => [c.item_name, c]))
-  const hasItemCmp = cmpByItem.size > 0
-  const extraCols = hasItemCmp ? 2 : 0
+  const cmpOn = cmpByItem.size > 0 && showCmp
+  const extraCols = cmpOn ? 6 : 0
   const groupCmp = (g: string) =>
     items
       .filter(([, t2]) => groupOf(t2.category) === g)
@@ -275,14 +305,25 @@ export function VisitCalendar({ customerId, month, highlightDates, compare, item
                 colSpan={(collapsed ? 0 : days.length) + 1}
                 className="sticky left-0 py-1"
               >
-                <button
-                  onClick={() => setShowChems((s) => !s)}
-                  className="text-[9px] uppercase tracking-[0.14em] text-ink-mute hover:text-ink"
-                  title={showChems ? "Collapse the chemicals" : "Show the chemicals"}
-                >
-                  <span className="inline-block w-2.5">{showChems ? "▾" : "▸"}</span>
-                  Chemicals sold
-                </button>
+                <span className="inline-flex items-center gap-1.5">
+                  <button
+                    onClick={() => setShowChems((s) => !s)}
+                    className="text-[9px] uppercase tracking-[0.14em] text-ink-mute hover:text-ink"
+                    title={showChems ? "Collapse the chemicals" : "Show the chemicals"}
+                  >
+                    <span className="inline-block w-2.5">{showChems ? "▾" : "▸"}</span>
+                    Chemicals sold
+                  </button>
+                  {cmpByItem.size > 0 && (
+                    <button
+                      onClick={() => setShowCmp((s) => !s)}
+                      className="h-[18px] px-1.5 rounded border border-line text-[9px] font-mono text-ink-mute hover:text-cyan hover:border-cyan"
+                      title={showCmp ? "Hide the comparison columns" : "Show the comparison columns"}
+                    >
+                      {showCmp ? "hide compare" : "compare"}
+                    </button>
+                  )}
+                </span>
               </TableCell>
               <TableCell className="text-right pl-4 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
                 Qty
@@ -290,13 +331,25 @@ export function VisitCalendar({ customerId, month, highlightDates, compare, item
               <TableCell className="text-right py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
                 Total $
               </TableCell>
-              {hasItemCmp && (
+              {cmpOn && (
                 <>
                   <TableCell className="text-right px-2 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-                    You / mo
+                    You qty
                   </TableCell>
                   <TableCell className="text-right px-2 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-                    Peers / mo
+                    You $
+                  </TableCell>
+                  <TableCell className="text-right px-2 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                    Δ you
+                  </TableCell>
+                  <TableCell className="text-right px-2 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                    Peer qty
+                  </TableCell>
+                  <TableCell className="text-right px-2 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                    Peer $
+                  </TableCell>
+                  <TableCell className="text-right px-2 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                    Δ peers
                   </TableCell>
                 </>
               )}
@@ -328,12 +381,12 @@ export function VisitCalendar({ customerId, month, highlightDates, compare, item
                 <TableCell className="text-right py-0.5 font-mono num text-[10px] text-ink-dim bg-white/[0.015]">
                   {formatCurrency(groupCents / 100)}
                 </TableCell>
-                {hasItemCmp && (() => {
+                {cmpOn && (() => {
                   const gc = groupCmp(g)
                   return (
                     <>
-                      <CompareCell thisVal={groupCents / 100} avgVal={gc.self} />
-                      <CompareCell thisVal={groupCents / 100} avgVal={gc.peer} />
+                      <CompareCells thisQty={null} thisUsd={groupCents / 100} avgQty={null} avgUsd={gc.self} qtyless />
+                      <CompareCells thisQty={null} thisUsd={groupCents / 100} avgQty={null} avgUsd={gc.peer} qtyless />
                     </>
                   )
                 })()}
@@ -370,12 +423,12 @@ export function VisitCalendar({ customerId, month, highlightDates, compare, item
               <TableCell className="text-right font-mono num text-ink border-l border-line-soft/30">
                 {formatCurrency(tot.cents / 100)}
               </TableCell>
-              {hasItemCmp && (() => {
+              {cmpOn && (() => {
                 const c = cmpByItem.get(item)
                 return (
                   <>
-                    <CompareCell thisVal={tot.qty} avgVal={Number(c?.self_avg_qty ?? 0)} fmt={fmtQty} eps={0.05} />
-                    <CompareCell thisVal={tot.qty} avgVal={Number(c?.peer_avg_qty ?? 0)} fmt={fmtQty} eps={0.05} />
+                    <CompareCells thisQty={tot.qty} thisUsd={tot.cents / 100} avgQty={Number(c?.self_avg_qty ?? 0)} avgUsd={Number(c?.self_avg_usd ?? 0)} />
+                    <CompareCells thisQty={tot.qty} thisUsd={tot.cents / 100} avgQty={Number(c?.peer_avg_qty ?? 0)} avgUsd={Number(c?.peer_avg_usd ?? 0)} />
                   </>
                 )
               })()}
@@ -409,20 +462,26 @@ export function VisitCalendar({ customerId, month, highlightDates, compare, item
               <TableCell className="text-right font-mono num font-semibold border-l border-line-soft/30">
                 {formatCurrency(grandTotal / 100)}
               </TableCell>
-              {hasItemCmp &&
+              {cmpOn &&
                 (compare?.length ? (
                   <>
-                    <CompareCell
-                      thisVal={grandTotal / 100}
-                      avgVal={compare.reduce((s2, c) => s2 + Number(c.self_typical_usd), 0)}
+                    <CompareCells
+                      thisQty={null}
+                      thisUsd={grandTotal / 100}
+                      avgQty={null}
+                      avgUsd={compare.reduce((s2, c) => s2 + Number(c.self_typical_usd), 0)}
+                      qtyless
                     />
-                    <CompareCell
-                      thisVal={grandTotal / 100}
-                      avgVal={compare.reduce((s2, c) => s2 + Number(c.peer_seasonal_usd), 0)}
+                    <CompareCells
+                      thisQty={null}
+                      thisUsd={grandTotal / 100}
+                      avgQty={null}
+                      avgUsd={compare.reduce((s2, c) => s2 + Number(c.peer_seasonal_usd), 0)}
+                      qtyless
                     />
                   </>
                 ) : (
-                  <TableCell colSpan={2} />
+                  <TableCell colSpan={6} />
                 ))}
             </TableRow>
           </TableFooter>
