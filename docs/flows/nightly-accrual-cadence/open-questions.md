@@ -23,16 +23,36 @@ is dead code by design. Remaining steps, in order, all Carter's:
 5. Pre-pipeline months (June and earlier, 487 rows) are parked
    `system: pre-pipeline legacy` so the tick can never touch legacy-billed months.
 
+## Phase 2 discovery — CAPTURED (Carter, network tab, 2026-08-04)
+
+The rebuild is ION-INTERNAL (no external/ProEdge hop observed) and browser-free
+automatable via the standard session + direct-fetch pattern. The captured XHR
+sequence on the receivables page (all GET-style `.cfm` with `_cf_clientid`):
+
+1. `receivables.cfm` — prime the container.
+2. `_switch.cfm?year=2026&month=8&trx=tasks&SearchTerm=` — scope to month + TASK invoices.
+3. `_buildTaskInvoices.cfm?InvoiceType=0&rand=...` — THE BUILD BUTTON.
+4. `_blank.cfm?rand=...` (repeating) — the container poll while invoices build;
+   a refresh control shows until all are built.
+5. Repeat for CONSUMABLE invoices (second `_switch.cfm` with different `trx`) —
+   both types must be rebuilt.
+
+Automation shape (no browser-sitting): the nightly Windmill step logs in once,
+fires both builds, and POLLS the container endpoint (or simply fires at 3:00 and
+lets the 3:30 tick read the transactions report — prime-then-read, decoupled).
+Checksum source = the existing All Transactions report pull once builds finish,
+since that parse path is already proven (`ion_task_transactions`).
+
 ## Open
 
-1. **The ION rebuild endpoint.** Does ION expose a "rebuild/regenerate draft invoice"
-   action per task (receivables area), and is it side-effect-free? Needs a supervised
-   discovery session: perform it manually while capturing POSTs to `.cfm` endpoints,
-   confirm it sends no emails, locks nothing, and does not fight ION's own month-end
-   invoice generation. The whole checksum reconcile hinges on this.
-2. **Checksum source.** Whether the nightly total comes from the rebuilt invoice itself
-   or from a report surface (as `ion_task_transactions` does at month end) — pick
-   whichever is one cheap fetch for all tasks.
+1. **Build completion signal.** What the container endpoint returns while building
+   vs done (the refresh control's presence?) — parse target for the poll, or pick a
+   generous fixed delay. Also whether the built listing itself returns usable rows.
+2. **Consumables build call.** Capture the exact second `_switch`/build pair
+   (`trx=` value and whether `_buildTaskInvoices.cfm` serves both via `InvoiceType`).
+3. **Rebuild vs manual ION edits.** Whether a mid-month rebuild clobbers an
+   office-edited draft invoice in ION — check with one edited example before
+   scheduling nightly.
 3. **Window shrink timing.** The visit ingester window drops to 1 day only after the
    checksum reconcile has demonstrably caught the late-edit cases the wide window used
    to catch (target: two clean cycles).
