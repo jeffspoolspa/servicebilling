@@ -29,6 +29,29 @@ A signal that reveals no change produces **no fact** — it updates cache
 freshness (`fetched_at`, stored `sync_token`) and nothing else. **Reads
 verify; diffs testify.**
 
+## Design every event as though we were event-sourced (RULED 2026-08-04)
+
+This system stores state and keeps events as the trail — it is NOT
+event-sourced, and rebuild comes from re-folding upstream facts (ION visits +
+terms + catalog), not from replay. But Carter intends to attempt an
+event-sourced build eventually, so every event added from now on is designed
+to the sourced standard:
+
+- **The payload carries the whole change**, not a summary of it. A reader
+  holding only the stream should be able to reconstruct what this event did
+  to its aggregate — ids, amounts, versions bound, before/after where a value
+  changed. "6 items, $386.86" is a caption; the sourced standard is the six
+  items.
+- **Name the fact, not the procedure** (past-tense domain language; no
+  `*_processed` / `*_ran`).
+- **One fact per state change** — never a rollup event summarizing several
+  changes that each deserve their own name.
+- **Idempotent identity**: an event should carry enough (aggregate id +
+  natural key of the change) that a replayer could dedupe it.
+
+Existing skinny payloads stay as they are (names are permanent, payloads are
+not retro-edited); the rule governs additions.
+
 ## The stream
 
 One append-only table per bounded context; this is billing's. Written only by
