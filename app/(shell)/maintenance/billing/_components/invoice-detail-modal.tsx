@@ -99,19 +99,28 @@ function invoiceHistoryRows(events: InvoiceEvent[]): HistoryRow[] {
   })
 }
 
+export interface DraftControls {
+  presentation: "itemized" | "summary"
+  onPresentation: (p: "itemized" | "summary") => void
+}
+
 export function InvoiceDetailModal({
   invoice,
   payments,
   history,
   onClose,
+  draft,
 }: {
   invoice: InvoiceDetail | null
   payments: AppliedPayment[]
   history: InvoiceEvent[]
   onClose: () => void
+  /** Present = this is the DRAFT projection: draft pill, the presentation
+   *  flip, a subtotal-only ladder (QBO adds tax at issue). */
+  draft?: DraftControls | null
 }) {
   if (!invoice) return null
-  return <InvoiceDetailBody inv={invoice} payments={payments} history={history} onClose={onClose} />
+  return <InvoiceDetailBody inv={invoice} payments={payments} history={history} onClose={onClose} draft={draft ?? null} />
 }
 
 function InvoiceDetailBody({
@@ -119,11 +128,13 @@ function InvoiceDetailBody({
   payments,
   history,
   onClose,
+  draft,
 }: {
   inv: InvoiceDetail
   payments: AppliedPayment[]
   history: InvoiceEvent[]
   onClose: () => void
+  draft: DraftControls | null
 }) {
   const paid = (inv.balance ?? 1) <= 0
   const taxCents = Math.round((Number(inv.total_amt ?? 0) - Number(inv.subtotal ?? 0)) * 100)
@@ -139,8 +150,10 @@ function InvoiceDetailBody({
     </div>
   )
 
+  const seg = (on: boolean) => (on ? "bg-cyan text-bg" : "bg-transparent text-ink-dim")
+
   return (
-    <Dialog open onClose={onClose} title={`Invoice ${inv.doc_number ?? inv.qbo_invoice_id}`} className="max-w-3xl bg-bg-elev">
+    <Dialog open onClose={onClose} title={`${draft ? "Draft invoice" : "Invoice"} ${inv.doc_number ?? inv.qbo_invoice_id}`} className="max-w-3xl bg-bg-elev">
       <div className="max-h-[78vh] overflow-y-auto -m-5 p-5 space-y-5">
         {/* the document header */}
         <div className="flex items-start justify-between gap-4">
@@ -151,10 +164,22 @@ function InvoiceDetailBody({
             <Field label="Class">{leafName(inv.qbo_class) || "—"}</Field>
           </div>
           <span className="flex items-center gap-1.5 flex-none">
-            <Pill tone={inv.email_status === "EmailSent" ? "grass" : "neutral"}>
-              {inv.email_status === "EmailSent" ? "sent" : "not sent"}
-            </Pill>
-            <Pill tone={paid ? "grass" : "sun"}>{paid ? "paid" : `balance ${formatCurrency(Number(inv.balance ?? 0))}`}</Pill>
+            {draft ? (
+              <>
+                <Pill tone="neutral">draft</Pill>
+                <div className="flex border border-line rounded-lg overflow-hidden">
+                  <button onClick={() => draft.onPresentation("itemized")} className={`h-[22px] px-2 text-[10.5px] font-semibold ${seg(draft.presentation === "itemized")}`}>Itemized</button>
+                  <button onClick={() => draft.onPresentation("summary")} className={`h-[22px] px-2 text-[10.5px] font-semibold border-l border-line ${seg(draft.presentation === "summary")}`}>Summary</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <Pill tone={inv.email_status === "EmailSent" ? "grass" : "neutral"}>
+                  {inv.email_status === "EmailSent" ? "sent" : "not sent"}
+                </Pill>
+                <Pill tone={paid ? "grass" : "sun"}>{paid ? "paid" : `balance ${formatCurrency(Number(inv.balance ?? 0))}`}</Pill>
+              </>
+            )}
           </span>
         </div>
         {inv.memo && <div className="text-[12px] text-ink-dim">{inv.memo}</div>}
@@ -211,16 +236,19 @@ function InvoiceDetailBody({
               <span>Subtotal</span>
               <span className="font-mono num">{formatCurrency(Number(inv.subtotal ?? 0))}</span>
             </div>
-            {taxCents > 0 && (
+            {draft && <div className="text-[10.5px] text-ink-mute">Tax is computed by QBO at issue.</div>}
+            {!draft && taxCents > 0 && (
               <div className="flex justify-between text-ink-dim">
                 <span>Tax</span>
                 <span className="font-mono num">{formatCurrency(taxCents / 100)}</span>
               </div>
             )}
-            <div className="flex justify-between text-ink font-medium">
-              <span>Total</span>
-              <span className="font-mono num">{formatCurrency(Number(inv.total_amt ?? 0))}</span>
-            </div>
+            {!draft && (
+              <div className="flex justify-between text-ink font-medium">
+                <span>Total</span>
+                <span className="font-mono num">{formatCurrency(Number(inv.total_amt ?? 0))}</span>
+              </div>
+            )}
             {/* applied payments bridge the total to the balance */}
             {payments.map((p) => (
               <div key={p.qbo_payment_id} className="flex items-center gap-2 text-ink-dim" title={p.memo ?? undefined}>
@@ -231,14 +259,21 @@ function InvoiceDetailBody({
                 <span className="ml-auto font-mono num text-grass">−{formatCurrency(Number(p.applied_amount ?? 0))}</span>
               </div>
             ))}
-            <div className={cn("flex justify-between font-medium", paid ? "text-grass" : "text-sun")}>
-              <span>Balance</span>
-              <span className="font-mono num">{formatCurrency(Number(inv.balance ?? 0))}</span>
-            </div>
+            {!draft && (
+              <div className={cn("flex justify-between font-medium", paid ? "text-grass" : "text-sun")}>
+                <span>Balance</span>
+                <span className="font-mono num">{formatCurrency(Number(inv.balance ?? 0))}</span>
+              </div>
+            )}
           </div>
         </div>
 
-        <HistoryTimeline rows={invoiceHistoryRows(history)} title="History" emptyText="No events — this invoice predates the machine." />
+        {!draft && <HistoryTimeline rows={invoiceHistoryRows(history)} title="History" emptyText="No events — this invoice predates the machine." />}
+        {draft && (
+          <div className="text-[11px] text-ink-mute">
+            Regenerated from the ledger on every view — the ledger moves with visit edits until issue locks it.
+          </div>
+        )}
       </div>
     </Dialog>
   )

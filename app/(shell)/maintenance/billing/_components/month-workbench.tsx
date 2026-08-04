@@ -18,6 +18,7 @@ import {
   type AppliedPayment,
   type InvoiceDetail,
   type InvoiceEvent,
+  type InvoiceLineItem,
 } from "./invoice-detail-modal"
 import { PaymentMethodBadge, type PaymentMethodRef } from "@/components/ui/payment-method"
 
@@ -287,54 +288,6 @@ export function MonthWorkbench({
             </CardBody>
           </Card>
 
-          {/* the DRAFT card — pre-issue only */}
-          {!hasInvoices && (
-            <Card id="draft-card">
-              <CardHeader>
-                <CardTitle>Draft invoice</CardTitle>
-                <div className="ml-auto flex border border-line rounded-lg overflow-hidden">
-                  <button onClick={() => setPresentation("itemized")} className={`h-[22px] px-2 text-[10.5px] font-semibold ${seg((presentation ?? (draft && draft !== "loading" && draft !== "error" ? draft.presentation : "itemized")) === "itemized")}`}>Itemized</button>
-                  <button onClick={() => setPresentation("summary")} className={`h-[22px] px-2 text-[10.5px] font-semibold border-l border-line ${seg((presentation ?? (draft && draft !== "loading" && draft !== "error" ? draft.presentation : "itemized")) === "summary")}`}>Summary</button>
-                </div>
-              </CardHeader>
-              <CardBody className="space-y-3">
-                <span className="text-[11px] text-ink-mute">Regenerated from the ledger on every view.</span>
-                {draft === "loading" && <div className="py-6 text-center text-[12px] text-ink-mute">Building the draft…</div>}
-                {draft === "error" && <div className="py-6 text-center text-[12px] text-coral">Failed to build the draft.</div>}
-                {draft && draft !== "loading" && draft !== "error" &&
-                  draft.documents.map((doc, d) => (
-                    <div key={d} className="rounded border border-line-soft overflow-hidden">
-                      {draft.documents.length > 1 && (
-                        <div className="px-3 py-1.5 font-mono text-[9.5px] uppercase tracking-[0.1em] text-cyan bg-white/[0.02]">
-                          {doc.kind} · {formatCurrency(doc.subtotalCents / 100)}
-                        </div>
-                      )}
-                      {doc.lines.map((ln, idx) =>
-                        ln.kind === "visit_break" ? (
-                          <div key={idx} className="px-3 pt-2 pb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-white/[0.015]">
-                            {visitBreakLabel(ln.serviceDate)}
-                          </div>
-                        ) : (
-                          <div key={idx} className="flex items-center gap-2.5 border-b border-line-soft/60 last:border-b-0 px-3 py-1.5">
-                            <div className="flex-1 min-w-0">
-                              <span className={ln.itemName ? "text-[12px] text-ink" : "text-[12px] text-ink-mute"}>{ln.itemName || "—"}</span>
-                              <span className="ml-2 font-mono text-[10px] text-ink-mute">
-                                {ln.kind === "variance" ? ln.detail : `${ln.qty} × ${formatCurrency(ln.unitPriceCents / 100)}`}
-                              </span>
-                              <div className={ln.description ? "text-[10.5px] text-ink-dim" : "text-[10.5px] text-coral"}>
-                                {ln.description || "no description — issue will refuse"}
-                              </div>
-                            </div>
-                            <span className="font-mono num text-[12px] text-ink">{formatCurrency(ln.amountCents / 100)}</span>
-                          </div>
-                        ),
-                      )}
-                    </div>
-                  ))}
-              </CardBody>
-            </Card>
-          )}
-
           {/* the LOGS card — its own component, full width */}
           <ServiceLog
             visits={visits}
@@ -367,11 +320,7 @@ export function MonthWorkbench({
                 {!hasInvoices &&
                   (draft && draft !== "loading" && draft !== "error" ? (
                     draft.documents.map((doc) => (
-                      <TableRow
-                        key={doc.kind}
-                        onClick={() => document.getElementById("draft-card")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                        className="cursor-pointer"
-                      >
+                      <TableRow key={doc.kind} onClick={() => setOpenInvoice(`draft:${doc.kind}`)} className="cursor-pointer">
                         <TableCell className="font-mono text-ink">{doc.docNumber ?? (draft.documents.length > 1 ? doc.kind : "draft")}</TableCell>
                         <TableCell>
                           <Pill tone="neutral">draft</Pill>
@@ -453,12 +402,54 @@ export function MonthWorkbench({
         </div>
       </div>
 
-      <InvoiceDetailModal
-        invoice={invoices.find((i) => i.qbo_invoice_id === openInvoice) ?? null}
-        payments={openInvoice ? (invoicePayments[openInvoice] ?? []) : []}
-        history={openInvoice ? (invoiceHistory[openInvoice] ?? []) : []}
-        onClose={() => setOpenInvoice(null)}
-      />
+      {openInvoice?.startsWith("draft:") && draft && draft !== "loading" && draft !== "error" ? (
+        (() => {
+          const doc = draft.documents.find((d) => `draft:${d.kind}` === openInvoice)
+          if (!doc) return null
+          const lines: InvoiceLineItem[] = doc.lines.map((ln) =>
+            ln.kind === "visit_break"
+              ? { line_type: "description", description: visitBreakLabel(ln.serviceDate) }
+              : {
+                  line_type: "item",
+                  item_name: ln.itemName || "—",
+                  description: ln.description ?? (ln.kind === "variance" ? ln.detail : null),
+                  qty: ln.qty,
+                  unit_price: ln.unitPriceCents / 100,
+                  amount: ln.amountCents / 100,
+                },
+          )
+          return (
+            <InvoiceDetailModal
+              invoice={{
+                qbo_invoice_id: openInvoice,
+                doc_number: doc.docNumber ?? null,
+                customer_name: m.customer_name,
+                txn_date: null,
+                memo: `${new Date(m.month.slice(0, 7) + "-15T12:00:00Z").toLocaleDateString("en-US", { month: "long", timeZone: "UTC" })} Pool Maintenance`,
+                subtotal: doc.subtotalCents / 100,
+                total_amt: null,
+                balance: null,
+                email_status: null,
+                line_items: lines,
+              }}
+              payments={[]}
+              history={[]}
+              onClose={() => setOpenInvoice(null)}
+              draft={{
+                presentation: presentation ?? draft.presentation,
+                onPresentation: setPresentation,
+              }}
+            />
+          )
+        })()
+      ) : (
+        <InvoiceDetailModal
+          invoice={invoices.find((i) => i.qbo_invoice_id === openInvoice) ?? null}
+          payments={openInvoice ? (invoicePayments[openInvoice] ?? []) : []}
+          history={openInvoice ? (invoiceHistory[openInvoice] ?? []) : []}
+          onClose={() => setOpenInvoice(null)}
+        />
+      )}
     </div>
   )
 }
