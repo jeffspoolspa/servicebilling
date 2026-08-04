@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { createSupabaseServer } from "@/lib/supabase/server"
 import { MonthSelect } from "./_components/month-select"
 import { MonthsTable } from "./_components/months-table"
@@ -46,6 +47,14 @@ export default async function BillingMonthsPage({
       <div className="flex items-center gap-3">
         <h2 className="font-display text-[18px]">Billing months</h2>
         {selected && <MonthSelect months={months} value={selected} />}
+        <span className="ml-auto flex items-center gap-4 text-[12px]">
+          <Link href={"/maintenance/billing/findings" as never} className="text-ink-mute hover:text-ink underline underline-offset-2">
+            Findings
+          </Link>
+          <Link href={"/maintenance/billing/autopay" as never} className="text-ink-mute hover:text-ink underline underline-offset-2">
+            Autopay roster
+          </Link>
+        </span>
       </div>
       <MonthsTable rows={(data ?? []) as MonthOverviewRow[]} />
     </div>
