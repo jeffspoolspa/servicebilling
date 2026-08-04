@@ -6,6 +6,7 @@ import { SupabaseBillingFacts } from "@/lib/billing/infrastructure/supabase-bill
 import { QboInvoices } from "@/lib/external/qbo/qbo"
 import { WindmillQboMinter } from "@/lib/external/qbo/windmill-minter"
 import { issueMonth, IssueRefused } from "@/lib/billing/application/issue-service"
+import { SupabaseInvoiceQueue } from "@/lib/billing/infrastructure/supabase-invoice-queue"
 
 /**
  * ISSUE one month's invoices in QBO — an EXPLICIT, per-month human act.
@@ -39,6 +40,9 @@ export async function POST(_req: Request, ctx: { params: Promise<{ monthId: stri
         ionInvoiceNumbers: (ids, m) => months.ionInvoiceNumbers(ids, m),
         qboCustomerId: (id) => months.qboCustomerId(id),
         saveIssued: (rows) => months.saveIssued(rows),
+        enqueueInvoices: async (ids) => {
+          await new SupabaseInvoiceQueue(sys as never).enqueue(ids, 2)
+        },
       },
       new Date(),
       delivered,

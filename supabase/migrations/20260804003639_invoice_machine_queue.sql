@@ -1,0 +1,11 @@
+-- The INVOICE machine's queue — the month queue's exact shape at the new
+-- grain (RULED: queue in, drainer through, events out; the command names
+-- the SUBJECT — AdvanceInvoice(qbo_invoice_id) — and the handler asks
+-- invoiceNextStep at claim time). Coalescing = one OPEN row per invoice;
+-- claiming = FOR UPDATE SKIP LOCKED; 3 strikes dead-letters.
+-- month_invoices also gains the COLLECT moment (outcome recorded so a
+-- resolved collection never re-asks; declined/unknown PARK for a person).
+-- Full definitions applied via MCP migration invoice_machine_queue:
+-- enqueue_invoices(text[], smallint) / claim_invoice() / finish_invoice(bigint, text),
+-- billing.invoice_queue (open-uniq per invoice, claimable idx),
+-- month_invoices.collected_at + collect_outcome.

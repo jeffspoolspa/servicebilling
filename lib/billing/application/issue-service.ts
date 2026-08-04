@@ -41,6 +41,9 @@ export interface IssueDeps {
   ionInvoiceNumbers(taskIds: readonly string[], month: string): Promise<string[]>
   qboCustomerId(customerId: number): Promise<string | null>
   saveIssued(rows: { billingMonthId: string; kind: string; qboInvoiceId: string; docNumber: string; subtotalCents: number; presentation: string; ionInvoiceNumbers: string[] }[]): Promise<void>
+  /** THE HANDOFF: each created invoice enters its own machine — one
+   *  AdvanceInvoice command per document, the drainer takes it from there. */
+  enqueueInvoices(qboInvoiceIds: string[]): Promise<void>
 }
 
 const MONTH_NAME = (month: string) =>
@@ -126,6 +129,7 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
   )
   m.markInvoiced(delivered, now, at)
   await deps.months.save(m)
+  await deps.enqueueInvoices(issued.map((i) => i.qboInvoiceId))
 
   return { monthId: m.id, invoices: issued, presentation, ionInvoiceNumbers: ionNumbers }
 }

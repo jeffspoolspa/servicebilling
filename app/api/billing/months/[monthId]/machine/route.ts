@@ -2,16 +2,15 @@ import { NextResponse } from "next/server"
 import { createSupabaseServer } from "@/lib/supabase/server"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
-import { maintenanceMachineDeps, refFor } from "@/lib/billing/infrastructure/maintenance-invoice-machine"
-import { preprocessInvoice } from "@/lib/billing/application/preprocess-service"
-import { processInvoice } from "@/lib/billing/application/process-service"
+import { maintenanceMachineDeps } from "@/lib/billing/infrastructure/maintenance-invoice-machine"
+import { SupabaseInvoiceQueue } from "@/lib/billing/infrastructure/supabase-invoice-queue"
+import { AdvanceInvoiceService } from "@/lib/billing/application/advance-invoice-service"
 
 /**
- * Run the INVOICE MACHINE for one month's issued documents — the pilot's
- * explicit trigger (Carter fires it; nothing is drainer-wired). For each
- * linked invoice: preprocess (credit check + route link) then process
- * (charge if bridged — the pilot charger declines by design — then SEND).
- * Level-triggered and idempotent: a re-run converges on sent invoices.
+ * The pilot trigger for one month's invoice machine — the SAME rails as
+ * production: enqueue AdvanceInvoice per issued document, then drain the
+ * queue through the one handler (claim -> invoiceNextStep -> one stage ->
+ * tail-chain). Your finger instead of the cron, nothing else different.
  */
 export async function POST(_req: Request, ctx: { params: Promise<{ monthId: string }> }) {
   const sb = await createSupabaseServer()
@@ -28,18 +27,30 @@ export async function POST(_req: Request, ctx: { params: Promise<{ monthId: stri
   const { data: rows, error } = await sys
     .schema("billing")
     .from("month_invoices")
-    .select("qbo_invoice_id, kind, subtotal_cents")
+    .select("qbo_invoice_id")
     .eq("billing_month_id", monthId)
   if (error) return NextResponse.json({ error: String(error.message ?? error) }, { status: 500 })
+  const ids = ((rows ?? []) as { qbo_invoice_id: string }[]).map((r) => r.qbo_invoice_id)
 
-  const { preprocess, process } = maintenanceMachineDeps(sys as never)
-  const now = new Date()
-  const outcomes = []
-  for (const r of (rows ?? []) as { qbo_invoice_id: string; kind: string; subtotal_cents: number }[]) {
-    const inv = refFor(monthId, month.customerId, r.qbo_invoice_id, r.subtotal_cents)
-    const pre = await preprocessInvoice(inv, preprocess, now)
-    const proc = await processInvoice(inv, process, now)
-    outcomes.push({ invoice: r.qbo_invoice_id, kind: r.kind, preprocess: pre, process: proc })
+  const queue = new SupabaseInvoiceQueue(sys as never)
+  await queue.enqueue(ids, 1)
+
+  const deps = maintenanceMachineDeps(sys as never)
+  const service = new AdvanceInvoiceService(deps.reader, deps.preprocess, deps.collect, deps.send)
+  const log: unknown[] = []
+  // Drain: claim -> one stage -> finish -> tail-chain, until the queue is dry.
+  for (let i = 0; i < 50; i++) {
+    const cmd = await queue.claim()
+    if (!cmd) break
+    try {
+      const out = await service.advance(cmd.qboInvoiceId)
+      log.push(out)
+      await queue.finish(cmd.queueId)
+      if (out.again) await queue.enqueue([cmd.qboInvoiceId], 1)
+    } catch (e) {
+      await queue.finish(cmd.queueId, String(e instanceof Error ? e.message : e).slice(0, 400))
+      log.push({ qboInvoiceId: cmd.qboInvoiceId, error: String(e instanceof Error ? e.message : e).slice(0, 400) })
+    }
   }
-  return NextResponse.json({ monthId, outcomes })
+  return NextResponse.json({ monthId, invoices: ids, log })
 }

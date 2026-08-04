@@ -6,7 +6,9 @@ import { InvoiceCharger } from "@/lib/payments/application/invoice-charger"
 import { SupabaseChargeRepository } from "@/lib/payments/infrastructure/supabase-charge-repository"
 import type { PaymentInstrument } from "@/lib/payments/domain/ports"
 import type { InvoiceRef, PreprocessInvoiceDeps } from "@/lib/billing/application/preprocess-service"
-import type { ProcessInvoiceDeps } from "@/lib/billing/application/process-service"
+import type { CollectDeps, SendDeps } from "@/lib/billing/application/process-service"
+import type { InvoiceStateReader } from "@/lib/billing/application/advance-invoice-service"
+import type { InvoiceMachineState } from "@/lib/billing/domain"
 
 /**
  * The MAINTENANCE policy adapters for the invoice machine — the deps behind
@@ -36,8 +38,10 @@ interface Db {
 
 export function maintenanceMachineDeps(sys: Db): {
   qbo: QboInvoices
+  reader: InvoiceStateReader
   preprocess: PreprocessInvoiceDeps
-  process: Omit<ProcessInvoiceDeps, "charger"> & { charger: InvoiceCharger }
+  collect: CollectDeps
+  send: SendDeps
 } {
   const mirror = new SupabaseInvoiceMirror(sys as never)
   const qbo = new QboInvoices(new WindmillQboMinter(), mirror)
@@ -124,8 +128,45 @@ export function maintenanceMachineDeps(sys: Db): {
     emit,
   }
 
-  const process: Omit<ProcessInvoiceDeps, "charger"> & { charger: InvoiceCharger } = {
-    async linkedInstrument(qboInvoiceId) {
+  const reader: InvoiceStateReader = {
+    async stateFor(qboInvoiceId: string) {
+      const q = sys.schema("billing").from("month_invoices") as {
+        select(c: string): { eq(col: string, v: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+      }
+      const { data, error } = await q
+        .select("qbo_invoice_id, billing_month_id, subtotal_cents, preprocessed_at, linked_payment_method_id, collected_at, collect_outcome, billing_months(customer_id)")
+        .eq("qbo_invoice_id", qboInvoiceId)
+      if (error) throw new Error(`machine state read failed: ${JSON.stringify(error).slice(0, 200)}`)
+      const r = (data ?? [])[0] as {
+        qbo_invoice_id: string; billing_month_id: string; subtotal_cents: number
+        preprocessed_at: string | null; linked_payment_method_id: string | null
+        collected_at: string | null; collect_outcome: InvoiceMachineState["collectOutcome"]
+        billing_months: { customer_id: number } | null
+      } | undefined
+      if (!r) return null
+      const { data: inv } = await invoicesCache().select("email_status").eq("qbo_invoice_id", qboInvoiceId)
+      const emailStatus = ((inv ?? [])[0] as { email_status: string | null } | undefined)?.email_status ?? null
+      return {
+        ref: {
+          qboInvoiceId: r.qbo_invoice_id,
+          customerId: r.billing_months?.customer_id ?? 0,
+          kind: "maintenance",
+          linkedTo: { aggregate: "billing_month", id: r.billing_month_id },
+          subtotalCents: r.subtotal_cents,
+        },
+        state: {
+          preprocessedAt: r.preprocessed_at,
+          linkedPaymentMethodId: r.linked_payment_method_id,
+          collectedAt: r.collected_at,
+          collectOutcome: r.collect_outcome,
+          emailStatus,
+        },
+      }
+    },
+  }
+
+  const collect: CollectDeps = {
+    async linkedInstrument(qboInvoiceId: string) {
       const { data, error } = await monthInvoices().select("linked_payment_method_id").eq("qbo_invoice_id", qboInvoiceId)
       if (error) throw new Error(`linked instrument read failed: ${JSON.stringify(error).slice(0, 200)}`)
       const id = ((data ?? [])[0] as { linked_payment_method_id: string | null } | undefined)?.linked_payment_method_id
@@ -139,6 +180,15 @@ export function maintenanceMachineDeps(sys: Db): {
       if (!row?.is_active) return null
       return { paymentMethodId: row.id, kind: row.type === "ach" ? "ach" : "card", active: true }
     },
+    async recordCollect(qboInvoiceId: string, outcome, at: string) {
+      const { data, error } = await monthInvoices()
+        .update({ collected_at: at, collect_outcome: outcome })
+        .eq("qbo_invoice_id", qboInvoiceId)
+        .select("id")
+      if (error) throw new Error(`collect record failed: ${JSON.stringify(error).slice(0, 200)}`)
+      if (!data || data.length === 0) throw new Error(`collect record touched no rows for ${qboInvoiceId}`)
+    },
+    emit,
     charger: new InvoiceCharger({
       openBalance: (id) => qbo.openBalance(id),
       charges,
@@ -160,8 +210,11 @@ export function maintenanceMachineDeps(sys: Db): {
       },
       newChargeId: () => crypto.randomUUID(),
     }),
+  }
+
+  const send: SendDeps = {
     sender: {
-      async send(qboInvoiceId, attachments) {
+      async send(qboInvoiceId: string, attachments: readonly { filename: string; pdf: Uint8Array }[]) {
         for (const a of attachments) await qbo.attachPdf(qboInvoiceId, a.filename, a.pdf)
         await qbo.sendInvoice(qboInvoiceId)
       },
@@ -170,16 +223,10 @@ export function maintenanceMachineDeps(sys: Db): {
       // The usage-report PDF ride-along lands with the report-render bridge.
       return []
     },
-    async sentAt(qboInvoiceId) {
-      const { data, error } = await invoicesCache().select("email_status").eq("qbo_invoice_id", qboInvoiceId)
-      if (error) throw new Error(`sent read failed: ${JSON.stringify(error).slice(0, 200)}`)
-      const st = ((data ?? [])[0] as { email_status: string | null } | undefined)?.email_status
-      return st === "EmailSent" ? "sent" : null
-    },
     emit,
   }
 
-  return { qbo, preprocess, process }
+  return { qbo, reader, preprocess, collect, send }
 }
 
 /** The InvoiceRef for a month's issued document. */

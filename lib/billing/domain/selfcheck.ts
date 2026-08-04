@@ -13,6 +13,7 @@ import { gate, type MonthGateFacts } from "./gate"
 import { auditConsumables } from "./consumables-audit"
 import { draftInvoice } from "./invoice-draft"
 import { documentsOf, presentationOf } from "./invoice-documents"
+import { invoiceNextStep } from "./invoice-lifecycle"
 
 let n = 0
 const check = (_name: string, fn: () => void) => {
@@ -707,6 +708,22 @@ check("QC prints at $0; a green-pool task is its OWN invoice, never combined", (
   )
   assert.ok(!svc.lines.some((l) => l.kind !== "visit_break" && l.itemName.includes("GREEN")), "green never combines")
   assert.strictEqual(docs[1].subtotalCents, 8500 + 2620, "the green invoice carries its own labor and chems")
+})
+
+check("invoiceNextStep is the machine's one statement of the sequence", () => {
+  const base = { preprocessedAt: null, linkedPaymentMethodId: null, collectedAt: null, collectOutcome: null, emailStatus: null } as const
+  assert.strictEqual(invoiceNextStep({ ...base }), "credit_check")
+  // Email route: no instrument skips collect entirely.
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT }), "send")
+  // Autopay route: instrument linked -> collect before send.
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, linkedPaymentMethodId: "pm" }), "collect")
+  // Resolved collections proceed; declined/unknown PARK for a person.
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, linkedPaymentMethodId: "pm", collectedAt: AT, collectOutcome: "charged" }), "send")
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, linkedPaymentMethodId: "pm", collectedAt: AT, collectOutcome: "nothing_owed" }), "send")
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, linkedPaymentMethodId: "pm", collectedAt: AT, collectOutcome: "declined" }), null)
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, linkedPaymentMethodId: "pm", collectedAt: AT, collectOutcome: "unknown" }), null)
+  // Sent = done; paid needs no step (the webhook feeds the closed fold).
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, emailStatus: "EmailSent" }), null)
 })
 
 console.log(`billing domain selfcheck: ${n} checks passed`)

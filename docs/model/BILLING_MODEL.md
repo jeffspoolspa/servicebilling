@@ -62,8 +62,19 @@ month's last own step (nextStep after invoiced = null). THE HANDOFF: each create
 ITS OWN machine — enrich(=creation) -> credit check (apply decided credits + link the active
 instrument) -> charge -> send — kind-scoped by WHAT IT IS LINKED TO (billing_month -> maintenance:
 the autopay roster decides the route; work_order -> service: its own resolver). One machine, two
-policy adapters; every invoice event carries the parent as a PARTICIPANT. preprocessInvoice /
-processInvoice are the invoice-grain steps (lib/billing/application). The month's final state is
+policy adapters; every invoice event carries the parent as a PARTICIPANT. THE MACHINE'S EXECUTION MODEL (queue in, drainer through, events out — the month machine's exact
+shape at the invoice grain): issueMonth's last act enqueues one AdvanceInvoice(qbo_invoice_id)
+command per created document into billing.invoice_queue (coalesced, SKIP LOCKED claim, 3-strike
+dead-letter — the month queue's RPCs mirrored). The handler (AdvanceInvoiceService) asks
+invoiceNextStep(state) AT CLAIM TIME — the machine's one statement of the sequence, derived from
+state queries (month_invoices.preprocessed_at / linked instrument / collected_at+collect_outcome,
+the mirror's email_status) — and runs exactly ONE stage per claim: credit_check
+(preprocessInvoice) -> collect (collectInvoice — records its OUTCOME so a resolved collection
+never re-asks; declined/unknown PARK for a person; no_instrument falls to the email route) ->
+send (sendInvoiceStep — the send echo flips the mirror, which is what nextStep reads). Tail-chain
+re-enqueues while nextStep says more. The pilot route (/months/[id]/machine) runs the SAME
+handler on the same queue — a finger instead of the cron; /billing/invoice-queue/drain is the
+standing drainer. The month's final state is
 CLOSED — a FOLD (every linked invoice sent AND paid) derived by v_months_overview, never a command;
 variance dispositions take the sent answer from the invoice fold (recordVariance(v, at,
 {invoiceSent})). Month stepper: Accrue -> Reconcile -> Gate -> Invoice -> Closed.
