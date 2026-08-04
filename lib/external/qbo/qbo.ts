@@ -357,3 +357,92 @@ export class QboInvoices extends Qbo {
     return Math.round((inv.Balance ?? 0) * 100)
   }
 }
+
+/* -------------------------------- credits --------------------------------- */
+
+export interface OpenCredit {
+  readonly kind: "payment" | "credit_memo"
+  readonly id: string
+  readonly availableCents: number
+  readonly memo: string
+}
+
+/**
+ * Open maintenance credits — RULED: BOTH open (unapplied) Payments AND
+ * CreditMemos with remaining credit, filtered to a 'maint' private note.
+ * Application mechanics are ported verbatim from the proven
+ * apply_maint_credits script: payment-apply preserves already-linked lines
+ * and sparse-updates; credit-memo-apply CREATES a $0 Payment linking the CM
+ * and the invoice in one line. Both echo-verified. Idempotency is
+ * self-converging by construction: amounts are min(available, open
+ * balance), and both sides shrink with each application — a crashed re-run
+ * re-reads both and applies only what is still owed.
+ */
+export class QboCredits extends Qbo {
+  async openMaintCredits(qboCustomerId: string): Promise<OpenCredit[]> {
+    const cust = qboCustomerId.replace(/'/g, "")
+    const out: OpenCredit[] = []
+
+    const pays = await this.query<{ QueryResponse: { Payment?: { Id: string; UnappliedAmt?: number; PrivateNote?: string }[] } }>(
+      `select Id, UnappliedAmt, PrivateNote from Payment where CustomerRef = '${cust}'`,
+    )
+    for (const p of pays.QueryResponse.Payment ?? []) {
+      const un = Number(p.UnappliedAmt ?? 0)
+      if (un > 0 && (p.PrivateNote ?? "").toLowerCase().includes("maint")) {
+        out.push({ kind: "payment", id: p.Id, availableCents: Math.round(un * 100), memo: p.PrivateNote ?? "" })
+      }
+    }
+
+    const cms = await this.query<{ QueryResponse: { CreditMemo?: { Id: string; RemainingCredit?: number; Balance?: number; PrivateNote?: string }[] } }>(
+      `select Id, RemainingCredit, Balance, PrivateNote from CreditMemo where CustomerRef = '${cust}' and Balance > '0'`,
+    )
+    for (const c of cms.QueryResponse.CreditMemo ?? []) {
+      const rem = Number(c.RemainingCredit ?? 0)
+      if (rem > 0 && (c.PrivateNote ?? "").toLowerCase().includes("maint")) {
+        out.push({ kind: "credit_memo", id: c.Id, availableCents: Math.round(rem * 100), memo: c.PrivateNote ?? "" })
+      }
+    }
+    return out
+  }
+
+  /** Apply part of an open Payment to an invoice; echo = the new UnappliedAmt. */
+  async applyPaymentToInvoice(paymentId: string, qboInvoiceId: string, cents: number): Promise<{ newUnappliedCents: number }> {
+    const cur = await this.request<{ Payment: { Id: string; SyncToken: string; TotalAmt: number; CustomerRef: { value: string }; Line?: { LinkedTxn?: unknown[]; Amount?: number }[] } }>(
+      "GET",
+      `/payment/${paymentId}`,
+    )
+    const p = cur.Payment
+    const lines = (p.Line ?? []).filter((l) => l.LinkedTxn)
+    lines.push({ Amount: cents / 100, LinkedTxn: [{ TxnId: qboInvoiceId, TxnType: "Invoice" }] as unknown[] })
+    const res = await this.request<{ Payment: { Id: string; UnappliedAmt?: number } }>("POST", "/payment", {
+      Id: p.Id,
+      SyncToken: p.SyncToken,
+      CustomerRef: p.CustomerRef,
+      TotalAmt: p.TotalAmt,
+      sparse: true,
+      Line: lines,
+    })
+    if (!res.Payment?.Id) throw new Error(`payment apply returned no echo — unproven`)
+    return { newUnappliedCents: Math.round(Number(res.Payment.UnappliedAmt ?? 0) * 100) }
+  }
+
+  /** Apply a CreditMemo to an invoice by creating the linking $0 Payment. */
+  async applyCreditMemoToInvoice(cmId: string, qboCustomerId: string, qboInvoiceId: string, cents: number, note: string): Promise<{ createdPaymentId: string }> {
+    const res = await this.request<{ Payment: { Id: string } }>("POST", "/payment", {
+      TotalAmt: 0,
+      CustomerRef: { value: qboCustomerId },
+      Line: [
+        {
+          Amount: cents / 100,
+          LinkedTxn: [
+            { TxnId: qboInvoiceId, TxnType: "Invoice" },
+            { TxnId: cmId, TxnType: "CreditMemo" },
+          ],
+        },
+      ],
+      PrivateNote: note,
+    })
+    if (!res.Payment?.Id) throw new Error(`credit-memo apply returned no echo — unproven`)
+    return { createdPaymentId: res.Payment.Id }
+  }
+}

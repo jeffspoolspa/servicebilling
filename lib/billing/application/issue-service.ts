@@ -44,6 +44,7 @@ export interface IssueDeps {
   /** THE HANDOFF: each created invoice enters its own machine — one
    *  AdvanceInvoice command per document, the drainer takes it from there. */
   enqueueInvoices(qboInvoiceIds: string[]): Promise<void>
+  emit(type: string, payload: Record<string, unknown>, participants: string[], at: string): Promise<void>
 }
 
 const MONTH_NAME = (month: string) =>
@@ -114,6 +115,12 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
       ),
     })
     issued.push({ ...created, kind: d.kind })
+    await deps.emit(
+      "invoice_created",
+      { qbo_invoice_id: created.qboInvoiceId, doc_number: created.docNumber, kind: d.kind, subtotal_cents: created.subtotalCents, how: created.how, presentation },
+      [m.id],
+      at,
+    )
   }
 
   await deps.saveIssued(

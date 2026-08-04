@@ -21,19 +21,34 @@ export interface InvoiceRef {
   subtotalCents: number
 }
 
+export interface OpenCreditRef {
+  kind: "payment" | "credit_memo"
+  id: string
+  availableCents: number
+  memo: string
+}
+
 export interface AppliedCredit {
-  paymentId: string
+  kind: "payment" | "credit_memo"
+  creditId: string
   qboInvoiceId: string
   appliedCents: number
+  /** The $0 linking Payment a credit-memo application creates. */
+  createdPaymentId?: string
 }
 
 export interface PreprocessInvoiceDeps {
   /** Already preprocessed? Level-triggered convergence, never re-applied. */
   preprocessedAt(qboInvoiceId: string): Promise<string | null>
-  /** DECIDED, still-open credits for this customer — kind-scoped policy. */
-  decidedOpenCredits(customerId: number, kind: InvoiceRef["kind"]): Promise<{ paymentId: string; unappliedCents: number }[]>
-  /** Apply one credit against this invoice in QBO — idempotent per pair, echo-verified (mirror rides the echo). */
-  applyCredit(paymentId: string, qboInvoiceId: string, cents: number): Promise<AppliedCredit>
+  /**
+   * Open credits for this customer — RULED: BOTH unapplied Payments AND
+   * CreditMemos with remaining credit, maint-memo'd. Kind-scoped policy.
+   */
+  openCredits(customerId: number, kind: InvoiceRef["kind"]): Promise<OpenCreditRef[]>
+  /** The invoice's open balance, FRESH — the room a credit may fill. */
+  openBalance(qboInvoiceId: string): Promise<number>
+  /** Apply one credit against this invoice in QBO — echo-verified; self-converging (both sides shrink). */
+  applyCredit(credit: OpenCreditRef, qboInvoiceId: string, cents: number): Promise<AppliedCredit>
   /** Stamp the stage's moment — credits checked. */
   markCreditsChecked(qboInvoiceId: string, at: string): Promise<void>
   /** Emit a fact with the parent as participant. */
@@ -52,16 +67,34 @@ export async function preprocessInvoice(inv: InvoiceRef, deps: PreprocessInvoice
     return { qboInvoiceId: inv.qboInvoiceId, appliedCredits: [] }
   }
 
-  /* 1 — credits: decided credits burn down, never past either remainder. */
-  const credits = await deps.decidedOpenCredits(inv.customerId, inv.kind)
+  /* 1 — credits. The room is the FRESH open balance (not the subtotal),
+   *     which is what makes a crashed re-run self-converging: both the
+   *     credit's remainder and the balance shrank with the first pass, so
+   *     min(available, room) applies only what is still owed. */
+  const credits = await deps.openCredits(inv.customerId, inv.kind)
   const applied: AppliedCredit[] = []
-  let room = inv.subtotalCents
-  for (const credit of credits) {
-    if (room <= 0) break
-    const cents = Math.min(credit.unappliedCents, room)
-    if (cents <= 0) continue
-    applied.push(await deps.applyCredit(credit.paymentId, inv.qboInvoiceId, cents))
-    room -= cents
+  if (credits.length > 0) {
+    await deps.emit(
+      "credits_matched",
+      { qbo_invoice_id: inv.qboInvoiceId, credits: credits.map((c) => ({ kind: c.kind, id: c.id, available_cents: c.availableCents, memo: c.memo })) },
+      [inv.linkedTo.id],
+      at,
+    )
+    let room = await deps.openBalance(inv.qboInvoiceId)
+    for (const credit of credits) {
+      if (room <= 0) break
+      const cents = Math.min(credit.availableCents, room)
+      if (cents <= 0) continue
+      const a = await deps.applyCredit(credit, inv.qboInvoiceId, cents)
+      applied.push(a)
+      room -= cents
+      await deps.emit(
+        "credit_applied",
+        { qbo_invoice_id: inv.qboInvoiceId, kind: a.kind, credit_id: a.creditId, applied_cents: a.appliedCents, ...(a.createdPaymentId ? { created_payment_id: a.createdPaymentId } : {}) },
+        [inv.linkedTo.id],
+        at,
+      )
+    }
   }
 
   // The payment route is NOT resolved here (RULED: resolution is a query,
@@ -69,7 +102,7 @@ export async function preprocessInvoice(inv: InvoiceRef, deps: PreprocessInvoice
   await deps.markCreditsChecked(inv.qboInvoiceId, at)
   await deps.emit(
     "invoice_credits_checked",
-    { qbo_invoice_id: inv.qboInvoiceId, credits_applied: applied.length, kind: inv.kind },
+    { qbo_invoice_id: inv.qboInvoiceId, credits_matched: credits.length, credits_applied: applied.length, kind: inv.kind },
     [inv.linkedTo.id],
     at,
   )

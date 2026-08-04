@@ -43,6 +43,18 @@ export async function POST(_req: Request, ctx: { params: Promise<{ monthId: stri
         enqueueInvoices: async (ids) => {
           await new SupabaseInvoiceQueue(sys as never).enqueue(ids, 2)
         },
+        emit: async (type, payload, participants, at) => {
+          const { error: factErr } = await sys.schema("maintenance").rpc("append_event", {
+            p_aggregate: "invoice",
+            p_aggregate_id: String(payload.qbo_invoice_id ?? ""),
+            p_type: type,
+            p_payload: payload,
+            p_actor: "billing_pipeline",
+            p_participants: participants,
+            p_occurred_at: at,
+          })
+          if (factErr) throw new Error(`event append failed (${type}): ${JSON.stringify(factErr).slice(0, 200)}`)
+        },
       },
       new Date(),
       delivered,

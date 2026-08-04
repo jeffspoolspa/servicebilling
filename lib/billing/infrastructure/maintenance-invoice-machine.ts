@@ -1,5 +1,5 @@
 import "server-only"
-import { QboInvoices } from "@/lib/external/qbo/qbo"
+import { QboCredits, QboInvoices, type OpenCredit } from "@/lib/external/qbo/qbo"
 import { WindmillQboMinter } from "@/lib/external/qbo/windmill-minter"
 import { SupabaseInvoiceMirror } from "@/lib/billing/infrastructure/supabase-invoice-mirror"
 import { InvoiceCharger } from "@/lib/payments/application/invoice-charger"
@@ -44,7 +44,9 @@ export function maintenanceMachineDeps(sys: Db): {
   send: SendDeps
 } {
   const mirror = new SupabaseInvoiceMirror(sys as never)
-  const qbo = new QboInvoices(new WindmillQboMinter(), mirror)
+  const minter = new WindmillQboMinter()
+  const qbo = new QboInvoices(minter, mirror)
+  const qboCredits = new QboCredits(minter)
   const charges = new SupabaseChargeRepository(sys as never)
 
   const monthInvoices = () =>
@@ -106,15 +108,31 @@ export function maintenanceMachineDeps(sys: Db): {
       if (error) throw new Error(`preprocessed read failed: ${JSON.stringify(error).slice(0, 200)}`)
       return ((data ?? [])[0] as { preprocessed_at: string | null } | undefined)?.preprocessed_at ?? null
     },
-    async decidedOpenCredits() {
-      // Not wired yet — and the gate's credits_settled already held months
-      // with UNDECIDED credits, so by construction there is nothing decided
-      // waiting here in the pilot. The moment decided-credit application is
-      // wired, this adapter is the one place it lands.
-      return []
+    async openCredits(customerId: number) {
+      // RULED: BOTH open payments AND credit memos, maint-memo'd.
+      const { data: cRows } = await (sys.schema("public").from("Customers") as {
+        select(c: string): { eq(col: string, v: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+      }).select("qbo_customer_id").eq("id", customerId)
+      const qboId = ((cRows ?? [])[0] as { qbo_customer_id: string | null } | undefined)?.qbo_customer_id
+      if (!qboId) return []
+      return qboCredits.openMaintCredits(qboId)
     },
-    async applyCredit() {
-      throw new Error("decided-credit application is not wired — refusing rather than silently skipping")
+    openBalance: (id: string) => qbo.openBalance(id),
+    async applyCredit(credit: OpenCredit, qboInvoiceId: string, cents: number) {
+      let createdPaymentId: string | undefined
+      if (credit.kind === "payment") {
+        await qboCredits.applyPaymentToInvoice(credit.id, qboInvoiceId, cents)
+      } else {
+        const { data: inv } = await invoicesCache().select("qbo_customer_id").eq("qbo_invoice_id", qboInvoiceId)
+        const qboCustomerId = ((inv ?? [])[0] as { qbo_customer_id: string | null } | undefined)?.qbo_customer_id
+        if (!qboCustomerId) throw new Error(`no mirror row for ${qboInvoiceId} — cannot apply credit memo`)
+        const r = await qboCredits.applyCreditMemoToInvoice(credit.id, qboCustomerId, qboInvoiceId, cents, `Auto-applied maint credit memo ${credit.id}`)
+        createdPaymentId = r.createdPaymentId
+      }
+      // The mirror rides the fresh read — the machine's next derive sees
+      // the post-application balance.
+      await qbo.openBalance(qboInvoiceId)
+      return { kind: credit.kind, creditId: credit.id, qboInvoiceId, appliedCents: cents, createdPaymentId }
     },
     async markCreditsChecked(qboInvoiceId: string, at: string) {
       const { data, error } = await monthInvoices()
