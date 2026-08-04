@@ -627,6 +627,13 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     const { data, error } = await ins.select("id")
     if (error) throw new Error(`month_invoices insert failed: ${JSON.stringify(error).slice(0, 240)}`)
     if (!data || data.length !== rows.length) throw new Error(`month_invoices wrote ${data?.length ?? 0} of ${rows.length}`)
+
+    // Each ITEM carries its invoice on its own (RULED) — stamp the month's
+    // items by the same bucket rule the documents split on, in the DB's
+    // one spelling of it.
+    const rpc = this.client.schema("billing") as unknown as { rpc(f: string, a: Record<string, unknown>): PromiseLike<{ error: unknown }> }
+    const { error: linkErr } = await rpc.rpc("link_month_items_to_invoices", { p_month_id: rows[0].billingMonthId })
+    if (linkErr) throw new Error(`item-invoice link failed: ${JSON.stringify(linkErr).slice(0, 200)}`)
   }
 
   async customerPeerGroups(customerIds: readonly number[]): Promise<Map<number, string>> {

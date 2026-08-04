@@ -54,6 +54,8 @@ export interface LedgerItem {
   unit_price_cents: number
   amount_cents: number
   service_date: string | null
+  visit_id: string | null
+  qbo_invoice_id: string | null
 }
 
 export interface MonthTask {
@@ -260,19 +262,34 @@ export function MonthWorkbench({
 
   // the ledger, grouped for display: summary collapses identical item+rate;
   // itemized keeps per-date rows — the SAME logic the documents follow.
-  const groupItems = (items: LedgerItem[]): { name: string; qty: number; rate: number; amount: number; date: string | null }[] => {
+  const groupItems = (
+    items: LedgerItem[],
+  ): { name: string; qty: number; rate: number; amount: number; date: string | null; visits: number; invoice: string | null }[] => {
     if (lockedPresentation === "summary") {
-      const g = new Map<string, { name: string; qty: number; rate: number; amount: number; date: null }>()
+      const g = new Map<string, { name: string; qty: number; rate: number; amount: number; date: null; visitSet: Set<string>; invoice: string | null }>()
       for (const it of items) {
-        const key = `${it.item_name}|${it.unit_price_cents}`
-        const row = g.get(key) ?? { name: it.item_name ?? "—", qty: 0, rate: it.unit_price_cents / 100, amount: 0, date: null }
+        // the group key includes the item's OWN invoice — items on different
+        // documents never merge, so the linkage stays exact under grouping
+        const key = `${it.item_name}|${it.unit_price_cents}|${it.qbo_invoice_id ?? "draft"}`
+        const row = g.get(key) ?? { name: it.item_name ?? "—", qty: 0, rate: it.unit_price_cents / 100, amount: 0, date: null, visitSet: new Set<string>(), invoice: it.qbo_invoice_id }
         row.qty += it.kind === "labor" ? 1 : Number(it.qty)
         row.amount += it.amount_cents / 100
+        if (it.visit_id) row.visitSet.add(it.visit_id)
         g.set(key, row)
       }
-      return [...g.values()].sort((a, b) => b.amount - a.amount)
+      return [...g.values()]
+        .map(({ visitSet, ...r }) => ({ ...r, visits: visitSet.size }))
+        .sort((a, b) => b.amount - a.amount)
     }
-    return items.map((it) => ({ name: it.item_name ?? "—", qty: Number(it.qty), rate: it.unit_price_cents / 100, amount: it.amount_cents / 100, date: it.service_date }))
+    return items.map((it) => ({
+      name: it.item_name ?? "—",
+      qty: Number(it.qty),
+      rate: it.unit_price_cents / 100,
+      amount: it.amount_cents / 100,
+      date: it.service_date,
+      visits: it.visit_id ? 1 : 0,
+      invoice: it.qbo_invoice_id,
+    }))
   }
   const laborItems = ledgerItems.filter((i) => i.kind === "labor" && i.amount_cents !== 0)
   const chemItems = ledgerItems.filter((i) => i.kind === "consumable")
@@ -446,16 +463,33 @@ export function MonthWorkbench({
                         ))}
                       <span className="ml-auto font-mono num text-[11px] text-ink-dim">{formatCurrency(subtotal / 100)}</span>
                     </div>
-                    {rows.map((r, i) => (
-                      <div key={i} className="flex items-center gap-2.5 border-t border-line-soft/50 px-5 py-1">
-                        <span className="text-[11.5px] text-ink flex-1 min-w-0 truncate">{r.name}</span>
-                        {r.date && <span className="font-mono text-[9.5px] text-ink-mute flex-none">{r.date}</span>}
-                        <span className="font-mono text-[10px] text-ink-mute flex-none">
-                          {r.qty} × {formatCurrency(r.rate)}
-                        </span>
-                        <span className="font-mono num text-[11.5px] text-ink w-[70px] text-right flex-none">{formatCurrency(r.amount)}</span>
-                      </div>
-                    ))}
+                    {rows.map((r, i) => {
+                      const invDoc = r.invoice ? invoices.find((iv) => iv.qbo_invoice_id === r.invoice) : null
+                      return (
+                        <div key={i} className="flex items-center gap-2.5 border-t border-line-soft/50 px-5 py-1">
+                          <span className="text-[11.5px] text-ink flex-1 min-w-0 truncate">{r.name}</span>
+                          <span className="font-mono text-[9.5px] text-ink-mute flex-none w-[64px]">
+                            {r.date ?? `${r.visits} visit${r.visits === 1 ? "" : "s"}`}
+                          </span>
+                          <span className="font-mono text-[10px] text-ink-mute flex-none">
+                            {r.qty} × {formatCurrency(r.rate)}
+                          </span>
+                          <span className="w-[70px] flex-none text-right">
+                            {r.invoice ? (
+                              <button
+                                onClick={() => setOpenInvoice(r.invoice!)}
+                                className="font-mono text-[9.5px] text-ink-mute hover:text-cyan underline underline-offset-2"
+                              >
+                                {invDoc?.doc_number ?? r.invoice}
+                              </button>
+                            ) : (
+                              <span className="font-mono text-[9.5px] text-ink-mute/50">{doc.label ?? "—"}</span>
+                            )}
+                          </span>
+                          <span className="font-mono num text-[11.5px] text-ink w-[70px] text-right flex-none">{formatCurrency(r.amount)}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 )
               })
