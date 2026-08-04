@@ -6,7 +6,7 @@ import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { Pill } from "@/components/ui/pill"
 import { StatusStepper } from "@/components/ui/status-stepper"
 import { formatCurrency } from "@/lib/utils/format"
-import { MONTH_STAGES, stepperStage, type MonthOverviewRow } from "../_lib/months"
+import { MONTH_STAGES, stepperStage, isHeld, type MonthOverviewRow } from "../_lib/months"
 
 /**
  * One table, every journey: the progression stepper shows where each
@@ -38,7 +38,7 @@ export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
         <div className="flex items-center gap-2">
           <StatusStepper stages={[...MONTH_STAGES]} current={stepperStage(row.original.status)} className="max-w-[420px]" />
           {row.original.status === "disputed" && <Pill tone={PAUSE_TONE.disputed}>disputed</Pill>}
-          {row.original.status === "held" && <Pill tone={PAUSE_TONE.held}>held</Pill>}
+          {isHeld(row.original) && <Pill tone={PAUSE_TONE.held}>held</Pill>}
         </div>
       ),
       enableSorting: false,
@@ -83,7 +83,7 @@ export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
     .sort()
     .reverse()
     .map((v) => ({ value: v, label: v }))
-  const statusOptions = ["accruing", "reconciled", "disputed", "gated", "held", "invoiced", "closed"].map((v) => ({
+  const statusOptions = ["accruing", "disputed", "gated", "invoiced", "closed"].map((v) => ({
     value: v,
     label: v,
   }))

@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils/cn"
 import { ServiceLog, type ServiceLogVisit } from "../../_components/service-log"
 import { FcHistoryChart, ReadingsOverview, type FcHistoryPoint } from "../../_components/service-log/readings-overview"
 import { VisitCalendar, type ChemItemCompareRow } from "./visit-calendar"
-import { MONTH_STAGES, stepperStage, type MonthOverviewRow } from "../_lib/months"
+import { MONTH_STAGES, stepperStage, isHeld, type MonthOverviewRow } from "../_lib/months"
 import {
   InvoiceDetailModal,
   type AppliedPayment,
@@ -371,7 +371,7 @@ export function MonthWorkbench({
                 <span className="flex items-center gap-2 flex-none">
                   <span className="text-[13px] font-medium text-ink">Billing month · {monthLabel}</span>
                   {m.status === "disputed" && <Pill tone="coral">disputed</Pill>}
-                  {m.status === "held" && <Pill tone="sun">held</Pill>}
+                  {isHeld(m) && <Pill tone="sun">held</Pill>}
                   <Pill tone={m.status === "closed" ? "grass" : "cyan"}>{m.status}</Pill>
                 </span>
                 <span className="flex items-center gap-4 font-mono text-[11px] ml-auto">
@@ -387,12 +387,12 @@ export function MonthWorkbench({
                   )}
                 </span>
                 <span className="flex items-center gap-2 flex-none">
-                  {m.status === "held" && (
+                  {isHeld(m) && (
                     <button disabled={acting !== null} onClick={() => act("Release hold", "DELETE", `/api/billing/months/${m.id}/hold`)} className={actionBtn}>
                       {acting === "Release hold" ? "Releasing…" : "Release hold"}
                     </button>
                   )}
-                  {m.status === "gated" && !hasInvoices && (
+                  {m.status === "gated" && !isHeld(m) && !hasInvoices && (
                     <button disabled={acting !== null} onClick={() => act("Issue invoices", "POST", `/api/billing/months/${m.id}/issue`)} className={primaryBtn}>
                       {acting === "Issue invoices" ? "Issuing…" : "Issue invoices"}
                     </button>

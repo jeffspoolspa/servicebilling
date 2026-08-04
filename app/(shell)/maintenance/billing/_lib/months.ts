@@ -20,7 +20,9 @@ export interface MonthOverviewRow {
   customer_id: number
   customer_name: string | null
   month: string
-  status: "accruing" | "reconciled" | "disputed" | "gated" | "held" | "invoiced" | "closed"
+  // FIVE statuses (RULED 2026-08-04), each a real resting state: gated
+  // absorbs held (gate_held_for says WHY), reconciled folds into accruing.
+  status: "accruing" | "disputed" | "gated" | "invoiced" | "closed"
   subtotal_cents: number
   item_count: number
   open_findings: number
@@ -44,8 +46,12 @@ export const MONTH_STAGES = [
 /** Map pauses onto the stage where they pause, for the stepper. */
 export function stepperStage(status: MonthOverviewRow["status"]): string {
   if (status === "disputed") return "reconciled"
-  if (status === "held") return "gated"
   return status
+}
+
+/** The gate held this month — the WHY lives in gate_held_for. */
+export function isHeld(m: Pick<MonthOverviewRow, "status" | "gate_held_for">): boolean {
+  return m.status === "gated" && (m.gate_held_for?.length ?? 0) > 0
 }
 
 export const MONTHS_SELECT =
