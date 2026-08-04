@@ -293,6 +293,28 @@ export class QboInvoices extends Qbo {
    * EmailSent in our cache the moment QBO confirms.
    */
   async sendInvoice(qboInvoiceId: string): Promise<void> {
+    // QUERY BEFORE SEND: QBO's own EmailStatus is the truth a crashed run
+    // consults — if the last run's send landed but our mirror write did
+    // not, this converges instead of emailing the customer twice.
+    const pre = await this.query<{ QueryResponse: { Invoice?: (QboInvoiceEntity & { EmailStatus?: string })[] } }>(
+      `select Id, DocNumber, TotalAmt, Balance, TxnDate, CustomerRef, EmailStatus from Invoice where Id = '${qboInvoiceId.replace(/'/g, "")}'`,
+    )
+    const existing = pre.QueryResponse.Invoice?.[0]
+    if (existing?.EmailStatus === "EmailSent") {
+      await this.mirror?.invoiceUpserted({
+        qboInvoiceId: existing.Id,
+        docNumber: existing.DocNumber,
+        qboCustomerId: existing.CustomerRef.value,
+        txnDate: existing.TxnDate ?? "",
+        totalAmt: existing.TotalAmt,
+        balance: existing.Balance ?? 0,
+        memo: existing.CustomerMemo?.value ?? null,
+        raw: existing,
+        emailStatus: "EmailSent",
+      })
+      return // already sent — converge, no second email
+    }
+
     const res = await this.request<{ Invoice: QboInvoiceEntity & { EmailStatus?: string } }>(
       "POST",
       `/invoice/${qboInvoiceId}/send`,
