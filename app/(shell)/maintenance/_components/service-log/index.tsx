@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { formatCurrency } from "@/lib/utils/format"
-import { FcChart } from "./fc-chart"
-import { LsiChart } from "./lsi-chart"
 
 /**
  * Reusable service-log viewer (extracted from the bill-review workbench).
@@ -130,7 +128,6 @@ export function ServiceLog({
 }) {
   const highlighted = new Set((highlightDates ?? []).map((d) => d.slice(0, 10)))
   const [openVisit, setOpenVisit] = useState<string | null>(null)
-  const [summaryOpen, setSummaryOpen] = useState(false)
   const [activeBody, setActiveBody] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<{ photos: ServiceLogVisit["photos"]; i: number } | null>(null)
   // assumptions for never-recorded chart inputs (editable)
@@ -353,75 +350,8 @@ export function ServiceLog({
             {flaggedVisits > 0 && <> · <span className="text-coral">{flaggedVisits} off-range</span></>}
             {avgMins != null && <> · avg {avgMins} min</>}
           </span>
-          {chart.n >= 2 && (
-            <button
-              onClick={() => setSummaryOpen(!summaryOpen)}
-              title={summaryOpen ? "Hide summary" : "Show summary"}
-              aria-label={summaryOpen ? "Hide summary" : "Show summary"}
-              className="h-5 w-5 rounded border border-line text-ink-mute hover:text-cyan hover:border-cyan grid place-items-center"
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                style={{ transform: summaryOpen ? "rotate(180deg)" : "none", transition: "transform 150ms" }}>
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </button>
-          )}
         </span>
       </div>
-
-      {/* ── summary: averages + charts ── */}
-      {chart.n >= 2 && summaryOpen && (
-        <div className="px-4 pt-2.5 pb-3 border-b border-line-soft flex-none">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FcChart rows={chart.rows} />
-            <LsiChart
-              rows={chart.rows}
-              start={period.start}
-              end={period.end}
-              controls={
-                <span className="flex items-center gap-2 font-mono text-[8.5px]">
-                  {(["cya", "ca"] as const).filter((k) => chart.needsAssume[k]).map((k) => (
-                    <span key={k} className="inline-flex items-center gap-1 text-sun">
-                      assuming {k === "cya" ? "CYA" : "Ca"}
-                      <input
-                        type="number"
-                        value={assume[k]}
-                        onChange={(e) => setAssume({ ...assume, [k]: Number(e.target.value) || 0 })}
-                        className="w-[46px] h-4.5 bg-bg-elev border border-sun/30 rounded px-1 text-[9px] font-mono text-sun outline-none focus:border-sun"
-                        title="Never recorded this period — calcs use this assumed value"
-                      />
-                    </span>
-                  ))}
-                  {chart.needsAssume.tds && (
-                    <span className="inline-flex items-center gap-1 text-sun">
-                      TDS
-                      <input
-                        type="number"
-                        value={assume.tds}
-                        onChange={(e) => setAssume({ ...assume, tds: Number(e.target.value) || 0 })}
-                        className="w-[46px] h-4.5 bg-bg-elev border border-sun/30 rounded px-1 text-[9px] font-mono text-sun outline-none focus:border-sun"
-                        title="No salinity recorded — LSI uses this assumed TDS"
-                      />
-                    </span>
-                  )}
-                  <span className="inline-flex items-center gap-1 text-ink-mute">
-                    temp
-                    <input
-                      type="number"
-                      value={assume.temp}
-                      onChange={(e) => setAssume({ ...assume, temp: Number(e.target.value) || 0 })}
-                      className="w-[40px] h-4.5 bg-bg-elev border border-line rounded px-1 text-[9px] font-mono text-ink-dim outline-none focus:border-cyan"
-                      title="Water temperature is not recorded — LSI uses this assumed °F"
-                    />
-                    °F
-                  </span>
-                </span>
-              }
-            />
-          </div>
-        </div>
-      )}
 
       {/* ── readings grid ── */}
       <div className="overflow-y-auto flex-1 min-h-0">

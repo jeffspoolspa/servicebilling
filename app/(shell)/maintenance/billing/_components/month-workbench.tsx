@@ -12,6 +12,7 @@ import { formatCurrency } from "@/lib/utils/format"
 import { visitBreakLabel } from "@/lib/billing/domain/invoice-documents"
 import { cn } from "@/lib/utils/cn"
 import { ServiceLog, type ServiceLogVisit } from "../../_components/service-log"
+import { ReadingsOverview } from "../../_components/service-log/readings-overview"
 import { MONTH_STAGES, stepperStage, type MonthOverviewRow } from "../_lib/months"
 import {
   InvoiceDetailModal,
@@ -57,6 +58,25 @@ export interface LedgerItem {
   visit_id: string | null
   qbo_invoice_id: string | null
   qbo_line_id: string | null
+}
+
+export interface ChemSummaryRow {
+  category: string
+  this_usd: number
+  self_typical_usd: number
+  peer_seasonal_usd: number
+}
+
+export interface MonthFinding {
+  id: number
+  rule: string
+  severity: string | null
+  message: string | null
+  cents: number | null
+  detected_at: string | null
+  resolved_at: string | null
+  resolved_by: string | null
+  resolution: string | null
 }
 
 export interface MonthTask {
@@ -176,6 +196,9 @@ export function MonthWorkbench({
   invoiceMethods,
   ledgerItems,
   monthTasks,
+  findings,
+  summaryNote,
+  chemSummary,
 }: {
   m: MonthOverviewRow
   visits: ServiceLogVisit[]
@@ -186,11 +209,16 @@ export function MonthWorkbench({
   invoiceMethods: Record<string, PaymentMethodRef | null>
   ledgerItems: LedgerItem[]
   monthTasks: MonthTask[]
+  findings: MonthFinding[]
+  summaryNote: string | null
+  chemSummary: ChemSummaryRow[]
 }) {
   const router = useRouter()
   const monthLabel = m.month.slice(0, 7)
   const [openInvoice, setOpenInvoice] = useState<string | null>(null)
-  const [ledgerTab, setLedgerTab] = useState<"items" | "tasks" | "visits">("items")
+  const [ledgerTab, setLedgerTab] = useState<"summary" | "items" | "tasks" | "visits">("summary")
+  const [note, setNote] = useState(summaryNote ?? "")
+  const [noteState, setNoteState] = useState<"idle" | "saving" | "saved" | "error">("idle")
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const [draft, setDraft] = useState<Draft | "loading" | "error" | null>(null)
   const [presentation, setPresentation] = useState<"itemized" | "summary" | null>(null)
@@ -388,6 +416,7 @@ export function MonthWorkbench({
           {/* the LEDGER tabs — page-level strip, ONE section on screen */}
           <div className="flex gap-1 border-b border-line-soft">
             {([
+              ["summary", "Summary", findings.length],
               ["items", "Billable items", ledgerItems.length],
               ["visits", "Visits", visits.length],
               ["tasks", "Tasks", monthTasks.length],
@@ -409,7 +438,163 @@ export function MonthWorkbench({
               </button>
             ))}
           </div>
-          {ledgerTab !== "visits" && (
+          {ledgerTab === "summary" && (
+            <>
+              {/* the aggregated context — what the explainer gets sent */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Month summary</CardTitle>
+                  <span className="ml-auto flex items-center gap-2">
+                    <a
+                      href={`/api/billing/months/${m.id}/explainer`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={actionBtn + " inline-flex items-center"}
+                    >
+                      Generate explainer
+                    </a>
+                  </span>
+                </CardHeader>
+                <CardBody className="space-y-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
+                    <div>
+                      <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">Visits</div>
+                      <div className="text-[13px] text-ink mt-0.5 font-mono num">{visits.length}</div>
+                    </div>
+                    <div>
+                      <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">Flagged visits</div>
+                      <div className="text-[13px] mt-0.5 font-mono num">
+                        <span className={findings.some((f) => !f.resolved_at) ? "text-sun" : "text-ink"}>
+                          {findings.filter((f) => !f.resolved_at).length} open
+                        </span>
+                        <span className="text-ink-mute"> · {findings.filter((f) => f.resolved_at).length} resolved</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">Chemicals billed</div>
+                      <div className="text-[13px] text-ink mt-0.5 font-mono num">
+                        {formatCurrency(ledgerItems.filter((i) => i.kind === "consumable").reduce((s2, i) => s2 + i.amount_cents, 0) / 100)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">Labor billed</div>
+                      <div className="text-[13px] text-ink mt-0.5 font-mono num">
+                        {formatCurrency(ledgerItems.filter((i) => i.kind === "labor").reduce((s2, i) => s2 + i.amount_cents, 0) / 100)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* chemical demand vs self and the peer group's season */}
+                  <Table className="text-[11.5px]">
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead>Category</TableHead>
+                        <TableHead className="text-right">This month</TableHead>
+                        <TableHead className="text-right">Your typical</TableHead>
+                        <TableHead className="text-right">Peer seasonal</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {chemSummary.filter((c) => c.this_usd > 0 || c.self_typical_usd > 0.5 || c.peer_seasonal_usd > 0.5).map((c) => {
+                        const hot = c.self_typical_usd > 1 && c.this_usd > 2 * c.self_typical_usd
+                        return (
+                          <TableRow key={c.category} className="text-ink-dim">
+                            <TableCell className="text-ink capitalize">{c.category}</TableCell>
+                            <TableCell className={cn("text-right font-mono num", hot ? "text-sun" : "text-ink")}>
+                              {formatCurrency(Number(c.this_usd))}
+                            </TableCell>
+                            <TableCell className="text-right font-mono num">{formatCurrency(Number(c.self_typical_usd))}</TableCell>
+                            <TableCell className="text-right font-mono num">{formatCurrency(Number(c.peer_seasonal_usd))}</TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+
+                  {/* readings overview — the charts, out of the log, living here */}
+                  <ReadingsOverview
+                    visits={visits}
+                    period={{
+                      start: `${monthLabel}-01`,
+                      end: new Date(Date.UTC(+monthLabel.slice(0, 4), +monthLabel.slice(5, 7), 0)).toISOString().slice(0, 10),
+                    }}
+                  />
+                </CardBody>
+              </Card>
+
+              {/* flagged visits + their resolution status */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Findings</CardTitle>
+                </CardHeader>
+                {findings.length === 0 ? (
+                  <CardBody><span className="text-[12.5px] text-ink-mute">No flagged visits this month.</span></CardBody>
+                ) : (
+                  <CardBody className="space-y-2">
+                    {findings.map((f) => (
+                      <div key={f.id} className="flex items-start gap-2.5 text-[12px]">
+                        <Pill tone={f.resolved_at ? "grass" : "sun"}>{f.resolved_at ? "resolved" : "open"}</Pill>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-ink">{f.rule.replace(/_/g, " ")}</span>
+                          {f.cents != null && <span className="font-mono text-ink-dim"> · {formatCurrency(Number(f.cents) / 100)}</span>}
+                          {f.message && <div className="text-[11px] text-ink-mute">{f.message}</div>}
+                          {f.resolved_at && (
+                            <div className="text-[11px] text-grass/80">
+                              {f.resolution ?? "resolved"}{f.resolved_by ? ` — ${f.resolved_by}` : ""}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </CardBody>
+                )}
+              </Card>
+
+              {/* the person-written overview — the explainer's narrative slot */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Summary note</CardTitle>
+                  <span className="ml-auto flex items-center gap-2">
+                    {noteState === "saved" && <span className="text-[11px] text-grass">saved</span>}
+                    {noteState === "error" && <span className="text-[11px] text-coral">save failed</span>}
+                    <button
+                      disabled={noteState === "saving"}
+                      onClick={async () => {
+                        setNoteState("saving")
+                        try {
+                          const r = await fetch(`/api/billing/months/${m.id}/summary-note`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ note }),
+                          })
+                          setNoteState(r.ok ? "saved" : "error")
+                        } catch {
+                          setNoteState("error")
+                        }
+                      }}
+                      className={actionBtn}
+                    >
+                      {noteState === "saving" ? "Saving…" : "Save note"}
+                    </button>
+                  </span>
+                </CardHeader>
+                <CardBody>
+                  <textarea
+                    value={note}
+                    onChange={(e) => {
+                      setNote(e.target.value)
+                      setNoteState("idle")
+                    }}
+                    rows={3}
+                    placeholder="The overview of this customer's month — becomes the explainer's narrative intro."
+                    className="w-full bg-bg border border-line rounded-lg p-2.5 text-[12.5px] text-ink outline-none focus:border-cyan resize-y"
+                  />
+                </CardBody>
+              </Card>
+            </>
+          )}
+
+          {ledgerTab !== "visits" && ledgerTab !== "summary" && (
           <Card>
             {ledgerTab === "items" && (
               <CardHeader>
