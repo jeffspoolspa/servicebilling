@@ -160,10 +160,10 @@ function InvoiceDetailBody({
         {inv.memo && <div className="text-[12px] text-ink-dim">{inv.memo}</div>}
 
         {/* the formatted document — our cache copy, as the customer reads it */}
-        <div className="rounded border border-line-soft overflow-hidden">
+        <div className="rounded-lg border border-line overflow-hidden shadow-card">
           <button
             onClick={() => setLinesOpen((o) => !o)}
-            className="w-full flex items-center gap-1.5 px-3 py-2 text-left"
+            className="w-full flex items-center gap-1.5 px-3 py-2 text-left border-b border-line-soft"
           >
             {linesOpen ? <ChevronDown className="w-3.5 h-3.5 text-ink-mute" /> : <ChevronRight className="w-3.5 h-3.5 text-ink-mute" />}
             <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">
@@ -206,7 +206,7 @@ function InvoiceDetailBody({
               </TableBody>
             </Table>
           )}
-          <div className="px-3 py-2 space-y-1 border-t border-line-soft text-[12px]">
+          <div className="px-3 py-2 space-y-1 border-t border-line text-[12px]">
             <div className="flex justify-between text-ink-dim">
               <span>Subtotal</span>
               <span className="font-mono num">{formatCurrency(Number(inv.subtotal ?? 0))}</span>
