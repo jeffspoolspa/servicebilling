@@ -146,7 +146,7 @@ export async function POST(req: Request) {
     ? await drainInvoiceQueue(sys as never, left())
     : { advanced: 0, errors: 0, parked: [] as string[] }
 
-  return NextResponse.json({
+  const summary = {
     started,
     periods,
     bulk,
@@ -156,5 +156,17 @@ export async function POST(req: Request) {
     refused,
     invoices: { advanced: invoices.advanced, errors: invoices.errors, parked: invoices.parked },
     seconds: Math.round((Date.now() - t0) / 1000),
+  }
+
+  // The run log — the summary a machine-fired tick would otherwise drop.
+  const logIns = sys.schema("billing").from("tick_runs") as unknown as {
+    insert(v: unknown): PromiseLike<{ error: unknown }>
+  }
+  await logIns.insert({
+    started_at: new Date(t0).toISOString(),
+    trigger: machineOk ? "machine" : "person",
+    summary,
   })
+
+  return NextResponse.json(summary)
 }
