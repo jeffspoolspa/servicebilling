@@ -3,6 +3,7 @@ import { createSupabaseServer } from "@/lib/supabase/server"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
 import { documentsOf, draftInvoice, presentationOf, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
+import { resolveLaborDocuments } from "@/lib/billing/application/labor-resolution"
 
 /**
  * The month's DRAFT invoice — regenerated on every read. This goes through
@@ -43,25 +44,18 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
   const defaultPresentation = presentationOf([...meta.values()].find((t) => t.ionInvoiceType)?.ionInvoiceType ?? null)
   const presentation: InvoicePresentation = asked === "summary" || asked === "itemized" ? asked : defaultPresentation
 
-  // Resolve every labor line through the catalog — the same lookup the
-  // issue step will refuse on. Flat monthly lines bill as the FLAT RATE
-  // item; unresolved names surface so a gap is visible in draft, not at
-  // issue time.
+  // Resolve every labor line to its REAL QBO SKU — exact name, then the
+  // task's category, then the rate (token tiebreak). The SAME resolver the
+  // issue step refuses on, so the preview IS the document.
   const laborCatalog = await repo.laborItems()
-  const resolveLabor = (itemName: string): string | null =>
-    laborCatalog.get(itemName)?.qboItemId ??
-    (itemName.endsWith(" — monthly") ? laborCatalog.get("FLAT RATE")?.qboItemId ?? null : null)
-  const documents = documentsOf(month, terms, presentation).map((d) => ({
-    ...d,
-    lines: d.lines.map((l) =>
-      l.kind === "labor" ? { ...l, qboItemId: resolveLabor(l.itemName) } : l,
-    ),
-  }))
-  const unmappedLabor = [
-    ...new Set(
-      documents.flatMap((d) => d.lines.filter((l) => l.kind === "labor" && !("qboItemId" in l && l.qboItemId)).map((l) => (l.kind === "labor" ? l.itemName : ""))),
-    ),
-  ].filter(Boolean)
+  const taskCategory = new Map([...meta.entries()].map(([id, t]) => [id, t.category]))
+  const flatTasks = new Set([...meta.entries()].filter(([, t]) => t.labor === "flat_rate").map(([id]) => id))
+  const { documents, unmapped: unmappedLabor } = resolveLaborDocuments(
+    documentsOf(month, terms, presentation),
+    taskCategory,
+    laborCatalog,
+    flatTasks,
+  )
 
   return NextResponse.json({
     ...draftInvoice(month),

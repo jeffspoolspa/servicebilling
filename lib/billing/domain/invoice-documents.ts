@@ -51,6 +51,7 @@ export type DocLine =
   | {
       readonly kind: "labor" | "consumable" | "variance"
       readonly itemName: string
+      readonly taskId: string | null
       readonly qty: number
       readonly unitPriceCents: number
       readonly amountCents: number
@@ -72,10 +73,10 @@ export interface InvoiceDocument {
 const money = (l: { amountCents: number }[]) => l.reduce((s, x) => s + x.amountCents, 0)
 
 function summarize(items: readonly BillableItem[]): DocLine[] {
-  const groups = new Map<string, { kind: "labor" | "consumable"; itemName: string; qty: number; unitPriceCents: number; amountCents: number }>()
+  const groups = new Map<string, { kind: "labor" | "consumable"; itemName: string; taskId: string | null; qty: number; unitPriceCents: number; amountCents: number }>()
   for (const it of items) {
     const key = `${it.kind}|${it.itemName}|${it.unitPriceCents}`
-    const g = groups.get(key) ?? { kind: it.kind, itemName: it.itemName, qty: 0, unitPriceCents: it.unitPriceCents, amountCents: 0 }
+    const g = groups.get(key) ?? { kind: it.kind, itemName: it.itemName, taskId: it.taskId ?? null, qty: 0, unitPriceCents: it.unitPriceCents, amountCents: 0 }
     g.qty += it.kind === "labor" ? 1 : it.qty
     g.amountCents += it.amountCents
     groups.set(key, g)
@@ -91,7 +92,7 @@ function itemize(items: readonly BillableItem[], qcTasks: ReadonlySet<string> = 
   // (consumables) each visit carries.
   const lines: DocLine[] = []
   for (const f of items.filter((i) => i.sourceKind === "flat")) {
-    lines.push({ kind: "labor", itemName: f.itemName, qty: 1, unitPriceCents: f.unitPriceCents, amountCents: f.amountCents, serviceDate: null, detail: null })
+    lines.push({ kind: "labor", itemName: f.itemName, taskId: f.taskId, qty: 1, unitPriceCents: f.unitPriceCents, amountCents: f.amountCents, serviceDate: null, detail: null })
   }
   const perVisit = items.filter((i) => i.sourceKind !== "flat")
   const dates = [...new Set(perVisit.map((i) => i.serviceDate))].sort()
@@ -110,10 +111,10 @@ function itemize(items: readonly BillableItem[], qcTasks: ReadonlySet<string> = 
     if (labor.length === 0 && chems.length === 0) continue
     lines.push({ kind: "visit_break", serviceDate: date })
     for (const l of labor) {
-      lines.push({ kind: "labor", itemName: l.itemName, qty: 1, unitPriceCents: l.unitPriceCents, amountCents: l.amountCents, serviceDate: date, detail: null })
+      lines.push({ kind: "labor", itemName: l.itemName, taskId: l.taskId, qty: 1, unitPriceCents: l.unitPriceCents, amountCents: l.amountCents, serviceDate: date, detail: null })
     }
     for (const c of chems) {
-      lines.push({ kind: "consumable", itemName: c.itemName, qty: c.qty, unitPriceCents: c.unitPriceCents, amountCents: c.amountCents, serviceDate: date, detail: null })
+      lines.push({ kind: "consumable", itemName: c.itemName, taskId: c.taskId, qty: c.qty, unitPriceCents: c.unitPriceCents, amountCents: c.amountCents, serviceDate: date, detail: null })
     }
   }
   return lines
@@ -150,6 +151,7 @@ export function documentsOf(
     serviceLines.push({
       kind: "variance",
       itemName: variance.kind,
+      taskId: null,
       qty: 1,
       unitPriceCents: variance.deltaCents ?? 0,
       amountCents: variance.deltaCents ?? 0,

@@ -1,5 +1,6 @@
 import type { BillingMonth } from "@/lib/billing/domain"
 import { documentsOf, presentationOf, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
+import { resolveLaborDocuments } from "./labor-resolution"
 import type { QboInvoices, CreatedInvoice } from "@/lib/external/qbo/qbo"
 import type { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
 
@@ -35,7 +36,7 @@ export interface IssueDeps {
   /** Task doc metadata for the month's tasks (terms + ION invoice type + category). */
   taskDocMeta(taskIds: readonly string[]): Promise<Map<string, { labor: "per_visit" | "flat_rate"; consumables: "included" | "separate"; ionInvoiceType: string | null; category: string | null }>>
   /** QBO item ids: labor by canonical name, consumables by item name. */
-  laborItems(): Promise<Map<string, { qboItemId: string }>>
+  laborItems(): Promise<Map<string, { qboItemId: string; usualRateCents: number | null }>>
   consumableQboIds(): Promise<Map<string, string>>
   /** ION invoice numbers for the month's tasks — the consolidation set. */
   ionInvoiceNumbers(taskIds: readonly string[], month: string): Promise<string[]>
@@ -76,17 +77,16 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
     }
   })
   const presentation = presentationOf([...meta.values()].find((t) => t.ionInvoiceType)?.ionInvoiceType ?? null)
-  const documents = documentsOf(m, terms, presentation)
-
-  // Every line resolves, or the issue refuses — with the full list of gaps.
-  const resolve = (kind: string, itemName: string): string | null =>
-    kind === "labor" || kind === "variance"
-      ? labor.get(itemName)?.qboItemId ?? (itemName.endsWith(" — monthly") ? labor.get("FLAT RATE")?.qboItemId ?? null : null)
-      : chems.get(itemName) ?? null
-  const unmapped = new Set<string>()
+  const taskCategory = new Map([...meta.entries()].map(([id, t]) => [id, t.category]))
+  const flatTasks = new Set([...meta.entries()].filter(([, t]) => t.labor === "flat_rate").map(([id]) => id))
+  // Labor resolves through the SAME ladder the draft preview showed
+  // (exact -> category -> rate); consumables by catalog name. Everything
+  // resolves, or the issue refuses — with the full list of gaps.
+  const { documents, unmapped: unmappedLabor } = resolveLaborDocuments(documentsOf(m, terms, presentation), taskCategory, labor, flatTasks)
+  const unmapped = new Set<string>(unmappedLabor)
   for (const d of documents) for (const l of d.lines) {
-    if (l.kind === "visit_break") continue
-    if (!resolve(l.kind, l.itemName)) unmapped.add(`${l.kind}:${l.itemName}`)
+    if (l.kind !== "consumable") continue
+    if (!chems.get(l.itemName)) unmapped.add(`consumable:${l.itemName}`)
   }
   if (unmapped.size > 0) throw new IssueRefused(`unmapped items — add to the catalog first: ${[...unmapped].join(", ")}`)
 
@@ -106,7 +106,7 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
         l.kind === "visit_break"
           ? []
           : [{
-              qboItemId: resolve(l.kind, l.itemName)!,
+              qboItemId: l.kind === "consumable" ? chems.get(l.itemName)! : (l as { qboItemId?: string | null }).qboItemId!,
               description: l.serviceDate,
               qty: l.qty,
               unitPriceCents: l.unitPriceCents,
