@@ -161,6 +161,9 @@ export interface QboInvoiceInput {
   readonly docNumber: string
   readonly txnDate: string
   readonly memo: string
+  /** The document carries its own destination — OUR Customers.email is
+   *  authoritative (user edits beat QBO), set as BillEmail at create. */
+  readonly billEmail: string | null
   readonly lines: readonly QboInvoiceLine[]
 }
 
@@ -233,6 +236,7 @@ export class QboInvoices extends Qbo {
       TxnDate: inv.txnDate,
       CustomerRef: { value: inv.qboCustomerId },
       CustomerMemo: { value: inv.memo },
+      ...(inv.billEmail ? { BillEmail: { Address: inv.billEmail } } : {}),
       Line: inv.lines.map((l) => ({
         DetailType: "SalesItemLineDetail",
         Amount: l.amountCents / 100,
@@ -292,7 +296,7 @@ export class QboInvoices extends Qbo {
    * EmailStatus) proves it, and the mirror rides it — email_status flips to
    * EmailSent in our cache the moment QBO confirms.
    */
-  async sendInvoice(qboInvoiceId: string): Promise<void> {
+  async sendInvoice(qboInvoiceId: string, sendTo?: string): Promise<void> {
     // QUERY BEFORE SEND: QBO's own EmailStatus is the truth a crashed run
     // consults — if the last run's send landed but our mirror write did
     // not, this converges instead of emailing the customer twice.
@@ -317,7 +321,7 @@ export class QboInvoices extends Qbo {
 
     const res = await this.request<{ Invoice: QboInvoiceEntity & { EmailStatus?: string } }>(
       "POST",
-      `/invoice/${qboInvoiceId}/send`,
+      `/invoice/${qboInvoiceId}/send${sendTo ? `?sendTo=${encodeURIComponent(sendTo)}` : ""}`,
     )
     const echo = res.Invoice
     if (!echo?.Id) throw new Error(`invoice send returned no echo — unproven`)

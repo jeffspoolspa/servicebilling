@@ -41,6 +41,7 @@ export interface IssueDeps {
   /** ION invoice numbers for the month's tasks — the consolidation set. */
   ionInvoiceNumbers(taskIds: readonly string[], month: string): Promise<string[]>
   qboCustomerId(customerId: number): Promise<string | null>
+  customerEmail(customerId: number): Promise<string | null>
   saveIssued(rows: { billingMonthId: string; kind: string; qboInvoiceId: string; docNumber: string; subtotalCents: number; presentation: string; ionInvoiceNumbers: string[] }[]): Promise<void>
   /** THE HANDOFF: each created invoice enters its own machine — one
    *  AdvanceInvoice command per document, the drainer takes it from there. */
@@ -56,12 +57,13 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
   if (blockers.length > 0) throw new IssueRefused(`not issuable: ${blockers.join("; ")}`)
 
   const taskIds = [...new Set(m.billableItems.map((i) => i.taskId).filter(Boolean))]
-  const [meta, labor, chems, ionNumbers, qboCustomerId] = await Promise.all([
+  const [meta, labor, chems, ionNumbers, qboCustomerId, billEmail] = await Promise.all([
     deps.taskDocMeta(taskIds),
     deps.laborItems(),
     deps.consumableQboIds(),
     deps.ionInvoiceNumbers(taskIds, m.month),
     deps.qboCustomerId(m.customerId),
+    deps.customerEmail(m.customerId),
   ])
   if (!qboCustomerId) throw new IssueRefused("customer has no QBO id — the gate should have held this month")
   if (ionNumbers.length === 0) throw new IssueRefused("no ION invoice numbers for this month — nothing to consolidate a doc number from")
@@ -100,6 +102,7 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
   for (const [i, d] of documents.entries()) {
     const created = await deps.qbo.createInvoice({
       qboCustomerId,
+      billEmail,
       docNumber: i === 0 ? baseDoc : `${baseDoc}-${d.kind.slice(0, 1).toUpperCase()}`,
       txnDate: at.slice(0, 10),
       memo: d.kind === "green" ? `${MONTH_NAME(m.month)} Green Pool Treatment` : memo,

@@ -237,7 +237,18 @@ export function maintenanceMachineDeps(sys: Db): {
     sender: {
       async send(qboInvoiceId: string, attachments: readonly { filename: string; pdf: Uint8Array }[]) {
         for (const a of attachments) await qbo.attachPdf(qboInvoiceId, a.filename, a.pdf)
-        await qbo.sendInvoice(qboInvoiceId)
+        // Direct the send to OUR email — authoritative over whatever the
+        // QBO entity carries (and covers docs created before BillEmail).
+        const { data } = await monthInvoices().select("billing_month_id, billing_months(customer_id)").eq("qbo_invoice_id", qboInvoiceId)
+        const custId = ((data ?? [])[0] as { billing_months: { customer_id: number } | null } | undefined)?.billing_months?.customer_id
+        let email: string | undefined
+        if (custId) {
+          const { data: c } = await (sys.schema("public").from("Customers") as {
+            select(col: string): { eq(k: string, v: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+          }).select("email").eq("id", custId)
+          email = ((c ?? [])[0] as { email: string | null } | undefined)?.email ?? undefined
+        }
+        await qbo.sendInvoice(qboInvoiceId, email)
       },
     },
     async attachments() {

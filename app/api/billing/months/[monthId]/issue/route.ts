@@ -39,6 +39,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ monthId: stri
         consumableQboIds: () => months.consumableQboIds(),
         ionInvoiceNumbers: (ids, m) => months.ionInvoiceNumbers(ids, m),
         qboCustomerId: (id) => months.qboCustomerId(id),
+        customerEmail: (id) => months.customerEmail(id),
         saveIssued: (rows) => months.saveIssued(rows),
         enqueueInvoices: async (ids) => {
           await new SupabaseInvoiceQueue(sys as never).enqueue(ids, 2)

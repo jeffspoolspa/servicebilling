@@ -578,6 +578,16 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     return ((data ?? [])[0] as { qbo_customer_id: string | null } | undefined)?.qbo_customer_id ?? null
   }
 
+  /** OUR email for the customer — authoritative over QBO's (user edits win). */
+  async customerEmail(customerId: number): Promise<string | null> {
+    const q = this.client.schema("public").from("Customers") as unknown as {
+      select(c: string): { eq(col: string, v: number): { limit(n: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
+    }
+    const { data, error } = await q.select("email").eq("id", customerId).limit(1)
+    if (error) throw new Error(`customer email failed: ${JSON.stringify(error).slice(0, 200)}`)
+    return ((data ?? [])[0] as { email: string | null } | undefined)?.email ?? null
+  }
+
   /** Record the issued documents — insert-only; the unique keys refuse doubles. */
   async saveIssued(rows: { billingMonthId: string; kind: string; qboInvoiceId: string; docNumber: string; subtotalCents: number; presentation: string; ionInvoiceNumbers: string[] }[]): Promise<void> {
     if (rows.length === 0) return
