@@ -33,12 +33,14 @@ export async function POST(req: Request) {
   const facts = new SupabaseBillingFacts(sys as never)
   const mint = { mint: (force: boolean) => triggerScriptSync<{ ionOrigin: string; cookieHeader: string }>("f/ION/api/get_session", { force_refresh: force }, { timeoutMs: 180000 }) }
   const jobs = { run: <T,>(path: string, args: Record<string, unknown>) => runScriptAndWait<T>(path, args, { timeoutMs: 600000 }) }
+  const monthsRepo = new SupabaseBillingMonthRepository(sys as never)
   const service = new AdvanceMonthService(
-    new SupabaseBillingMonthRepository(sys as never),
+    monthsRepo,
     facts, facts, facts,
     new IonReportInvoiceFacts(sys as never, new IonReports(mint, jobs)),
     new IonDeliveryRefresher(sys as never, new IonVisits(mint, jobs)),
     new SupabaseMonthGateFacts(sys as never),
+    monthsRepo, // claim-time labor linkage
   )
   const queue = new SupabaseBillingQueue(sys as never)
 

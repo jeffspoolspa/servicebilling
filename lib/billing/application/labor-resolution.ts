@@ -39,6 +39,52 @@ const TOKEN_ITEM: [RegExp, string][] = [
 
 export type ResolvedLine = DocLine & { qboItemId?: string | null }
 
+/**
+ * The ladder's CORE, shared by the projection resolver below and the
+ * ACCRUER (RULED, Carter 2026-08-04: the ledger links labor to its line
+ * item at CLAIM — blank service_types resolve into canonical names when
+ * the claim is written, not just when a document renders).
+ */
+export function resolveLaborSku(
+  l: { itemName: string; taskId: string | null; unitPriceCents: number; serviceDate: string | null },
+  taskCategory: ReadonlyMap<string, string | null>,
+  catalog: ReadonlyMap<string, LaborCatalogEntry>,
+  flatTasks: ReadonlySet<string> = new Set(),
+): { name: string; qboItemId: string } | null {
+  // 1 — exact
+  const exact = catalog.get(l.itemName)
+  if (exact) return { name: l.itemName, qboItemId: exact.qboItemId }
+  // 1.5 — longest catalog-name PREFIX (pool-suffixed multi-pool names)
+  let prefix: string | null = null
+  for (const name of catalog.keys()) {
+    if (l.itemName.startsWith(name + " ") && (!prefix || name.length > prefix.length)) prefix = name
+  }
+  if (prefix) return { name: prefix, qboItemId: catalog.get(prefix)!.qboItemId }
+  // 2 — flat: the TERMS say so
+  if ((l.taskId && flatTasks.has(l.taskId) && l.serviceDate === null) || l.itemName.endsWith(" — monthly")) {
+    const flat = catalog.get("FLAT RATE")
+    if (flat) return { name: "FLAT RATE", qboItemId: flat.qboItemId }
+  }
+  // 3 — the task's category
+  const cat = l.taskId ? taskCategory.get(l.taskId) : null
+  const byCat = cat ? CATEGORY_ITEM[cat] : undefined
+  if (byCat && catalog.has(byCat)) return { name: byCat, qboItemId: catalog.get(byCat)!.qboItemId }
+  // 4 — the rate, token tiebreak, POOL MAINTENANCE default
+  const candidates = [...catalog.entries()].filter(([, e]) => e.usualRateCents === l.unitPriceCents)
+  if (candidates.length === 1) return { name: candidates[0][0], qboItemId: candidates[0][1].qboItemId }
+  if (candidates.length > 1) {
+    for (const [re, item] of TOKEN_ITEM) {
+      if (re.test(l.itemName) && candidates.some(([n]) => n === item)) {
+        return { name: item, qboItemId: catalog.get(item)!.qboItemId }
+      }
+    }
+    const pool = candidates.find(([n]) => n.startsWith("POOL MAINTENANCE"))
+    if (pool) return { name: pool[0], qboItemId: pool[1].qboItemId }
+    return { name: candidates[0][0], qboItemId: candidates[0][1].qboItemId }
+  }
+  return null
+}
+
 export function resolveLaborDocuments(
   documents: InvoiceDocument[],
   taskCategory: ReadonlyMap<string, string | null>,
@@ -50,42 +96,8 @@ export function resolveLaborDocuments(
 ): { documents: (Omit<InvoiceDocument, "lines"> & { lines: ResolvedLine[] })[]; unmapped: string[] } {
   const unmapped = new Set<string>()
 
-  const resolve = (l: Extract<DocLine, { kind: "labor" | "consumable" | "variance" }>): { name: string; qboItemId: string } | null => {
-    // 1 — exact
-    const exact = catalog.get(l.itemName)
-    if (exact) return { name: l.itemName, qboItemId: exact.qboItemId }
-    // 1.5 — longest catalog-name PREFIX: multi-pool properties suffix the
-    // pool onto the SKU ("POOL MAINTENANCE 80 Lounge Pool"); the custom
-    // rate rides through untouched.
-    let prefix: string | null = null
-    for (const name of catalog.keys()) {
-      if (l.itemName.startsWith(name + " ") && (!prefix || name.length > prefix.length)) prefix = name
-    }
-    if (prefix) return { name: prefix, qboItemId: catalog.get(prefix)!.qboItemId }
-    // 2 — flat: the TERMS say so (name suffix kept as a fallback)
-    if ((l.taskId && flatTasks.has(l.taskId) && l.serviceDate === null) || l.itemName.endsWith(" — monthly")) {
-      const flat = catalog.get("FLAT RATE")
-      if (flat) return { name: "FLAT RATE", qboItemId: flat.qboItemId }
-    }
-    // 3 — the task's category
-    const cat = l.taskId ? taskCategory.get(l.taskId) : null
-    const byCat = cat ? CATEGORY_ITEM[cat] : undefined
-    if (byCat && catalog.has(byCat)) return { name: byCat, qboItemId: catalog.get(byCat)!.qboItemId }
-    // 4 — the rate, token tiebreak, POOL MAINTENANCE default
-    const candidates = [...catalog.entries()].filter(([, e]) => e.usualRateCents === l.unitPriceCents)
-    if (candidates.length === 1) return { name: candidates[0][0], qboItemId: candidates[0][1].qboItemId }
-    if (candidates.length > 1) {
-      for (const [re, item] of TOKEN_ITEM) {
-        if (re.test(l.itemName) && candidates.some(([n]) => n === item)) {
-          return { name: item, qboItemId: catalog.get(item)!.qboItemId }
-        }
-      }
-      const pool = candidates.find(([n]) => n.startsWith("POOL MAINTENANCE"))
-      if (pool) return { name: pool[0], qboItemId: pool[1].qboItemId }
-      return { name: candidates[0][0], qboItemId: candidates[0][1].qboItemId }
-    }
-    return null
-  }
+  const resolve = (l: Extract<DocLine, { kind: "labor" | "consumable" | "variance" }>): { name: string; qboItemId: string } | null =>
+    resolveLaborSku(l, taskCategory, catalog, flatTasks)
 
   const out = documents.map((d) => {
     const lines = d.lines.map((l): ResolvedLine => {

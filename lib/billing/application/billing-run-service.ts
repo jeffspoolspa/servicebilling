@@ -12,6 +12,7 @@
  */
 
 import { auditConsumables, gate, priceMonth, reconcile } from "@/lib/billing/domain"
+import { resolveLaborSku } from "./labor-resolution"
 import type { ChemObservation } from "@/lib/billing/domain"
 import type { BillingMonth } from "@/lib/billing/domain"
 import type { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
@@ -108,6 +109,15 @@ export class BillingRunService {
       this.facts.prices(),
       this.systemInvoices.perTaskTotalsForMonth(month),
     ])
+    // Claim-time labor linkage: the same ladder the documents use, so the
+    // LEDGER carries canonical names (RULED 2026-08-04).
+    const allTaskIds = [...new Set([...termsBy.values()].flat().map((t) => t.taskId))]
+    const [laborCatalog, docMeta] = await Promise.all([
+      this.months.laborItems(),
+      this.months.taskDocMeta(allTaskIds),
+    ])
+    const categories = new Map([...docMeta.entries()].map(([id, t]) => [id, t.category]))
+
     const tally: Record<string, number> = {}
     const bump = (k: string) => (tally[k] = (tally[k] ?? 0) + 1)
     const disputed: string[] = []
@@ -128,7 +138,11 @@ export class BillingRunService {
           const priced = new Set<string>()
           for (const t of termsBy.get(m.customerId) ?? []) {
             const out = priceMonth({ month, terms: t, sources, catalog, at })
-            for (const item of out.items) {
+            for (let item of out.items) {
+              if (item.kind === "labor" && !item.itemName) {
+                const r2 = resolveLaborSku(item, categories, laborCatalog)
+                if (r2) item = { ...item, itemName: r2.name }
+              }
               m.claim(item, { claimedByMonthId: null }, at)
               priced.add(`${item.sourceKind}:${item.sourceId}`)
             }

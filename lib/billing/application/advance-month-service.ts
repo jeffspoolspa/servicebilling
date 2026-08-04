@@ -13,6 +13,7 @@
  * service's whole job is to fetch, ask, apply and record.
  */
 
+import { resolveLaborSku, type LaborCatalogEntry } from "./labor-resolution"
 import {
   gate,
   priceMonth,
@@ -47,6 +48,11 @@ export class AdvanceMonthService {
     /** The healing half — absent, a dispute can only ever be reported. */
     private readonly deliveryRefresher?: DeliveryRefresher,
     private readonly gateFacts?: SupabaseMonthGateFacts,
+    /** When present, blank labor names resolve to their catalog SKU at CLAIM. */
+    private readonly laborLink?: {
+      laborItems(): Promise<Map<string, LaborCatalogEntry>>
+      taskDocMeta(ids: readonly string[]): Promise<Map<string, { category: string | null }>>
+    },
   ) {}
 
   async advance(monthId: string, opts: { now?: Date; dryRun?: boolean } = {}): Promise<AdvanceOutcome> {
@@ -71,10 +77,22 @@ export class AdvanceMonthService {
         let claimed = 0
         const refusals: string[] = []
         const priced = new Set<string>()
+        // The ledger LINKS labor to its line item at claim (RULED): blank
+        // service_types resolve through the same ladder the documents use.
+        const laborCatalog = this.laborLink ? await this.laborLink.laborItems() : null
+        const categories = this.laborLink
+          ? await this.laborLink.taskDocMeta([...new Set(termsList.map((t) => t.taskId))]).then(
+              (m2) => new Map([...m2.entries()].map(([id, t]) => [id, t.category])),
+            )
+          : null
         for (const t of termsList) {
           const out = priceMonth({ month: month.month, terms: t, sources, catalog, at })
           for (const r of out.refused) refusals.push(r.reason)
-          for (const item of out.items) {
+          for (let item of out.items) {
+            if (laborCatalog && categories && item.kind === "labor" && !item.itemName) {
+              const r2 = resolveLaborSku(item, categories, laborCatalog)
+              if (r2) item = { ...item, itemName: r2.name }
+            }
             month.claim(item, { claimedByMonthId: null }, at)
             priced.add(`${item.sourceKind}:${item.sourceId}`)
             claimed++
