@@ -53,11 +53,7 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
 
   return (
     <div className="px-7 pt-6 pb-10 space-y-4">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.14em] text-ink-mute">Billing month · {m.month.slice(0, 7)}</div>
-          <h2 className="font-display text-[18px] mt-0.5">{m.customer_name ?? m.customer_id}</h2>
-        </div>
+      <div className="flex justify-end">
         <Link href={`/maintenance/billing?month=${m.month.slice(0, 7)}` as never} className="text-[12px] text-ink-mute hover:text-ink underline underline-offset-2">
           Back to months
         </Link>

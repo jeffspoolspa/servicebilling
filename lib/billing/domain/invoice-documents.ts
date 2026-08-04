@@ -29,6 +29,16 @@ import type { BillingMonth } from "./billing-month"
 
 export type InvoicePresentation = "itemized" | "summary"
 
+/**
+ * THE doc-number rule: the month's documents reuse ION's invoice number —
+ * the first document takes it whole, siblings suffix their kind's initial
+ * ("-C" consumables, "-G" green). A draft projects the SAME numbers the
+ * issue step will mint; there is exactly one spelling of this rule.
+ */
+export function documentDocNumber(baseDoc: string, kind: string, index: number): string {
+  return index === 0 ? baseDoc : `${baseDoc}-${kind.slice(0, 1).toUpperCase()}`
+}
+
 /** The visit-break label as the customer reads it: "Tuesday: July 4th, 2026". */
 export function visitBreakLabel(iso: string): string {
   const d = new Date(iso.slice(0, 10) + "T12:00:00Z")

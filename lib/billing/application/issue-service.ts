@@ -1,5 +1,5 @@
 import type { BillingMonth } from "@/lib/billing/domain"
-import { documentsOf, presentationOf, visitBreakLabel, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
+import { documentDocNumber, documentsOf, presentationOf, visitBreakLabel, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
 import { resolveLaborDocuments } from "./labor-resolution"
 import type { QboInvoices, CreatedInvoice } from "@/lib/external/qbo/qbo"
 import type { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
@@ -117,7 +117,7 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
       billEmail,
       classId: MAINTENANCE_CLASS_ID,
       salesTermId: NET_15_TERM_ID,
-      docNumber: i === 0 ? baseDoc : `${baseDoc}-${d.kind.slice(0, 1).toUpperCase()}`,
+      docNumber: documentDocNumber(baseDoc, d.kind, i),
       txnDate: at.slice(0, 10),
       memo: d.kind === "green" ? `${MONTH_NAME(m.month)} Green Pool Treatment` : memo,
       lines: d.lines.map((l) => {

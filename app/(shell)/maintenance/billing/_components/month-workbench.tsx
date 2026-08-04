@@ -52,7 +52,7 @@ interface Draft {
   subtotalCents: number
   claimedAtZero: number
   presentation: "itemized" | "summary"
-  documents: { kind: string; lines: DocLine[]; subtotalCents: number }[]
+  documents: { kind: string; docNumber?: string | null; lines: DocLine[]; subtotalCents: number }[]
 }
 
 /**
@@ -289,7 +289,7 @@ export function MonthWorkbench({
 
           {/* the DRAFT card — pre-issue only */}
           {!hasInvoices && (
-            <Card>
+            <Card id="draft-card">
               <CardHeader>
                 <CardTitle>Draft invoice</CardTitle>
                 <div className="ml-auto flex border border-line rounded-lg overflow-hidden">
@@ -354,22 +354,44 @@ export function MonthWorkbench({
             <CardHeader>
               <CardTitle>Invoices</CardTitle>
             </CardHeader>
-            {!hasInvoices ? (
-              <CardBody>
-                <span className="text-[12.5px] text-ink-mute">None issued — the draft is the preview.</span>
-              </CardBody>
-            ) : (
-              <Table className="text-[11.5px]">
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead>Invoice</TableHead>
-                    <TableHead>Sent</TableHead>
-                    <TableHead>Method</TableHead>
-                    <TableHead className="text-right">Balance</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {invoices.map((inv) => (
+            <Table className="text-[11.5px]">
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Invoice</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Method</TableHead>
+                  <TableHead className="text-right">Balance</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {!hasInvoices &&
+                  (draft && draft !== "loading" && draft !== "error" ? (
+                    draft.documents.map((doc) => (
+                      <TableRow
+                        key={doc.kind}
+                        onClick={() => document.getElementById("draft-card")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                        className="cursor-pointer"
+                      >
+                        <TableCell className="font-mono text-ink">{doc.docNumber ?? (draft.documents.length > 1 ? doc.kind : "draft")}</TableCell>
+                        <TableCell>
+                          <Pill tone="neutral">draft</Pill>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-ink-mute">—</span>
+                        </TableCell>
+                        <TableCell className="text-right font-mono num text-ink-dim">
+                          {formatCurrency(doc.subtotalCents / 100)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={4} className="text-ink-mute">
+                        {draft === "error" ? "Draft failed to build." : "Building the draft…"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                {invoices.map((inv) => (
                     <TableRow
                       key={inv.qbo_invoice_id}
                       onClick={() => setOpenInvoice(inv.qbo_invoice_id)}
@@ -388,10 +410,9 @@ export function MonthWorkbench({
                         {formatCurrency(Number(inv.balance ?? 0))}
                       </TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
+                ))}
+              </TableBody>
+            </Table>
           </Card>
 
           {/* payments & credits — QBO's own linkage, across the month's invoices */}

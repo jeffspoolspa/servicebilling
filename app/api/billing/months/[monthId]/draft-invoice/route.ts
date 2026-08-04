@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { createSupabaseServer } from "@/lib/supabase/server"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
-import { documentsOf, draftInvoice, presentationOf, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
+import { documentDocNumber, documentsOf, draftInvoice, presentationOf, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
 import { resolveLaborDocuments } from "@/lib/billing/application/labor-resolution"
 
 /**
@@ -60,10 +60,16 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
   // Attach the CUSTOMER-FACING description to every line — the same cached
   // catalog text the issue step ships (and refuses on when blank) — so the
   // draft shows exactly what the customer will read, blanks included.
-  const [descriptions, chems] = await Promise.all([repo.itemDescriptions(), repo.consumableQboIds()])
+  const [descriptions, chems, ionNumbers] = await Promise.all([
+    repo.itemDescriptions(),
+    repo.consumableQboIds(),
+    repo.ionInvoiceNumbers(taskIds, month.month),
+  ])
+  const baseDoc = ionNumbers[0] ?? null
   const missingDescriptions: string[] = []
-  const documents = resolved.map((d) => ({
+  const documents = resolved.map((d, i) => ({
     ...d,
+    docNumber: baseDoc ? documentDocNumber(baseDoc, d.kind, i) : null,
     lines: d.lines.map((l) => {
       if (l.kind === "visit_break") return l
       const qboItemId = l.kind === "consumable" ? (chems.get(l.itemName) ?? null) : ((l as { qboItemId?: string | null }).qboItemId ?? null)
@@ -80,5 +86,6 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
     documents,
     unmappedLabor,
     missingDescriptions: [...new Set(missingDescriptions)],
+    ionInvoiceNumbers: ionNumbers,
   })
 }
