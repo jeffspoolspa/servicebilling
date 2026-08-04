@@ -14,7 +14,7 @@ LOCKED claims). The concrete phase-1 pieces:
 | `billing.v_active_months` | The active-month Specification's one named home; the tick and the tick route both read it. |
 | `billing.findings.source_key` | The finding's true subject: `task_id:service_date` (visit grain). Identity = (rule, source_key); observation (cents) decides supersede. |
 | `billing.policy_flags` | Runtime switches. `auto_charge` (default true): the collect stage refuses to touch a card while false — the supervised issue-day lever. |
-| `billing.tick_nightly()` | Enqueue active set + wake the relay. Correctness half is the enqueue; the wake is latency only. NOT cron-scheduled by the migration — arming is a human act. |
+| `billing.tick_nightly()` | A PURE WAKE: one pg_net POST to the tick route (vault secrets billing_tick_url/_token; unarmed = no-op). No data logic — the route re-derives all work from v_active_months. NOT cron-scheduled by the migration — arming is a human act. |
 | `app/api/billing/tick` | The worker half: startMonth -> advanceAll per period -> depth-first heal drain -> re-gate -> issue pass -> depth-first invoice drain. Budget-bound, converges across drains. |
 
 ## Reads

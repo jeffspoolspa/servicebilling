@@ -7,27 +7,26 @@
 
 ```mermaid
 sequenceDiagram
-    participant Cron as pg_cron tick
-    participant Q as month rebuild queue
-    participant D as rebuild drainer
+    participant Cron as pg_cron (tick = one POST)
+    participant R as tick route (/api/billing/tick)
     participant BM as BillingMonth aggregate
     participant ION as ION (checksum + logs)
     participant UI as Month page (review)
 
-    Cron->>Q: enqueue every active month
-    Cron->>D: wake (drains until empty, then dies)
-    loop each queued month
-        D->>BM: accrue (re-fold visits, re-claim unlocked items)
-        D->>ION: fetch rebuilt invoice total per task (checksum)
+    Cron->>R: wake — pg_net POST, shared machine token
+    Note over R: reads billing.v_active_months (the Specification)
+    loop each active month
+        R->>BM: accrue (re-fold visits, re-claim unlocked items)
+        R->>ION: fetch rebuilt invoice total per task (checksum — phase 2)
         alt totals agree
             BM-->>BM: reconciled
         else totals disagree
-            D->>ION: targeted re-scrape of the disagreeing task's logs
-            D->>BM: re-accrue (remediation terminates; agree or stay unreconciled)
+            R->>ION: targeted re-scrape of the disagreeing task's logs
+            R->>BM: re-accrue (remediation terminates; agree or stay unreconciled)
         end
-        D->>BM: re-judge gate (open cpv_outlier flags hold)
+        R->>BM: audit + re-judge gate (open cpv_outlier flags hold)
         BM-->>UI: flags surface for review (Mark reviewed = resolution)
-        Note over BM: issue PROHIBITED - period still open
+        Note over BM: issue PROHIBITED - period still open (phase 1: reconcile also waits for period close)
     end
 ```
 
@@ -55,9 +54,11 @@ sequenceDiagram
 
 ### Text fallback (numbered steps)
 
-1. Nightly, after the visit ingester: the pg_cron tick enqueues every active month into
-   the month rebuild queue and wakes the rebuild drainer.
-2. The drainer takes months one at a time: accrue (re-fold visits; locked items untouched).
+1. Nightly, after the visit ingester: pg_cron fires `billing.tick_nightly()` — a PURE
+   WAKE (one pg_net POST to the tick route with the shared machine token). The route
+   re-derives the work: it reads `billing.v_active_months` and opens the current
+   period's months. The existing month queue serves dispute-heals and buttons only.
+2. The route takes months one at a time: accrue (re-fold visits; locked items untouched).
 3. Reconcile: fetch ION's rebuilt draft invoice total per task; diff against our accrual.
    Agreement -> done. Disagreement -> targeted re-scrape of that task's logs, re-accrue
    once (terminating remediation).

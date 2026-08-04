@@ -8,7 +8,8 @@ The rules the cadence runs by. Each rule names the DDD concept doing the work.
 ## Pre-conditions
 
 - A month is **active** when its period overlaps today or it is period-closed but not yet
-  invoiced and not manually parked. Active months are what the tick enqueues.
+  invoiced and not manually parked. The active set is what the nightly tick route
+  processes (read from `billing.v_active_months`).
 - The visit ingester has run for the day (the tick runs after it).
 
 ## Decision sequence
