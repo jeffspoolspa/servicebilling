@@ -35,6 +35,9 @@ export interface ServiceLogVisit {
   /** The invoice this visit rides on, once the month is issued. */
   qbo_invoice_id?: string | null
   invoice_doc_number?: string | null
+  /** Labor for the visit: frozen from the ledger when invoiced, live from
+   *  the task's current terms while not. */
+  labor_cents?: number | null
 }
 
 export interface ServiceLogPeriod {
@@ -440,6 +443,7 @@ export function ServiceLog({
           const open = openVisit === v.visit_id
           const warn = Object.entries(v.readings).some(([k, val]) => readingWarn(k, val))
           const chemCents = v.chems.reduce((s, c) => s + (c.cents ?? 0), 0)
+          const totalCents = chemCents + Number(v.labor_cents ?? 0)
           const otherReads = Object.entries(v.readings)
             .filter(([k, val]) => !CORE_NAMES.has(k) && val != null && val !== "")
           const flagged = highlighted.has(v.visit_date.slice(0, 10))
@@ -496,8 +500,11 @@ export function ServiceLog({
                     {v.photos.length}
                   </span>
                 )}
-                <span className="font-mono text-[12px] text-ink w-[64px] text-right flex-none">
-                  {chemCents > 0 ? formatCurrency(chemCents / 100) : "—"}
+                <span
+                  className="font-mono text-[12px] text-ink w-[64px] text-right flex-none"
+                  title={totalCents > 0 ? `labor ${formatCurrency(Number(v.labor_cents ?? 0) / 100)} + chems ${formatCurrency(chemCents / 100)}` : undefined}
+                >
+                  {totalCents > 0 ? formatCurrency(totalCents / 100) : "—"}
                 </span>
                 <span className="w-[70px] text-right flex-none">
                   {v.invoice_doc_number ? (
