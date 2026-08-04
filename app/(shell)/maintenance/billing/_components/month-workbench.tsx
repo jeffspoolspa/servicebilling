@@ -56,6 +56,7 @@ export interface LedgerItem {
   service_date: string | null
   visit_id: string | null
   qbo_invoice_id: string | null
+  qbo_line_id: string | null
 }
 
 export interface MonthTask {
@@ -272,7 +273,7 @@ export function MonthWorkbench({
   // itemized keeps per-date rows — the SAME logic the documents follow.
   const groupItems = (
     items: LedgerItem[],
-  ): { name: string; qty: number; rate: number; amount: number; date: string | null; visits: number; invoice: string | null; members: LedgerItem[] }[] => {
+  ): { name: string; qty: number; rate: number; amount: number; date: string | null; visits: number; invoice: string | null; lineId: string | null; members: LedgerItem[] }[] => {
     if (lockedPresentation === "summary") {
       const g = new Map<string, { name: string; qty: number; rate: number; amount: number; date: null; visitSet: Set<string>; invoice: string | null; members: LedgerItem[] }>()
       for (const it of items) {
@@ -287,7 +288,10 @@ export function MonthWorkbench({
         g.set(key, row)
       }
       return [...g.values()]
-        .map(({ visitSet, ...r }) => ({ ...r, visits: visitSet.size }))
+        .map(({ visitSet, ...r }) => {
+          const lineIds = [...new Set(r.members.map((mIt) => mIt.qbo_line_id).filter(Boolean))]
+          return { ...r, visits: visitSet.size, lineId: lineIds.length === 1 ? (lineIds[0] as string) : null }
+        })
         .sort((a, b) => b.amount - a.amount)
     }
     return items.map((it) => ({
@@ -298,6 +302,7 @@ export function MonthWorkbench({
       date: it.service_date,
       visits: it.visit_id ? 1 : 0,
       invoice: it.qbo_invoice_id,
+      lineId: it.qbo_line_id,
       members: [it],
     }))
   }
@@ -481,14 +486,6 @@ export function MonthWorkbench({
                   <div key={key} className="border-t border-line-soft first:border-t-0">
                     <div className="flex items-center gap-2 px-5 py-1.5">
                       <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-mute">{label}</span>
-                      {doc.label &&
-                        (doc.open ? (
-                          <button onClick={doc.open} className="font-mono text-[10px] text-ink-mute hover:text-cyan underline underline-offset-2">
-                            {doc.label}
-                          </button>
-                        ) : (
-                          <span className="font-mono text-[10px] text-ink-mute">{doc.label}</span>
-                        ))}
                       <span className="ml-auto font-mono num text-[11px] text-ink-dim">{formatCurrency(subtotal / 100)}</span>
                     </div>
                     {rows.map((r, i) => {
@@ -517,6 +514,9 @@ export function MonthWorkbench({
                             </span>
                             <span className="font-mono text-[10px] text-ink-mute flex-none">
                               {r.qty} × {formatCurrency(r.rate)}
+                            </span>
+                            <span className="w-[52px] flex-none text-right font-mono text-[9.5px] text-ink-mute" title="QBO line id">
+                              {r.lineId ? `ln ${r.lineId}` : "—"}
                             </span>
                             <span className="w-[70px] flex-none text-right">
                               {r.invoice ? (
@@ -563,7 +563,14 @@ export function MonthWorkbench({
                     })}
                   </div>
                 )
-              })
+              }).concat(
+                <div key="total" className="flex items-center gap-2 px-5 py-2 border-t border-line">
+                  <span className="text-[12px] font-medium text-ink">Total</span>
+                  <span className="ml-auto font-mono num text-[12.5px] font-semibold text-ink">
+                    {formatCurrency(ledgerItems.reduce((s2, i) => s2 + i.amount_cents, 0) / 100)}
+                  </span>
+                </div>,
+              )
             ))}
           </Card>
           )}
