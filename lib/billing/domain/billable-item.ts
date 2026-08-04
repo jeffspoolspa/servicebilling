@@ -57,6 +57,10 @@ export interface BillableItem {
   readonly claimedAt: string
   /** Pricing provenance: the terms VERSION in effect at claim. */
   readonly termsVersionId?: string | null
+  /** Set when the item lands on an issued invoice — THE LOCK. */
+  readonly qboInvoiceId?: string | null
+  /** The exact QBO line the item rode into, when unambiguous. */
+  readonly qboLineId?: string | null
 }
 
 /** The one place the key is formed, so the ledger and the index agree. */

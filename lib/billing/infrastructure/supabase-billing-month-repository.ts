@@ -64,7 +64,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   private async hydrate(row: MonthRow): Promise<BillingMonth> {
     const [{ data: itemRows, error }, { data: varRows, error: vErr }] = await Promise.all([
       this.q("billable_items")
-        .select("source_kind, source_id, task_id, kind, service_date, item_name, qty, unit_price_cents, amount_cents, created_at")
+        .select("source_kind, source_id, task_id, kind, service_date, item_name, qty, unit_price_cents, amount_cents, created_at, task_terms_id, qbo_invoice_id, qbo_line_id")
         .eq("billing_month_id", row.id)
         .range(0, 4999),
       this.q("variances")
@@ -86,6 +86,9 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       unitPriceCents: Number(r.unit_price_cents ?? 0),
       amountCents: Number(r.amount_cents ?? 0),
       claimedAt: String(r.created_at ?? ""),
+      termsVersionId: r.task_terms_id == null ? null : String(r.task_terms_id),
+      qboInvoiceId: r.qbo_invoice_id == null ? null : String(r.qbo_invoice_id),
+      qboLineId: r.qbo_line_id == null ? null : String(r.qbo_line_id),
     }))
 
     const variances: Variance[] = ((varRows ?? []) as Record<string, unknown>[]).map((r) => ({
@@ -181,11 +184,16 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   }
 
   private async replaceItems(month: BillingMonth): Promise<void> {
-    const { error: delErr } = await (this.q("billable_items").delete().eq("billing_month_id", month.id) as unknown as PromiseLike<{ error: unknown }>)
+    // LOCKED items (invoice-linked) are immutable rows — the rewrite
+    // touches only the unlocked remainder; the DB trigger backstops.
+    const { error: delErr } = await ((this.q("billable_items").delete().eq("billing_month_id", month.id) as unknown as {
+      is(col: string, v: null): PromiseLike<{ error: unknown }>
+    }).is("qbo_invoice_id", null) as PromiseLike<{ error: unknown }>)
     if (delErr) throw new Error(`billable_items clear failed: ${JSON.stringify(delErr).slice(0, 200)}`)
-    if (month.billableItems.length === 0) return
+    const unlocked = month.billableItems.filter((i) => !i.qboInvoiceId)
+    if (unlocked.length === 0) return
     const { error } = await (this.q("billable_items").insert(
-      month.billableItems.map((i) => ({
+      unlocked.map((i) => ({
         billing_month_id: month.id,
         source_kind: i.sourceKind,
         source_id: i.sourceKind === "flat" ? null : i.sourceId,
@@ -258,7 +266,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       const c = ids.slice(i, i + CHUNK)
       jobs.push((async () => {
         const { data, error } = await this.q("billable_items")
-          .select("billing_month_id, source_kind, source_id, task_id, kind, service_date, item_name, qty, unit_price_cents, amount_cents, created_at")
+          .select("billing_month_id, source_kind, source_id, task_id, kind, service_date, item_name, qty, unit_price_cents, amount_cents, created_at, task_terms_id, qbo_invoice_id, qbo_line_id")
           .in("billing_month_id", c).range(0, 9999)
         if (error) throw new Error(`items page failed: ${JSON.stringify(error).slice(0, 200)}`)
         itemChunks.push((data ?? []) as Record<string, unknown>[])
@@ -288,6 +296,9 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
         unitPriceCents: Number(r.unit_price_cents ?? 0),
         amountCents: Number(r.amount_cents ?? 0),
         claimedAt: String(r.created_at ?? ""),
+        termsVersionId: r.task_terms_id == null ? null : String(r.task_terms_id),
+        qboInvoiceId: r.qbo_invoice_id == null ? null : String(r.qbo_invoice_id),
+        qboLineId: r.qbo_line_id == null ? null : String(r.qbo_line_id),
       }])
     }
     const varsBy = new Map<string, Variance[]>()
@@ -347,16 +358,18 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       for (let i = 0; i < dirty.length; i += 40) {
         const c = dirty.slice(i, i + 40).map((m) => m.id)
         const dq = this.client.schema("billing").from("billable_items") as unknown as {
-          delete(): { in(col: string, v: unknown[]): PromiseLike<{ error: unknown }> }
+          delete(): { in(col: string, v: unknown[]): { is(col2: string, v2: null): PromiseLike<{ error: unknown }> } }
         }
-        const { error } = await dq.delete().in("billing_month_id", c)
+        // locked (invoice-linked) rows are immutable — rewrite the rest
+        const { error } = await dq.delete().in("billing_month_id", c).is("qbo_invoice_id", null)
         if (error) throw new Error(`bulk item clear failed: ${JSON.stringify(error).slice(0, 200)}`)
       }
-      const rows = dirty.flatMap((m) => m.billableItems.map((i) => ({
+      const rows = dirty.flatMap((m) => m.billableItems.filter((i) => !i.qboInvoiceId).map((i) => ({
         billing_month_id: m.id, source_kind: i.sourceKind,
         source_id: i.sourceKind === "flat" ? null : i.sourceId,
         task_id: i.taskId, kind: i.kind, service_date: i.serviceDate, item_name: i.itemName,
         qty: i.qty, unit_price_cents: i.unitPriceCents, amount_cents: i.amountCents,
+        task_terms_id: i.termsVersionId ?? null,
       })))
       for (let i = 0; i < rows.length; i += 500) {
         const ins = this.client.schema("billing").from("billable_items") as unknown as {
@@ -629,12 +642,18 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     if (error) throw new Error(`month_invoices insert failed: ${JSON.stringify(error).slice(0, 240)}`)
     if (!data || data.length !== rows.length) throw new Error(`month_invoices wrote ${data?.length ?? 0} of ${rows.length}`)
 
-    // Each ITEM carries its invoice on its own (RULED) — stamp the month's
-    // items by the same bucket rule the documents split on, in the DB's
-    // one spelling of it.
+  }
+
+  /**
+   * Stamp each ITEM's invoice + exact QBO line (RULED: the links live on
+   * the item; setting the invoice LOCKS it). Called AFTER the month's
+   * final save at issue — the save rewrites unlocked rows, so stamping
+   * must be the last write of the issue transaction's sequence.
+   */
+  async linkItemsToInvoices(monthId: string): Promise<void> {
     const rpc = this.client.schema("billing") as unknown as { rpc(f: string, a: Record<string, unknown>): PromiseLike<{ error: unknown }> }
-    const { error: linkErr } = await rpc.rpc("link_month_items_to_invoices", { p_month_id: rows[0].billingMonthId })
-    if (linkErr) throw new Error(`item-invoice link failed: ${JSON.stringify(linkErr).slice(0, 200)}`)
+    const { error } = await rpc.rpc("link_month_items_to_invoices", { p_month_id: monthId })
+    if (error) throw new Error(`item-invoice link failed: ${JSON.stringify(error).slice(0, 200)}`)
   }
 
   async customerPeerGroups(customerIds: readonly number[]): Promise<Map<number, string>> {

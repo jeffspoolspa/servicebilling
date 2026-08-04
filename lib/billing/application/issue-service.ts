@@ -178,6 +178,9 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
   )
   m.markInvoiced(delivered, now, at)
   await deps.months.save(m)
+  // The item stamps come LAST: save rewrites unlocked rows, so the lock
+  // (invoice link) lands only after the ledger's final write.
+  await deps.months.linkItemsToInvoices(m.id)
   await deps.enqueueInvoices(issued.map((i) => i.qboInvoiceId))
 
   return { monthId: m.id, invoices: issued, presentation, ionInvoiceNumbers: ionNumbers }

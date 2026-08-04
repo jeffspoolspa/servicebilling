@@ -229,6 +229,12 @@ export class BillingMonth {
 
   /** Give a source back. Legal right up until the invoice exists. [I-B3] */
   release(sourceKind: BillableItem["sourceKind"], sourceId: string, at: string, reason: string): void {
+    const existing = [...this.items.values()].find((i) => i.sourceKind === sourceKind && i.sourceId === sourceId)
+    if (existing?.qboInvoiceId) {
+      throw new BillingRuleError(
+        `${sourceKind}:${sourceId} is locked by invoice ${existing.qboInvoiceId} — items on an issued invoice do not change`,
+      )
+    }
     const key = sourceKeyOf({ sourceKind, sourceId })
     if (this.isInvoiced) {
       throw new BillingRuleError(`${this.month} was invoiced — record a Variance for ${key} instead [I-B3]`)
