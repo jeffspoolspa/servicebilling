@@ -189,6 +189,7 @@ export function MonthWorkbench({
   const router = useRouter()
   const monthLabel = m.month.slice(0, 7)
   const [openInvoice, setOpenInvoice] = useState<string | null>(null)
+  const [ledgerTab, setLedgerTab] = useState<"items" | "tasks">("items")
   const [draft, setDraft] = useState<Draft | "loading" | "error" | null>(null)
   const [presentation, setPresentation] = useState<"itemized" | "summary" | null>(null)
   const [acting, setActing] = useState<string | null>(null)
@@ -308,35 +309,48 @@ export function MonthWorkbench({
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4 items-start">
         {/* ------------------------------- LEFT ------------------------------- */}
         <div className="space-y-4 min-w-0">
-          {/* the BILLING MONTH card: high-level details + action items */}
+          {/* the BILLING MONTH summary strip — customer-card shaped */}
           <Card>
-            <CardHeader>
-              <CardTitle>Billing month · {monthLabel}</CardTitle>
-              <span className="ml-auto flex items-center gap-1.5">
-                {m.status === "disputed" && <Pill tone="coral">disputed</Pill>}
-                {m.status === "held" && <Pill tone="sun">held</Pill>}
-                <Pill tone={m.status === "closed" ? "grass" : "cyan"}>{m.status}</Pill>
-              </span>
-            </CardHeader>
-            <CardBody className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
-                <Field label="Items">{m.item_count}</Field>
-                <Field label="Subtotal">
-                  <span className="font-mono num">{formatCurrency(m.subtotal_cents / 100)}</span>
-                </Field>
-                <Field label="Invoiced">
-                  <span className="font-mono num">{hasInvoices ? formatCurrency(fold.total) : "—"}</span>
-                </Field>
-                <Field label="Balance">
-                  <span className={cn("font-mono num", hasInvoices && fold.totalBalance > 0 ? "text-sun" : hasInvoices ? "text-grass" : "")}>
-                    {hasInvoices ? formatCurrency(fold.totalBalance) : "—"}
-                  </span>
-                </Field>
+            <CardBody className="py-2.5 space-y-2">
+              <div className="flex items-center gap-4 flex-wrap">
+                <span className="flex items-center gap-2 flex-none">
+                  <span className="text-[13px] font-medium text-ink">Billing month · {monthLabel}</span>
+                  {m.status === "disputed" && <Pill tone="coral">disputed</Pill>}
+                  {m.status === "held" && <Pill tone="sun">held</Pill>}
+                  <Pill tone={m.status === "closed" ? "grass" : "cyan"}>{m.status}</Pill>
+                </span>
+                <span className="flex items-center gap-4 font-mono text-[11px] ml-auto">
+                  <span className="text-ink-mute">items <span className="text-ink num">{m.item_count}</span></span>
+                  <span className="text-ink-mute">subtotal <span className="text-ink num">{formatCurrency(m.subtotal_cents / 100)}</span></span>
+                  {hasInvoices && (
+                    <>
+                      <span className="text-ink-mute">invoiced <span className="text-ink num">{formatCurrency(fold.total)}</span></span>
+                      <span className="text-ink-mute">
+                        balance <span className={cn("num", fold.totalBalance > 0 ? "text-sun" : "text-grass")}>{formatCurrency(fold.totalBalance)}</span>
+                      </span>
+                    </>
+                  )}
+                </span>
+                <span className="flex items-center gap-2 flex-none">
+                  {m.status === "held" && (
+                    <button disabled={acting !== null} onClick={() => act("Release hold", "DELETE", `/api/billing/months/${m.id}/hold`)} className={actionBtn}>
+                      {acting === "Release hold" ? "Releasing…" : "Release hold"}
+                    </button>
+                  )}
+                  {m.status === "gated" && !hasInvoices && (
+                    <button disabled={acting !== null} onClick={() => act("Issue invoices", "POST", `/api/billing/months/${m.id}/issue`)} className={primaryBtn}>
+                      {acting === "Issue invoices" ? "Issuing…" : "Issue invoices"}
+                    </button>
+                  )}
+                  {hasInvoices && m.status !== "closed" && (
+                    <button disabled={acting !== null} onClick={() => act("Run machine", "POST", `/api/billing/months/${m.id}/machine`)} className={actionBtn}>
+                      {acting === "Run machine" ? "Running…" : "Run machine"}
+                    </button>
+                  )}
+                </span>
               </div>
               <StatusStepper stages={[...MONTH_STAGES]} current={stepperStage(m.status)} />
-
-              {/* what needs a person: held reasons, disputes, findings */}
-              {((m.gate_held_for?.length ?? 0) > 0 || (m.disputes?.length ?? 0) > 0 || m.open_findings > 0 || settingsConflicts.length > 0) && (
+              {((m.gate_held_for?.length ?? 0) > 0 || (m.disputes?.length ?? 0) > 0 || m.open_findings > 0 || settingsConflicts.length > 0 || actErr) && (
                 <div className="flex flex-wrap items-center gap-1.5">
                   {(m.gate_held_for ?? []).map((h) => (
                     <Pill key={h} tone="sun">{h}</Pill>
@@ -357,37 +371,55 @@ export function MonthWorkbench({
                       Review {m.open_findings} open finding{m.open_findings === 1 ? "" : "s"}
                     </Link>
                   )}
+                  {actErr && <span className="text-[11px] text-coral">{actErr}</span>}
                 </div>
               )}
-
-              {/* the ACTIONS the state makes available */}
-              <div className="flex items-center gap-2 flex-wrap">
-                {m.status === "held" && (
-                  <button disabled={acting !== null} onClick={() => act("Release hold", "DELETE", `/api/billing/months/${m.id}/hold`)} className={actionBtn}>
-                    {acting === "Release hold" ? "Releasing…" : "Release hold"}
-                  </button>
-                )}
-                {m.status === "gated" && !hasInvoices && (
-                  <button disabled={acting !== null} onClick={() => act("Issue invoices", "POST", `/api/billing/months/${m.id}/issue`)} className={primaryBtn}>
-                    {acting === "Issue invoices" ? "Issuing…" : "Issue invoices"}
-                  </button>
-                )}
-                {hasInvoices && m.status !== "closed" && (
-                  <button disabled={acting !== null} onClick={() => act("Run machine", "POST", `/api/billing/months/${m.id}/machine`)} className={actionBtn}>
-                    {acting === "Run machine" ? "Running…" : "Run machine"}
-                  </button>
-                )}
-                {actErr && <span className="text-[11px] text-coral">{actErr}</span>}
-              </div>
             </CardBody>
           </Card>
 
-          {/* TASKS with logs this month — the agreements shaping the documents */}
+          {/* the LEDGER tabs — page-level strip, ONE section on screen */}
+          <div className="flex gap-1 border-b border-line-soft">
+            {([
+              ["items", "Billable items", ledgerItems.length],
+              ["tasks", "Tasks", monthTasks.length],
+            ] as const).map(([key, label, count]) => (
+              <button
+                key={key}
+                onClick={() => setLedgerTab(key)}
+                className={cn(
+                  "px-3.5 py-2.5 text-[13px] -mb-px border-b-2",
+                  ledgerTab === key ? "text-ink border-cyan font-medium" : "text-ink-mute border-transparent hover:text-ink",
+                )}
+              >
+                {label}
+                {count > 0 && (
+                  <span className="ml-1.5 inline-flex items-center rounded-full border border-line bg-bg-elev px-1.5 text-[10px] font-mono text-ink-dim align-[1px]">
+                    {count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
           <Card>
-            <CardHeader>
-              <CardTitle>Tasks</CardTitle>
-            </CardHeader>
-            {monthTasks.length === 0 ? (
+            {ledgerTab === "items" && (
+              <CardHeader>
+                <CardTitle>Billable items</CardTitle>
+                <span
+                  className="ml-auto flex items-center gap-1.5"
+                  title="From the task agreement in ION — locked. Changing it regenerates any draft invoices on next read."
+                >
+                  <span className="flex border border-line rounded-lg overflow-hidden opacity-70">
+                    <span className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] ${lockedPresentation === "itemized" ? "bg-cyan text-bg" : "text-ink-dim"}`}>Itemized</span>
+                    <span className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] border-l border-line ${lockedPresentation === "summary" ? "bg-cyan text-bg" : "text-ink-dim"}`}>Summary</span>
+                  </span>
+                  <Pill tone={separateConsumables ? "cyan" : "neutral"}>
+                    {separateConsumables ? "separate consumables" : "consumables included"}
+                  </Pill>
+                  {settingsConflicts.length > 0 && <Pill tone="coral">mixed — fix in ION</Pill>}
+                </span>
+              </CardHeader>
+            )}
+            {ledgerTab === "tasks" && (monthTasks.length === 0 ? (
               <CardBody><span className="text-[12.5px] text-ink-mute">No tasks logged visits this month.</span></CardBody>
             ) : (
               <Table className="text-[11.5px]">
@@ -427,29 +459,8 @@ export function MonthWorkbench({
                   ))}
                 </TableBody>
               </Table>
-            )}
-          </Card>
-
-          {/* the LEDGER: billable items split by document bucket, with the
-              LOCKED shaping settings and each bucket's invoice number */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Billable items</CardTitle>
-              <span
-                className="ml-auto flex items-center gap-1.5"
-                title="From the task agreement in ION — locked. Changing it regenerates any draft invoices on next read."
-              >
-                <span className="flex border border-line rounded-lg overflow-hidden opacity-70">
-                  <span className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] ${lockedPresentation === "itemized" ? "bg-cyan text-bg" : "text-ink-dim"}`}>Itemized</span>
-                  <span className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] border-l border-line ${lockedPresentation === "summary" ? "bg-cyan text-bg" : "text-ink-dim"}`}>Summary</span>
-                </span>
-                <Pill tone={separateConsumables ? "cyan" : "neutral"}>
-                  {separateConsumables ? "separate consumables" : "consumables included"}
-                </Pill>
-                {settingsConflicts.length > 0 && <Pill tone="coral">mixed — fix in ION</Pill>}
-              </span>
-            </CardHeader>
-            {ledgerItems.length === 0 ? (
+            ))}
+            {ledgerTab === "items" && (ledgerItems.length === 0 ? (
               <CardBody><span className="text-[12.5px] text-ink-mute">Nothing claimed yet.</span></CardBody>
             ) : (
               [
@@ -505,7 +516,7 @@ export function MonthWorkbench({
                   </div>
                 )
               })
-            )}
+            ))}
           </Card>
 
           {/* the LOGS card — its own component, full width */}
