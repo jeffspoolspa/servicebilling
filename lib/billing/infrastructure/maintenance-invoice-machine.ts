@@ -67,21 +67,33 @@ export function maintenanceMachineDeps(sys: Db): {
   }
 
   const activeInstrument = async (customerId: number): Promise<PaymentInstrument | null> => {
-    // The ROSTER decides (maintenance policy): enrolled AND an active method.
-    const enroll = sys.schema("public").from("autopay_customers") as {
+    // The ROSTER decides (maintenance policy): enrolled AND an active
+    // method. Both live in billing schema keyed by QBO customer id — the
+    // same reads the gate context uses (one vocabulary, one join path).
+    const cust = sys.schema("public").from("Customers") as {
+      select(c: string): { eq(col: string, v: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+    }
+    const { data: cRows, error: e0 } = await cust.select("qbo_customer_id").eq("id", customerId)
+    if (e0) throw new Error(`customer read failed: ${JSON.stringify(e0).slice(0, 200)}`)
+    const qboId = ((cRows ?? [])[0] as { qbo_customer_id: string | null } | undefined)?.qbo_customer_id
+    if (!qboId) return null
+
+    const enroll = sys.schema("billing").from("autopay_customers") as {
       select(c: string): { eq(col: string, v: unknown): { eq(c2: string, v2: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
     }
-    const { data: roster, error: e1 } = await enroll.select("customer_id").eq("customer_id", customerId).eq("is_active", true)
+    const { data: roster, error: e1 } = await enroll.select("qbo_customer_id").eq("qbo_customer_id", qboId).eq("is_active", true)
     if (e1) throw new Error(`roster read failed: ${JSON.stringify(e1).slice(0, 200)}`)
     if (!roster || roster.length === 0) return null
-    const methods = sys.schema("public").from("customer_payment_methods") as {
+
+    const methods = sys.schema("billing").from("customer_payment_methods") as {
       select(c: string): { eq(col: string, v: unknown): { eq(c2: string, v2: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
     }
-    const { data: pm, error: e2 } = await methods.select("id, method_type").eq("customer_id", customerId).eq("is_active", true)
+    const { data: pm, error: e2 } = await methods.select("id, type, is_default").eq("qbo_customer_id", qboId).eq("is_active", true)
     if (e2) throw new Error(`methods read failed: ${JSON.stringify(e2).slice(0, 200)}`)
-    const row = (pm ?? [])[0] as { id: string; method_type?: string } | undefined
+    const rows = (pm ?? []) as { id: string; type?: string; is_default?: boolean }[]
+    const row = rows.find((r) => r.is_default) ?? rows[0]
     if (!row) return null
-    return { paymentMethodId: row.id, kind: row.method_type === "ach" ? "ach" : "card", active: true }
+    return { paymentMethodId: row.id, kind: row.type === "ach" ? "ach" : "card", active: true }
   }
 
   const preprocess: PreprocessInvoiceDeps = {
@@ -119,13 +131,13 @@ export function maintenanceMachineDeps(sys: Db): {
       const id = ((data ?? [])[0] as { linked_payment_method_id: string | null } | undefined)?.linked_payment_method_id
       if (!id) return null
       // Re-resolve CURRENT state: a disable since preprocess must win.
-      const methods = sys.schema("public").from("customer_payment_methods") as {
+      const methods = sys.schema("billing").from("customer_payment_methods") as {
         select(c: string): { eq(col: string, v: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> }
       }
-      const { data: pm } = await methods.select("id, method_type, is_active").eq("id", id)
-      const row = (pm ?? [])[0] as { id: string; method_type?: string; is_active?: boolean } | undefined
+      const { data: pm } = await methods.select("id, type, is_active").eq("id", id)
+      const row = (pm ?? [])[0] as { id: string; type?: string; is_active?: boolean } | undefined
       if (!row?.is_active) return null
-      return { paymentMethodId: row.id, kind: row.method_type === "ach" ? "ach" : "card", active: true }
+      return { paymentMethodId: row.id, kind: row.type === "ach" ? "ach" : "card", active: true }
     },
     charger: new InvoiceCharger({
       openBalance: (id) => qbo.openBalance(id),
