@@ -189,7 +189,7 @@ export function MonthWorkbench({
   const router = useRouter()
   const monthLabel = m.month.slice(0, 7)
   const [openInvoice, setOpenInvoice] = useState<string | null>(null)
-  const [ledgerTab, setLedgerTab] = useState<"items" | "tasks">("items")
+  const [ledgerTab, setLedgerTab] = useState<"items" | "tasks" | "visits">("items")
   const [draft, setDraft] = useState<Draft | "loading" | "error" | null>(null)
   const [presentation, setPresentation] = useState<"itemized" | "summary" | null>(null)
   const [acting, setActing] = useState<string | null>(null)
@@ -382,6 +382,7 @@ export function MonthWorkbench({
             {([
               ["items", "Billable items", ledgerItems.length],
               ["tasks", "Tasks", monthTasks.length],
+              ["visits", "Visits", visits.length],
             ] as const).map(([key, label, count]) => (
               <button
                 key={key}
@@ -400,6 +401,7 @@ export function MonthWorkbench({
               </button>
             ))}
           </div>
+          {ledgerTab !== "visits" && (
           <Card>
             {ledgerTab === "items" && (
               <CardHeader>
@@ -518,16 +520,19 @@ export function MonthWorkbench({
               })
             ))}
           </Card>
+          )}
 
-          {/* the LOGS card — its own component, full width */}
-          <ServiceLog
-            visits={visits}
-            period={{
-              label: monthLabel,
-              start: `${monthLabel}-01`,
-              end: new Date(Date.UTC(+monthLabel.slice(0, 4), +monthLabel.slice(5, 7), 0)).toISOString().slice(0, 10),
-            }}
-          />
+          {/* the LOGS — the Visits tab */}
+          {ledgerTab === "visits" && (
+            <ServiceLog
+              visits={visits}
+              period={{
+                label: monthLabel,
+                start: `${monthLabel}-01`,
+                end: new Date(Date.UTC(+monthLabel.slice(0, 4), +monthLabel.slice(5, 7), 0)).toISOString().slice(0, 10),
+              }}
+            />
+          )}
         </div>
 
         {/* ------------------------------- RIGHT ------------------------------ */}
