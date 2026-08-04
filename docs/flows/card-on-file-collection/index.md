@@ -20,48 +20,59 @@ for their **service address**.
 
 | Step | What the customer sees | What happens underneath |
 |---|---|---|
-| 1. Find | "Service address" input | Debounced (350 ms) `collect-lookup {action:"search"}` → `public.search_service_addresses` |
+| 1. Find | "Service address" input | Debounced (350 ms) `POST /api/card-collection/resolve {action:"search"}` → `public.search_service_addresses` |
 | 2. Confirm | "Is this you?" + masked name + address | Nothing yet — pure confirmation |
-| 3. Card | Card / Bank account tabs + $1-hold notice | `collect-lookup {action:"select"}` mints a capture session; the page embeds `/capture` |
-| 4. Done | "You're all set", brand + last 4 | The vault already POSTed the method to QBO |
+| 3. Card | Card / Bank account tabs + $1-hold notice | `{action:"select"}` re-resolves the customer, mints a capture session via the vault, and the page embeds `/capture` |
+| 4. Done | "You're all set", brand + last 4 | The vault vaulted the method in QBO and announced it to `/api/card-collection/captured` |
 
 ```mermaid
 sequenceDiagram
   participant C as Customer
-  participant P as /collect (vault app)
-  participant F as collect-lookup (vault edge fn)
+  participant P as /collect (vault app, presentation only)
+  participant A as internal app /api/card-collection
   participant DB as JPS Internal (Postgres)
+  participant M as vault mint-session
   participant V as /capture + capture fn
   participant Q as QBO Payments
 
   C->>P: types "60 Sabal Dr"
-  P->>F: {action:search, query}
-  F->>DB: search_service_addresses(query)
-  DB-->>F: <=5 masked candidates
-  F-->>P: candidates
+  P->>A: resolve {action:search, query}
+  A->>DB: search_service_addresses(query)
+  DB-->>A: <=5 masked candidates
+  A-->>P: candidates
   C->>P: picks one, confirms "that's me"
-  P->>F: {action:select, customer_id}
-  F->>DB: get_collect_customer(id) -> qbo_customer_id
-  F->>F: mint-session (kind=link, 48h)
-  F-->>P: capture_session
+  P->>A: resolve {action:select, customer_id}
+  A->>DB: get_collect_customer(id) -> qbo_customer_id
+  A->>M: mint-session (Bearer VAULT_SECRET_KEY, kind=link, 48h)
+  M-->>A: capture_session
+  A-->>P: capture_session
   P->>V: embeds /capture?session=...
   C->>V: enters card
-  V->>Q: POST /customers/{id}/cards + $1 uncaptured auth
+  V->>V: fingerprint -> already vaulted? -> 409 card_exists
+  V->>Q: reuse existing token, else POST /cards + $1 uncaptured auth
+  V-->>A: captured webhook -> refresh wallet cache
   V-->>P: postMessage card_saved
   P->>C: success screen
 ```
 
 ## Why the pieces live where they do
 
-- **The page is in the vault app, not the Next.js app.** It needs to run *before* a session
-  exists, and it must not put the internal Supabase key or `VAULT_SECRET_KEY` in the browser.
-  Living beside `/capture` lets one edge function hold both credentials server-side.
-- **The card fields are still `/capture` in an iframe.** Same origin here, so the iframe is not a
-  security boundary in this context — it is reuse. `/capture` is the proven, already-deployed
-  component that talks to the capture function; `/collect` never touches a card number, which
-  keeps it freely editable.
-- **The enumeration guardrails are in SQL, not in the page.** The page is JavaScript any caller
-  can bypass by hitting PostgREST directly with the (public) anon key. See below.
+- **The page is in the vault app; the DOMAIN is not.** `/collect` is presentation only. It knows
+  one URL and nothing about customers, addresses or how a match is decided. The first cut put that
+  lookup in a vault edge function, which meant a payments service held the internal database's
+  URL, anon key and RPC names — re-coupling it to the business database that card-vault commit
+  `6babb96` deliberately cut it loose from ("capture no longer reads the business DB").
+- **Minting authority lives with the system that owns customer identity.** A capture session
+  encodes which customer a card attaches to, so requesting one IS the authority to make that
+  claim. The internal app therefore holds `VAULT_SECRET_KEY`. That is the point of the design, not
+  its cost — avoiding the secret is exactly what dragged the schema across the boundary before.
+  The vault still MINTS, validates and expires every session; our app only asks.
+- **The card fields are still `/capture` in an iframe.** Same origin as `/collect`, so here it is
+  reuse rather than a security boundary — `/collect` never touches a card number, which keeps it
+  freely editable. The boundary that matters is against the *internal app*, which is a different
+  origin.
+- **The enumeration guardrails are in SQL, not in the page or the route.** Both are bypassable by
+  hitting PostgREST directly with the (public) anon key. See below.
 
 ## The disclosure this design accepts
 
@@ -85,17 +96,14 @@ links**, not a tighter search.
 
 ## Go-live checklist
 
-Nothing below is done yet — the code is written, type-checked, built, and driven end-to-end
-locally against real data, but the form is not live.
+Rolled out 2026-08-04. One item remains, and it needs a real card.
 
 - [x] `search_service_addresses` + `get_collect_customer` + `normalize_street_name` applied to
       production (migration `20260804120000_public_service_address_lookup.sql`).
-- [x] `collect-lookup` edge function deployed to the vault project (`rjxhummrmyigngdqiuic`),
-      **v2**, and verified live: `search` returns the right single candidate, enumeration
-      returns `[]`, and `select` minted a real `link` session for customer 2 / QBO 8264.
-      It needs **no new edge secrets** — `VAULT_SECRET_KEY` and `SUPABASE_URL` were already set
-      on the project, and the internal project's URL + anon key are inlined (both are public
-      "publishable" values; see the function header for why).
+- [x] **Resolver live** at `POST internal.jeffspoolspa.com/api/card-collection/resolve`, verified
+      in production: `search` returns the right single candidate, enumeration returns `[]`, CORS
+      opens only for `secure.jeffspoolspa.com`, and `select` mints a real `link` session.
+      (It briefly lived as a vault edge function; see the refactor entry below for why it moved.)
 - [x] **The second QBO refresher is gone.** `f/qbo/get_access_token` no longer refreshes: it is
       now a cache that DELEGATES rotation to `f/qbo/api/get_access_token` (ADR 012,
       `concurrent_limit=1`). Verified — two back-to-back calls returned a valid token while the
@@ -121,14 +129,15 @@ locally against real data, but the form is not live.
 
 ## Known gaps
 
-- **No duplicate detection.** If a customer submits a card already on file, the vault POSTs it to
-  QBO again and a second payment-method token comes back. Nothing dedupes by last-4 + expiry, in
-  the vault or in `billing.customer_payment_methods` (whose upsert keys on
-  `qbo_payment_method_id`, which differs per submission). Worth adding before a bulk send, since
-  bulk sends are exactly when people re-submit.
-- **No rate limiting** on `collect-lookup`. The SQL guardrails make enumeration impractical rather
-  than impossible; a per-IP limit would close the gap on brute-forcing house numbers along a
-  known street.
+- **No rate limiting** on `/api/card-collection/resolve`. The SQL guardrails make enumeration
+  impractical rather than impossible; a per-IP limit would close the gap on brute-forcing house
+  numbers along a known street.
+- **One shared vault key, no client identity.** `mint-session` compares against a single
+  `VAULT_SECRET_KEY` with no notion of who is calling, so there is no per-consumer rotation,
+  revocation or attribution. Fine while the internal app is the only consumer; the trigger to
+  build a `vault_clients` table (hashed key per client, stamping the already-existing but unused
+  `capture_sessions.created_by`) is consumer number two. That same key is currently reused to
+  authenticate the inbound capture webhook, which would be the first thing to untangle.
 - **Wallet cache refresh — fixed, but not yet proven in production.** The first live capture put
   the card in QBO and left `billing.customer_payment_methods` empty: the customer saw "You're all
   set" while staff saw "No payment methods on file". The daily sweep selects customers by joining
@@ -152,4 +161,6 @@ locally against real data, but the form is not live.
 
 - Entity: [Payment Method](../../entities/payment-method.md) — the vault contract in full
 - The internal (staff-facing) equivalent: `app/(shell)/customers/[id]/payment-methods`
-- Vault repo: `~/card-vault` (`apps/collect`, `supabase/functions/collect-lookup`)
+- Vault repo: `~/card-vault` (`apps/collect`, `supabase/functions/capture`) — deploys to Vercel
+  project `card-vault-collect` from **`jeffspoolspa/card-vault-pro` branch `main`**. Note edge
+  functions do NOT deploy on git push; they are deployed separately.
