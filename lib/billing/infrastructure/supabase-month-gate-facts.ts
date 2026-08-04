@@ -57,7 +57,7 @@ export class SupabaseMonthGateFacts {
     const emailOf = new Map(custRows.map((r) => [r.id, r.email]))
     const qboIds = custRows.map((r) => r.qbo_customer_id).filter((x): x is string => x !== null)
 
-    const [autopay, methods, holds, credits, findings] = await Promise.all([
+    const [autopay, methods, holds, findings] = await Promise.all([
       this.chunked(qboIds, async (c) => {
         const { data, error } = await this.q("billing", "autopay_customers").select("qbo_customer_id, is_active").in("qbo_customer_id", c).eq("is_active", true).range(0, 999)
         if (error) throw new Error(`autopay read failed: ${JSON.stringify(error).slice(0, 200)}`)
@@ -73,14 +73,6 @@ export class SupabaseMonthGateFacts {
         if (error) throw new Error(`holds read failed: ${JSON.stringify(error).slice(0, 200)}`)
         return (data ?? []) as { subject_id: string; reason: string | null }[]
       }),
-      this.chunked(qboIds, async (c) => {
-        const cutoff = new Date(now.getTime() - 183 * 86400000).toISOString().slice(0, 10)
-        const { data, error } = await this.q("billing", "customer_payments")
-          .select("qbo_customer_id, qbo_payment_id, unapplied_amt, memo, txn_date")
-          .in("qbo_customer_id", c).gt("unapplied_amt", 0).gte("txn_date", cutoff).range(0, 1999)
-        if (error) throw new Error(`credits read failed: ${JSON.stringify(error).slice(0, 200)}`)
-        return (data ?? []) as { qbo_customer_id: string; qbo_payment_id: string; unapplied_amt: number; memo: string | null }[]
-      }),
       this.chunked([...monthIdOf.values()], async (c) => {
         const { data, error } = await this.q("billing", "findings")
           .select("billing_month_id, rule, message, severity")
@@ -94,15 +86,6 @@ export class SupabaseMonthGateFacts {
     const methodSet = new Set(methods.map((r) => r.qbo_customer_id))
     const holdOf = new Map(holds.map((r) => [Number(r.subject_id), r.reason ?? "no reason recorded"]))
     const monthOfId = new Map([...monthIdOf].map(([cid, mid]) => [mid, cid]))
-
-    const creditsOf = new Map<number, { paymentId: string; unappliedCents: number }[]>()
-    for (const r of credits) {
-      // Maintenance-marked only; the service gate owns the complement.
-      if (!r.memo || !/maint/i.test(r.memo)) continue
-      const cid = custRows.find((x) => x.qbo_customer_id === r.qbo_customer_id)?.id
-      if (!cid) continue
-      creditsOf.set(cid, [...(creditsOf.get(cid) ?? []), { paymentId: r.qbo_payment_id, unappliedCents: Math.round(r.unapplied_amt * 100) }])
-    }
 
     const findingsOf = new Map<number, { rule: string; message: string }[]>()
     for (const r of findings) {
@@ -124,7 +107,6 @@ export class SupabaseMonthGateFacts {
         qboCustomerId: qbo,
         paymentRoute: route,
         activeHold: holdOf.get(cid) ?? null,
-        openCredits: creditsOf.get(cid) ?? [],
         blockingFindings: findingsOf.get(cid) ?? [],
       })
     }

@@ -455,7 +455,6 @@ const facts = (over: Partial<MonthGateFacts> = {}): MonthGateFacts => ({
   qboCustomerId: "6532",
   paymentRoute: "autopay",
   activeHold: null,
-  openCredits: [],
   blockingFindings: [],
   ...over,
 })
@@ -471,7 +470,7 @@ const gateable = () => {
 check("the gate names every criterion, and says WHY it failed", () => {
   const ok = gate(gateable(), facts())
   assert.strictEqual(ok.cleared, true)
-  assert.strictEqual(ok.criteria.length, 7, "all seven are reported, not just failures")
+  assert.strictEqual(ok.criteria.length, 6, "all six are reported, not just failures")
 
   const held = gate(gateable(), facts({ qboCustomerId: null, paymentRoute: null }))
   assert.deepStrictEqual(held.heldFor, ["billing_identity", "route_resolved"])
@@ -480,10 +479,8 @@ check("the gate names every criterion, and says WHY it failed", () => {
 })
 
 check("the buried SQL rules become sentences a person can read", () => {
-  const credits = gate(gateable(), facts({ openCredits: [{ paymentId: "P-9", unappliedCents: 12000 }] }))
-  assert.deepStrictEqual(credits.heldFor, ["credits_settled"])
-  assert.match(credits.criteria.find((c) => c.name === "credits_settled")!.detail!, /how a customer pays twice/)
-
+  // No credits criterion: maint in the memo IS the decision — the invoice
+  // machine's credit_check applies it (see gate.ts).
   const held = gate(gateable(), facts({ activeHold: "customer asked us to pause while insurance settles" }))
   assert.deepStrictEqual(held.heldFor, ["not_on_hold"])
   assert.match(held.criteria.find((c) => c.name === "not_on_hold")!.detail!, /insurance settles/)

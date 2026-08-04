@@ -50,7 +50,6 @@ export interface MonthGateFacts {
    * with no decision. Billing more before deciding them is how a customer
    * pays twice.
    */
-  readonly openCredits: { paymentId: string; unappliedCents: number }[]
   /** Unresolved blocking findings on this month — the audit's stop signs. */
   readonly blockingFindings: { rule: string; message: string }[]
 }
@@ -77,14 +76,9 @@ export function gate(month: BillingMonth, facts: MonthGateFacts): GateResult {
     "no payment route — not enrolled in autopay and no email on file, so a bill could not reach them",
   )
   check("not_on_hold", facts.activeHold === null, facts.activeHold ? `held: ${facts.activeHold}` : undefined)
-  check(
-    "credits_settled",
-    facts.openCredits.length === 0,
-    `${facts.openCredits.length} open credit(s) with no decision: ${facts.openCredits
-      .slice(0, 3)
-      .map((c) => `${c.paymentId} ($${(c.unappliedCents / 100).toFixed(2)})`)
-      .join(", ")} — billing more before deciding them is how a customer pays twice`,
-  )
+  // No credits criterion (RULED: maint in the memo IS the decision — the
+  // invoice machine's credit_check applies it before collect/send; holding
+  // the month for an "undecided" credit contradicts the documented rule).
   check(
     "findings_resolved",
     facts.blockingFindings.length === 0,
