@@ -29,17 +29,20 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
       sb.rpc("maint_billing_invoice_detail", { p_qbo_invoice_id: inv.qbo_invoice_id }),
       sb.rpc("maint_billing_invoice_payments", { p_qbo_invoice_id: inv.qbo_invoice_id }),
       sb.rpc("maint_billing_invoice_history", { p_qbo_invoice_id: inv.qbo_invoice_id }),
+      sb.rpc("maint_billing_invoice_method", { p_qbo_invoice_id: inv.qbo_invoice_id }),
     ]),
   ])
 
   const invoices: InvoiceDetail[] = []
   const invoicePayments: Record<string, unknown[]> = {}
   const invoiceHistory: Record<string, unknown[]> = {}
+  const invoiceMethods: Record<string, unknown> = {}
   issued.forEach((inv, i) => {
-    const detail = ((perInvoice[i * 3].data ?? []) as InvoiceDetail[])[0]
+    const detail = ((perInvoice[i * 4].data ?? []) as InvoiceDetail[])[0]
     if (detail) invoices.push(detail)
-    invoicePayments[inv.qbo_invoice_id] = perInvoice[i * 3 + 1].data ?? []
-    invoiceHistory[inv.qbo_invoice_id] = perInvoice[i * 3 + 2].data ?? []
+    invoicePayments[inv.qbo_invoice_id] = perInvoice[i * 4 + 1].data ?? []
+    invoiceHistory[inv.qbo_invoice_id] = perInvoice[i * 4 + 2].data ?? []
+    invoiceMethods[inv.qbo_invoice_id] = ((perInvoice[i * 4 + 3].data ?? []) as unknown[])[0] ?? null
   })
 
   return (
@@ -51,6 +54,7 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
         invoices={invoices}
         invoicePayments={invoicePayments as never}
         invoiceHistory={invoiceHistory as never}
+        invoiceMethods={invoiceMethods as never}
       />
     </div>
   )

@@ -26,6 +26,7 @@ import {
   type InvoiceDetail,
   type InvoiceEvent,
 } from "./invoice-detail-modal"
+import { PaymentMethodBadge, type PaymentMethodRef } from "@/components/ui/payment-method"
 
 /**
  * The billing-month workbench — the month's detail in the work-order-detail
@@ -151,6 +152,7 @@ export function MonthWorkbench({
   invoices,
   invoicePayments,
   invoiceHistory,
+  invoiceMethods,
 }: {
   m: MonthOverviewRow
   visits: ServiceLogVisit[]
@@ -158,6 +160,7 @@ export function MonthWorkbench({
   invoices: InvoiceDetail[]
   invoicePayments: Record<string, AppliedPayment[]>
   invoiceHistory: Record<string, InvoiceEvent[]>
+  invoiceMethods: Record<string, PaymentMethodRef | null>
 }) {
   const monthLabel = m.month.slice(0, 7)
   const [tab, setTab] = useState<string>("month")
@@ -399,25 +402,44 @@ export function MonthWorkbench({
             <CardHeader>
               <CardTitle>Invoices</CardTitle>
             </CardHeader>
-            <CardBody className="space-y-1">
-              {!hasInvoices && <span className="text-[12.5px] text-ink-mute">None issued — the draft is the preview.</span>}
-              {invoices.map((inv) => (
-                <button
-                  key={inv.qbo_invoice_id}
-                  onClick={() => setOpenInvoice(inv.qbo_invoice_id)}
-                  className="w-full flex items-center gap-2 rounded px-2 py-1.5 -mx-2 text-left hover:bg-white/[0.03]"
-                >
-                  <span className="font-mono text-[12px] text-ink">{inv.doc_number ?? inv.qbo_invoice_id}</span>
-                  <Pill tone={inv.email_status === "EmailSent" ? "grass" : "neutral"}>
-                    {inv.email_status === "EmailSent" ? "sent" : "not sent"}
-                  </Pill>
-                  <Pill tone={(inv.balance ?? 1) <= 0 ? "grass" : "sun"}>{(inv.balance ?? 1) <= 0 ? "paid" : "open"}</Pill>
-                  <span className={cn("ml-auto font-mono num text-[12px]", (inv.balance ?? 0) > 0 ? "text-sun" : "text-grass")}>
-                    {formatCurrency(Number(inv.total_amt ?? 0))}
-                  </span>
-                </button>
-              ))}
-            </CardBody>
+            {!hasInvoices ? (
+              <CardBody>
+                <span className="text-[12.5px] text-ink-mute">None issued — the draft is the preview.</span>
+              </CardBody>
+            ) : (
+              <Table className="text-[11.5px]">
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Invoice</TableHead>
+                    <TableHead>Sent</TableHead>
+                    <TableHead>Method</TableHead>
+                    <TableHead className="text-right">Balance</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invoices.map((inv) => (
+                    <TableRow
+                      key={inv.qbo_invoice_id}
+                      onClick={() => setOpenInvoice(inv.qbo_invoice_id)}
+                      className="cursor-pointer"
+                    >
+                      <TableCell className="font-mono text-ink">{inv.doc_number ?? inv.qbo_invoice_id}</TableCell>
+                      <TableCell>
+                        <Pill tone={inv.email_status === "EmailSent" ? "grass" : "neutral"}>
+                          {inv.email_status === "EmailSent" ? "sent" : "not sent"}
+                        </Pill>
+                      </TableCell>
+                      <TableCell>
+                        <PaymentMethodBadge method={invoiceMethods[inv.qbo_invoice_id]} />
+                      </TableCell>
+                      <TableCell className={cn("text-right font-mono num", (inv.balance ?? 0) > 0 ? "text-sun" : "text-grass")}>
+                        {formatCurrency(Number(inv.balance ?? 0))}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </Card>
 
           <HistoryTimeline
