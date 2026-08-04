@@ -2,17 +2,10 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Pill } from "@/components/ui/pill"
 import { StatusStepper } from "@/components/ui/status-stepper"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { HistoryTimeline, type HistoryRow } from "@/components/ui/history-timeline"
 import { formatCurrency } from "@/lib/utils/format"
@@ -29,15 +22,15 @@ import {
 import { PaymentMethodBadge, type PaymentMethodRef } from "@/components/ui/payment-method"
 
 /**
- * The billing-month workbench — the month's detail in the work-order-detail
- * shape: header, progression, the month tab (history + ServiceLog, now
- * full-width — the visits get the room), and pre-issue a Draft tab with
- * the itemized/summary flip. Issued INVOICES live in the right-rail
- * Invoices card; clicking one opens the invoice DETAIL MODAL (the cached
- * document formatted, its applied payments, its machine history). The
- * payment method lives on each invoice now — the old placeholder card is
- * gone. RULED: the month's own lifecycle ends at invoice creation —
- * everything after is its invoices' story, folded back here.
+ * The billing-month workbench. The CUSTOMER card sits ABOVE this (rendered
+ * by the page, same as the work-order detail). Here: the BILLING MONTH
+ * card — high-level details, the progression, and the ACTION ITEMS the
+ * month's state makes available (release hold / issue / run machine /
+ * review findings) — then the draft (pre-issue) and the ServiceLog as
+ * their own cards. Invoices and Payments & credits live in the right
+ * rail; clicking either opens the invoice detail modal. RULED: the
+ * month's own lifecycle ends at invoice creation — everything after is
+ * its invoices' story, folded back here.
  */
 
 export interface HistoryEvent {
@@ -162,17 +155,19 @@ export function MonthWorkbench({
   invoiceHistory: Record<string, InvoiceEvent[]>
   invoiceMethods: Record<string, PaymentMethodRef | null>
 }) {
+  const router = useRouter()
   const monthLabel = m.month.slice(0, 7)
-  const [tab, setTab] = useState<string>("month")
   const [openInvoice, setOpenInvoice] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | "loading" | "error" | null>(null)
   const [presentation, setPresentation] = useState<"itemized" | "summary" | null>(null)
+  const [acting, setActing] = useState<string | null>(null)
+  const [actErr, setActErr] = useState<string | null>(null)
 
   const hasInvoices = invoices.length > 0
 
-  // Pre-issue: the Draft tab fetches the on-demand projection.
+  // Pre-issue: the draft card fetches the on-demand projection.
   useEffect(() => {
-    if (hasInvoices || tab !== "draft") return
+    if (hasInvoices) return
     let alive = true
     setDraft("loading")
     const q = presentation ? `?presentation=${presentation}` : ""
@@ -183,18 +178,30 @@ export function MonthWorkbench({
     return () => {
       alive = false
     }
-  }, [tab, presentation, m.id, hasInvoices])
+  }, [presentation, m.id, hasInvoices])
+
+  const act = async (name: string, method: string, path: string) => {
+    setActing(name)
+    setActErr(null)
+    try {
+      const r = await fetch(path, { method })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(String(j.error ?? `${r.status}`))
+      router.refresh()
+    } catch (e) {
+      setActErr(`${name} failed: ${String(e instanceof Error ? e.message : e).slice(0, 200)}`)
+    } finally {
+      setActing(null)
+    }
+  }
 
   const seg = (on: boolean) => (on ? "bg-cyan text-bg" : "bg-transparent text-ink-dim")
-
-  const allPayments = invoices.flatMap((inv) => (invoicePayments[inv.qbo_invoice_id] ?? []).map((p) => ({ inv, p })))
 
   const fold = {
     totalBalance: invoices.reduce((s, i) => s + Number(i.balance ?? 0), 0),
     total: invoices.reduce((s, i) => s + Number(i.total_amt ?? 0), 0),
-    allSent: invoices.length > 0 && invoices.every((i) => i.email_status === "EmailSent"),
-    allPaid: invoices.length > 0 && invoices.every((i) => (i.balance ?? 1) <= 0),
   }
+  const allPayments = invoices.flatMap((inv) => (invoicePayments[inv.qbo_invoice_id] ?? []).map((p) => ({ inv, p })))
 
   const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div>
@@ -203,95 +210,95 @@ export function MonthWorkbench({
     </div>
   )
 
+  const actionBtn = "h-8 px-3 rounded-lg border border-line bg-bg-elev text-ink-dim text-[12px] font-medium hover:border-cyan hover:text-cyan disabled:opacity-50"
+  const primaryBtn = "h-8 px-3.5 rounded-lg bg-gradient-to-b from-cyan to-cyan-deep text-bg text-[12px] font-semibold hover:brightness-110 disabled:opacity-50"
+
   return (
     <div className="space-y-4">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.14em] text-ink-mute">Billing month · {monthLabel}</div>
-          <h2 className="font-display text-[18px] mt-0.5">{m.customer_name ?? m.customer_id}</h2>
-        </div>
-        <div className="flex items-center gap-3 text-[12px]">
-          {m.open_findings > 0 && (
-            <Link
-              href={`/maintenance/billing/findings/${m.customer_id}?month=${monthLabel}` as never}
-              className="text-sun hover:brightness-110 underline underline-offset-2"
-            >
-              {m.open_findings} open finding{m.open_findings === 1 ? "" : "s"}
-            </Link>
-          )}
-          <Link href={`/maintenance/billing?month=${monthLabel}` as never} className="text-ink-mute hover:text-ink underline underline-offset-2">
-            Back to months
-          </Link>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4 items-start">
         {/* ------------------------------- LEFT ------------------------------- */}
         <div className="space-y-4 min-w-0">
+          {/* the BILLING MONTH card: high-level details + action items */}
           <Card>
-            {/* the document card: tabs in the header, like WO | INVOICE */}
-            <div className="flex items-center gap-4 px-5 pt-3 border-b border-line-soft flex-wrap">
-              <button
-                onClick={() => setTab("month")}
-                className={cn(
-                  "pb-2.5 -mb-px border-b-2 text-[12px] uppercase tracking-[0.08em]",
-                  tab === "month" ? "text-ink border-cyan font-medium" : "text-ink-mute border-transparent hover:text-ink",
-                )}
-              >
-                Billing month {monthLabel}
-              </button>
-              {!hasInvoices && (
-                <button
-                  onClick={() => setTab("draft")}
-                  className={cn(
-                    "pb-2.5 -mb-px border-b-2 text-[12px] uppercase tracking-[0.08em]",
-                    tab === "draft" ? "text-ink border-cyan font-medium" : "text-ink-mute border-transparent hover:text-ink",
-                  )}
-                >
-                  Draft invoice
-                </button>
-              )}
-              <span className="ml-auto flex items-center gap-1.5 pb-2">
+            <CardHeader>
+              <CardTitle>Billing month · {monthLabel}</CardTitle>
+              <span className="ml-auto flex items-center gap-1.5">
                 {m.status === "disputed" && <Pill tone="coral">disputed</Pill>}
                 {m.status === "held" && <Pill tone="sun">held</Pill>}
-                <Pill tone="cyan">{m.status}</Pill>
+                <Pill tone={m.status === "closed" ? "grass" : "cyan"}>{m.status}</Pill>
               </span>
-            </div>
+            </CardHeader>
+            <CardBody className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
+                <Field label="Items">{m.item_count}</Field>
+                <Field label="Subtotal">
+                  <span className="font-mono num">{formatCurrency(m.subtotal_cents / 100)}</span>
+                </Field>
+                <Field label="Invoiced">
+                  <span className="font-mono num">{hasInvoices ? formatCurrency(fold.total) : "—"}</span>
+                </Field>
+                <Field label="Balance">
+                  <span className={cn("font-mono num", hasInvoices && fold.totalBalance > 0 ? "text-sun" : hasInvoices ? "text-grass" : "")}>
+                    {hasInvoices ? formatCurrency(fold.totalBalance) : "—"}
+                  </span>
+                </Field>
+              </div>
+              <StatusStepper stages={[...MONTH_STAGES]} current={stepperStage(m.status)} />
 
-            {/* month tab: field grid + progression + service log */}
-            {tab === "month" && (
-              <CardBody className="space-y-4">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
-                  <Field label="Customer">{m.customer_name ?? m.customer_id}</Field>
-                  <Field label="Month">{monthLabel}</Field>
-                  <Field label="Items">{m.item_count}</Field>
-                  <Field label="Subtotal">
-                    <span className="font-mono num">{formatCurrency(m.subtotal_cents / 100)}</span>
-                  </Field>
+              {/* what needs a person: held reasons, disputes, findings */}
+              {((m.gate_held_for?.length ?? 0) > 0 || (m.disputes?.length ?? 0) > 0 || m.open_findings > 0) && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {(m.gate_held_for ?? []).map((h) => (
+                    <Pill key={h} tone="sun">{h}</Pill>
+                  ))}
+                  {(m.disputes ?? []).map((d, i) => (
+                    <span key={i} className="text-[11px] text-coral">{d}</span>
+                  ))}
+                  {m.open_findings > 0 && (
+                    <Link
+                      href={`/maintenance/billing/findings/${m.customer_id}?month=${monthLabel}` as never}
+                      className="text-[12px] text-sun hover:brightness-110 underline underline-offset-2"
+                    >
+                      Review {m.open_findings} open finding{m.open_findings === 1 ? "" : "s"}
+                    </Link>
+                  )}
                 </div>
-                <StatusStepper stages={[...MONTH_STAGES]} current={stepperStage(m.status)} />
-                <ServiceLog
-                  visits={visits}
-                  onOpenInvoice={setOpenInvoice}
-                  period={{
-                    label: monthLabel,
-                    start: `${monthLabel}-01`,
-                    end: new Date(Date.UTC(+monthLabel.slice(0, 4), +monthLabel.slice(5, 7), 0)).toISOString().slice(0, 10),
-                  }}
-                />
-              </CardBody>
-            )}
+              )}
 
-            {/* draft tab */}
-            {!hasInvoices && tab === "draft" && (
+              {/* the ACTIONS the state makes available */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {m.status === "held" && (
+                  <button disabled={acting !== null} onClick={() => act("Release hold", "DELETE", `/api/billing/months/${m.id}/hold`)} className={actionBtn}>
+                    {acting === "Release hold" ? "Releasing…" : "Release hold"}
+                  </button>
+                )}
+                {m.status === "gated" && !hasInvoices && (
+                  <button disabled={acting !== null} onClick={() => act("Issue invoices", "POST", `/api/billing/months/${m.id}/issue`)} className={primaryBtn}>
+                    {acting === "Issue invoices" ? "Issuing…" : "Issue invoices"}
+                  </button>
+                )}
+                {hasInvoices && m.status !== "closed" && (
+                  <button disabled={acting !== null} onClick={() => act("Run machine", "POST", `/api/billing/months/${m.id}/machine`)} className={actionBtn}>
+                    {acting === "Run machine" ? "Running…" : "Run machine"}
+                  </button>
+                )}
+                {actErr && <span className="text-[11px] text-coral">{actErr}</span>}
+              </div>
+            </CardBody>
+          </Card>
+
+          {/* the DRAFT card — pre-issue only */}
+          {!hasInvoices && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Draft invoice</CardTitle>
+                <div className="ml-auto flex border border-line rounded-lg overflow-hidden">
+                  <button onClick={() => setPresentation("itemized")} className={`h-[22px] px-2 text-[10.5px] font-semibold ${seg((presentation ?? (draft && draft !== "loading" && draft !== "error" ? draft.presentation : "itemized")) === "itemized")}`}>Itemized</button>
+                  <button onClick={() => setPresentation("summary")} className={`h-[22px] px-2 text-[10.5px] font-semibold border-l border-line ${seg((presentation ?? (draft && draft !== "loading" && draft !== "error" ? draft.presentation : "itemized")) === "summary")}`}>Summary</button>
+                </div>
+              </CardHeader>
               <CardBody className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-ink-mute">Draft — regenerated from the ledger on every view</span>
-                  <div className="flex border border-line rounded-lg overflow-hidden">
-                    <button onClick={() => setPresentation("itemized")} className={`h-[22px] px-2 text-[10.5px] font-semibold ${seg((presentation ?? (draft && draft !== "loading" && draft !== "error" ? draft.presentation : "itemized")) === "itemized")}`}>Itemized</button>
-                    <button onClick={() => setPresentation("summary")} className={`h-[22px] px-2 text-[10.5px] font-semibold border-l border-line ${seg((presentation ?? (draft && draft !== "loading" && draft !== "error" ? draft.presentation : "itemized")) === "summary")}`}>Summary</button>
-                  </div>
-                </div>
+                <span className="text-[11px] text-ink-mute">Regenerated from the ledger on every view.</span>
                 {draft === "loading" && <div className="py-6 text-center text-[12px] text-ink-mute">Building the draft…</div>}
                 {draft === "error" && <div className="py-6 text-center text-[12px] text-coral">Failed to build the draft.</div>}
                 {draft && draft !== "loading" && draft !== "error" &&
@@ -325,80 +332,24 @@ export function MonthWorkbench({
                     </div>
                   ))}
               </CardBody>
-            )}
-          </Card>
+            </Card>
+          )}
 
-          {/* payments & credits — QBO's own linkage, across the month's invoices */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Payments &amp; credits</CardTitle>
-            </CardHeader>
-            <CardBody className="text-sm">
-              {allPayments.length === 0 ? (
-                <span className="text-ink-mute">
-                  {hasInvoices
-                    ? "No payments or credits touch these invoices yet."
-                    : "Payments and credits appear once the invoice exists — credit checks and payment resolution run per invoice."}
-                </span>
-              ) : (
-                <div className="space-y-1.5">
-                  {allPayments.map(({ inv, p }) => (
-                    <div key={`${inv.qbo_invoice_id}-${p.qbo_payment_id}`} className="flex items-center gap-2.5 text-[12px]">
-                      <span className="text-ink">Payment #{p.qbo_payment_id}</span>
-                      <span className="font-mono text-[10px] text-ink-mute">{p.txn_date ?? ""}</span>
-                      {p.payment_method_name && <span className="text-[10.5px] text-ink-dim">{p.payment_method_name}</span>}
-                      <button
-                        onClick={() => setOpenInvoice(inv.qbo_invoice_id)}
-                        className="font-mono text-[10px] text-ink-mute hover:text-cyan underline underline-offset-2"
-                      >
-                        {inv.doc_number}
-                      </button>
-                      <span className="ml-auto font-mono num text-grass">{formatCurrency(Number(p.applied_amount ?? 0))}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardBody>
-          </Card>
+          {/* the LOGS card — its own component, full width */}
+          <ServiceLog
+            visits={visits}
+            onOpenInvoice={setOpenInvoice}
+            period={{
+              label: monthLabel,
+              start: `${monthLabel}-01`,
+              end: new Date(Date.UTC(+monthLabel.slice(0, 4), +monthLabel.slice(5, 7), 0)).toISOString().slice(0, 10),
+            }}
+          />
         </div>
 
         {/* ------------------------------- RIGHT ------------------------------ */}
         <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Summary</CardTitle>
-              <span className="ml-auto">
-                {m.status === "closed" ? <Pill tone="grass">closed</Pill> : <Pill tone="cyan">{m.status}</Pill>}
-              </span>
-            </CardHeader>
-            <CardBody className="space-y-2 text-[13px]">
-              <div className="flex justify-between">
-                <span className="text-ink-mute">Subtotal</span>
-                <span className="font-mono num">{formatCurrency(m.subtotal_cents / 100)}</span>
-              </div>
-              {hasInvoices && (
-                <>
-                  <div className="flex justify-between">
-                    <span className="text-ink-mute">Invoiced</span>
-                    <span className="font-mono num">{formatCurrency(fold.total)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-ink-mute">Balance</span>
-                    <span className={cn("font-mono num", fold.totalBalance > 0 ? "text-sun" : "text-grass")}>{formatCurrency(fold.totalBalance)}</span>
-                  </div>
-                </>
-              )}
-              {m.open_findings > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-ink-mute">Open findings</span>
-                  <Pill tone="sun">{m.open_findings}</Pill>
-                </div>
-              )}
-            </CardBody>
-          </Card>
-
-          {/* the month's invoices — click for the full detail modal; the
-              payment method rides each invoice's memo and machine now */}
+          {/* the month's invoices — click for the full detail modal */}
           <Card>
             <CardHeader>
               <CardTitle>Invoices</CardTitle>
@@ -441,6 +392,36 @@ export function MonthWorkbench({
                 </TableBody>
               </Table>
             )}
+          </Card>
+
+          {/* payments & credits — QBO's own linkage, across the month's invoices */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Payments &amp; credits</CardTitle>
+            </CardHeader>
+            <CardBody className="text-sm">
+              {allPayments.length === 0 ? (
+                <span className="text-[12.5px] text-ink-mute">
+                  {hasInvoices ? "None touch these invoices yet." : "Appear once the invoice exists."}
+                </span>
+              ) : (
+                <div className="space-y-1.5">
+                  {allPayments.map(({ inv, p }) => (
+                    <button
+                      key={`${inv.qbo_invoice_id}-${p.qbo_payment_id}`}
+                      onClick={() => setOpenInvoice(inv.qbo_invoice_id)}
+                      className="w-full flex items-center gap-2 rounded px-2 py-1 -mx-2 text-left text-[12px] hover:bg-white/[0.03]"
+                      title={p.memo ?? undefined}
+                    >
+                      <span className="text-ink">#{p.qbo_payment_id}</span>
+                      <span className="font-mono text-[10px] text-ink-mute">{p.txn_date ?? ""}</span>
+                      <span className="font-mono text-[10px] text-ink-mute">{inv.doc_number}</span>
+                      <span className="ml-auto font-mono num text-grass">{formatCurrency(Number(p.applied_amount ?? 0))}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CardBody>
           </Card>
 
           <HistoryTimeline

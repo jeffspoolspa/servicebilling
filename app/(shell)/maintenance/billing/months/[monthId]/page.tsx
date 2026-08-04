@@ -1,5 +1,8 @@
 import { notFound } from "next/navigation"
+import Link from "next/link"
 import { createSupabaseServer } from "@/lib/supabase/server"
+import { CustomerCard } from "@/components/work-orders/detail/customer-card"
+import { getCustomerCard } from "@/lib/queries/dashboard"
 import type { ServiceLogVisit } from "../../../_components/service-log"
 import { MONTHS_SELECT, type MonthOverviewRow } from "../../_lib/months"
 import { MonthWorkbench, type HistoryEvent, type InvoiceDetail } from "../../_components/month-workbench"
@@ -22,6 +25,9 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
 
   const monthDate = `${m.month.slice(0, 7)}-01`
   const issued = m.issued_invoices ?? []
+  const { data: custRow } = await sb.from("Customers").select("qbo_customer_id").eq("id", m.customer_id).limit(1)
+  const qboCustomerId = ((custRow ?? [])[0] as { qbo_customer_id: string | null } | undefined)?.qbo_customer_id ?? null
+  const customerCard = await getCustomerCard(qboCustomerId)
   const [visitsRes, historyRes, ...perInvoice] = await Promise.all([
     sb.rpc("maint_billing_review_visits", { p_customer_id: m.customer_id, p_month: monthDate }),
     sb.rpc("billing_month_history", { p_month_id: m.id }),
@@ -46,7 +52,17 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
   })
 
   return (
-    <div className="px-7 pt-6 pb-10">
+    <div className="px-7 pt-6 pb-10 space-y-4">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.14em] text-ink-mute">Billing month · {m.month.slice(0, 7)}</div>
+          <h2 className="font-display text-[18px] mt-0.5">{m.customer_name ?? m.customer_id}</h2>
+        </div>
+        <Link href={`/maintenance/billing?month=${m.month.slice(0, 7)}` as never} className="text-[12px] text-ink-mute hover:text-ink underline underline-offset-2">
+          Back to months
+        </Link>
+      </div>
+      {customerCard && <CustomerCard data={customerCard} />}
       <MonthWorkbench
         m={m}
         visits={(visitsRes.data ?? []) as ServiceLogVisit[]}
