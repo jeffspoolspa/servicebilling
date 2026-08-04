@@ -167,12 +167,26 @@ export function VisitCalendar({ customerId, month, highlightDates, compare }: { 
                 )
               })}
               {(() => {
-                // the reading's TOTAL is its AVERAGE over visits that recorded it
+                // the reading's TOTAL is its AVERAGE over visits that recorded
+                // it — rounded to the step a person reads the water in:
+                // pH to .2, CYA/TA/Calcium to 10, FC to whole ppm.
                 const vals = days.map((d) => Number(d.readings?.[name])).filter((x) => isFinite(x) && x > 0)
                 const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
+                const rounded =
+                  avg == null
+                    ? null
+                    : name === "pH"
+                      ? (Math.round(avg / 0.2) * 0.2).toFixed(1)
+                      : name === "Cyanuric Acid" || name === "Total Alkalinity" || name === "Calcium Hardness"
+                        ? (Math.round(avg / 10) * 10).toLocaleString()
+                        : name === "Free Chlorine"
+                          ? String(Math.round(avg))
+                          : avg >= 100
+                            ? Math.round(avg).toLocaleString()
+                            : avg.toFixed(1)
                 return (
                   <TableCell className="text-right pl-4 font-mono num text-ink border-l border-line-soft/30" title={avg != null ? `avg of ${vals.length} recorded` : undefined}>
-                    {avg != null ? (avg >= 100 ? Math.round(avg).toLocaleString() : avg.toFixed(1)) : ""}
+                    {rounded ?? ""}
                   </TableCell>
                 )
               })()}
