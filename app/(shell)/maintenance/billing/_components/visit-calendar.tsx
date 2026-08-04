@@ -45,9 +45,10 @@ function cents(v: number | null | undefined): string {
   return v == null ? "—" : formatCurrency(v / 100)
 }
 
-export function VisitCalendar({ customerId, month, highlightDates }: { customerId: number; month: string; highlightDates?: string[] }) {
+export function VisitCalendar({ customerId, month, highlightDates, compare }: { customerId: number; month: string; highlightDates?: string[]; compare?: { selfUsd: number; peerUsd: number } }) {
   const hl = new Set((highlightDates ?? []).map((d) => d.slice(0, 10)))
   const [days, setDays] = useState<VisitDay[] | "loading" | "error">("loading")
+  const [collapsed, setCollapsed] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -102,8 +103,19 @@ export function VisitCalendar({ customerId, month, highlightDates }: { customerI
       <Table className="text-[11px]">
         <TableHeader>
           <TableRow className="hover:bg-transparent bg-white/[0.02]">
-            <TableHead className="sticky left-0 bg-bg-elev z-10 w-px">Visit date</TableHead>
-            {days.map((d) => {
+            <TableHead className="sticky left-0 bg-bg-elev z-10 w-px">
+              <span className="inline-flex items-center gap-1.5">
+                Visit date
+                <button
+                  onClick={() => setCollapsed((c) => !c)}
+                  className="h-[18px] px-1.5 rounded border border-line text-[9px] font-mono text-ink-mute hover:text-cyan hover:border-cyan"
+                  title={collapsed ? "Show the per-visit columns" : "Collapse to totals"}
+                >
+                  {collapsed ? "expand" : "collapse"}
+                </button>
+              </span>
+            </TableHead>
+            {!collapsed && days.map((d) => {
               const qc = d.service_names?.toUpperCase().includes("QUALITY CONTROL")
               return (
                 <TableHead
@@ -129,7 +141,7 @@ export function VisitCalendar({ customerId, month, highlightDates }: { customerI
           {readingRows.length > 0 && (
             <TableRow className="hover:bg-white/[0.04] bg-white/[0.04]">
               <TableCell
-                colSpan={days.length + 3}
+                colSpan={(collapsed ? 0 : days.length) + 3}
                 className="sticky left-0 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute"
               >
                 Readings
@@ -139,7 +151,7 @@ export function VisitCalendar({ customerId, month, highlightDates }: { customerI
           {readingRows.map(([name, label]) => (
             <TableRow key={name} className="text-ink-dim">
               <TableCell className="sticky left-0 bg-bg-elev z-10">{label}</TableCell>
-              {days.map((d) => {
+              {!collapsed && days.map((d) => {
                 const v = d.readings?.[name]
                 return (
                   <TableCell
@@ -154,14 +166,23 @@ export function VisitCalendar({ customerId, month, highlightDates }: { customerI
                   </TableCell>
                 )
               })}
-              <TableCell />
+              {(() => {
+                // the reading's TOTAL is its AVERAGE over visits that recorded it
+                const vals = days.map((d) => Number(d.readings?.[name])).filter((x) => isFinite(x) && x > 0)
+                const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
+                return (
+                  <TableCell className="text-right pl-4 font-mono num text-ink border-l border-line-soft/30" title={avg != null ? `avg of ${vals.length} recorded` : undefined}>
+                    {avg != null ? (avg >= 100 ? Math.round(avg).toLocaleString() : avg.toFixed(1)) : ""}
+                  </TableCell>
+                )
+              })()}
               <TableCell />
             </TableRow>
           ))}
           {items.length > 0 && (
             <TableRow className="hover:bg-white/[0.04] bg-white/[0.04]">
               <TableCell
-                colSpan={days.length + 1}
+                colSpan={(collapsed ? 0 : days.length) + 1}
                 className="sticky left-0 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute"
               >
                 Chemicals sold
@@ -189,7 +210,7 @@ export function VisitCalendar({ customerId, month, highlightDates }: { customerI
                   </Pill>
                 )}
               </TableCell>
-              {days.map((d) => {
+              {!collapsed && days.map((d) => {
                 const qty = qtyByItemDate.get(`${item}|${d.visit_date}`)
                 return (
                   <TableCell
@@ -217,7 +238,7 @@ export function VisitCalendar({ customerId, month, highlightDates }: { customerI
           <TableFooter>
             <TableRow className="text-ink hover:bg-transparent">
               <TableCell className="sticky left-0 bg-bg-elev z-10">Chemicals $ / visit</TableCell>
-              {days.map((d) => {
+              {!collapsed && days.map((d) => {
                 const amt = Number(d.chem_total_cents)
                 return (
                   <TableCell
@@ -240,6 +261,13 @@ export function VisitCalendar({ customerId, month, highlightDates }: { customerI
           </TableFooter>
         )}
       </Table>
+      {compare && (
+        <div className="flex justify-end items-baseline gap-4 px-3 py-1.5 font-mono text-[10.5px] text-ink-mute border-t border-line-soft">
+          <span>this month <span className="text-ink num">{formatCurrency(grandTotal / 100)}</span></span>
+          <span>your typical <span className="text-ink-dim num">{formatCurrency(compare.selfUsd)}</span></span>
+          <span>peer seasonal <span className="text-ink-dim num">{formatCurrency(compare.peerUsd)}</span></span>
+        </div>
+      )}
     </div>
   )
 }

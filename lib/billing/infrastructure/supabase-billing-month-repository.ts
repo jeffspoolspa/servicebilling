@@ -399,7 +399,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
    * over the trailing window, from the SAME priced items the months bill.
    * The repository owns the criteria; the domain only judges (Evans).
    */
-  async chemHistory(beforeMonth: string, windowMonths = 6): Promise<Map<number, { customerId: number; medianChemCents: number; visits: number }>> {
+  async chemHistory(beforeMonth: string, windowMonths = 6): Promise<Map<number, { customerId: number; medianChemCents: number; p95ChemCents: number; visits: number }>> {
     const [y, m] = beforeMonth.split("-").map(Number)
     const months: string[] = []
     for (let i = 1; i <= windowMonths; i++) {
@@ -435,10 +435,11 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     }
     const byCustomer = new Map<number, number[]>()
     for (const v of perVisit.values()) byCustomer.set(v.customerId, [...(byCustomer.get(v.customerId) ?? []), v.cents])
-    const out = new Map<number, { customerId: number; medianChemCents: number; visits: number }>()
+    const out = new Map<number, { customerId: number; medianChemCents: number; p95ChemCents: number; visits: number }>()
     for (const [cid, arr] of byCustomer) {
       const sorted = arr.sort((a, b) => a - b)
-      out.set(cid, { customerId: cid, medianChemCents: sorted[Math.floor(sorted.length / 2)], visits: sorted.length })
+      const p95 = sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(0.95 * sorted.length) - 1))]
+      out.set(cid, { customerId: cid, medianChemCents: sorted[Math.floor(sorted.length / 2)], p95ChemCents: p95, visits: sorted.length })
     }
     return out
   }

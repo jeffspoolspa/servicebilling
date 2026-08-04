@@ -45,6 +45,8 @@ export interface ChemHistory {
   readonly customerId: number
   /** Median chem-per-visit over the trailing window, and how many visits. */
   readonly medianChemCents: number
+  /** The customer's OWN 95th-percentile visit over the window. */
+  readonly p95ChemCents: number
   readonly visits: number
 }
 
@@ -53,9 +55,11 @@ export interface AuditPolicy {
   readonly percentile: number
   /** Peer groups smaller than this cannot define "normal". */
   readonly minPeers: number
-  /** ...and it must also exceed selfFactor x the customer's own median. */
+  /** RETIRED (Carter 2026-08-04): superseded by the self-percentile rule —
+   *  kept for display context only. */
   readonly selfFactor: number
-  /** Customers with fewer historical visits than this skip the self bar. */
+  /** RULED: the SELF bar (own p95) applies only with enough history to
+   *  justify a distribution — this many of the customer's own visits. */
   readonly minSelfVisits: number
   /**
    * Peer groups the CPV check does NOT judge (RULED: Carter, 2026-08-03).
@@ -74,7 +78,7 @@ export const AUDIT_POLICY: AuditPolicy = {
   percentile: 0.95,
   minPeers: 20,
   selfFactor: 2,
-  minSelfVisits: 6,
+  minSelfVisits: 20,
   cpvExemptGroups: ["bulk_refill"],
 }
 
@@ -120,12 +124,21 @@ export function auditConsumables(
   for (const o of observations) {
     if (exempt.has(o.peerKey)) continue
     if (o.chemCents <= 0) continue
-    const bar = thresholds.get(o.peerKey)
-    if (bar === undefined || o.chemCents <= bar) continue
 
+    // RULED (Carter, 2026-08-04): flagged = the visit's consumable total at
+    // or above the PEER group's 95th percentile, OR at or above the
+    // customer's OWN 95th percentile when they have the history to justify
+    // a distribution (minSelfVisits of their own visits).
+    const peerBar = thresholds.get(o.peerKey)
     const self = histories.get(o.customerId)
-    const hasHistory = self !== undefined && self.visits >= policy.minSelfVisits
-    if (hasHistory && o.chemCents <= self.medianChemCents * policy.selfFactor) continue
+    const selfBar = self !== undefined && self.visits >= policy.minSelfVisits ? self.p95ChemCents : undefined
+    const overPeer = peerBar !== undefined && o.chemCents > peerBar
+    const overSelf = selfBar !== undefined && o.chemCents > selfBar
+    if (!overPeer && !overSelf) continue
+
+    const reasons: string[] = []
+    if (overPeer) reasons.push(`above the ${Math.round(policy.percentile * 100)}th percentile of ${o.peerKey} ($${(peerBar! / 100).toFixed(2)})`)
+    if (overSelf) reasons.push(`above their own ${Math.round(policy.percentile * 100)}th percentile ($${(selfBar! / 100).toFixed(2)}, ${self!.visits} visits)`)
 
     findings.push({
       monthId: o.monthId,
@@ -134,13 +147,7 @@ export function auditConsumables(
       severity: "high",
       sourceKey: o.visitKey,
       cents: o.chemCents,
-      message:
-        `${o.serviceDate}: $${(o.chemCents / 100).toFixed(2)} of chemicals on one visit — ` +
-        `above the ${Math.round(policy.percentile * 100)}th percentile of ${o.peerKey} ` +
-        `($${(bar / 100).toFixed(2)})` +
-        (hasHistory
-          ? ` and ${(o.chemCents / Math.max(1, self.medianChemCents)).toFixed(1)}x this customer's own median ($${(self.medianChemCents / 100).toFixed(2)})`
-          : ` (no self history yet — peers only)`),
+      message: `${o.serviceDate}: $${(o.chemCents / 100).toFixed(2)} of chemicals on one visit — ${reasons.join(" and ")}`,
     })
   }
   return findings

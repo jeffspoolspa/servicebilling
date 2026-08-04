@@ -29,7 +29,7 @@ function lsiOf(ph: number, ta: number, cya: number, ca: number, tds: number, tem
   return ph - ((9.3 + A + B) - (C + D))
 }
 
-export function ReadingsOverview({ visits, period }: { visits: ServiceLogVisit[]; period: { start?: string; end?: string } }) {
+export function ReadingsOverview({ visits, period, fcSlot }: { visits: ServiceLogVisit[]; period: { start?: string; end?: string }; fcSlot?: React.ReactNode }) {
   const [assume, setAssume] = useState({ cya: 30, ca: 250, tds: 1000, temp: 84 })
 
   const chart = useMemo(() => {
@@ -75,7 +75,7 @@ export function ReadingsOverview({ visits, period }: { visits: ServiceLogVisit[]
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <FcChart rows={chart.rows} />
+      {fcSlot ?? <FcChart rows={chart.rows} />}
       <LsiChart
         rows={chart.rows}
         start={period.start}
@@ -122,4 +122,40 @@ export function ReadingsOverview({ visits, period }: { visits: ServiceLogVisit[]
       />
     </div>
   )
+}
+
+export interface FcHistoryPoint {
+  visit_date: string
+  fc: number | null
+  cya: number | null
+}
+
+/** The FULL free-chlorine history (as far back as we have data), with the
+ *  month in context highlighted as a band. */
+export function FcHistoryChart({ points, monthStart, monthEnd }: { points: FcHistoryPoint[]; monthStart: string; monthEnd: string }) {
+  const rows = useMemo(() => {
+    let cya: number | null = null
+    return points
+      .filter((p) => p.fc != null)
+      .map((p) => {
+        if (p.cya != null && p.cya > 0) cya = p.cya
+        const min = Math.max(1, 0.075 * (cya ?? 30))
+        return {
+          iso: p.visit_date.slice(0, 10),
+          date: new Date(p.visit_date + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
+          fc: Number(p.fc),
+          min: Number(min.toFixed(1)),
+          lsi: null,
+        }
+      })
+  }, [points])
+
+  const fromX = rows.findIndex((r) => r.iso >= monthStart)
+  let toX = -1
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].iso <= monthEnd) { toX = i; break }
+  }
+  const highlight = fromX >= 0 && toX >= fromX ? { fromX, toX } : undefined
+
+  return <FcChart rows={rows} highlight={highlight} title="Free chlorine vs min — full history" />
 }

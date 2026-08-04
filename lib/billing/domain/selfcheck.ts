@@ -563,10 +563,10 @@ check("self history VETOES the peers — a pool that always eats chlorine is not
   for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `m${i}`, customerId: i, visitKey: `t${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "P", chemCents: 1000 }))
   obs.push(ob({ monthId: "mX", customerId: 99, visitKey: "tX:2026-07-15", serviceDate: "2026-07-15", peerKey: "P", chemCents: 20000 }))
   // $200 is under 2x this customer's own $150 median: their normal, not a finding.
-  const history = new Map([[99, { customerId: 99, medianChemCents: 15000, visits: 12 }]])
+  const history = new Map([[99, { customerId: 99, medianChemCents: 15000, p95ChemCents: 30000, visits: 12 }]])
   assert.strictEqual(auditConsumables(obs, history).length, 0)
   // ...but a thin history (below minSelfVisits) cannot veto.
-  const thin = new Map([[99, { customerId: 99, medianChemCents: 15000, visits: 2 }]])
+  const thin = new Map([[99, { customerId: 99, medianChemCents: 15000, p95ChemCents: 30000, visits: 2 }]])
   assert.strictEqual(auditConsumables(obs, thin).length, 1)
 })
 

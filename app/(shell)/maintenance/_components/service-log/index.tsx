@@ -116,6 +116,7 @@ export function ServiceLog({
   period,
   className = "",
   highlightDates,
+  flags,
   onOpenInvoice,
 }: {
   visits: ServiceLogVisit[]
@@ -123,10 +124,14 @@ export function ServiceLog({
   className?: string
   /** Visit dates (YYYY-MM-DD) to tint — e.g. the audit's flagged visits. */
   highlightDates?: string[]
+  /** Two-tier flags: OPEN flagged visits tint coral, REVIEWED tint sun. */
+  flags?: { open: string[]; reviewed: string[] }
   /** When provided, a visit's invoice doc renders as a link opening its detail. */
   onOpenInvoice?: (qboInvoiceId: string) => void
 }) {
   const highlighted = new Set((highlightDates ?? []).map((d) => d.slice(0, 10)))
+  const flagOpen = new Set((flags?.open ?? []).map((d) => d.slice(0, 10)))
+  const flagReviewed = new Set((flags?.reviewed ?? []).map((d) => d.slice(0, 10)))
   const [openVisit, setOpenVisit] = useState<string | null>(null)
   const [activeBody, setActiveBody] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<{ photos: ServiceLogVisit["photos"]; i: number } | null>(null)
@@ -375,12 +380,20 @@ export function ServiceLog({
           const totalCents = chemCents + Number(v.labor_cents ?? 0)
           const otherReads = Object.entries(v.readings)
             .filter(([k, val]) => !CORE_NAMES.has(k) && val != null && val !== "")
-          const flagged = highlighted.has(v.visit_date.slice(0, 10))
+          const d10 = v.visit_date.slice(0, 10)
+          const tier = flagOpen.has(d10) ? "open" : flagReviewed.has(d10) ? "reviewed" : highlighted.has(d10) ? "hl" : null
+          const rowTint = tier === "open" ? "bg-coral/[0.07]" : tier === "reviewed" || tier === "hl" ? "bg-sun/[0.06]" : ""
+          const rowHover =
+            tier === "open"
+              ? "hover:bg-coral/[0.1] border-l-2 border-l-coral"
+              : tier === "reviewed" || tier === "hl"
+                ? "hover:bg-sun/[0.09] border-l-2 border-l-sun"
+                : "hover:bg-white/[0.02]"
           return (
-            <div key={v.visit_id} className={`border-b border-line-soft last:border-0 ${flagged ? "bg-sun/[0.06]" : ""}`}>
+            <div key={v.visit_id} className={`border-b border-line-soft last:border-0 ${rowTint}`}>
               <div
                 onClick={() => setOpenVisit(open ? null : v.visit_id)}
-                className={`flex flex-nowrap items-center gap-x-3 px-4 py-2 cursor-pointer ${flagged ? "hover:bg-sun/[0.09] border-l-2 border-l-sun" : "hover:bg-white/[0.02]"}`}
+                className={`flex flex-nowrap items-center gap-x-3 px-4 py-2 cursor-pointer ${rowHover}`}
               >
                 <span
                   className={`w-[7px] h-[7px] rounded-full flex-none ${

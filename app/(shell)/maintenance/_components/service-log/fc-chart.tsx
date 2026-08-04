@@ -1,6 +1,6 @@
 "use client"
 
-import { Area, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "recharts"
+import { Area, CartesianGrid, ComposedChart, Line, XAxis, YAxis, ReferenceArea } from "recharts"
 import { ChartContainer, ChartTooltip, type ChartConfig } from "@/components/ui/chart"
 import { ChartEmpty, type ChartRow } from "./chart-shared"
 
@@ -31,7 +31,7 @@ type Point = {
   deficit: [number, number]
 }
 
-export function FcChart({ rows }: { rows: ChartRow[] }) {
+export function FcChart({ rows, highlight, title }: { rows: ChartRow[]; highlight?: { fromX: number; toX: number }; title?: string }) {
   const usable = rows.filter((r) => r.fc != null && r.min != null)
   if (usable.length < 2) {
     return <ChartEmpty title="Free chlorine vs min" />
@@ -72,7 +72,7 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
     <div className="flex flex-col h-full">
       <div className="flex items-baseline justify-between mb-1">
         <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">
-          Free chlorine vs min
+          {title ?? "Free chlorine vs min"}
         </span>
         <span className="flex items-center gap-2 font-mono text-[8.5px] text-ink-mute">
           <span className="flex items-center gap-1">
@@ -93,6 +93,9 @@ export function FcChart({ rows }: { rows: ChartRow[] }) {
           margin={{ top: 8, right: 8, left: -6, bottom: 0 }}
         >
           <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
+          {highlight && (
+            <ReferenceArea x1={highlight.fromX} x2={highlight.toX} fill="rgb(56 189 248)" fillOpacity={0.08} stroke="rgb(56 189 248)" strokeOpacity={0.25} />
+          )}
           <XAxis
             dataKey="x"
             type="number"

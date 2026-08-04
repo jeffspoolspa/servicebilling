@@ -12,7 +12,8 @@ import { formatCurrency } from "@/lib/utils/format"
 import { visitBreakLabel } from "@/lib/billing/domain/invoice-documents"
 import { cn } from "@/lib/utils/cn"
 import { ServiceLog, type ServiceLogVisit } from "../../_components/service-log"
-import { ReadingsOverview } from "../../_components/service-log/readings-overview"
+import { FcHistoryChart, ReadingsOverview, type FcHistoryPoint } from "../../_components/service-log/readings-overview"
+import { VisitCalendar } from "./visit-calendar"
 import { MONTH_STAGES, stepperStage, type MonthOverviewRow } from "../_lib/months"
 import {
   InvoiceDetailModal,
@@ -199,6 +200,7 @@ export function MonthWorkbench({
   findings,
   summaryNote,
   chemSummary,
+  fcHistory,
 }: {
   m: MonthOverviewRow
   visits: ServiceLogVisit[]
@@ -212,13 +214,37 @@ export function MonthWorkbench({
   findings: MonthFinding[]
   summaryNote: string | null
   chemSummary: ChemSummaryRow[]
+  fcHistory: FcHistoryPoint[]
 }) {
   const router = useRouter()
   const monthLabel = m.month.slice(0, 7)
+  const monthEndIso = new Date(Date.UTC(+m.month.slice(0, 4), +m.month.slice(5, 7), 0)).toISOString().slice(0, 10)
   const [openInvoice, setOpenInvoice] = useState<string | null>(null)
   const [ledgerTab, setLedgerTab] = useState<"summary" | "items" | "tasks" | "visits">("summary")
   const [note, setNote] = useState(summaryNote ?? "")
   const [noteState, setNoteState] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [reviewing, setReviewing] = useState<number | "all" | null>(null)
+
+  // Flagged visits: the finding's message leads with the visit date.
+  const dateOf = (f: MonthFinding) => f.message?.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null
+  const openFindings = findings.filter((f) => !f.resolved_at)
+  const reviewedFindings = findings.filter((f) => f.resolved_at)
+  const flaggedOpenDates = [...new Set(openFindings.map(dateOf).filter(Boolean))] as string[]
+  const flaggedReviewedDates = [...new Set(reviewedFindings.map(dateOf).filter(Boolean))] as string[]
+
+  const review = async (ids: number[] | "all") => {
+    setReviewing(ids === "all" ? "all" : ids[0])
+    try {
+      const r = await fetch(`/api/billing/months/${m.id}/findings-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ids === "all" ? { all: true } : { finding_ids: ids }),
+      })
+      if (r.ok) router.refresh()
+    } finally {
+      setReviewing(null)
+    }
+  }
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const [draft, setDraft] = useState<Draft | "loading" | "error" | null>(null)
   const [presentation, setPresentation] = useState<"itemized" | "summary" | null>(null)
@@ -416,11 +442,11 @@ export function MonthWorkbench({
           {/* the LEDGER tabs — page-level strip, ONE section on screen */}
           <div className="flex gap-1 border-b border-line-soft">
             {([
-              ["summary", "Summary", findings.length],
-              ["items", "Billable items", ledgerItems.length],
-              ["visits", "Visits", visits.length],
-              ["tasks", "Tasks", monthTasks.length],
-            ] as const).map(([key, label, count]) => (
+              ["summary", "Summary", openFindings.length, true],
+              ["items", "Billable items", ledgerItems.length, false],
+              ["visits", "Visits", visits.length, false],
+              ["tasks", "Tasks", monthTasks.length, false],
+            ] as const).map(([key, label, count, hot]) => (
               <button
                 key={key}
                 onClick={() => setLedgerTab(key)}
@@ -431,8 +457,18 @@ export function MonthWorkbench({
               >
                 {label}
                 {count > 0 && (
-                  <span className="ml-1.5 inline-flex items-center rounded-full border border-line bg-bg-elev px-1.5 text-[10px] font-mono text-ink-dim align-[1px]">
+                  <span
+                    className={cn(
+                      "ml-1.5 inline-flex items-center rounded-full px-1.5 text-[10px] font-mono align-[1px]",
+                      hot ? "border border-coral/25 bg-coral/10 text-coral" : "border border-line bg-bg-elev text-ink-dim",
+                    )}
+                  >
                     {count}
+                  </span>
+                )}
+                {key === "visits" && flaggedOpenDates.length > 0 && (
+                  <span className="ml-1 inline-flex items-center rounded-full border border-coral/25 bg-coral/10 px-1.5 text-[10px] font-mono text-coral align-[1px]" title="flagged visits awaiting review">
+                    {flaggedOpenDates.length}
                   </span>
                 )}
               </button>
@@ -440,157 +476,149 @@ export function MonthWorkbench({
           </div>
           {ledgerTab === "summary" && (
             <>
-              {/* the aggregated context — what the explainer gets sent */}
+              {/* the readings, in context: FULL FC history with the month
+                  banded; the water-balance calendar stays month-scoped */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Month summary</CardTitle>
-                  <span className="ml-auto flex items-center gap-2">
-                    <a
-                      href={`/api/billing/months/${m.id}/explainer`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={actionBtn + " inline-flex items-center"}
-                    >
-                      Generate explainer
-                    </a>
-                  </span>
-                </CardHeader>
-                <CardBody className="space-y-4">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
-                    <div>
-                      <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">Visits</div>
-                      <div className="text-[13px] text-ink mt-0.5 font-mono num">{visits.length}</div>
-                    </div>
-                    <div>
-                      <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">Flagged visits</div>
-                      <div className="text-[13px] mt-0.5 font-mono num">
-                        <span className={findings.some((f) => !f.resolved_at) ? "text-sun" : "text-ink"}>
-                          {findings.filter((f) => !f.resolved_at).length} open
-                        </span>
-                        <span className="text-ink-mute"> · {findings.filter((f) => f.resolved_at).length} resolved</span>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">Chemicals billed</div>
-                      <div className="text-[13px] text-ink mt-0.5 font-mono num">
-                        {formatCurrency(ledgerItems.filter((i) => i.kind === "consumable").reduce((s2, i) => s2 + i.amount_cents, 0) / 100)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">Labor billed</div>
-                      <div className="text-[13px] text-ink mt-0.5 font-mono num">
-                        {formatCurrency(ledgerItems.filter((i) => i.kind === "labor").reduce((s2, i) => s2 + i.amount_cents, 0) / 100)}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* chemical demand vs self and the peer group's season */}
-                  <Table className="text-[11.5px]">
-                    <TableHeader>
-                      <TableRow className="hover:bg-transparent">
-                        <TableHead>Category</TableHead>
-                        <TableHead className="text-right">This month</TableHead>
-                        <TableHead className="text-right">Your typical</TableHead>
-                        <TableHead className="text-right">Peer seasonal</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {chemSummary.filter((c) => c.this_usd > 0 || c.self_typical_usd > 0.5 || c.peer_seasonal_usd > 0.5).map((c) => {
-                        const hot = c.self_typical_usd > 1 && c.this_usd > 2 * c.self_typical_usd
-                        return (
-                          <TableRow key={c.category} className="text-ink-dim">
-                            <TableCell className="text-ink capitalize">{c.category}</TableCell>
-                            <TableCell className={cn("text-right font-mono num", hot ? "text-sun" : "text-ink")}>
-                              {formatCurrency(Number(c.this_usd))}
-                            </TableCell>
-                            <TableCell className="text-right font-mono num">{formatCurrency(Number(c.self_typical_usd))}</TableCell>
-                            <TableCell className="text-right font-mono num">{formatCurrency(Number(c.peer_seasonal_usd))}</TableCell>
-                          </TableRow>
-                        )
-                      })}
-                    </TableBody>
-                  </Table>
-
-                  {/* readings overview — the charts, out of the log, living here */}
-                  <ReadingsOverview
-                    visits={visits}
-                    period={{
-                      start: `${monthLabel}-01`,
-                      end: new Date(Date.UTC(+monthLabel.slice(0, 4), +monthLabel.slice(5, 7), 0)).toISOString().slice(0, 10),
-                    }}
-                  />
-                </CardBody>
-              </Card>
-
-              {/* flagged visits + their resolution status */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Findings</CardTitle>
-                </CardHeader>
-                {findings.length === 0 ? (
-                  <CardBody><span className="text-[12.5px] text-ink-mute">No flagged visits this month.</span></CardBody>
-                ) : (
-                  <CardBody className="space-y-2">
-                    {findings.map((f) => (
-                      <div key={f.id} className="flex items-start gap-2.5 text-[12px]">
-                        <Pill tone={f.resolved_at ? "grass" : "sun"}>{f.resolved_at ? "resolved" : "open"}</Pill>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-ink">{f.rule.replace(/_/g, " ")}</span>
-                          {f.cents != null && <span className="font-mono text-ink-dim"> · {formatCurrency(Number(f.cents) / 100)}</span>}
-                          {f.message && <div className="text-[11px] text-ink-mute">{f.message}</div>}
-                          {f.resolved_at && (
-                            <div className="text-[11px] text-grass/80">
-                              {f.resolution ?? "resolved"}{f.resolved_by ? ` — ${f.resolved_by}` : ""}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </CardBody>
-                )}
-              </Card>
-
-              {/* the person-written overview — the explainer's narrative slot */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Summary note</CardTitle>
-                  <span className="ml-auto flex items-center gap-2">
-                    {noteState === "saved" && <span className="text-[11px] text-grass">saved</span>}
-                    {noteState === "error" && <span className="text-[11px] text-coral">save failed</span>}
-                    <button
-                      disabled={noteState === "saving"}
-                      onClick={async () => {
-                        setNoteState("saving")
-                        try {
-                          const r = await fetch(`/api/billing/months/${m.id}/summary-note`, {
-                            method: "PATCH",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ note }),
-                          })
-                          setNoteState(r.ok ? "saved" : "error")
-                        } catch {
-                          setNoteState("error")
-                        }
-                      }}
-                      className={actionBtn}
-                    >
-                      {noteState === "saving" ? "Saving…" : "Save note"}
-                    </button>
+                  <CardTitle>Readings</CardTitle>
+                  <span className="ml-auto font-mono text-[10.5px] text-ink-mute">
+                    {visits.length} visits
+                    {flaggedOpenDates.length > 0 && <span className="text-coral"> · {flaggedOpenDates.length} flagged</span>}
+                    {flaggedReviewedDates.length > 0 && <span className="text-sun"> · {flaggedReviewedDates.length} reviewed</span>}
                   </span>
                 </CardHeader>
                 <CardBody>
-                  <textarea
-                    value={note}
-                    onChange={(e) => {
-                      setNote(e.target.value)
-                      setNoteState("idle")
-                    }}
-                    rows={3}
-                    placeholder="The overview of this customer's month — becomes the explainer's narrative intro."
-                    className="w-full bg-bg border border-line rounded-lg p-2.5 text-[12.5px] text-ink outline-none focus:border-cyan resize-y"
+                  <ReadingsOverview
+                    visits={visits}
+                    period={{ start: `${monthLabel}-01`, end: monthEndIso }}
+                    fcSlot={<FcHistoryChart points={fcHistory} monthStart={`${monthLabel}-01`} monthEnd={monthEndIso} />}
                   />
                 </CardBody>
               </Card>
+
+              {/* the pivot: readings + consumables sold x days serviced, with
+                  the self / peer comparisons beside the totals */}
+              <Card>
+                <VisitCalendar
+                  customerId={m.customer_id}
+                  month={monthLabel}
+                  highlightDates={[...flaggedOpenDates, ...flaggedReviewedDates]}
+                  compare={{
+                    selfUsd: chemSummary.reduce((s2, c) => s2 + Number(c.self_typical_usd), 0),
+                    peerUsd: chemSummary.reduce((s2, c) => s2 + Number(c.peer_seasonal_usd), 0),
+                  }}
+                />
+              </Card>
+
+              {/* side by side: the flagged-visit review queue | the narrative + explainer */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Flagged visits</CardTitle>
+                    <span className="ml-auto">
+                      {openFindings.length > 1 && (
+                        <button disabled={reviewing !== null} onClick={() => review("all")} className={actionBtn}>
+                          {reviewing === "all" ? "Reviewing…" : "Mark all reviewed"}
+                        </button>
+                      )}
+                    </span>
+                  </CardHeader>
+                  {findings.length === 0 ? (
+                    <CardBody><span className="text-[12.5px] text-ink-mute">No flagged visits this month.</span></CardBody>
+                  ) : (
+                    <div>
+                      {findings.map((f) => {
+                        const d = dateOf(f)
+                        const open2 = !f.resolved_at
+                        return (
+                          <div
+                            key={f.id}
+                            className={cn(
+                              "flex items-center gap-2.5 px-5 py-2 border-t border-line-soft first:border-t-0",
+                              open2 ? "bg-coral/[0.06] border-l-2 border-l-coral" : "bg-sun/[0.05] border-l-2 border-l-sun",
+                            )}
+                          >
+                            <div className="w-[76px] flex-none">
+                              <div className="font-mono text-[11px] text-ink">
+                                {d
+                                  ? new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })
+                                  : "—"}
+                              </div>
+                              {f.cents != null && <div className="font-mono text-[10px] text-ink-mute">{formatCurrency(Number(f.cents) / 100)}</div>}
+                            </div>
+                            <div className="flex-1 min-w-0 text-[11.5px] text-ink-dim truncate" title={f.message ?? undefined}>
+                              {(f.message ?? "").replace(/^\d{4}-\d{2}-\d{2}:\s*/, "")}
+                              {!open2 && (
+                                <div className="text-[10.5px] text-sun/90">reviewed{f.resolved_by ? ` — ${f.resolved_by.split("@")[0]}` : ""}</div>
+                              )}
+                            </div>
+                            {open2 ? (
+                              <button
+                                disabled={reviewing !== null}
+                                onClick={() => review([f.id])}
+                                className="flex-none h-6 px-2 rounded-md border border-line bg-bg-elev text-[10.5px] text-ink-dim hover:border-sun hover:text-sun disabled:opacity-50"
+                              >
+                                {reviewing === f.id ? "…" : "Mark reviewed"}
+                              </button>
+                            ) : (
+                              <Pill tone="sun">reviewed</Pill>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Summary note</CardTitle>
+                    <span className="ml-auto flex items-center gap-2">
+                      {noteState === "saved" && <span className="text-[11px] text-grass">saved</span>}
+                      {noteState === "error" && <span className="text-[11px] text-coral">save failed</span>}
+                      <button
+                        disabled={noteState === "saving"}
+                        onClick={async () => {
+                          setNoteState("saving")
+                          try {
+                            const r = await fetch(`/api/billing/months/${m.id}/summary-note`, {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ note }),
+                            })
+                            setNoteState(r.ok ? "saved" : "error")
+                          } catch {
+                            setNoteState("error")
+                          }
+                        }}
+                        className={actionBtn}
+                      >
+                        {noteState === "saving" ? "Saving…" : "Save note"}
+                      </button>
+                      <a
+                        href={`/api/billing/months/${m.id}/explainer`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={primaryBtn + " inline-flex items-center"}
+                      >
+                        Generate explainer
+                      </a>
+                    </span>
+                  </CardHeader>
+                  <CardBody>
+                    <textarea
+                      value={note}
+                      onChange={(e) => {
+                        setNote(e.target.value)
+                        setNoteState("idle")
+                      }}
+                      rows={6}
+                      placeholder="The overview of this customer's month — becomes the explainer's narrative intro."
+                      className="w-full bg-bg border border-line rounded-lg p-2.5 text-[12.5px] text-ink outline-none focus:border-cyan resize-y"
+                    />
+                  </CardBody>
+                </Card>
+              </div>
             </>
           )}
 
@@ -764,6 +792,7 @@ export function MonthWorkbench({
           {ledgerTab === "visits" && (
             <ServiceLog
               visits={visits}
+              flags={{ open: flaggedOpenDates, reviewed: flaggedReviewedDates }}
               period={{
                 label: monthLabel,
                 start: `${monthLabel}-01`,
