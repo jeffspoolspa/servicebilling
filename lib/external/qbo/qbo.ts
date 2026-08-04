@@ -240,6 +240,7 @@ export class QboInvoices extends Qbo {
       TxnDate: inv.txnDate,
       CustomerRef: { value: inv.qboCustomerId },
       CustomerMemo: { value: inv.memo },
+      PrivateNote: inv.memo,
       ...(inv.billEmail ? { BillEmail: { Address: inv.billEmail } } : {}),
       ...(inv.classId ? { ClassRef: { value: inv.classId } } : {}),
       ...(inv.salesTermId ? { SalesTermRef: { value: inv.salesTermId } } : {}),

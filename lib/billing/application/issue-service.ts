@@ -96,8 +96,12 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
   if (documents.length === 0) throw new IssueRefused("the month's ledger produces no document lines — nothing to bill")
   const unmapped = new Set<string>(unmappedLabor)
   for (const d of documents) for (const l of d.lines) {
-    if (l.kind !== "consumable") continue
-    if (!chems.get(l.itemName)) unmapped.add(`consumable:${l.itemName}`)
+    if (l.kind === "visit_break") continue
+    const qboItemId = l.kind === "consumable" ? chems.get(l.itemName) : (l as { qboItemId?: string | null }).qboItemId
+    if (l.kind === "consumable" && !qboItemId) unmapped.add(`consumable:${l.itemName}`)
+    // RULED: every line ships with the customer-facing description — a
+    // blank one already reached a customer once; never again.
+    if (qboItemId && !descriptions.get(qboItemId)) unmapped.add(`no description: ${l.itemName}`)
   }
   if (unmapped.size > 0) throw new IssueRefused(`unmapped items — add to the catalog first: ${[...unmapped].join(", ")}`)
 
@@ -127,7 +131,7 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
                 // historical sales description, never blank (item name as
                 // the last resort), with the visit date on itemized lines.
                 description:
-                  (descriptions.get(qboItemId) ?? l.itemName) + (presentation === "itemized" && l.serviceDate ? ` — ${l.serviceDate}` : ""),
+                  descriptions.get(qboItemId)! + (presentation === "itemized" && l.serviceDate ? ` — ${l.serviceDate}` : ""),
                 qty: l.qty,
                 unitPriceCents: l.unitPriceCents,
                 amountCents: l.amountCents,

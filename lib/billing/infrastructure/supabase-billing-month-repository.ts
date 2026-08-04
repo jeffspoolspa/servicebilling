@@ -579,29 +579,26 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   }
 
   /**
-   * The customer-facing SALES DESCRIPTION per QBO item — what the printed
-   * invoice shows. Sourced from what we have actually billed (the cached
-   * invoice lines' modal description per item), so the machine's documents
-   * read like every invoice before them. [Carter: the description is all
-   * the customer sees — a blank one shipped on the first pilot.]
+   * The customer-facing SALES DESCRIPTION per QBO item — CACHED on the
+   * catalogs (labor_items.description / consumables.sales_description,
+   * pulled once from QBO's own Item records, editable like any catalog
+   * fact). RULED: every line must have one before an invoice is created —
+   * the issue step refuses a gap rather than shipping a blank line.
    */
   async itemDescriptions(): Promise<Map<string, string>> {
-    const q = this.client.schema("billing_audit").from("maintenance_invoice_line_items") as unknown as {
-      select(c: string): { not(col: string, op: string, v: unknown): { limit(n: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
-    }
-    const { data, error } = await q.select("qbo_item_id, description").not("description", "is", null).limit(20000)
-    if (error) throw new Error(`item descriptions failed: ${JSON.stringify(error).slice(0, 200)}`)
-    const counts = new Map<string, Map<string, number>>()
-    for (const r of (data ?? []) as { qbo_item_id: string | null; description: string | null }[]) {
-      if (!r.qbo_item_id || !r.description?.trim()) continue
-      const inner = counts.get(r.qbo_item_id) ?? new Map<string, number>()
-      inner.set(r.description, (inner.get(r.description) ?? 0) + 1)
-      counts.set(r.qbo_item_id, inner)
-    }
     const out = new Map<string, string>()
-    for (const [item, inner] of counts) {
-      out.set(item, [...inner.entries()].sort((a, b) => b[1] - a[1])[0][0])
+    const labor = this.client.schema("maintenance").from("labor_items") as unknown as {
+      select(c: string): { not(col: string, op: string, v: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> }
     }
+    const { data: lRows, error: lErr } = await labor.select("qbo_item_id, description").not("description", "is", null)
+    if (lErr) throw new Error(`labor descriptions failed: ${JSON.stringify(lErr).slice(0, 200)}`)
+    for (const r of (lRows ?? []) as { qbo_item_id: string; description: string }[]) out.set(r.qbo_item_id, r.description)
+    const chems = this.client.schema("maintenance").from("consumables") as unknown as {
+      select(c: string): { not(col: string, op: string, v: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+    }
+    const { data: cRows, error: cErr } = await chems.select("qbo_item_id, sales_description").not("sales_description", "is", null)
+    if (cErr) throw new Error(`consumable descriptions failed: ${JSON.stringify(cErr).slice(0, 200)}`)
+    for (const r of (cRows ?? []) as { qbo_item_id: string; sales_description: string }[]) out.set(r.qbo_item_id, r.sales_description)
     return out
   }
 
