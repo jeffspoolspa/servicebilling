@@ -432,6 +432,8 @@ export function ServiceLog({
               ))}
             </div>
             <span className="flex-1 min-w-0 pl-4">Notes</span>
+            <span className="w-[64px] text-right flex-none">Total</span>
+            <span className="w-[70px] text-right flex-none">Invoice</span>
           </div>
         )}
         {shownVisits.map((v) => {
@@ -447,7 +449,12 @@ export function ServiceLog({
                 onClick={() => setOpenVisit(open ? null : v.visit_id)}
                 className={`flex flex-nowrap items-center gap-x-3 px-4 py-2 cursor-pointer ${flagged ? "hover:bg-sun/[0.09] border-l-2 border-l-sun" : "hover:bg-white/[0.02]"}`}
               >
-                <span className={`w-[7px] h-[7px] rounded-full flex-none ${warn ? "bg-coral" : "bg-grass"}`} />
+                <span
+                  className={`w-[7px] h-[7px] rounded-full flex-none ${
+                    v.status === "voided" || v.status === "non_serviceable" ? "bg-coral" : "bg-grass"
+                  }`}
+                  title={v.status === "non_serviceable" ? "non-serviceable" : v.status ?? "completed"}
+                />
                 <div className="w-[86px] flex-none">
                   <div className="font-mono text-[11px] text-ink">
                     {new Date(v.visit_date + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })}
@@ -480,30 +487,6 @@ export function ServiceLog({
                     <span className="text-[10px] text-ink-mute">no notes</span>
                   )}
                 </div>
-                {v.status && v.status !== "completed" && (
-                  <span
-                    className={`font-mono text-[9px] uppercase tracking-[0.05em] flex-none ${
-                      v.status === "voided" ? "text-coral" : "text-sun"
-                    }`}
-                  >
-                    {v.status === "non_serviceable" ? "non-serviceable" : v.status}
-                  </span>
-                )}
-                {v.invoice_doc_number &&
-                  (onOpenInvoice && v.qbo_invoice_id ? (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onOpenInvoice(v.qbo_invoice_id!)
-                      }}
-                      className="font-mono text-[10px] text-ink-mute hover:text-cyan underline underline-offset-2 flex-none"
-                      title="Open invoice detail"
-                    >
-                      {v.invoice_doc_number}
-                    </button>
-                  ) : (
-                    <span className="font-mono text-[10px] text-ink-mute flex-none">{v.invoice_doc_number}</span>
-                  ))}
                 {v.photos.length > 0 && (
                   <span className="inline-flex items-center gap-1 font-mono text-[10px] text-ink-mute flex-none">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -515,6 +498,26 @@ export function ServiceLog({
                 )}
                 <span className="font-mono text-[12px] text-ink w-[64px] text-right flex-none">
                   {chemCents > 0 ? formatCurrency(chemCents / 100) : "—"}
+                </span>
+                <span className="w-[70px] text-right flex-none">
+                  {v.invoice_doc_number ? (
+                    onOpenInvoice && v.qbo_invoice_id ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onOpenInvoice(v.qbo_invoice_id!)
+                        }}
+                        className="font-mono text-[10px] text-ink-mute hover:text-cyan underline underline-offset-2"
+                        title="Open invoice detail"
+                      >
+                        {v.invoice_doc_number}
+                      </button>
+                    ) : (
+                      <span className="font-mono text-[10px] text-ink-mute">{v.invoice_doc_number}</span>
+                    )
+                  ) : (
+                    <span className="font-mono text-[10px] text-ink-mute/40">—</span>
+                  )}
                 </span>
               </div>
               {open && (
