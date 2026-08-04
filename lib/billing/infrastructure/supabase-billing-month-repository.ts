@@ -673,32 +673,65 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
 
   /**
    * SYNC audit findings for the audited months: the finding rows are a
-   * DERIVED VIEW of the audit — only resolutions are human facts. So a
-   * computed finding that is already open stays; a new one is inserted; an
-   * OPEN one that no longer reproduces (a peer-group reassignment, a healed
-   * visit) is retracted; and a RESOLVED finding is never touched and never
-   * resurrects. Pass every audited month, findings or not — a month whose
-   * flags all vanished is exactly the retraction case.
+   * DERIVED VIEW of the audit — only resolutions are human facts.
+   *
+   * Identity is the SUBJECT: (rule, source_key) where source_key is the
+   * visit grain (task_id:service_date). The rule's OBSERVATION (cents)
+   * decides supersede: a review resolves an observation, not the visit —
+   * so a computed flag whose observation equals a reviewed one stays
+   * silent, and one whose observation is NEW (a late-added chem after a
+   * re-scrape) inserts a fresh finding beside the resolved history. An
+   * OPEN finding refreshes its observation in place; one that no longer
+   * reproduces is retracted; resolved rows are never touched.
    */
   async recordFindings(
     findings: readonly { monthId: string; customerId: number; rule: string; severity: string; sourceKey: string; message: string; cents: number }[],
     auditedMonthIds: readonly string[],
-  ): Promise<{ recorded: number; alreadyOpen: number; retracted: number }> {
+  ): Promise<{ recorded: number; alreadyOpen: number; suppressed: number; retracted: number }> {
     const monthIds = [...new Set(auditedMonthIds)]
-    const existing = new Set<string>()
-    const openRows: { id: string; key: string }[] = []
+    const openByKey = new Map<string, { id: string; cents: number }>()
+    const reviewedCents = new Map<string, Set<number>>()
     for (let i = 0; i < monthIds.length; i += 40) {
       const c = monthIds.slice(i, i + 40)
-      const { data, error } = await this.q("findings").select("id, billing_month_id, rule, message, resolved_at").eq("phase", "audit").in("billing_month_id", c).range(0, 4999)
+      const { data, error } = await this.q("findings").select("id, rule, source_key, cents, resolved_at").eq("phase", "audit").in("billing_month_id", c).range(0, 4999)
       if (error) throw new Error(`findings read failed: ${JSON.stringify(error).slice(0, 200)}`)
-      for (const r of (data ?? []) as { id: string; billing_month_id: string; rule: string; message: string | null; resolved_at: string | null }[]) {
-        const key = `${r.billing_month_id}|${r.rule}|${(r.message ?? "").slice(0, 10)}`
-        existing.add(key)
-        if (r.resolved_at === null) openRows.push({ id: r.id, key })
+      for (const r of (data ?? []) as { id: string; rule: string; source_key: string | null; cents: number | null; resolved_at: string | null }[]) {
+        // Legacy rows (pre-source_key) get an unmatchable key: open ones
+        // retract and re-insert keyed on this pass; resolved ones keep.
+        const key = r.source_key ? `${r.rule}|${r.source_key}` : `legacy:${r.id}`
+        if (r.resolved_at === null) openByKey.set(key, { id: r.id, cents: r.cents ?? 0 })
+        else {
+          const set = reviewedCents.get(key) ?? new Set<number>()
+          set.add(r.cents ?? 0)
+          reviewedCents.set(key, set)
+        }
       }
     }
-    const computed = new Set(findings.map((f) => `${f.monthId}|${f.rule}|${f.message.slice(0, 10)}`))
-    const stale = openRows.filter((r) => !computed.has(r.key)).map((r) => r.id)
+
+    const computedKeys = new Set<string>()
+    const fresh: typeof findings[number][] = []
+    let alreadyOpen = 0
+    let suppressed = 0
+    for (const f of findings) {
+      const key = `${f.rule}|${f.sourceKey}`
+      computedKeys.add(key)
+      const open = openByKey.get(key)
+      if (open) {
+        alreadyOpen++
+        if (open.cents !== f.cents) {
+          // the open row is derived — refresh its observation in place
+          const upd = this.q("findings").update({ cents: f.cents, message: f.message }).eq("id", open.id) as unknown as PromiseLike<{ error: unknown }>
+          const { error } = await upd
+          if (error) throw new Error(`findings refresh failed: ${JSON.stringify(error).slice(0, 200)}`)
+        }
+      } else if (reviewedCents.get(key)?.has(f.cents)) {
+        suppressed++
+      } else {
+        fresh.push(f)
+      }
+    }
+
+    const stale = [...openByKey.entries()].filter(([k]) => !computedKeys.has(k)).map(([, v]) => v.id)
     if (stale.length > 0) {
       for (let i = 0; i < stale.length; i += 100) {
         const del = this.q("findings").delete().in("id", stale.slice(i, i + 100)) as unknown as PromiseLike<{ error: unknown }>
@@ -706,7 +739,6 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
         if (error) throw new Error(`findings retract failed: ${JSON.stringify(error).slice(0, 200)}`)
       }
     }
-    const fresh = findings.filter((f) => !existing.has(`${f.monthId}|${f.rule}|${f.message.slice(0, 10)}`))
     if (fresh.length > 0) {
       const ins = this.client.schema("billing").from("findings") as unknown as {
         insert(v: unknown[]): { select(c: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
@@ -714,11 +746,13 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       const { data, error } = await ins.insert(fresh.map((f) => ({
         billing_month_id: f.monthId, phase: "audit", rule: f.rule, severity: f.severity,
         customer_id: f.customerId, message: f.message, cents: f.cents,
+        source_key: f.sourceKey,
+        task_id: f.sourceKey.includes(":") ? f.sourceKey.slice(0, f.sourceKey.lastIndexOf(":")) : null,
       }))).select("id")
       if (error) throw new Error(`findings insert failed: ${JSON.stringify(error).slice(0, 240)}`)
       if (!data || data.length !== fresh.length) throw new Error(`findings insert wrote ${data?.length ?? 0} of ${fresh.length}`)
     }
-    return { recorded: fresh.length, alreadyOpen: findings.length - fresh.length, retracted: stale.length }
+    return { recorded: fresh.length, alreadyOpen, suppressed, retracted: stale.length }
   }
 
   async customersWithDelivery(month: string): Promise<number[]> {

@@ -1,10 +1,10 @@
 # Flow: Nightly Accrual Cadence
 
-> Status: [proposed]
+> Status: [building] — phase 1 code landed 2026-08-04, tick UNARMED (see open-questions for the arming checklist); phase 2 (ION checksum) not started
 > Kind: [orchestration]
-> Trigger: nightly schedule (pg_cron tick) + the calendar (period close on the 1st)
-> Code location: (to build) the tick + month rebuild queue; everything downstream reuses
-> `lib/billing` application services and the existing invoice queue machine
+> Trigger: nightly schedule (pg_cron tick, not yet scheduled) + the calendar (period close on the 1st)
+> Code location: `billing.tick_nightly()` (migration 20260804221524) -> `app/api/billing/tick/route.ts`;
+> reuses `billing.billing_month_queue`, `lib/billing` application services and the invoice queue machine
 > Entities: [Billing Month](../../entities/billing-month.md), [Visit](../../entities/visit.md),
 > [Task](../../entities/task.md), [Invoice](../../entities/invoice.md)
 

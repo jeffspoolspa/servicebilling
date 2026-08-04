@@ -2,9 +2,8 @@ import { NextResponse } from "next/server"
 import { createSupabaseServer } from "@/lib/supabase/server"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
-import { maintenanceMachineDeps } from "@/lib/billing/infrastructure/maintenance-invoice-machine"
 import { SupabaseInvoiceQueue } from "@/lib/billing/infrastructure/supabase-invoice-queue"
-import { AdvanceInvoiceService } from "@/lib/billing/application/advance-invoice-service"
+import { drainInvoiceQueue } from "@/lib/billing/infrastructure/drain-invoice-queue"
 
 /**
  * The pilot trigger for one month's invoice machine — the SAME rails as
@@ -35,22 +34,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ monthId: stri
   const queue = new SupabaseInvoiceQueue(sys as never)
   await queue.enqueue(ids, 1)
 
-  const deps = maintenanceMachineDeps(sys as never)
-  const service = new AdvanceInvoiceService(deps.reader, deps.preprocess, deps.collect, deps.send)
-  const log: unknown[] = []
-  // Drain: claim -> one stage -> finish -> tail-chain, until the queue is dry.
-  for (let i = 0; i < 50; i++) {
-    const cmd = await queue.claim()
-    if (!cmd) break
-    try {
-      const out = await service.advance(cmd.qboInvoiceId)
-      log.push(out)
-      await queue.finish(cmd.queueId)
-      if (out.again) await queue.enqueue([cmd.qboInvoiceId], 1)
-    } catch (e) {
-      await queue.finish(cmd.queueId, String(e instanceof Error ? e.message : e).slice(0, 400))
-      log.push({ qboInvoiceId: cmd.qboInvoiceId, error: String(e instanceof Error ? e.message : e).slice(0, 400) })
-    }
-  }
-  return NextResponse.json({ monthId, invoices: ids, log })
+  // Depth-first drain (shared loop): each claim runs its whole ladder.
+  const { log, errors } = await drainInvoiceQueue(sys as never, 4 * 60 * 1000)
+  return NextResponse.json({ monthId, invoices: ids, errors, log })
 }

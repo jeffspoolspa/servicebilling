@@ -27,6 +27,9 @@ export class AdvanceInvoiceService {
     private readonly preprocessDeps: PreprocessInvoiceDeps,
     private readonly collectDeps: CollectDeps,
     private readonly sendDeps: SendDeps,
+    /** When wired, the collect stage asks this before touching a card —
+     * the supervised issue-day switch (billing.policy_flags 'auto_charge'). */
+    private readonly autoChargeEnabled?: () => Promise<boolean>,
   ) {}
 
   async advance(qboInvoiceId: string, now = new Date()): Promise<AdvanceInvoiceOutcome> {
@@ -37,6 +40,10 @@ export class AdvanceInvoiceService {
     if (step === null) {
       const parked = loaded.state.latestCharge === "declined"
       return { qboInvoiceId, step, detail: parked ? "parked: charge declined — a person decides the next cycle" : "machine done", again: false }
+    }
+
+    if (step === "collect" && this.autoChargeEnabled && !(await this.autoChargeEnabled())) {
+      return { qboInvoiceId, step, detail: "parked: auto-charge disabled — flip billing.policy_flags 'auto_charge' to resume", again: false }
     }
 
     let detail = ""

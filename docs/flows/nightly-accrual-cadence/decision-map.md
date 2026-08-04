@@ -17,8 +17,16 @@ The rules the cadence runs by. Each rule names the DDD concept doing the work.
    visits; billable items re-claim at current terms unless locked to an invoice
    (`qbo_invoice_id` set => immutable). Nothing about the aggregate changes for this flow.
 
-2. **The checksum reconcile.** ION's rebuilt draft invoice total per task is a cheap
-   checksum. Diff our accrued total per task against it:
+2. **Phase 1: while the period is OPEN, accrual is the only step owed.** The domain
+   (`nextStep`) returns null after accrue until `monthIsOver` — ION's invoices for the
+   month do not exist yet, so a mid-month reconcile would dispute against nothing and
+   burn a delivery refresh per night. The nightly AUDIT still runs regardless of steps,
+   so flags surface all month. Reconcile happens at period close against the
+   transactions report exactly as the July run proved. Phase 2 (the checksum) is what
+   moves reconcile earlier.
+
+3. **The checksum reconcile (phase 2).** ION's rebuilt draft invoice total per task is a
+   cheap checksum. Diff our accrued total per task against it:
    - Agree -> reconciled, no ION traffic beyond the one checksum fetch.
    - Disagree -> **targeted re-scrape** of that task's logs (the terminating refresh
      remediation the reconcile design already defines), then re-accrue. Never a blanket
@@ -26,26 +34,35 @@ The rules the cadence runs by. Each rule names the DDD concept doing the work.
    - This is what earns the ingester window shrink: the wide window existed to catch late
      edits; the checksum catches them by construction.
 
-3. **The gate re-judges nightly, and its verdict is only ever current.** The one finding
+4. **The gate re-judges nightly, and its verdict is only ever current.** The one finding
    kind that holds a month is an open `cpv_outlier` flagged visit (per-visit consumable
    total >= p95 of the peer group, or >= p95 of the customer's own visits given >= 20
    visits of history; bulk refills exempt). Flags surface the night the visit lands —
    the rule is per-visit, so it is stable mid-month. Marking a visit reviewed is the
    resolution; manual holds survive rebuilds as today.
 
-4. **The period-open invariant (the only new rule).** The issue command is **prohibited
+   **A finding's identity is its SUBJECT (rule + `source_key` = task:date), and a
+   review resolves an OBSERVATION, not the visit** (RULED 2026-08-04): the sync
+   re-raises a new finding when the rule's observed value (cents, for cpv) is not one
+   already reviewed — so a chem added after your review re-flags, a bounce back to a
+   reviewed state stays silent, open findings refresh their observation in place, and
+   resolved rows are never touched. Sameness-of-lineage is the key; sameness-of-substance
+   is the rule's authored observation. One rule exists today; per-rule grain waits for a
+   second rule.
+
+5. **The period-open invariant.** The issue command is **prohibited
    while the month's period is open** — visits may still be uncompleted, so the visit set
    is not complete. This is a precondition of the issue command, NOT a gate criterion:
    the calendar states a fact (period completeness); the gate judges data. On the 1st the
    period closes and the prohibition lifts.
 
-5. **Issue needs no issue-day policy.** On the first tick after period close, the drainer
+6. **Issue needs no issue-day policy.** On the first tick after period close, the drainer
    advances months exactly as every other night; months that are reconciled-clean with no
    unresolved flagged visits and no manual hold pass the gate and flow into Invoice — the
    existing invoice queue machine takes them through create -> charge -> send -> receipt.
    There is no special issue-day code path.
 
-6. **The 2nd, and really the first visit.** The next month begins accruing the moment its
+7. **The 2nd, and really the first visit.** The next month begins accruing the moment its
    first visit lands; "starts on the 2nd" is just when the first tick sees it.
 
 ## Failure handling

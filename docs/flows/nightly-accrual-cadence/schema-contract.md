@@ -1,9 +1,21 @@
 # Nightly Accrual Cadence — schema contract
 
-> Status: [proposed]
+> Status: [building] — phase 1 pieces landed (migration 20260804221524)
 > Parent: [index.md](index.md)
 
-Everything below the "new" line exists today; the flow adds only the tick and one queue.
+Phase 1 adds NO new queue — the tick feeds the existing
+`billing.billing_month_queue` (coalescing partial-unique + FOR UPDATE SKIP
+LOCKED claims). The concrete phase-1 pieces:
+
+| Piece | What it is |
+|---|---|
+| `billing.billing_months.parked_at/parked_by` | The explicit exit from the active set without invoicing. 487 pre-pipeline June months are parked (`system: pre-pipeline legacy`) so the tick can never touch legacy-billed months. |
+| `idx_billing_months_active` | Partial index `(month) WHERE invoiced_at IS NULL AND parked_at IS NULL` — the tick stays O(active) forever. |
+| `billing.v_active_months` | The active-month Specification's one named home; the tick and the tick route both read it. |
+| `billing.findings.source_key` | The finding's true subject: `task_id:service_date` (visit grain). Identity = (rule, source_key); observation (cents) decides supersede. |
+| `billing.policy_flags` | Runtime switches. `auto_charge` (default true): the collect stage refuses to touch a card while false — the supervised issue-day lever. |
+| `billing.tick_nightly()` | Enqueue active set + wake the relay. Correctness half is the enqueue; the wake is latency only. NOT cron-scheduled by the migration — arming is a human act. |
+| `app/api/billing/tick` | The worker half: startMonth -> advanceAll per period -> depth-first heal drain -> re-gate -> issue pass -> depth-first invoice drain. Budget-bound, converges across drains. |
 
 ## Reads
 

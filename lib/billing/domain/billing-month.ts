@@ -313,6 +313,12 @@ export class BillingMonth {
     // a real issue for a person, not something to retry forever.
     if (this.disputedAt) return this.deliveryRefreshedAt ? null : "refresh_delivery"
     if (this.completenessBlockers(delivered).length > 0) return "accrue"
+    // While the period is OPEN, accrual is the only step owed: ION's
+    // invoices for the month do not exist yet, so a reconcile would dispute
+    // against nothing and burn a delivery refresh per night. The nightly
+    // audit still flags visits regardless of steps. (Phase 2 — the ION
+    // rebuilt-invoice checksum — is what moves reconcile earlier.)
+    if (!this.monthIsOver(now)) return null
     if (!this.reconciledAt) return "reconcile"
     if (!this.gatedAt) return "gate"
     return this.issueBlockers(now).length === 0 ? "issue" : null

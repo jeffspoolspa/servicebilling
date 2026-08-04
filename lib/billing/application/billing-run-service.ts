@@ -31,7 +31,7 @@ export interface AdvanceAllOutcome {
   months: number
   tally: Record<string, number>
   disputedQueued: number
-  audit: { findings: number; recorded: number; alreadyOpen: number; retracted: number }
+  audit: { findings: number; recorded: number; alreadyOpen: number; suppressed: number; retracted: number }
   statesWritten: number
   itemsRewritten: number
   factsAppended: number
@@ -70,7 +70,7 @@ export class BillingRunService {
    * safe by construction: recompute under the new grouping, sync — stale
    * open findings retract, resolved ones never move.
    */
-  async auditMonth(month: string): Promise<{ findings: number; recorded: number; alreadyOpen: number; retracted: number }> {
+  async auditMonth(month: string): Promise<{ findings: number; recorded: number; alreadyOpen: number; suppressed: number; retracted: number }> {
     const monthsAll = await this.months.allForMonth(month)
     return this.runAudit(monthsAll, month)
   }
@@ -93,7 +93,7 @@ export class BillingRunService {
   }
 
   /** The whole month, in memory, in seconds. */
-  async advanceAll(month: string, opts: { now?: Date } = {}): Promise<AdvanceAllOutcome> {
+  async advanceAll(month: string, opts: { now?: Date; refreshReport?: boolean } = {}): Promise<AdvanceAllOutcome> {
     if (!this.facts || !this.systemInvoices) throw new Error("advanceAll needs the facts and report adapters wired")
     const t0 = Date.now()
     const now = opts.now ?? new Date()
@@ -101,7 +101,9 @@ export class BillingRunService {
 
     // Everything, up front. The report refresh is the one external call, and
     // its durable freshness window makes it a no-op when recently pulled.
-    await this.systemInvoices.refresh(month)
+    // The nightly tick skips it for OPEN periods — ION has no invoices to
+    // reconcile against until the period closes (phase 2 changes this).
+    if (opts.refreshReport !== false) await this.systemInvoices.refresh(month)
     const [monthsAll, sourcesBy, termsBy, catalog, reportTotals] = await Promise.all([
       this.months.allForMonth(month),
       this.facts.sourcesForMonth(month),
