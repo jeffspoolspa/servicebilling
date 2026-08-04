@@ -381,8 +381,8 @@ export function MonthWorkbench({
           <div className="flex gap-1 border-b border-line-soft">
             {([
               ["items", "Billable items", ledgerItems.length],
-              ["tasks", "Tasks", monthTasks.length],
               ["visits", "Visits", visits.length],
+              ["tasks", "Tasks", monthTasks.length],
             ] as const).map(([key, label, count]) => (
               <button
                 key={key}
