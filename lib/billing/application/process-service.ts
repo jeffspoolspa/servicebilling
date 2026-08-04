@@ -17,6 +17,8 @@ import type { InvoiceRef } from "./preprocess-service"
 export interface CollectDeps {
   /** The instrument preprocess linked — re-resolved to its CURRENT state. */
   linkedInstrument(qboInvoiceId: string): Promise<PaymentInstrument | null>
+  /** What the payment memo names: the month's label + the invoice's DocNumber. */
+  memoContext(qboInvoiceId: string): Promise<{ monthLabel: string; docNumber: string }>
   charger: InvoiceCharger
   emit(type: string, payload: Record<string, unknown>, participants: string[], at: string): Promise<void>
 }
@@ -37,7 +39,8 @@ export async function collectInvoice(inv: InvoiceRef, deps: CollectDeps, now: Da
     return { qboInvoiceId: inv.qboInvoiceId, outcome: "no_instrument" }
   }
 
-  const r = await deps.charger.chargeInvoice({ qboInvoiceId: inv.qboInvoiceId, customerId: inv.customerId, instrument, at })
+  const { monthLabel, docNumber } = await deps.memoContext(inv.qboInvoiceId)
+  const r = await deps.charger.chargeInvoice({ qboInvoiceId: inv.qboInvoiceId, customerId: inv.customerId, instrument, monthLabel, docNumber, at })
   if (r.outcome === "declined") {
     await deps.emit("charge_declined", { qbo_invoice_id: inv.qboInvoiceId, reason: r.reason }, [inv.linkedTo.id], at)
     return { qboInvoiceId: inv.qboInvoiceId, outcome: "declined", detail: r.reason }

@@ -147,13 +147,17 @@ export class QboCustomers extends Qbo {
 
 /* -------------------------------- invoices -------------------------------- */
 
-export interface QboInvoiceLine {
-  readonly qboItemId: string
-  readonly description: string | null
-  readonly qty: number
-  readonly unitPriceCents: number
-  readonly amountCents: number
-}
+export type QboInvoiceLine =
+  | {
+      readonly kind: "item"
+      readonly qboItemId: string
+      readonly description: string | null
+      readonly qty: number
+      readonly unitPriceCents: number
+      readonly amountCents: number
+    }
+  /** A description-only line — how the visit-date break reads on the document. */
+  | { readonly kind: "text"; readonly text: string }
 
 export interface QboInvoiceInput {
   readonly qboCustomerId: string
@@ -234,7 +238,7 @@ export class QboInvoices extends Qbo {
       return { qboInvoiceId: found.Id, docNumber: found.DocNumber, subtotalCents: Math.round(found.TotalAmt * 100), how: "already_existed" }
     }
 
-    const subtotal = inv.lines.reduce((s, l) => s + l.amountCents, 0)
+    const subtotal = inv.lines.reduce((s, l) => s + (l.kind === "item" ? l.amountCents : 0), 0)
     const body = {
       DocNumber: inv.docNumber,
       TxnDate: inv.txnDate,
@@ -244,16 +248,20 @@ export class QboInvoices extends Qbo {
       ...(inv.billEmail ? { BillEmail: { Address: inv.billEmail } } : {}),
       ...(inv.classId ? { ClassRef: { value: inv.classId } } : {}),
       ...(inv.salesTermId ? { SalesTermRef: { value: inv.salesTermId } } : {}),
-      Line: inv.lines.map((l) => ({
-        DetailType: "SalesItemLineDetail",
-        Amount: l.amountCents / 100,
-        Description: l.description ?? undefined,
-        SalesItemLineDetail: {
-          ItemRef: { value: l.qboItemId },
-          Qty: l.qty,
-          UnitPrice: l.unitPriceCents / 100,
-        },
-      })),
+      Line: inv.lines.map((l) =>
+        l.kind === "text"
+          ? { DetailType: "DescriptionOnly", Description: l.text, DescriptionLineDetail: {} }
+          : {
+              DetailType: "SalesItemLineDetail",
+              Amount: l.amountCents / 100,
+              Description: l.description ?? undefined,
+              SalesItemLineDetail: {
+                ItemRef: { value: l.qboItemId },
+                Qty: l.qty,
+                UnitPrice: l.unitPriceCents / 100,
+              },
+            },
+      ),
     }
     const res = await this.request<{ Invoice: QboInvoiceEntity }>("POST", "/invoice", body)
     const echo = res.Invoice
@@ -481,5 +489,68 @@ export class QboCredits extends Qbo {
     })
     if (!res.Payment?.Id) throw new Error(`credit-memo apply returned no echo — unproven`)
     return { createdPaymentId: res.Payment.Id }
+  }
+}
+
+/**
+ * The accounting side of a PROCESSED charge — QBO Payments moved the money;
+ * this records the Payment entity so the books and the bank feed agree.
+ * Body ported verbatim from the proven f/billing/_lib/qbo.py
+ * record_qbo_payment: CreditCardPayment.CreditChargeResponse.CCTransId +
+ * TxnSource "IntuitPayment" are the AUTO-RECONCILE linkage — QBO ties the
+ * Payment to the merchant batch and the deposit matches itself.
+ */
+export class QboChargePayments extends Qbo {
+  /** QBO PaymentMethod ids the live machinery uses (f/billing/_lib/qbo.py). */
+  private static METHOD = { card: "21", ach: "20" } as const
+
+  async recordChargePayment(args: {
+    qboInvoiceId: string
+    amountCents: number
+    memo: string
+    kind: "card" | "ach"
+    chargeRef: string
+    paymentRef: string
+  }): Promise<{ qboPaymentId: string }> {
+    const invId = args.qboInvoiceId.replace(/'/g, "")
+
+    // The invoice names its customer — and its payments. CONVERGENCE scan:
+    // if a prior run's create landed but the charge-row save did not, the
+    // linked payment whose memo carries this charge id IS our payment.
+    const inv = await this.request<{ Invoice: { Id: string; CustomerRef: { value: string }; LinkedTxn?: { TxnId: string; TxnType: string }[] } }>(
+      "GET",
+      `/invoice/${invId}`,
+    )
+    const linkedPayments = (inv.Invoice.LinkedTxn ?? []).filter((t) => t.TxnType === "Payment").map((t) => t.TxnId)
+    for (const pid of linkedPayments) {
+      const p = await this.request<{ Payment: { Id: string; PrivateNote?: string } }>("GET", `/payment/${pid}`)
+      if ((p.Payment.PrivateNote ?? "").includes(args.chargeRef)) return { qboPaymentId: p.Payment.Id }
+    }
+
+    const amount = args.amountCents / 100
+    const res = await this.request<{ Payment: { Id: string; TotalAmt: number } }>("POST", "/payment", {
+      CustomerRef: { value: inv.Invoice.CustomerRef.value },
+      TotalAmt: amount,
+      PaymentMethodRef: { value: QboChargePayments.METHOD[args.kind] },
+      PaymentRefNum: args.paymentRef.slice(0, 21),
+      TxnDate: new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date()),
+      Line: [{ Amount: amount, LinkedTxn: [{ TxnId: invId, TxnType: "Invoice" }] }],
+      PrivateNote: args.memo,
+      CreditCardPayment: {
+        CreditChargeInfo: { ProcessPayment: true, Amount: amount },
+        CreditChargeResponse: { Status: "Completed", CCTransId: args.chargeRef },
+      },
+      TxnSource: "IntuitPayment",
+    })
+    if (!res.Payment?.Id) throw new Error("charge payment create returned no echo — unproven")
+    if (Math.round(res.Payment.TotalAmt * 100) !== args.amountCents) {
+      throw new Error(`charge payment echo mismatch: sent ${args.amountCents} got ${Math.round(res.Payment.TotalAmt * 100)}`)
+    }
+    return { qboPaymentId: res.Payment.Id }
+  }
+
+  /** QBO emails its own receipt for the payment — same send door as invoices. */
+  async sendPaymentReceipt(qboPaymentId: string, sendTo: string): Promise<void> {
+    await this.request("POST", `/payment/${qboPaymentId.replace(/'/g, "")}/send?sendTo=${encodeURIComponent(sendTo)}`)
   }
 }

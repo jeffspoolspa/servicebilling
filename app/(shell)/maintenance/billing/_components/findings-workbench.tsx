@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils/format"
+import { visitBreakLabel } from "@/lib/billing/domain/invoice-documents"
 import { ServiceLog, type ServiceLogVisit } from "../../_components/service-log"
 import { ChemHistoryContext, type FlagContext } from "./chem-history-context"
 import type { FindingGroup } from "../_lib/findings"
@@ -21,7 +22,7 @@ import type { FindingGroup } from "../_lib/findings"
 
 type DocLine =
   | { kind: "visit_break"; serviceDate: string }
-  | { kind: "labor" | "consumable" | "variance"; itemName: string; qty: number; unitPriceCents: number; amountCents: number; serviceDate: string | null; detail: string | null }
+  | { kind: "labor" | "consumable" | "variance"; itemName: string; qty: number; unitPriceCents: number; amountCents: number; serviceDate: string | null; detail: string | null; description?: string | null }
 interface DocumentT {
   kind: "service" | "consumables" | "green"
   lines: DocLine[]
@@ -245,7 +246,7 @@ export function FindingsWorkbench({
               {doc.lines.map((ln, idx) =>
                 ln.kind === "visit_break" ? (
                   <div key={idx} className="px-5 pt-2.5 pb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-white/[0.015]">
-                    {new Date(ln.serviceDate + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })}
+                    {visitBreakLabel(ln.serviceDate)}
                   </div>
                 ) : (
                   <div key={idx} className="border-b border-line-soft px-5 py-2 hover:bg-white/[0.015]">
@@ -254,6 +255,9 @@ export function FindingsWorkbench({
                         <div className={ln.itemName ? "text-[12.5px] font-medium text-ink" : "text-[12.5px] font-medium text-ink-mute"}>{ln.itemName || "—"}</div>
                         <div className="font-mono text-[10.5px] text-ink-mute mt-0.5">
                           {ln.kind === "variance" ? ln.detail : `${ln.qty} × ${formatCurrency(ln.unitPriceCents / 100)}`}
+                        </div>
+                        <div className={ln.description ? "text-[10.5px] text-ink-dim mt-0.5" : "text-[10.5px] text-coral mt-0.5"}>
+                          {ln.description || "no description — issue will refuse"}
                         </div>
                       </div>
                       <div className="w-[92px] text-right flex-none">

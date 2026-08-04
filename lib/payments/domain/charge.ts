@@ -23,6 +23,35 @@
 
 export class ChargeRuleError extends Error {}
 
+/**
+ * The payment memo — the one line every recorded Payment and receipt
+ * carries, in the PROVEN live shape:
+ *   "June Pool Maintenance | Inv# 7942466 | Charge ID: 19aa6i2uzc2y | Auth: 00025A | Visa x8984 | 2026-07-03 20:43"
+ * Absent parts are omitted, never blanked.
+ */
+export function paymentMemo(args: {
+  monthLabel: string
+  docNumber: string
+  chargeRef: string
+  authCode: string | null
+  instrumentLabel: string | null
+  at: string
+}): string {
+  const d = new Date(args.at)
+  const stamp = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).format(d).replace(",", "")
+  return [
+    args.monthLabel,
+    `Inv# ${args.docNumber}`,
+    `Charge ID: ${args.chargeRef}`,
+    args.authCode ? `Auth: ${args.authCode}` : null,
+    args.instrumentLabel,
+    stamp,
+  ].filter(Boolean).join(" | ")
+}
+
 export type ChargeStatus = "requested" | "settled" | "recorded" | "receipted" | "declined"
 
 export interface ChargeFact {
@@ -49,6 +78,8 @@ export class Charge {
     private declineReason: string | null,
     private qboPaymentId: string | null,
     private receiptedAt: string | null,
+    public processorRef: string | null = null,
+    public authCode: string | null = null,
   ) {}
 
   /** The domain identity the wire-level idempotency enforces. */
@@ -88,20 +119,24 @@ export class Charge {
     id: string; invoiceId: string; qboInvoiceId: string; customerId: number; paymentMethodId: string
     amountCents: number; cycle: number; settledAt?: string | null; declinedAt?: string | null
     declineReason?: string | null; qboPaymentId?: string | null; receiptedAt?: string | null
+    processorRef?: string | null; authCode?: string | null
   }): Charge {
     return new Charge(
       args.id, args.invoiceId, args.qboInvoiceId, args.customerId, args.paymentMethodId,
       args.amountCents, args.cycle, args.settledAt ?? null, args.declinedAt ?? null,
       args.declineReason ?? null, args.qboPaymentId ?? null, args.receiptedAt ?? null,
+      args.processorRef ?? null, args.authCode ?? null,
     )
   }
 
   /** The processor took the money. */
-  markSettled(processorRef: string, at: string): void {
+  markSettled(processorRef: string, authCode: string | null, at: string): void {
     if (this.declinedAt) throw new ChargeRuleError(`charge ${this.id} was declined — a new cycle is a new decision`)
     if (this.settledAt) return // converging retry, not a second settle
     this.settledAt = at
-    this.facts.push({ type: "ChargeSettled", chargeId: this.id, at, payload: { processorRef, amountCents: this.amountCents } })
+    this.processorRef = processorRef
+    this.authCode = authCode
+    this.facts.push({ type: "ChargeSettled", chargeId: this.id, at, payload: { processorRef, authCode, amountCents: this.amountCents } })
   }
 
   markDeclined(reason: string, at: string): void {

@@ -78,9 +78,8 @@ export function resolveLaborDocuments(
     return null
   }
 
-  const out = documents.map((d) => ({
-    ...d,
-    lines: d.lines.map((l): ResolvedLine => {
+  const out = documents.map((d) => {
+    const lines = d.lines.map((l): ResolvedLine => {
       if (l.kind === "visit_break" || l.kind === "consumable") return l
       const r = resolve(l)
       if (!r) {
@@ -88,8 +87,28 @@ export function resolveLaborDocuments(
         return { ...l, qboItemId: null }
       }
       return { ...l, itemName: r.name, qboItemId: r.qboItemId }
-    }),
-  }))
+    })
+    // SUMMARY docs (no visit breaks) re-collapse AFTER resolution: four
+    // raw service-type strings that all resolved to QUALITY CONTROL are
+    // one row, not four. [found live in the draft preview]
+    if (!lines.some((l) => l.kind === "visit_break")) {
+      const groups = new Map<string, ResolvedLine & { kind: "labor" | "consumable" | "variance" }>()
+      const collapsed: ResolvedLine[] = []
+      for (const l of lines) {
+        if (l.kind === "visit_break") continue
+        const key = `${l.kind}|${l.itemName}|${l.unitPriceCents}`
+        const g = groups.get(key)
+        if (g) {
+          groups.set(key, { ...g, qty: g.qty + l.qty, amountCents: g.amountCents + l.amountCents })
+        } else {
+          groups.set(key, { ...l })
+        }
+      }
+      for (const g of groups.values()) collapsed.push(g)
+      return { ...d, lines: collapsed }
+    }
+    return { ...d, lines }
+  })
 
   return { documents: out, unmapped: [...unmapped] }
 }

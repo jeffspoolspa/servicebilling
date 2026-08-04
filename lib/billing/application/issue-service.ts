@@ -1,5 +1,5 @@
 import type { BillingMonth } from "@/lib/billing/domain"
-import { documentsOf, presentationOf, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
+import { documentsOf, presentationOf, visitBreakLabel, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
 import { resolveLaborDocuments } from "./labor-resolution"
 import type { QboInvoices, CreatedInvoice } from "@/lib/external/qbo/qbo"
 import type { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
@@ -120,24 +120,23 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
       docNumber: i === 0 ? baseDoc : `${baseDoc}-${d.kind.slice(0, 1).toUpperCase()}`,
       txnDate: at.slice(0, 10),
       memo: d.kind === "green" ? `${MONTH_NAME(m.month)} Green Pool Treatment` : memo,
-      lines: d.lines.flatMap((l) =>
-        l.kind === "visit_break"
-          ? []
-          : [(() => {
-              const qboItemId = l.kind === "consumable" ? chems.get(l.itemName)! : (l as { qboItemId?: string | null }).qboItemId!
-              return {
-                qboItemId,
-                // The description is what the customer reads — the item's
-                // historical sales description, never blank (item name as
-                // the last resort), with the visit date on itemized lines.
-                description:
-                  descriptions.get(qboItemId)! + (presentation === "itemized" && l.serviceDate ? ` — ${l.serviceDate}` : ""),
-                qty: l.qty,
-                unitPriceCents: l.unitPriceCents,
-                amountCents: l.amountCents,
-              }
-            })()],
-      ),
+      lines: d.lines.map((l) => {
+        if (l.kind === "visit_break") {
+          // The break IS a line on the document — a description-only row
+          // reading "Tuesday: July 4th, 2026".
+          return { kind: "text" as const, text: visitBreakLabel(l.serviceDate) }
+        }
+        const qboItemId = l.kind === "consumable" ? chems.get(l.itemName)! : (l as { qboItemId?: string | null }).qboItemId!
+        return {
+          kind: "item" as const,
+          qboItemId,
+          // What the customer reads — the item's cached sales description.
+          description: descriptions.get(qboItemId)!,
+          qty: l.qty,
+          unitPriceCents: l.unitPriceCents,
+          amountCents: l.amountCents,
+        }
+      }),
     })
     issued.push({ ...created, kind: d.kind })
     await deps.emit(

@@ -41,7 +41,7 @@ export class SupabaseChargeRepository implements ChargeRepository {
     if (error) throw new Error(`charge read failed: ${JSON.stringify(error).slice(0, 200)}`)
     const r = (data ?? [])[0] as Row | undefined
     if (!r) return null
-    const raw = (r.raw ?? {}) as { customer_id?: number; settled_at?: string; declined_at?: string; decline_reason?: string; receipted_at?: string }
+    const raw = (r.raw ?? {}) as { customer_id?: number; settled_at?: string; declined_at?: string; decline_reason?: string; receipted_at?: string; processor_ref?: string; auth_code?: string }
     return Charge.reconstitute({
       id: String(r.id),
       invoiceId: r.qbo_invoice_id,
@@ -55,6 +55,8 @@ export class SupabaseChargeRepository implements ChargeRepository {
       declineReason: raw.decline_reason ?? r.error_message,
       qboPaymentId: r.qbo_payment_id,
       receiptedAt: raw.receipted_at ?? null,
+      processorRef: raw.processor_ref ?? null,
+      authCode: raw.auth_code ?? null,
     })
   }
 
@@ -73,7 +75,13 @@ export class SupabaseChargeRepository implements ChargeRepository {
           source: "billing_pipeline",
           attempted_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          raw: { customer_id: charge.customerId, cycle: charge.cycle, facts: facts.map((f) => ({ type: f.type, at: f.at })) },
+          raw: {
+            customer_id: charge.customerId,
+            cycle: charge.cycle,
+            processor_ref: charge.processorRef,
+            auth_code: charge.authCode,
+            facts: facts.map((f) => ({ type: f.type, at: f.at })),
+          },
         },
         { onConflict: "idempotency_key" },
       )

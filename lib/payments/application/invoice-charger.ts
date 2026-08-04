@@ -1,4 +1,4 @@
-import { Charge } from "@/lib/payments/domain/charge"
+import { Charge, paymentMemo } from "@/lib/payments/domain/charge"
 import type { CardCharger, ChargeRepository, PaymentInstrument, PaymentRecorder, ReceiptSender } from "@/lib/payments/domain/ports"
 
 /**
@@ -39,6 +39,10 @@ export class InvoiceCharger {
     qboInvoiceId: string
     customerId: number
     instrument: PaymentInstrument
+    /** "July Pool Maintenance" — the same memo the invoice carries. */
+    monthLabel: string
+    /** The invoice's DocNumber — how a person finds it from the memo. */
+    docNumber: string
     at: string
   }): Promise<ChargeInvoiceOutcome> {
     const { qboInvoiceId, customerId, instrument, at } = args
@@ -52,6 +56,7 @@ export class InvoiceCharger {
 
     // One charge per invoice per CYCLE — a crashed run resumes ITS charge;
     // a re-decision after a decline mints a new cycle.
+    let chargedLabel: string | null = instrument.label
     const cycle = await this.deps.charges.nextCycle(qboInvoiceId)
     const charge =
       (await this.deps.charges.openFor(qboInvoiceId, cycle)) ??
@@ -77,18 +82,37 @@ export class InvoiceCharger {
         await this.deps.charges.save(charge) // still "requested" — resumable
         return { outcome: "unknown", qboInvoiceId, detail: result.detail }
       }
-      charge.markSettled(result.processorRef, at)
+      charge.markSettled(result.processorRef, result.authCode ?? null, at)
+      if (result.label) chargedLabel = result.label
       await this.deps.charges.save(charge) // settle is durable before accounting
     }
 
+    // ONE memo for both money records — the Payment's PrivateNote and the
+    // receipt tell the same story in the proven live shape.
+    const memo = paymentMemo({
+      monthLabel: args.monthLabel,
+      docNumber: args.docNumber,
+      chargeRef: charge.processorRef ?? charge.idempotencyKey,
+      authCode: charge.authCode,
+      instrumentLabel: chargedLabel,
+      at,
+    })
+
     if (charge.status === "settled") {
-      const { qboPaymentId } = await this.deps.recorder.record(qboInvoiceId, charge.amountCents, charge.idempotencyKey)
+      const { qboPaymentId } = await this.deps.recorder.record({
+        qboInvoiceId,
+        amountCents: charge.amountCents,
+        memo,
+        kind: instrument.kind,
+        chargeRef: charge.processorRef ?? charge.idempotencyKey,
+        paymentRef: args.docNumber,
+      })
       charge.markPaymentRecorded(qboPaymentId, at)
       await this.deps.charges.save(charge)
     }
 
     if (charge.status === "recorded") {
-      await this.deps.receipts.send(customerId, charge.paymentId!, charge.amountCents)
+      await this.deps.receipts.send(customerId, charge.paymentId!, charge.amountCents, memo)
       charge.markReceipted(at)
       await this.deps.charges.save(charge)
     }

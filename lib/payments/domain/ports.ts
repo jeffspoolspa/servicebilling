@@ -14,13 +14,18 @@ import type { Charge } from "./charge"
 /** A vaulted instrument, as the domain needs to know it — never the PAN. */
 export interface PaymentInstrument {
   readonly paymentMethodId: string
+  /** The PROCESSOR's on-file id (QBO Payments card/bank id) — what a charge names. */
+  readonly onFileId: string | null
   readonly kind: "card" | "ach"
+  /** How the memo names it: "Visa x8984", "ACH x2602". Never the PAN. */
+  readonly label: string | null
   /** Disabled by the 3-strike rule or by a person; a disabled instrument never charges. */
   readonly active: boolean
 }
 
 export type ChargeAttemptResult =
-  | { outcome: "settled"; processorRef: string }
+  /** label = the charged instrument as the processor's echo describes it ("Visa x8984"). */
+  | { outcome: "settled"; processorRef: string; authCode?: string; label?: string }
   | { outcome: "declined"; reason: string }
   /**
    * The wire went dark mid-flight. The adapter MUST have already tried
@@ -37,12 +42,25 @@ export interface CardCharger {
 
 /** The accounting side: the Payment entity applied against the invoice. */
 export interface PaymentRecorder {
-  /** Echo-verified create; idempotent — an existing payment for this charge converges. */
-  record(qboInvoiceId: string, amountCents: number, idempotencyKey: string): Promise<{ qboPaymentId: string }>
+  /**
+   * Echo-verified create; idempotent — an existing payment carrying this
+   * chargeRef converges instead of double-recording. The memo is the
+   * Payment's PrivateNote; chargeRef becomes CCTransId (the auto-reconcile
+   * linkage); paymentRef is the human "Ref no." (the invoice's DocNumber).
+   */
+  record(args: {
+    qboInvoiceId: string
+    amountCents: number
+    memo: string
+    kind: "card" | "ach"
+    chargeRef: string
+    paymentRef: string
+  }): Promise<{ qboPaymentId: string }>
 }
 
 export interface ReceiptSender {
-  send(customerId: number, qboPaymentId: string, amountCents: number): Promise<void>
+  /** The receipt tells the customer what the memo records — same facts, same line. */
+  send(customerId: number, qboPaymentId: string, amountCents: number, memo: string): Promise<void>
 }
 
 /** Sends the invoice itself, with any attached documents (the usage report). */

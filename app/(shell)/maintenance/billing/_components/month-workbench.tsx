@@ -16,6 +16,7 @@ import {
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { HistoryTimeline, type HistoryRow } from "@/components/ui/history-timeline"
 import { formatCurrency } from "@/lib/utils/format"
+import { visitBreakLabel } from "@/lib/billing/domain/invoice-documents"
 import { cn } from "@/lib/utils/cn"
 import { ServiceLog, type ServiceLogVisit } from "../../_components/service-log"
 import { MONTH_STAGES, stepperStage, type MonthOverviewRow } from "../_lib/months"
@@ -53,7 +54,7 @@ export interface InvoiceDetail {
 
 type DocLine =
   | { kind: "visit_break"; serviceDate: string }
-  | { kind: "labor" | "consumable" | "variance"; itemName: string; qty: number; unitPriceCents: number; amountCents: number; serviceDate: string | null; detail: string | null }
+  | { kind: "labor" | "consumable" | "variance"; itemName: string; qty: number; unitPriceCents: number; amountCents: number; serviceDate: string | null; detail: string | null; description?: string | null }
 interface Draft {
   subtotalCents: number
   claimedAtZero: number
@@ -372,7 +373,7 @@ export function MonthWorkbench({
                       {doc.lines.map((ln, idx) =>
                         ln.kind === "visit_break" ? (
                           <div key={idx} className="px-3 pt-2 pb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-white/[0.015]">
-                            {ln.serviceDate}
+                            {visitBreakLabel(ln.serviceDate)}
                           </div>
                         ) : (
                           <div key={idx} className="flex items-center gap-2.5 border-b border-line-soft/60 last:border-b-0 px-3 py-1.5">
@@ -381,6 +382,9 @@ export function MonthWorkbench({
                               <span className="ml-2 font-mono text-[10px] text-ink-mute">
                                 {ln.kind === "variance" ? ln.detail : `${ln.qty} × ${formatCurrency(ln.unitPriceCents / 100)}`}
                               </span>
+                              <div className={ln.description ? "text-[10.5px] text-ink-dim" : "text-[10.5px] text-coral"}>
+                                {ln.description || "no description — issue will refuse"}
+                              </div>
                             </div>
                             <span className="font-mono num text-[12px] text-ink">{formatCurrency(ln.amountCents / 100)}</span>
                           </div>

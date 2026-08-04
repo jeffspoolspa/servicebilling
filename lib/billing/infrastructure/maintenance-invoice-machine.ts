@@ -1,5 +1,6 @@
 import "server-only"
-import { QboCredits, QboInvoices, type OpenCredit } from "@/lib/external/qbo/qbo"
+import { QboChargePayments, QboCredits, QboInvoices, type OpenCredit } from "@/lib/external/qbo/qbo"
+import { QboProcessor } from "@/lib/external/qbo/qbo-processor"
 import { WindmillQboMinter } from "@/lib/external/qbo/windmill-minter"
 import { SupabaseInvoiceMirror } from "@/lib/billing/infrastructure/supabase-invoice-mirror"
 import { InvoiceCharger } from "@/lib/payments/application/invoice-charger"
@@ -46,6 +47,7 @@ export function maintenanceMachineDeps(sys: Db): {
   const mirror = new SupabaseInvoiceMirror(sys as never)
   const minter = new WindmillQboMinter()
   const qbo = new QboInvoices(minter, mirror)
+  const chargePayments = new QboChargePayments(minter)
   const qboCredits = new QboCredits(minter)
   const charges = new SupabaseChargeRepository(sys as never)
 
@@ -94,12 +96,14 @@ export function maintenanceMachineDeps(sys: Db): {
     const methods = sys.schema("billing").from("customer_payment_methods") as {
       select(c: string): { eq(col: string, v: unknown): { eq(c2: string, v2: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
     }
-    const { data: pm, error: e2 } = await methods.select("id, type, is_default").eq("qbo_customer_id", qboId).eq("is_active", true)
+    const { data: pm, error: e2 } = await methods.select("id, qbo_payment_method_id, type, card_brand, last_four, is_default").eq("qbo_customer_id", qboId).eq("is_active", true)
     if (e2) throw new Error(`methods read failed: ${JSON.stringify(e2).slice(0, 200)}`)
-    const rows = (pm ?? []) as { id: string; type?: string; is_default?: boolean }[]
+    const rows = (pm ?? []) as { id: string; qbo_payment_method_id?: string | null; type?: string; card_brand?: string | null; last_four?: string | null; is_default?: boolean }[]
     const row = rows.find((r) => r.is_default) ?? rows[0]
     if (!row) return null
-    return { paymentMethodId: row.id, kind: row.type === "ach" ? "ach" : "card", active: true }
+    const kind = row.type === "ach" ? "ach" : "card"
+    const label = row.last_four ? `${row.card_brand ?? (kind === "ach" ? "ACH" : "Card")} x${row.last_four}` : null
+    return { paymentMethodId: row.id, onFileId: row.qbo_payment_method_id ?? null, kind, label, active: true }
   }
 
   const preprocess: PreprocessInvoiceDeps = {
@@ -201,6 +205,18 @@ export function maintenanceMachineDeps(sys: Db): {
   }
 
   const collect: CollectDeps = {
+    async memoContext(qboInvoiceId: string) {
+      const { data, error } = await monthInvoices()
+        .select("doc_number, billing_months(month)")
+        .eq("qbo_invoice_id", qboInvoiceId)
+      if (error) throw new Error(`memo context read failed: ${JSON.stringify(error).slice(0, 200)}`)
+      const row = (data ?? [])[0] as { doc_number: string | null; billing_months: { month: string } | null } | undefined
+      const month = row?.billing_months?.month
+      const monthLabel = month
+        ? `${new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(new Date(month + "T12:00:00Z"))} Pool Maintenance`
+        : "Pool Maintenance"
+      return { monthLabel, docNumber: row?.doc_number ?? qboInvoiceId }
+    },
     async linkedInstrument(qboInvoiceId: string) {
       // The roster's answer, LIVE — resolution is a query, not a stage.
       const { data, error } = await monthInvoices().select("billing_month_id, billing_months(customer_id)").eq("qbo_invoice_id", qboInvoiceId)
@@ -213,20 +229,20 @@ export function maintenanceMachineDeps(sys: Db): {
     charger: new InvoiceCharger({
       openBalance: (id) => qbo.openBalance(id),
       charges,
-      charger: {
-        async charge() {
-          // The processor bridge (card-vault machinery) is its own change.
-          return { outcome: "declined", reason: "card charging is not bridged to the pilot — send-only for now" }
-        },
-      },
+      // THE BRIDGE: the same two rails the live machinery runs — card via
+      // /charges, ACH via /echecks — picked by the resolved instrument's kind.
+      charger: new QboProcessor(minter),
       recorder: {
-        async record() {
-          throw new Error("payment recording unreachable while the charger declines all")
-        },
+        record: (args) => chargePayments.recordChargePayment(args),
       },
       receipts: {
-        async send() {
-          throw new Error("receipts unreachable while the charger declines all")
+        async send(customerId: number, qboPaymentId: string, _amountCents: number, _memo: string) {
+          const { data } = await (sys.schema("public").from("Customers") as {
+            select(col: string): { eq(k: string, v: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+          }).select("email").eq("id", customerId)
+          const email = ((data ?? [])[0] as { email: string | null } | undefined)?.email
+          if (!email) throw new Error(`customer ${customerId} has no email — receipt cannot send`)
+          await chargePayments.sendPaymentReceipt(qboPaymentId, email)
         },
       },
       newChargeId: () => crypto.randomUUID(),

@@ -50,12 +50,28 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
   const laborCatalog = await repo.laborItems()
   const taskCategory = new Map([...meta.entries()].map(([id, t]) => [id, t.category]))
   const flatTasks = new Set([...meta.entries()].filter(([, t]) => t.labor === "flat_rate").map(([id]) => id))
-  const { documents, unmapped: unmappedLabor } = resolveLaborDocuments(
+  const { documents: resolved, unmapped: unmappedLabor } = resolveLaborDocuments(
     documentsOf(month, terms, presentation),
     taskCategory,
     laborCatalog,
     flatTasks,
   )
+
+  // Attach the CUSTOMER-FACING description to every line — the same cached
+  // catalog text the issue step ships (and refuses on when blank) — so the
+  // draft shows exactly what the customer will read, blanks included.
+  const [descriptions, chems] = await Promise.all([repo.itemDescriptions(), repo.consumableQboIds()])
+  const missingDescriptions: string[] = []
+  const documents = resolved.map((d) => ({
+    ...d,
+    lines: d.lines.map((l) => {
+      if (l.kind === "visit_break") return l
+      const qboItemId = l.kind === "consumable" ? (chems.get(l.itemName) ?? null) : ((l as { qboItemId?: string | null }).qboItemId ?? null)
+      const description = qboItemId ? (descriptions.get(qboItemId) ?? null) : null
+      if (!description) missingDescriptions.push(`${l.kind}:${l.itemName || "(blank)"}`)
+      return { ...l, description }
+    }),
+  }))
 
   return NextResponse.json({
     ...draftInvoice(month),
@@ -63,5 +79,6 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
     defaultPresentation,
     documents,
     unmappedLabor,
+    missingDescriptions: [...new Set(missingDescriptions)],
   })
 }

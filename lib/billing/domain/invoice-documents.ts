@@ -29,6 +29,16 @@ import type { BillingMonth } from "./billing-month"
 
 export type InvoicePresentation = "itemized" | "summary"
 
+/** The visit-break label as the customer reads it: "Tuesday: July 4th, 2026". */
+export function visitBreakLabel(iso: string): string {
+  const d = new Date(iso.slice(0, 10) + "T12:00:00Z")
+  const day = d.getUTCDate()
+  const suffix = day % 10 === 1 && day !== 11 ? "st" : day % 10 === 2 && day !== 12 ? "nd" : day % 10 === 3 && day !== 13 ? "rd" : "th"
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(d)
+  const month = new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(d)
+  return `${weekday}: ${month} ${day}${suffix}, ${d.getUTCFullYear()}`
+}
+
 /** The ACL: ION's invoice-type string -> our presentation. Null (not yet
  *  captured from ION) defaults to itemized, ION's own default. */
 export function presentationOf(ionInvoiceType: string | null): InvoicePresentation {
