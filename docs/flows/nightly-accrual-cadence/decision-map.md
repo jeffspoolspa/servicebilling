@@ -26,12 +26,15 @@ The rules the cadence runs by. Each rule names the DDD concept doing the work.
    transactions report exactly as the July run proved. Phase 2 (the checksum) is what
    moves reconcile earlier.
 
-   **And the referee must have spoken:** zero ION invoices for a customer-month is
-   "nothing to reconcile against yet", never a dispute. Without this, the first
-   period-close tick before ION's invoices are built would mass-dispute every month
-   and burn every repull on an empty report. A month with no ION invoices simply
-   rests un-reconciled (it cannot gate or issue) until the invoices exist — built by
-   the office or by phase 2's automated rebuild.
+   **And reconcile only judges a cache refreshed since the last run** (the report's
+   trust window, 60 min): if the ION invoice-build or report step breaks, a stale
+   cache must not dispute fresh accruals — every new visit would "disagree" with old
+   data. `pulled_at` lives on the report ROWS, so a month ION has no invoices for has
+   none and the same rule covers "the referee has not spoken yet" — the first
+   period-close tick before ION's invoices are built cannot mass-dispute an empty
+   report. Untrusted cache -> the month rests un-reconciled (cannot gate or issue)
+   until a fresh pull exists. A FRESH month-wide report that lacks one customer is a
+   real disagreement and disputes normally.
 
 3. **The checksum reconcile (phase 2).** ION's rebuilt draft invoice total per task is a
    cheap checksum. Diff our accrued total per task against it:

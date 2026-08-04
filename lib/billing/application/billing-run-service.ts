@@ -120,6 +120,14 @@ export class BillingRunService {
     ])
     const categories = new Map([...docMeta.entries()].map(([id, t]) => [id, t.category]))
 
+    // RULED (2026-08-04): reconcile only judges a cache REFRESHED SINCE THE
+    // LAST RUN. If the ION invoice-build/report step breaks, the stale cache
+    // must not dispute fresh accruals — every new visit would "disagree"
+    // with old data. pulled_at lives on the report rows, so an empty month
+    // has none and the same rule covers "ION has not spoken yet".
+    const reportPulledAt = await this.systemInvoices.pulledAt(month)
+    const reportTrusted = !!reportPulledAt && now.getTime() - new Date(reportPulledAt).getTime() < 60 * 60_000
+
     const tally: Record<string, number> = {}
     const bump = (k: string) => (tally[k] = (tally[k] ?? 0) + 1)
     const disputed: string[] = []
@@ -157,12 +165,10 @@ export class BillingRunService {
           continue
         }
         if (step === "reconcile") {
+          // RULED: only judge a cache refreshed since the last run — see
+          // the per-unit handler for the full statement of the rule.
+          if (!reportTrusted) break
           const totals = reportTotals.get(m.customerId) ?? []
-          // The referee must have spoken: zero ION invoices for this
-          // customer-month is "nothing to reconcile against yet", never a
-          // dispute — disputing an empty report would burn the one repull
-          // (and on the first period-close night, ~480 of them at once).
-          if (totals.length === 0) break
           const r = reconcile(m, totals)
           if (r.agrees) m.markReconciled(at)
           else m.markDisputed(r.findings.map((f) => `${f.rule}: ${f.message}`), at)

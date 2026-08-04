@@ -123,15 +123,18 @@ export class AdvanceMonthService {
         // compare fresh arithmetic to yesterday's facts and call it agreement.
         // Coalesced, so this costs one scrape per run, not one per month.
         await this.systemInvoices.refresh(month.month)
-        const totals = await this.systemInvoices.perTaskTotals(month.customerId, month.month)
-        // A month can only reconcile once the REFEREE HAS SPOKEN: zero ION
-        // invoices for this customer-month is not a disagreement, it is
-        // "nothing to reconcile against yet" (ION's invoices are built in
-        // receivables after period close; phase 2 automates the build).
-        // Disputing here would burn the one repull on an empty report.
-        if (totals.length === 0) {
-          return { monthId, from, step, to: from, detail: "nothing to reconcile against yet — ION has no invoices for this month", again: false }
+        // RULED (2026-08-04): reconcile only judges a cache REFRESHED SINCE
+        // THE LAST RUN (the port's trust window). pulled_at lives on the
+        // report ROWS, so a month ION has no invoices for has none — "the
+        // referee has spoken" falls out of the same rule, and the first
+        // period-close night cannot mass-dispute an empty report. A fresh
+        // month-wide report that lacks THIS customer is a real disagreement.
+        const spoke = await this.systemInvoices.pulledAt(month.month)
+        const trusted = !!spoke && now.getTime() - new Date(spoke).getTime() < 60 * 60_000
+        if (!trusted) {
+          return { monthId, from, step, to: from, detail: "report cache not refreshed since the last run — nothing trustworthy to reconcile against", again: false }
         }
+        const totals = await this.systemInvoices.perTaskTotals(month.customerId, month.month)
         const result = reconcile(month, totals)
         if (result.agrees) {
           month.markReconciled(at)
