@@ -710,18 +710,22 @@ check("QC prints at $0; a green-pool task is its OWN invoice, never combined", (
   assert.strictEqual(docs[1].subtotalCents, 8500 + 2620, "the green invoice carries its own labor and chems")
 })
 
-check("invoiceNextStep is the machine's one statement of the sequence", () => {
-  const base = { preprocessedAt: null, linkedPaymentMethodId: null, collectedAt: null, collectOutcome: null, emailStatus: null } as const
+check("invoiceNextStep derives collect — no tag, no stale state", () => {
+  const base = { preprocessedAt: null, hasActiveInstrument: false, mirrorBalanceCents: 0, latestCharge: "none", emailStatus: null } as const
   assert.strictEqual(invoiceNextStep({ ...base }), "credit_check")
-  // Email route: no instrument skips collect entirely.
-  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT }), "send")
-  // Autopay route: instrument linked -> collect before send.
-  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, linkedPaymentMethodId: "pm" }), "collect")
-  // Resolved collections proceed; declined/unknown PARK for a person.
-  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, linkedPaymentMethodId: "pm", collectedAt: AT, collectOutcome: "charged" }), "send")
-  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, linkedPaymentMethodId: "pm", collectedAt: AT, collectOutcome: "nothing_owed" }), "send")
-  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, linkedPaymentMethodId: "pm", collectedAt: AT, collectOutcome: "declined" }), null)
-  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, linkedPaymentMethodId: "pm", collectedAt: AT, collectOutcome: "unknown" }), null)
+  // Email route: no instrument -> collect never happens.
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, mirrorBalanceCents: 5000 }), "send")
+  // Autopay: linked + owed + unattempted -> collect.
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, hasActiveInstrument: true, mirrorBalanceCents: 5000 }), "collect")
+  // Nothing owed (a check arrived; the fresh read updated the mirror) -> move along.
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, hasActiveInstrument: true, mirrorBalanceCents: 0 }), "send")
+  // An in-flight or half-finished ladder RESUMES at its rung...
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, hasActiveInstrument: true, mirrorBalanceCents: 5000, latestCharge: "requested" }), "collect")
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, hasActiveInstrument: true, mirrorBalanceCents: 5000, latestCharge: "settled" }), "collect")
+  // ...a receipted attempt is done -> move along to send.
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, hasActiveInstrument: true, mirrorBalanceCents: 5000, latestCharge: "receipted" }), "send")
+  // A DECLINE parks unsent — the earlier ruling stands.
+  assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, hasActiveInstrument: true, mirrorBalanceCents: 5000, latestCharge: "declined" }), null)
   // Sent = done; paid needs no step (the webhook feeds the closed fold).
   assert.strictEqual(invoiceNextStep({ ...base, preprocessedAt: AT, emailStatus: "EmailSent" }), null)
 })

@@ -18,7 +18,6 @@ export interface CollectDeps {
   /** The instrument preprocess linked — re-resolved to its CURRENT state. */
   linkedInstrument(qboInvoiceId: string): Promise<PaymentInstrument | null>
   charger: InvoiceCharger
-  recordCollect(qboInvoiceId: string, outcome: "charged" | "nothing_owed" | "declined" | "unknown" | "no_instrument", at: string): Promise<void>
   emit(type: string, payload: Record<string, unknown>, participants: string[], at: string): Promise<void>
 }
 
@@ -28,29 +27,28 @@ export type CollectOutcome =
 
 export async function collectInvoice(inv: InvoiceRef, deps: CollectDeps, now: Date): Promise<CollectOutcome> {
   const at = now.toISOString()
+  // No tags anywhere: the outcome IS the charge row (billing.charges) plus
+  // the mirror the fresh balance read updates on its way through — the
+  // next derive sees both and moves along or parks on its own.
   const instrument = await deps.linkedInstrument(inv.qboInvoiceId)
   if (!instrument?.active) {
-    // Disabled since preprocess: the email route is the answer now.
-    await deps.recordCollect(inv.qboInvoiceId, "no_instrument", at)
+    // Disabled since preprocess: the derive sees no linked/active method
+    // next time; the email route is the answer now.
     return { qboInvoiceId: inv.qboInvoiceId, outcome: "no_instrument" }
   }
 
   const r = await deps.charger.chargeInvoice({ qboInvoiceId: inv.qboInvoiceId, customerId: inv.customerId, instrument, at })
   if (r.outcome === "declined") {
-    await deps.recordCollect(inv.qboInvoiceId, "declined", at)
     await deps.emit("charge_declined", { qbo_invoice_id: inv.qboInvoiceId, reason: r.reason }, [inv.linkedTo.id], at)
     return { qboInvoiceId: inv.qboInvoiceId, outcome: "declined", detail: r.reason }
   }
   if (r.outcome === "unknown") {
-    await deps.recordCollect(inv.qboInvoiceId, "unknown", at)
     await deps.emit("charge_uncertain", { qbo_invoice_id: inv.qboInvoiceId, detail: r.detail }, [inv.linkedTo.id], at)
     return { qboInvoiceId: inv.qboInvoiceId, outcome: "unknown", detail: r.detail }
   }
   if (r.outcome === "nothing_owed") {
-    await deps.recordCollect(inv.qboInvoiceId, "nothing_owed", at)
     return { qboInvoiceId: inv.qboInvoiceId, outcome: "nothing_owed" }
   }
-  await deps.recordCollect(inv.qboInvoiceId, "charged", at)
   await deps.emit("charge_captured", { qbo_invoice_id: inv.qboInvoiceId, qbo_payment_id: r.qboPaymentId, amount_cents: r.amountCents }, [inv.linkedTo.id], at)
   return { qboInvoiceId: inv.qboInvoiceId, outcome: "charged", qboPaymentId: r.qboPaymentId, amountCents: r.amountCents }
 }

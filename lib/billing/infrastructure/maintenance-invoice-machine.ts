@@ -116,14 +116,13 @@ export function maintenanceMachineDeps(sys: Db): {
     async applyCredit() {
       throw new Error("decided-credit application is not wired — refusing rather than silently skipping")
     },
-    activeInstrument: (customerId) => activeInstrument(customerId),
-    async linkInstrument(qboInvoiceId, paymentMethodId, at) {
+    async markCreditsChecked(qboInvoiceId: string, at: string) {
       const { data, error } = await monthInvoices()
-        .update({ preprocessed_at: at, linked_payment_method_id: paymentMethodId })
+        .update({ preprocessed_at: at })
         .eq("qbo_invoice_id", qboInvoiceId)
         .select("id")
-      if (error) throw new Error(`instrument link failed: ${JSON.stringify(error).slice(0, 200)}`)
-      if (!data || data.length === 0) throw new Error(`instrument link touched no rows for ${qboInvoiceId}`)
+      if (error) throw new Error(`credits-checked stamp failed: ${JSON.stringify(error).slice(0, 200)}`)
+      if (!data || data.length === 0) throw new Error(`credits-checked stamp touched no rows for ${qboInvoiceId}`)
     },
     emit,
   }
@@ -134,18 +133,36 @@ export function maintenanceMachineDeps(sys: Db): {
         select(c: string): { eq(col: string, v: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> }
       }
       const { data, error } = await q
-        .select("qbo_invoice_id, billing_month_id, subtotal_cents, preprocessed_at, linked_payment_method_id, collected_at, collect_outcome, billing_months(customer_id)")
+        .select("qbo_invoice_id, billing_month_id, subtotal_cents, preprocessed_at, billing_months(customer_id)")
         .eq("qbo_invoice_id", qboInvoiceId)
       if (error) throw new Error(`machine state read failed: ${JSON.stringify(error).slice(0, 200)}`)
       const r = (data ?? [])[0] as {
         qbo_invoice_id: string; billing_month_id: string; subtotal_cents: number
-        preprocessed_at: string | null; linked_payment_method_id: string | null
-        collected_at: string | null; collect_outcome: InvoiceMachineState["collectOutcome"]
+        preprocessed_at: string | null
         billing_months: { customer_id: number } | null
       } | undefined
       if (!r) return null
-      const { data: inv } = await invoicesCache().select("email_status").eq("qbo_invoice_id", qboInvoiceId)
-      const emailStatus = ((inv ?? [])[0] as { email_status: string | null } | undefined)?.email_status ?? null
+
+      // Payment-method resolution is a QUERY, asked live at claim time —
+      // the roster's answer right now, never a stored link to go stale.
+      const instrument = await activeInstrument(r.billing_months?.customer_id ?? 0)
+
+      // DERIVED, never tagged: the mirror's balance (kept warm by every
+      // echo) and the latest charge attempt decide whether collect is owed.
+      const { data: inv } = await invoicesCache().select("email_status, balance").eq("qbo_invoice_id", qboInvoiceId)
+      const cache = (inv ?? [])[0] as { email_status: string | null; balance: number | null } | undefined
+      const chargesQ = sys.schema("billing").from("charges") as {
+        select(c: string): { eq(col: string, v: unknown): { order(col2: string, o: { ascending: boolean }): { limit(n: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } } }
+      }
+      const { data: ch } = await chargesQ.select("status").eq("qbo_invoice_id", qboInvoiceId).order("attempted_at", { ascending: false }).limit(1)
+      const latest = ((ch ?? [])[0] as { status: string } | undefined)?.status
+      const latestCharge: InvoiceMachineState["latestCharge"] =
+        latest === "settled" || latest === "recorded" || latest === "receipted" || latest === "declined" || latest === "requested"
+          ? latest
+          : latest === "captured"
+            ? "settled" // legacy vocabulary from the live machinery
+            : "none"
+
       return {
         ref: {
           qboInvoiceId: r.qbo_invoice_id,
@@ -156,10 +173,10 @@ export function maintenanceMachineDeps(sys: Db): {
         },
         state: {
           preprocessedAt: r.preprocessed_at,
-          linkedPaymentMethodId: r.linked_payment_method_id,
-          collectedAt: r.collected_at,
-          collectOutcome: r.collect_outcome,
-          emailStatus,
+          hasActiveInstrument: instrument !== null,
+          mirrorBalanceCents: Math.round(Number(cache?.balance ?? r.subtotal_cents / 100) * 100),
+          latestCharge,
+          emailStatus: cache?.email_status ?? null,
         },
       }
     },
@@ -167,26 +184,12 @@ export function maintenanceMachineDeps(sys: Db): {
 
   const collect: CollectDeps = {
     async linkedInstrument(qboInvoiceId: string) {
-      const { data, error } = await monthInvoices().select("linked_payment_method_id").eq("qbo_invoice_id", qboInvoiceId)
-      if (error) throw new Error(`linked instrument read failed: ${JSON.stringify(error).slice(0, 200)}`)
-      const id = ((data ?? [])[0] as { linked_payment_method_id: string | null } | undefined)?.linked_payment_method_id
-      if (!id) return null
-      // Re-resolve CURRENT state: a disable since preprocess must win.
-      const methods = sys.schema("billing").from("customer_payment_methods") as {
-        select(c: string): { eq(col: string, v: unknown): PromiseLike<{ data: unknown[] | null; error: unknown }> }
-      }
-      const { data: pm } = await methods.select("id, type, is_active").eq("id", id)
-      const row = (pm ?? [])[0] as { id: string; type?: string; is_active?: boolean } | undefined
-      if (!row?.is_active) return null
-      return { paymentMethodId: row.id, kind: row.type === "ach" ? "ach" : "card", active: true }
-    },
-    async recordCollect(qboInvoiceId: string, outcome, at: string) {
-      const { data, error } = await monthInvoices()
-        .update({ collected_at: at, collect_outcome: outcome })
-        .eq("qbo_invoice_id", qboInvoiceId)
-        .select("id")
-      if (error) throw new Error(`collect record failed: ${JSON.stringify(error).slice(0, 200)}`)
-      if (!data || data.length === 0) throw new Error(`collect record touched no rows for ${qboInvoiceId}`)
+      // The roster's answer, LIVE — resolution is a query, not a stage.
+      const { data, error } = await monthInvoices().select("billing_month_id, billing_months(customer_id)").eq("qbo_invoice_id", qboInvoiceId)
+      if (error) throw new Error(`instrument derive failed: ${JSON.stringify(error).slice(0, 200)}`)
+      const row = (data ?? [])[0] as { billing_months: { customer_id: number } | null } | undefined
+      if (!row?.billing_months) return null
+      return activeInstrument(row.billing_months.customer_id)
     },
     emit,
     charger: new InvoiceCharger({

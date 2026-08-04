@@ -35,14 +35,14 @@ export class AdvanceInvoiceService {
     const step = invoiceNextStep(loaded.state)
 
     if (step === null) {
-      const parked = loaded.state.collectOutcome === "declined" || loaded.state.collectOutcome === "unknown"
-      return { qboInvoiceId, step, detail: parked ? `parked: collection ${loaded.state.collectOutcome} — a person decides` : "machine done", again: false }
+      const parked = loaded.state.latestCharge === "declined"
+      return { qboInvoiceId, step, detail: parked ? "parked: charge declined — a person decides the next cycle" : "machine done", again: false }
     }
 
     let detail = ""
     if (step === "credit_check") {
       const r = await preprocessInvoice(loaded.ref, this.preprocessDeps, now)
-      detail = `route: ${r.route}${r.appliedCredits.length ? ` · ${r.appliedCredits.length} credit(s) applied` : ""}`
+      detail = `credits checked${r.appliedCredits.length ? ` · ${r.appliedCredits.length} applied` : " · none decided"}`
     } else if (step === "collect") {
       const r = await collectInvoice(loaded.ref, this.collectDeps, now)
       detail = r.outcome === "charged" ? `charged ${r.amountCents}` : r.outcome

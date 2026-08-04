@@ -66,12 +66,16 @@ policy adapters; every invoice event carries the parent as a PARTICIPANT. THE MA
 shape at the invoice grain): issueMonth's last act enqueues one AdvanceInvoice(qbo_invoice_id)
 command per created document into billing.invoice_queue (coalesced, SKIP LOCKED claim, 3-strike
 dead-letter — the month queue's RPCs mirrored). The handler (AdvanceInvoiceService) asks
-invoiceNextStep(state) AT CLAIM TIME — the machine's one statement of the sequence, derived from
-state queries (month_invoices.preprocessed_at / linked instrument / collected_at+collect_outcome,
-the mirror's email_status) — and runs exactly ONE stage per claim: credit_check
-(preprocessInvoice) -> collect (collectInvoice — records its OUTCOME so a resolved collection
-never re-asks; declined/unknown PARK for a person; no_instrument falls to the email route) ->
-send (sendInvoiceStep — the send echo flips the mirror, which is what nextStep reads). Tail-chain
+invoiceNextStep(state) AT CLAIM TIME — the machine's one statement of the sequence, and RULED
+(2026-08-04) the machine DERIVES, it does not tag: collect-needed = active-instrument ∧ mirror
+balance > 0 ∧ no charge attempt (billing.charges is the attempt record; the fresh balance read
+inside chargeInvoice updates the MIRROR on its way through, so nothing_owed self-resolves with no
+marker). Payment-method RESOLUTION is a QUERY, not a stage — collect asks the roster LIVE at
+claim time and the method used lands on the charge row; only side-effectful work earns a stage
+and a moment, so preprocessed_at means exactly one thing: CREDITS CHECKED. Stages per claim:
+credit_check (apply decided credits) -> collect (the Charge ladder; a DECLINED attempt PARKS the
+invoice unsent — a person mints the next cycle) -> send (the send echo flips the mirror, which is
+what nextStep reads; query-before-send converges on QBO's own EmailStatus). Tail-chain
 re-enqueues while nextStep says more. The pilot route (/months/[id]/machine) runs the SAME
 handler on the same queue — a finger instead of the cron; /billing/invoice-queue/drain is the
 standing drainer. The month's final state is
