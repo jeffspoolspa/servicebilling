@@ -1,5 +1,5 @@
 import type { BillingMonth } from "@/lib/billing/domain"
-import { documentDocNumber, documentsOf, presentationOf, visitBreakLabel, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
+import { documentDocNumber, documentsOf, monthDocSettings, visitBreakLabel, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
 import { resolveLaborDocuments } from "./labor-resolution"
 import type { QboInvoices, CreatedInvoice } from "@/lib/external/qbo/qbo"
 import type { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
@@ -76,17 +76,35 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
   if (!qboCustomerId) throw new IssueRefused("customer has no QBO id — the gate should have held this month")
   if (ionNumbers.length === 0) throw new IssueRefused("no ION invoice numbers for this month — nothing to consolidate a doc number from")
 
+  // The document settings live ON THE MONTH (RULED): consumables mode and
+  // presentation are month-level value objects the invoices inherit. Tasks
+  // disagreeing is an ION config mistake — REFUSE, with the disagreement
+  // spelled out, so it is fixed before any document exists.
+  const settings = monthDocSettings(
+    taskIds.map((id) => {
+      const t = meta.get(id)
+      return {
+        taskId: id,
+        consumables: t?.consumables ?? "included",
+        ionInvoiceType: t?.ionInvoiceType ?? null,
+        green: t?.category === "green_pool",
+      }
+    }),
+  )
+  if (settings.conflicts.length > 0) {
+    throw new IssueRefused(`billing settings disagree across tasks — fix in ION first: ${settings.conflicts.join("; ")}`)
+  }
   const terms: DocTerms[] = taskIds.map((id) => {
     const t = meta.get(id)
     return {
       taskId: id,
       labor: t?.labor ?? "per_visit",
-      consumables: t?.consumables ?? "included",
+      consumables: t?.category === "green_pool" ? (t?.consumables ?? "included") : settings.consumables,
       qc: t?.category === "quality_control",
       green: t?.category === "green_pool",
     }
   })
-  const presentation = presentationOf([...meta.values()].find((t) => t.ionInvoiceType)?.ionInvoiceType ?? null)
+  const presentation = settings.presentation
   const taskCategory = new Map([...meta.entries()].map(([id, t]) => [id, t.category]))
   const flatTasks = new Set([...meta.entries()].filter(([, t]) => t.labor === "flat_rate").map(([id]) => id))
   // Labor resolves through the SAME ladder the draft preview showed

@@ -30,6 +30,50 @@ import type { BillingMonth } from "./billing-month"
 export type InvoicePresentation = "itemized" | "summary"
 
 /**
+ * The month's DOCUMENT SETTINGS — value objects set ON THE BILLING MONTH
+ * (RULED, Carter 2026-08-04): consumables included/separate and the
+ * presentation are month-level; invoices INHERIT them. Two tasks
+ * disagreeing is almost always an ION config mistake — derive the
+ * majority for display, and report the CONFLICT so it is fixed BEFORE
+ * invoice creation (the issue step refuses on it). Green tasks are
+ * excluded: the green document is its own thing regardless.
+ */
+export interface MonthDocSettings {
+  readonly consumables: "included" | "separate"
+  readonly presentation: InvoicePresentation
+  /** Human-readable disagreements; non-empty = fix in ION before issue. */
+  readonly conflicts: string[]
+}
+
+export function monthDocSettings(
+  tasks: readonly { taskId: string; consumables: "included" | "separate"; ionInvoiceType: string | null; green: boolean }[],
+): MonthDocSettings {
+  const live = tasks.filter((t) => !t.green)
+  const conflicts: string[] = []
+
+  const modes = new Set(live.map((t) => t.consumables))
+  const consumables: "included" | "separate" =
+    modes.size === 1
+      ? [...modes][0]
+      : live.filter((t) => t.consumables === "separate").length >= live.length / 2
+        ? "separate"
+        : "included"
+  if (modes.size > 1) {
+    const minority = live.filter((t) => t.consumables !== consumables).map((t) => t.taskId)
+    conflicts.push(`tasks disagree on consumables (included vs separate) — minority: ${minority.join(", ")}`)
+  }
+
+  const types = [...new Set(live.map((t) => t.ionInvoiceType).filter((x): x is string => !!x))]
+  const presentations = [...new Set(types.map((t) => presentationOf(t)))]
+  const presentation = presentations[0] ?? "itemized"
+  if (presentations.length > 1) {
+    conflicts.push(`tasks disagree on presentation (itemized vs summary): ${types.join(" | ")}`)
+  }
+
+  return { consumables, presentation, conflicts }
+}
+
+/**
  * THE doc-number rule: the month's documents reuse ION's invoice number —
  * the first document takes it whole, siblings suffix their kind's initial
  * ("-C" consumables, "-G" green). A draft projects the SAME numbers the

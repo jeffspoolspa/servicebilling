@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { createSupabaseServer } from "@/lib/supabase/server"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
-import { documentDocNumber, documentsOf, draftInvoice, presentationOf, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
+import { documentDocNumber, documentsOf, draftInvoice, monthDocSettings, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
 import { resolveLaborDocuments } from "@/lib/billing/application/labor-resolution"
 
 /**
@@ -31,17 +31,30 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
   // default; the draft flip is a parameter, never state.
   const taskIds = [...new Set(month.billableItems.map((i) => i.taskId).filter(Boolean))]
   const meta = await repo.taskDocMeta(taskIds)
+  // Month-level settings, inherited by every document; a disagreement
+  // renders (majority wins for display) but is REPORTED — issue refuses it.
+  const settings = monthDocSettings(
+    taskIds.map((id) => {
+      const t = meta.get(id)
+      return {
+        taskId: id,
+        consumables: t?.consumables ?? "included",
+        ionInvoiceType: t?.ionInvoiceType ?? null,
+        green: t?.category === "green_pool",
+      }
+    }),
+  )
   const terms: DocTerms[] = taskIds.map((id) => {
     const t = meta.get(id)
     return {
       taskId: id,
       labor: t?.labor ?? "per_visit",
-      consumables: t?.consumables ?? "included",
+      consumables: t?.category === "green_pool" ? (t?.consumables ?? "included") : settings.consumables,
       qc: t?.category === "quality_control",
       green: t?.category === "green_pool",
     }
   })
-  const defaultPresentation = presentationOf([...meta.values()].find((t) => t.ionInvoiceType)?.ionInvoiceType ?? null)
+  const defaultPresentation = settings.presentation
   const presentation: InvoicePresentation = asked === "summary" || asked === "itemized" ? asked : defaultPresentation
 
   // Resolve every labor line to its REAL QBO SKU — exact name, then the
@@ -87,5 +100,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
     unmappedLabor,
     missingDescriptions: [...new Set(missingDescriptions)],
     ionInvoiceNumbers: ionNumbers,
+    settings: { consumables: settings.consumables, presentation: settings.presentation },
+    settingsConflicts: settings.conflicts,
   })
 }

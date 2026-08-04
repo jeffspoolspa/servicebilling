@@ -78,6 +78,8 @@ interface Draft {
   claimedAtZero: number
   presentation: "itemized" | "summary"
   documents: { kind: string; docNumber?: string | null; lines: DocLine[]; subtotalCents: number }[]
+  settings?: { consumables: "included" | "separate"; presentation: "itemized" | "summary" }
+  settingsConflicts?: string[]
 }
 
 /**
@@ -246,7 +248,11 @@ export function MonthWorkbench({
   const lockedPresentation: "itemized" | "summary" =
     (draft && draft !== "loading" && draft !== "error" ? draft.presentation : null) ??
     ((monthTasks.find((t) => t.ion_invoice_type)?.ion_invoice_type ?? "").toLowerCase().includes("summary") ? "summary" : "itemized")
-  const separateConsumables = monthTasks.some((t) => (t.consumables_mode ?? "").toLowerCase().includes("separate")) || ledgerItems.some((i) => i.bucket === "consumables")
+  const draftSettings = draft && draft !== "loading" && draft !== "error" ? draft.settings : undefined
+  const separateConsumables = draftSettings
+    ? draftSettings.consumables === "separate"
+    : ledgerItems.some((i) => i.bucket === "consumables")
+  const settingsConflicts = (draft && draft !== "loading" && draft !== "error" ? draft.settingsConflicts : undefined) ?? []
 
   // bucket -> doc number: the issued invoice's, else the draft projection's
   const docNumberOf = (bucket: string): { label: string | null; open: (() => void) | null } => {
@@ -330,13 +336,18 @@ export function MonthWorkbench({
               <StatusStepper stages={[...MONTH_STAGES]} current={stepperStage(m.status)} />
 
               {/* what needs a person: held reasons, disputes, findings */}
-              {((m.gate_held_for?.length ?? 0) > 0 || (m.disputes?.length ?? 0) > 0 || m.open_findings > 0) && (
+              {((m.gate_held_for?.length ?? 0) > 0 || (m.disputes?.length ?? 0) > 0 || m.open_findings > 0 || settingsConflicts.length > 0) && (
                 <div className="flex flex-wrap items-center gap-1.5">
                   {(m.gate_held_for ?? []).map((h) => (
                     <Pill key={h} tone="sun">{h}</Pill>
                   ))}
                   {(m.disputes ?? []).map((d, i) => (
                     <span key={i} className="text-[11px] text-coral">{d}</span>
+                  ))}
+                  {settingsConflicts.map((c, i) => (
+                    <span key={`sc${i}`} className="text-[11px] text-coral" title="Fix the task's billing settings in ION — issue refuses while tasks disagree">
+                      {c}
+                    </span>
                   ))}
                   {m.open_findings > 0 && (
                     <Link
@@ -435,6 +446,7 @@ export function MonthWorkbench({
                 <Pill tone={separateConsumables ? "cyan" : "neutral"}>
                   {separateConsumables ? "separate consumables" : "consumables included"}
                 </Pill>
+                {settingsConflicts.length > 0 && <Pill tone="coral">mixed — fix in ION</Pill>}
               </span>
             </CardHeader>
             {ledgerItems.length === 0 ? (
