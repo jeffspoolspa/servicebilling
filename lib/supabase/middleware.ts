@@ -47,6 +47,14 @@ export async function updateSession(request: NextRequest) {
     return response
   }
 
+  // Public card-on-file collection. Callers are customers' browsers on
+  // secure.jeffspoolspa.com (/resolve, gated by CORS + the enumeration limits
+  // baked into search_service_addresses) and the card vault itself (/captured,
+  // gated by a bearer secret in the route). Neither has a session cookie.
+  if (path.startsWith("/api/card-collection/")) {
+    return response
+  }
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
