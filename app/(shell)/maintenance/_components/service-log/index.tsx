@@ -30,6 +30,11 @@ export interface ServiceLogVisit {
   readings: Record<string, string>
   chems: { item: string; qty: number; cents: number; category: string | null }[]
   photos: { guid: string; thumb_url: string; s3_key: string; uploaded_by: string | null }[]
+  /** completed | non_serviceable | voided — derived from the visit facts. */
+  status?: string | null
+  /** The invoice this visit rides on, once the month is issued. */
+  qbo_invoice_id?: string | null
+  invoice_doc_number?: string | null
 }
 
 export interface ServiceLogPeriod {
@@ -110,12 +115,15 @@ export function ServiceLog({
   period,
   className = "",
   highlightDates,
+  onOpenInvoice,
 }: {
   visits: ServiceLogVisit[]
   period: ServiceLogPeriod
   className?: string
   /** Visit dates (YYYY-MM-DD) to tint — e.g. the audit's flagged visits. */
   highlightDates?: string[]
+  /** When provided, a visit's invoice doc renders as a link opening its detail. */
+  onOpenInvoice?: (qboInvoiceId: string) => void
 }) {
   const highlighted = new Set((highlightDates ?? []).map((d) => d.slice(0, 10)))
   const [openVisit, setOpenVisit] = useState<string | null>(null)
@@ -472,6 +480,30 @@ export function ServiceLog({
                     <span className="text-[10px] text-ink-mute">no notes</span>
                   )}
                 </div>
+                {v.status && v.status !== "completed" && (
+                  <span
+                    className={`font-mono text-[9px] uppercase tracking-[0.05em] flex-none ${
+                      v.status === "voided" ? "text-coral" : "text-sun"
+                    }`}
+                  >
+                    {v.status === "non_serviceable" ? "non-serviceable" : v.status}
+                  </span>
+                )}
+                {v.invoice_doc_number &&
+                  (onOpenInvoice && v.qbo_invoice_id ? (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onOpenInvoice(v.qbo_invoice_id!)
+                      }}
+                      className="font-mono text-[10px] text-ink-mute hover:text-cyan underline underline-offset-2 flex-none"
+                      title="Open invoice detail"
+                    >
+                      {v.invoice_doc_number}
+                    </button>
+                  ) : (
+                    <span className="font-mono text-[10px] text-ink-mute flex-none">{v.invoice_doc_number}</span>
+                  ))}
                 {v.photos.length > 0 && (
                   <span className="inline-flex items-center gap-1 font-mono text-[10px] text-ink-mute flex-none">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

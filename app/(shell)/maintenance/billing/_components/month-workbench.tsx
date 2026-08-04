@@ -272,6 +272,7 @@ export function MonthWorkbench({
                 <StatusStepper stages={[...MONTH_STAGES]} current={stepperStage(m.status)} />
                 <ServiceLog
                   visits={visits}
+                  onOpenInvoice={setOpenInvoice}
                   period={{
                     label: monthLabel,
                     start: `${monthLabel}-01`,
