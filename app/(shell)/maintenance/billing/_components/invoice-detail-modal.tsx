@@ -140,7 +140,7 @@ function InvoiceDetailBody({
   )
 
   return (
-    <Dialog open onClose={onClose} title={`Invoice ${inv.doc_number ?? inv.qbo_invoice_id}`} className="max-w-3xl">
+    <Dialog open onClose={onClose} title={`Invoice ${inv.doc_number ?? inv.qbo_invoice_id}`} className="max-w-3xl bg-bg-elev">
       <div className="max-h-[78vh] overflow-y-auto -m-5 p-5 space-y-5">
         {/* the document header */}
         <div className="flex items-start justify-between gap-4">
@@ -163,7 +163,7 @@ function InvoiceDetailBody({
         <div className="rounded border border-line-soft overflow-hidden">
           <button
             onClick={() => setLinesOpen((o) => !o)}
-            className="w-full flex items-center gap-1.5 px-3 py-2 text-left hover:bg-white/[0.02]"
+            className="w-full flex items-center gap-1.5 px-3 py-2 text-left"
           >
             {linesOpen ? <ChevronDown className="w-3.5 h-3.5 text-ink-mute" /> : <ChevronRight className="w-3.5 h-3.5 text-ink-mute" />}
             <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">
@@ -185,14 +185,14 @@ function InvoiceDetailBody({
                 {lines.map((l, i) =>
                   l.line_type === "description" ? (
                     <TableRow key={i} className="hover:bg-transparent">
-                      <TableCell colSpan={5} className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-white/[0.015] py-1.5">
+                      <TableCell colSpan={5} className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-mute py-1.5">
                         {l.description}
                       </TableCell>
                     </TableRow>
                   ) : (
                     <TableRow key={i} className="text-ink-dim">
                       <TableCell className="text-ink whitespace-nowrap">{leafName(l.item_name) || "—"}</TableCell>
-                      <TableCell className="text-ink-mute">{l.description ?? ""}</TableCell>
+                      <TableCell className="text-ink-mute whitespace-normal">{l.description ?? ""}</TableCell>
                       <TableCell className="text-right font-mono num">
                         {l.unit_price != null ? formatCurrency(Number(l.unit_price)) : ""}
                       </TableCell>
@@ -206,7 +206,7 @@ function InvoiceDetailBody({
               </TableBody>
             </Table>
           )}
-          <div className="px-3 py-2 space-y-1 border-t border-line-soft bg-white/[0.01] text-[12px]">
+          <div className="px-3 py-2 space-y-1 border-t border-line-soft text-[12px]">
             <div className="flex justify-between text-ink-dim">
               <span>Subtotal</span>
               <span className="font-mono num">{formatCurrency(Number(inv.subtotal ?? 0))}</span>
