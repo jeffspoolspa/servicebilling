@@ -124,6 +124,14 @@ export class AdvanceMonthService {
         // Coalesced, so this costs one scrape per run, not one per month.
         await this.systemInvoices.refresh(month.month)
         const totals = await this.systemInvoices.perTaskTotals(month.customerId, month.month)
+        // A month can only reconcile once the REFEREE HAS SPOKEN: zero ION
+        // invoices for this customer-month is not a disagreement, it is
+        // "nothing to reconcile against yet" (ION's invoices are built in
+        // receivables after period close; phase 2 automates the build).
+        // Disputing here would burn the one repull on an empty report.
+        if (totals.length === 0) {
+          return { monthId, from, step, to: from, detail: "nothing to reconcile against yet — ION has no invoices for this month", again: false }
+        }
         const result = reconcile(month, totals)
         if (result.agrees) {
           month.markReconciled(at)

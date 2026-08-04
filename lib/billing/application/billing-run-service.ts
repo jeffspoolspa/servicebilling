@@ -158,6 +158,11 @@ export class BillingRunService {
         }
         if (step === "reconcile") {
           const totals = reportTotals.get(m.customerId) ?? []
+          // The referee must have spoken: zero ION invoices for this
+          // customer-month is "nothing to reconcile against yet", never a
+          // dispute — disputing an empty report would burn the one repull
+          // (and on the first period-close night, ~480 of them at once).
+          if (totals.length === 0) break
           const r = reconcile(m, totals)
           if (r.agrees) m.markReconciled(at)
           else m.markDisputed(r.findings.map((f) => `${f.rule}: ${f.message}`), at)
