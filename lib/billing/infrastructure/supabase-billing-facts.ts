@@ -152,7 +152,7 @@ export class SupabaseBillingFacts implements DeliveryFacts, AgreementTermsSource
 
     // The historical terms for those tasks, if any are recorded.
     const day = asOf.slice(0, 10)
-    const historical = new Map<string, { billing_method: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; consumables_mode: string | null }>()
+    const historical = new Map<string, { id?: string; billing_method: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; consumables_mode: string | null }>()
     if (taskRows.length > 0) {
       const { data: ttRows, error: ttErr } = await (this.q("maintenance", "task_terms") as unknown as {
         select(c: string): { in(c2: string, v: unknown[]): { lte(c3: string, v3: string): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } } }
@@ -270,13 +270,13 @@ export class SupabaseBillingFacts implements DeliveryFacts, AgreementTermsSource
     }
 
     const day = asOf.slice(0, 10)
-    const historical = new Map<string, { billing_method: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; consumables_mode: string | null }>()
+    const historical = new Map<string, { id?: string; billing_method: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; consumables_mode: string | null }>()
     for (let off = 0; ; off += 1000) {
       const { data, error } = await (this.q("maintenance", "task_terms") as unknown as {
         select(c: string): { lte(c2: string, v: string): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
-      }).select("task_id, billing_method, price_per_visit_cents, flat_rate_monthly_cents, consumables_mode, valid_from, valid_to").lte("valid_from", day).range(off, off + 999)
+      }).select("id, task_id, billing_method, price_per_visit_cents, flat_rate_monthly_cents, consumables_mode, valid_from, valid_to").lte("valid_from", day).range(off, off + 999)
       if (error) throw new Error(`task_terms page failed: ${JSON.stringify(error).slice(0, 200)}`)
-      const rows = (data ?? []) as { task_id: string; valid_to: string | null; billing_method: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; consumables_mode: string | null }[]
+      const rows = (data ?? []) as { id: string; task_id: string; valid_to: string | null; billing_method: string | null; price_per_visit_cents: number | null; flat_rate_monthly_cents: number | null; consumables_mode: string | null }[]
       for (const r of rows) {
         if (r.valid_to !== null && r.valid_to <= day) continue
         historical.set(r.task_id, r)
@@ -288,12 +288,14 @@ export class SupabaseBillingFacts implements DeliveryFacts, AgreementTermsSource
     const out = new Map<number, PricingTerms[]>()
     for (const t0 of tasks) {
       if (!t0.customer_id) continue
-      const t = { ...t0, ...(historical.get(t0.id) ?? {}) }
+      const hist = historical.get(t0.id)
+      const t = { ...t0, ...(hist ?? {}) }
       if (t.ends_on && t.ends_on < from) continue
       if (t.starts_on && t.starts_on >= to) continue
       const flat = t.billing_method === "flat_rate_monthly"
       const terms: PricingTerms = {
         taskId: t0.id,
+        termsVersionId: hist?.id ?? null,
         labor: flat ? "flat_rate" : "per_visit",
         consumables: t.consumables_mode === "included" || t.consumables_mode === "listed" ? "included" : "separate",
         amountCents: flat ? t.flat_rate_monthly_cents : t.price_per_visit_cents,

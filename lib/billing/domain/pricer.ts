@@ -22,6 +22,9 @@ export class PricingRefused extends Error {}
 /** What the agreement says about money, in the shape pricing needs. */
 export interface PricingTerms {
   readonly taskId: string
+  /** The task_terms VERSION these numbers came from — pricing provenance.
+   *  Null when priced from the task's inline fields. */
+  readonly termsVersionId?: string | null
   readonly labor: "per_visit" | "flat_rate"
   readonly consumables: "included" | "separate"
   /** Per visit when labor is per_visit; per month when flat rate. */
@@ -113,6 +116,7 @@ export function priceMonth(args: {
     for (const v of billableVisits) {
       const charged = chargedVisit.has(v.sourceId)
       items.push({
+        termsVersionId: terms.termsVersionId ?? null,
         sourceKind: "visit",
         sourceId: v.sourceId,
         taskId: v.taskId,
@@ -145,6 +149,7 @@ export function priceMonth(args: {
       // never be satisfied and a real visit sits unbilled and invisible.
       for (const v of billableVisits) {
         items.push({
+        termsVersionId: terms.termsVersionId ?? null,
           sourceKind: "visit",
           sourceId: v.sourceId,
           taskId: v.taskId,
@@ -158,6 +163,7 @@ export function priceMonth(args: {
         })
       }
       items.push({
+        termsVersionId: terms.termsVersionId ?? null,
         sourceKind: "flat",
         sourceId: `${terms.taskId}:${month.slice(0, 7)}`,
         taskId: anchor.taskId,
@@ -196,6 +202,7 @@ export function priceMonth(args: {
         continue
       }
       items.push({
+        termsVersionId: terms.termsVersionId ?? null,
         sourceKind: "usage",
         sourceId: u.sourceId,
         taskId: u.taskId,

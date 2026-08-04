@@ -196,6 +196,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
         qty: i.qty,
         unit_price_cents: i.unitPriceCents,
         amount_cents: i.amountCents,
+        task_terms_id: i.termsVersionId ?? null,
       })),
     ).select("id") as unknown as PromiseLike<{ error: unknown }>)
     if (error) throw new Error(`billable_items write failed: ${JSON.stringify(error).slice(0, 240)}`)

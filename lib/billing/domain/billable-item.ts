@@ -55,6 +55,8 @@ export interface BillableItem {
   readonly unitPriceCents: number
   readonly amountCents: number
   readonly claimedAt: string
+  /** Pricing provenance: the terms VERSION in effect at claim. */
+  readonly termsVersionId?: string | null
 }
 
 /** The one place the key is formed, so the ledger and the index agree. */
