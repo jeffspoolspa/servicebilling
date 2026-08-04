@@ -1,4 +1,4 @@
-import { CreditCard, Landmark } from "lucide-react"
+import { CreditCard, Landmark, Mail } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 
 /**
@@ -16,7 +16,15 @@ export interface PaymentMethodRef {
 }
 
 export function PaymentMethodBadge({ method, className }: { method: PaymentMethodRef | null | undefined; className?: string }) {
-  if (!method?.last_four) return <span className={cn("text-ink-mute", className)}>—</span>
+  // No instrument = the EMAIL route (the gate guarantees every issued
+  // invoice has one or the other).
+  if (!method?.last_four) {
+    return (
+      <span className={cn("inline-flex items-center", className)} title="email route">
+        <Mail className="w-3 h-3 text-ink-mute" />
+      </span>
+    )
+  }
   const isBank = method.method_type === "ach" || method.method_type === "bank"
   const Icon = isBank ? Landmark : CreditCard
   const brand = method.card_brand?.trim() || (isBank ? "ACH" : "CARD")
