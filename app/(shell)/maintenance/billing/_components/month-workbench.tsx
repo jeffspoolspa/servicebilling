@@ -190,6 +190,7 @@ export function MonthWorkbench({
   const monthLabel = m.month.slice(0, 7)
   const [openInvoice, setOpenInvoice] = useState<string | null>(null)
   const [ledgerTab, setLedgerTab] = useState<"items" | "tasks" | "visits">("items")
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const [draft, setDraft] = useState<Draft | "loading" | "error" | null>(null)
   const [presentation, setPresentation] = useState<"itemized" | "summary" | null>(null)
   const [acting, setActing] = useState<string | null>(null)
@@ -271,17 +272,18 @@ export function MonthWorkbench({
   // itemized keeps per-date rows — the SAME logic the documents follow.
   const groupItems = (
     items: LedgerItem[],
-  ): { name: string; qty: number; rate: number; amount: number; date: string | null; visits: number; invoice: string | null }[] => {
+  ): { name: string; qty: number; rate: number; amount: number; date: string | null; visits: number; invoice: string | null; members: LedgerItem[] }[] => {
     if (lockedPresentation === "summary") {
-      const g = new Map<string, { name: string; qty: number; rate: number; amount: number; date: null; visitSet: Set<string>; invoice: string | null }>()
+      const g = new Map<string, { name: string; qty: number; rate: number; amount: number; date: null; visitSet: Set<string>; invoice: string | null; members: LedgerItem[] }>()
       for (const it of items) {
         // the group key includes the item's OWN invoice — items on different
         // documents never merge, so the linkage stays exact under grouping
         const key = `${it.item_name}|${it.unit_price_cents}|${it.qbo_invoice_id ?? "draft"}`
-        const row = g.get(key) ?? { name: it.item_name ?? "—", qty: 0, rate: it.unit_price_cents / 100, amount: 0, date: null, visitSet: new Set<string>(), invoice: it.qbo_invoice_id }
+        const row = g.get(key) ?? { name: it.item_name ?? "—", qty: 0, rate: it.unit_price_cents / 100, amount: 0, date: null, visitSet: new Set<string>(), invoice: it.qbo_invoice_id, members: [] }
         row.qty += it.kind === "labor" ? 1 : Number(it.qty)
         row.amount += it.amount_cents / 100
         if (it.visit_id) row.visitSet.add(it.visit_id)
+        row.members.push(it)
         g.set(key, row)
       }
       return [...g.values()]
@@ -296,6 +298,7 @@ export function MonthWorkbench({
       date: it.service_date,
       visits: it.visit_id ? 1 : 0,
       invoice: it.qbo_invoice_id,
+      members: [it],
     }))
   }
   const laborItems = ledgerItems.filter((i) => i.kind === "labor" && i.amount_cents !== 0)
@@ -490,28 +493,71 @@ export function MonthWorkbench({
                     </div>
                     {rows.map((r, i) => {
                       const invDoc = r.invoice ? invoices.find((iv) => iv.qbo_invoice_id === r.invoice) : null
+                      const groupKey = `${key}|${r.name}|${r.rate}|${r.invoice ?? "draft"}`
+                      const expandable = r.members.length > 1
+                      const open = openGroups.has(groupKey)
                       return (
-                        <div key={i} className="flex items-center gap-2.5 border-t border-line-soft/50 px-5 py-1">
-                          <span className="text-[11.5px] text-ink flex-1 min-w-0 truncate">{r.name}</span>
-                          <span className="font-mono text-[9.5px] text-ink-mute flex-none w-[64px]">
-                            {r.date ?? `${r.visits} visit${r.visits === 1 ? "" : "s"}`}
-                          </span>
-                          <span className="font-mono text-[10px] text-ink-mute flex-none">
-                            {r.qty} × {formatCurrency(r.rate)}
-                          </span>
-                          <span className="w-[70px] flex-none text-right">
-                            {r.invoice ? (
-                              <button
-                                onClick={() => setOpenInvoice(r.invoice!)}
-                                className="font-mono text-[9.5px] text-ink-mute hover:text-cyan underline underline-offset-2"
-                              >
-                                {invDoc?.doc_number ?? r.invoice}
-                              </button>
-                            ) : (
-                              <span className="font-mono text-[9.5px] text-ink-mute/50">{doc.label ?? "—"}</span>
-                            )}
-                          </span>
-                          <span className="font-mono num text-[11.5px] text-ink w-[70px] text-right flex-none">{formatCurrency(r.amount)}</span>
+                        <div key={i} className="border-t border-line-soft/50">
+                          <div
+                            onClick={() => {
+                              if (!expandable) return
+                              const next = new Set(openGroups)
+                              if (open) next.delete(groupKey)
+                              else next.add(groupKey)
+                              setOpenGroups(next)
+                            }}
+                            className={cn("flex items-center gap-2.5 px-5 py-1", expandable && "cursor-pointer hover:bg-white/[0.02]")}
+                          >
+                            <span className="w-[10px] flex-none font-mono text-[9px] text-ink-mute">
+                              {expandable ? (open ? "▾" : "▸") : ""}
+                            </span>
+                            <span className="text-[11.5px] text-ink flex-1 min-w-0 truncate">{r.name}</span>
+                            <span className="font-mono text-[9.5px] text-ink-mute flex-none w-[64px]">
+                              {r.date ?? `${r.visits} visit${r.visits === 1 ? "" : "s"}`}
+                            </span>
+                            <span className="font-mono text-[10px] text-ink-mute flex-none">
+                              {r.qty} × {formatCurrency(r.rate)}
+                            </span>
+                            <span className="w-[70px] flex-none text-right">
+                              {r.invoice ? (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setOpenInvoice(r.invoice!)
+                                  }}
+                                  className="font-mono text-[9.5px] text-ink-mute hover:text-cyan underline underline-offset-2"
+                                >
+                                  {invDoc?.doc_number ?? r.invoice}
+                                </button>
+                              ) : (
+                                <span className="font-mono text-[9.5px] text-ink-mute/50">{doc.label ?? "—"}</span>
+                              )}
+                            </span>
+                            <span className="font-mono num text-[11.5px] text-ink w-[70px] text-right flex-none">{formatCurrency(r.amount)}</span>
+                          </div>
+                          {open &&
+                            r.members
+                              .slice()
+                              .sort((a, b) => String(a.service_date).localeCompare(String(b.service_date)))
+                              .map((mIt, mi) => (
+                                <div key={mi} className="flex items-center gap-2.5 pl-10 pr-5 py-[3px] bg-white/[0.012]">
+                                  <button
+                                    onClick={() => setLedgerTab("visits")}
+                                    className="font-mono text-[9.5px] text-ink-dim hover:text-cyan underline underline-offset-2 flex-none"
+                                    title="Open the visit log"
+                                  >
+                                    {mIt.service_date
+                                      ? new Date(mIt.service_date + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })
+                                      : "no visit"}
+                                  </button>
+                                  <span className="font-mono text-[9px] text-ink-mute flex-none">
+                                    {Number(mIt.qty)} × {formatCurrency(mIt.unit_price_cents / 100)}
+                                  </span>
+                                  <span className="ml-auto font-mono num text-[10.5px] text-ink-dim flex-none">
+                                    {formatCurrency(mIt.amount_cents / 100)}
+                                  </span>
+                                </div>
+                              ))}
                         </div>
                       )
                     })}
