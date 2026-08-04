@@ -1,7 +1,10 @@
 "use client"
 
+import { useState } from "react"
+import { ChevronDown, ChevronRight } from "lucide-react"
 import { Dialog } from "@/components/ui/dialog"
 import { Pill } from "@/components/ui/pill"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { HistoryTimeline, type HistoryRow } from "@/components/ui/history-timeline"
 import { formatCurrency } from "@/lib/utils/format"
 import { cn } from "@/lib/utils/cn"
@@ -108,9 +111,26 @@ export function InvoiceDetailModal({
   onClose: () => void
 }) {
   if (!invoice) return null
-  const inv = invoice
+  return <InvoiceDetailBody inv={invoice} payments={payments} history={history} onClose={onClose} />
+}
+
+function InvoiceDetailBody({
+  inv,
+  payments,
+  history,
+  onClose,
+}: {
+  inv: InvoiceDetail
+  payments: AppliedPayment[]
+  history: InvoiceEvent[]
+  onClose: () => void
+}) {
   const paid = (inv.balance ?? 1) <= 0
   const taxCents = Math.round((Number(inv.total_amt ?? 0) - Number(inv.subtotal ?? 0)) * 100)
+  const lines = (inv.line_items ?? []).filter((l) => l.line_type !== "subtotal")
+  // Long itemized documents fold closed; short ones open. The totals
+  // ladder below always shows.
+  const [linesOpen, setLinesOpen] = useState(lines.length <= 12)
 
   const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div>
@@ -141,28 +161,51 @@ export function InvoiceDetailModal({
 
         {/* the formatted document — our cache copy, as the customer reads it */}
         <div className="rounded border border-line-soft overflow-hidden">
-          {(inv.line_items ?? [])
-            .filter((l) => l.line_type !== "subtotal")
-            .map((l, i) =>
-              l.line_type === "description" ? (
-                <div key={i} className="px-3 pt-2 pb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-white/[0.015]">
-                  {l.description}
-                </div>
-              ) : (
-                <div key={i} className="flex items-center gap-2.5 border-b border-line-soft/60 last:border-b-0 px-3 py-1.5">
-                  <div className="flex-1 min-w-0">
-                    <span className="text-[12px] text-ink">{leafName(l.item_name) || "—"}</span>
-                    <span className="ml-2 font-mono text-[10px] text-ink-mute">
-                      {l.qty != null ? `${l.qty} × ${l.unit_price != null ? formatCurrency(Number(l.unit_price)) : "—"}` : ""}
-                    </span>
-                    {l.description && <div className="text-[10.5px] text-ink-dim">{l.description}</div>}
-                  </div>
-                  <span className="font-mono num text-[12px] text-ink flex-none">
-                    {l.amount != null ? formatCurrency(Number(l.amount)) : ""}
-                  </span>
-                </div>
-              ),
-            )}
+          <button
+            onClick={() => setLinesOpen((o) => !o)}
+            className="w-full flex items-center gap-1.5 px-3 py-2 text-left hover:bg-white/[0.02]"
+          >
+            {linesOpen ? <ChevronDown className="w-3.5 h-3.5 text-ink-mute" /> : <ChevronRight className="w-3.5 h-3.5 text-ink-mute" />}
+            <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute">
+              Lines · {lines.filter((l) => l.line_type !== "description").length}
+            </span>
+          </button>
+          {linesOpen && (
+            <Table className="text-[11.5px]">
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Product</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="text-right">Rate</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {lines.map((l, i) =>
+                  l.line_type === "description" ? (
+                    <TableRow key={i} className="hover:bg-transparent">
+                      <TableCell colSpan={5} className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-mute bg-white/[0.015] py-1.5">
+                        {l.description}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    <TableRow key={i} className="text-ink-dim">
+                      <TableCell className="text-ink whitespace-nowrap">{leafName(l.item_name) || "—"}</TableCell>
+                      <TableCell className="text-ink-mute">{l.description ?? ""}</TableCell>
+                      <TableCell className="text-right font-mono num">
+                        {l.unit_price != null ? formatCurrency(Number(l.unit_price)) : ""}
+                      </TableCell>
+                      <TableCell className="text-right font-mono num">{l.qty ?? ""}</TableCell>
+                      <TableCell className="text-right font-mono num text-ink">
+                        {l.amount != null ? formatCurrency(Number(l.amount)) : ""}
+                      </TableCell>
+                    </TableRow>
+                  ),
+                )}
+              </TableBody>
+            </Table>
+          )}
           <div className="px-3 py-2 space-y-1 border-t border-line-soft bg-white/[0.01] text-[12px]">
             <div className="flex justify-between text-ink-dim">
               <span>Subtotal</span>
@@ -178,35 +221,21 @@ export function InvoiceDetailModal({
               <span>Total</span>
               <span className="font-mono num">{formatCurrency(Number(inv.total_amt ?? 0))}</span>
             </div>
+            {/* applied payments bridge the total to the balance */}
+            {payments.map((p) => (
+              <div key={p.qbo_payment_id} className="flex items-center gap-2 text-ink-dim" title={p.memo ?? undefined}>
+                <span>
+                  Payment #{p.qbo_payment_id}
+                  <span className="text-ink-mute"> · {p.txn_date ?? ""}{p.payment_method_name ? ` · ${p.payment_method_name}` : ""}</span>
+                </span>
+                <span className="ml-auto font-mono num text-grass">−{formatCurrency(Number(p.applied_amount ?? 0))}</span>
+              </div>
+            ))}
             <div className={cn("flex justify-between font-medium", paid ? "text-grass" : "text-sun")}>
               <span>Balance</span>
               <span className="font-mono num">{formatCurrency(Number(inv.balance ?? 0))}</span>
             </div>
           </div>
-        </div>
-
-        {/* payments applied — QBO's own linkage, from the payment mirror */}
-        <div>
-          <div className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-mute mb-1.5">Payments applied</div>
-          {payments.length === 0 ? (
-            <div className="text-[12px] text-ink-mute">No payments applied.</div>
-          ) : (
-            <div className="rounded border border-line-soft overflow-hidden">
-              {payments.map((p) => (
-                <div key={p.qbo_payment_id} className="border-b border-line-soft/60 last:border-b-0 px-3 py-1.5">
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-[12px] text-ink">Payment #{p.qbo_payment_id}</span>
-                    <span className="font-mono text-[10px] text-ink-mute">{p.txn_date ?? ""}</span>
-                    {p.payment_method_name && <span className="text-[10.5px] text-ink-dim">{p.payment_method_name}</span>}
-                    <span className="ml-auto font-mono num text-[12px] text-grass">
-                      {formatCurrency(Number(p.applied_amount ?? 0))}
-                    </span>
-                  </div>
-                  {p.memo && <div className="text-[10.5px] text-ink-dim mt-0.5 truncate">{p.memo}</div>}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         <HistoryTimeline rows={invoiceHistoryRows(history)} title="History" emptyText="No events — this invoice predates the machine." />
