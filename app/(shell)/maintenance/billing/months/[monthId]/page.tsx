@@ -28,9 +28,11 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
   const { data: custRow } = await sb.from("Customers").select("qbo_customer_id").eq("id", m.customer_id).limit(1)
   const qboCustomerId = ((custRow ?? [])[0] as { qbo_customer_id: string | null } | undefined)?.qbo_customer_id ?? null
   const customerCard = await getCustomerCard(qboCustomerId)
-  const [visitsRes, historyRes, ...perInvoice] = await Promise.all([
+  const [visitsRes, historyRes, itemsRes, tasksRes, ...perInvoice] = await Promise.all([
     sb.rpc("maint_billing_review_visits", { p_customer_id: m.customer_id, p_month: monthDate }),
     sb.rpc("billing_month_history", { p_month_id: m.id }),
+    sb.rpc("maint_billing_month_items", { p_month_id: m.id }),
+    sb.rpc("maint_billing_month_tasks", { p_customer_id: m.customer_id, p_month: monthDate }),
     ...issued.flatMap((inv) => [
       sb.rpc("maint_billing_invoice_detail", { p_qbo_invoice_id: inv.qbo_invoice_id }),
       sb.rpc("maint_billing_invoice_payments", { p_qbo_invoice_id: inv.qbo_invoice_id }),
@@ -43,6 +45,8 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
   const invoicePayments: Record<string, unknown[]> = {}
   const invoiceHistory: Record<string, unknown[]> = {}
   const invoiceMethods: Record<string, unknown> = {}
+  const ledgerItems = (itemsRes.data ?? []) as never[]
+  const monthTasks = (tasksRes.data ?? []) as never[]
   issued.forEach((inv, i) => {
     const detail = ((perInvoice[i * 4].data ?? []) as InvoiceDetail[])[0]
     if (detail) invoices.push(detail)
@@ -67,6 +71,8 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
         invoicePayments={invoicePayments as never}
         invoiceHistory={invoiceHistory as never}
         invoiceMethods={invoiceMethods as never}
+        ledgerItems={ledgerItems as never}
+        monthTasks={monthTasks as never}
       />
     </div>
   )

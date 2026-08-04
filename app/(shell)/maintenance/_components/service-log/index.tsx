@@ -268,7 +268,7 @@ export function ServiceLog({
       {/* header: title + period + body tabs | stats */}
       <div className="flex flex-wrap items-center justify-between px-4 py-2.5 border-b border-line-soft flex-none gap-x-3 gap-y-1">
         <div className="flex items-center gap-2 flex-none">
-          <span className="font-display text-[15px]">Service log</span>
+          <span className="font-display text-[15px]">Visits</span>
           <span className="flex items-center gap-0.5 font-mono text-[11px] text-ink-dim">
             {period.onChange && (
               <button
@@ -436,7 +436,6 @@ export function ServiceLog({
             </div>
             <span className="flex-1 min-w-0 pl-4">Notes</span>
             <span className="w-[64px] text-right flex-none">Total</span>
-            <span className="w-[70px] text-right flex-none">Invoice</span>
           </div>
         )}
         {shownVisits.map((v) => {
@@ -505,26 +504,6 @@ export function ServiceLog({
                   title={totalCents > 0 ? `labor ${formatCurrency(Number(v.labor_cents ?? 0) / 100)} + chems ${formatCurrency(chemCents / 100)}` : undefined}
                 >
                   {totalCents > 0 ? formatCurrency(totalCents / 100) : "—"}
-                </span>
-                <span className="w-[70px] text-right flex-none">
-                  {v.invoice_doc_number ? (
-                    onOpenInvoice && v.qbo_invoice_id ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onOpenInvoice(v.qbo_invoice_id!)
-                        }}
-                        className="font-mono text-[10px] text-ink-mute hover:text-cyan underline underline-offset-2"
-                        title="Open invoice detail"
-                      >
-                        {v.invoice_doc_number}
-                      </button>
-                    ) : (
-                      <span className="font-mono text-[10px] text-ink-mute">{v.invoice_doc_number}</span>
-                    )
-                  ) : (
-                    <span className="font-mono text-[10px] text-ink-mute/40">—</span>
-                  )}
                 </span>
               </div>
               {open && (

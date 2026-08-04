@@ -46,6 +46,28 @@ export interface HistoryEvent {
 
 export type { InvoiceDetail }
 
+export interface LedgerItem {
+  kind: "labor" | "consumable" | string
+  bucket: "service" | "consumables" | "green" | string
+  item_name: string | null
+  qty: number
+  unit_price_cents: number
+  amount_cents: number
+  service_date: string | null
+}
+
+export interface MonthTask {
+  task_id: string
+  service_name: string | null
+  category: string | null
+  billing_method: string | null
+  price_per_visit_cents: number | null
+  flat_rate_monthly_cents: number | null
+  consumables_mode: string | null
+  ion_invoice_type: string | null
+  visit_count: number
+}
+
 type DocLine =
   | { kind: "visit_break"; serviceDate: string }
   | { kind: "labor" | "consumable" | "variance"; itemName: string; qty: number; unitPriceCents: number; amountCents: number; serviceDate: string | null; detail: string | null; description?: string | null }
@@ -147,6 +169,8 @@ export function MonthWorkbench({
   invoicePayments,
   invoiceHistory,
   invoiceMethods,
+  ledgerItems,
+  monthTasks,
 }: {
   m: MonthOverviewRow
   visits: ServiceLogVisit[]
@@ -155,6 +179,8 @@ export function MonthWorkbench({
   invoicePayments: Record<string, AppliedPayment[]>
   invoiceHistory: Record<string, InvoiceEvent[]>
   invoiceMethods: Record<string, PaymentMethodRef | null>
+  ledgerItems: LedgerItem[]
+  monthTasks: MonthTask[]
 }) {
   const router = useRouter()
   const monthLabel = m.month.slice(0, 7)
@@ -210,6 +236,46 @@ export function MonthWorkbench({
       <div className="text-[13px] text-ink mt-0.5">{children}</div>
     </div>
   )
+
+  // The LOCKED document-shaping settings, read from the agreements: the
+  // presentation (ION invoice type) and whether consumables split to their
+  // own document. Changing them means changing the task in ION — every
+  // draft regenerates on next read by construction.
+  const lockedPresentation: "itemized" | "summary" =
+    (draft && draft !== "loading" && draft !== "error" ? draft.presentation : null) ??
+    ((monthTasks.find((t) => t.ion_invoice_type)?.ion_invoice_type ?? "").toLowerCase().includes("summary") ? "summary" : "itemized")
+  const separateConsumables = monthTasks.some((t) => (t.consumables_mode ?? "").toLowerCase().includes("separate")) || ledgerItems.some((i) => i.bucket === "consumables")
+
+  // bucket -> doc number: the issued invoice's, else the draft projection's
+  const docNumberOf = (bucket: string): { label: string | null; open: (() => void) | null } => {
+    const kindOf = (k: string) => (bucket === "service" ? k === "service" : bucket === k)
+    const issuedRow = (m.issued_invoices ?? []).find((r) => kindOf(r.kind))
+    if (issuedRow) return { label: issuedRow.doc_number, open: () => setOpenInvoice(issuedRow.qbo_invoice_id) }
+    if (draft && draft !== "loading" && draft !== "error") {
+      const d = draft.documents.find((dd) => kindOf(dd.kind))
+      if (d?.docNumber) return { label: `${d.docNumber} · draft`, open: () => setOpenInvoice(`draft:${d.kind}`) }
+    }
+    return { label: null, open: null }
+  }
+
+  // the ledger, grouped for display: summary collapses identical item+rate;
+  // itemized keeps per-date rows — the SAME logic the documents follow.
+  const groupItems = (items: LedgerItem[]): { name: string; qty: number; rate: number; amount: number; date: string | null }[] => {
+    if (lockedPresentation === "summary") {
+      const g = new Map<string, { name: string; qty: number; rate: number; amount: number; date: null }>()
+      for (const it of items) {
+        const key = `${it.item_name}|${it.unit_price_cents}`
+        const row = g.get(key) ?? { name: it.item_name ?? "—", qty: 0, rate: it.unit_price_cents / 100, amount: 0, date: null }
+        row.qty += it.kind === "labor" ? 1 : Number(it.qty)
+        row.amount += it.amount_cents / 100
+        g.set(key, row)
+      }
+      return [...g.values()].sort((a, b) => b.amount - a.amount)
+    }
+    return items.map((it) => ({ name: it.item_name ?? "—", qty: Number(it.qty), rate: it.unit_price_cents / 100, amount: it.amount_cents / 100, date: it.service_date }))
+  }
+  const laborItems = ledgerItems.filter((i) => i.kind === "labor" && i.amount_cents !== 0)
+  const chemItems = ledgerItems.filter((i) => i.kind === "consumable")
 
   const actionBtn = "h-8 px-3 rounded-lg border border-line bg-bg-elev text-ink-dim text-[12px] font-medium hover:border-cyan hover:text-cyan disabled:opacity-50"
   const primaryBtn = "h-8 px-3.5 rounded-lg bg-gradient-to-b from-cyan to-cyan-deep text-bg text-[12px] font-semibold hover:brightness-110 disabled:opacity-50"
@@ -288,10 +354,117 @@ export function MonthWorkbench({
             </CardBody>
           </Card>
 
+          {/* TASKS with logs this month — the agreements shaping the documents */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Tasks</CardTitle>
+            </CardHeader>
+            {monthTasks.length === 0 ? (
+              <CardBody><span className="text-[12.5px] text-ink-mute">No tasks logged visits this month.</span></CardBody>
+            ) : (
+              <Table className="text-[11.5px]">
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Task</TableHead>
+                    <TableHead>Terms</TableHead>
+                    <TableHead>Consumables</TableHead>
+                    <TableHead>Presentation</TableHead>
+                    <TableHead className="text-right">Visits</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {monthTasks.map((t) => (
+                    <TableRow key={t.task_id} className="text-ink-dim">
+                      <TableCell className="text-ink">
+                        {t.service_name ?? "—"}
+                        {t.category && t.category !== "recurring" && (
+                          <span className="ml-1.5 font-mono text-[9.5px] text-ink-mute">{t.category.replace(/_/g, " ")}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="font-mono text-[10.5px]">
+                        {t.billing_method === "flat_rate"
+                          ? `flat ${formatCurrency(Number(t.flat_rate_monthly_cents ?? 0) / 100)}/mo`
+                          : t.price_per_visit_cents != null
+                            ? `${formatCurrency(Number(t.price_per_visit_cents) / 100)}/visit`
+                            : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Pill tone={(t.consumables_mode ?? "").toLowerCase().includes("separate") ? "cyan" : "neutral"}>
+                          {(t.consumables_mode ?? "").toLowerCase().includes("separate") ? "separate" : "included"}
+                        </Pill>
+                      </TableCell>
+                      <TableCell className="text-[10.5px] text-ink-mute">{t.ion_invoice_type ?? "—"}</TableCell>
+                      <TableCell className="text-right font-mono num">{t.visit_count}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </Card>
+
+          {/* the LEDGER: billable items split by document bucket, with the
+              LOCKED shaping settings and each bucket's invoice number */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Billable items</CardTitle>
+              <span
+                className="ml-auto flex items-center gap-1.5"
+                title="From the task agreement in ION — locked. Changing it regenerates any draft invoices on next read."
+              >
+                <span className="flex border border-line rounded-lg overflow-hidden opacity-70">
+                  <span className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] ${lockedPresentation === "itemized" ? "bg-cyan text-bg" : "text-ink-dim"}`}>Itemized</span>
+                  <span className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] border-l border-line ${lockedPresentation === "summary" ? "bg-cyan text-bg" : "text-ink-dim"}`}>Summary</span>
+                </span>
+                <Pill tone={separateConsumables ? "cyan" : "neutral"}>
+                  {separateConsumables ? "separate consumables" : "consumables included"}
+                </Pill>
+              </span>
+            </CardHeader>
+            {ledgerItems.length === 0 ? (
+              <CardBody><span className="text-[12.5px] text-ink-mute">Nothing claimed yet.</span></CardBody>
+            ) : (
+              [
+                { key: "labor", label: "Labor", items: laborItems },
+                { key: "chems", label: "Consumables", items: chemItems },
+              ].map(({ key, label, items }) => {
+                if (items.length === 0) return null
+                const bucket = key === "chems" && separateConsumables ? "consumables" : items.some((i) => i.bucket === "green") ? "green" : "service"
+                const doc = docNumberOf(bucket)
+                const rows = groupItems(items)
+                const subtotal = items.reduce((s2, i) => s2 + i.amount_cents, 0)
+                return (
+                  <div key={key} className="border-t border-line-soft first:border-t-0">
+                    <div className="flex items-center gap-2 px-5 py-1.5">
+                      <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-mute">{label}</span>
+                      {doc.label &&
+                        (doc.open ? (
+                          <button onClick={doc.open} className="font-mono text-[10px] text-ink-mute hover:text-cyan underline underline-offset-2">
+                            {doc.label}
+                          </button>
+                        ) : (
+                          <span className="font-mono text-[10px] text-ink-mute">{doc.label}</span>
+                        ))}
+                      <span className="ml-auto font-mono num text-[11px] text-ink-dim">{formatCurrency(subtotal / 100)}</span>
+                    </div>
+                    {rows.map((r, i) => (
+                      <div key={i} className="flex items-center gap-2.5 border-t border-line-soft/50 px-5 py-1">
+                        <span className="text-[11.5px] text-ink flex-1 min-w-0 truncate">{r.name}</span>
+                        {r.date && <span className="font-mono text-[9.5px] text-ink-mute flex-none">{r.date}</span>}
+                        <span className="font-mono text-[10px] text-ink-mute flex-none">
+                          {r.qty} × {formatCurrency(r.rate)}
+                        </span>
+                        <span className="font-mono num text-[11.5px] text-ink w-[70px] text-right flex-none">{formatCurrency(r.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })
+            )}
+          </Card>
+
           {/* the LOGS card — its own component, full width */}
           <ServiceLog
             visits={visits}
-            onOpenInvoice={setOpenInvoice}
             period={{
               label: monthLabel,
               start: `${monthLabel}-01`,
