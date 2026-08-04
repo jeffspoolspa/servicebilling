@@ -106,7 +106,7 @@ export class SupabaseMonthGateFacts {
 
     const findingsOf = new Map<number, { rule: string; message: string }[]>()
     for (const r of findings) {
-      if (r.severity !== "blocking" && r.severity !== "high") continue
+      if (!findingBlocks(r.rule, r.severity)) continue
       const cid = monthOfId.get(r.billing_month_id)
       if (!cid) continue
       findingsOf.set(cid, [...(findingsOf.get(cid) ?? []), { rule: r.rule, message: r.message ?? "" }])
@@ -130,4 +130,18 @@ export class SupabaseMonthGateFacts {
     }
     return out
   }
+}
+
+/**
+ * THE ONE INVOICE FLAG (RULED, Carter 2026-08-03): an OPEN cpv_outlier —
+ * the audit's chem-per-visit judgement against the PEER GROUP — is the
+ * only finding that holds a month at the gate, until a person dispositions
+ * it. Everything else the old rule table named is covered structurally:
+ * pricing/config/quantity errors cannot pass RECONCILE (our totals must
+ * equal ION's own report), and the legacy bill-review rules were folded
+ * into the peer groups themselves (customer-provides-chems IS a peer
+ * group, not a rule).
+ */
+export function findingBlocks(rule: string, _severity: string | null): boolean {
+  return rule === "cpv_outlier"
 }

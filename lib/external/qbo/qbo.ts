@@ -258,7 +258,18 @@ export class QboInvoices extends Qbo {
               SalesItemLineDetail: {
                 ItemRef: { value: l.qboItemId },
                 Qty: l.qty,
-                UnitPrice: l.unitPriceCents / 100,
+                // The class rides EVERY line, not just the txn header — QBO
+                // ignores the header ClassRef when the company tracks class
+                // per row, and this method is the ONE place documents are
+                // written, so the rule lives here for every caller.
+                ...(inv.classId ? { ClassRef: { value: inv.classId } } : {}),
+                // Half-quantity lines round per line; the collapsed sum is
+                // the LEDGER's truth (what reconciled against ION), so when
+                // qty x unit no longer equals it, omit the rate and let QBO
+                // derive it — never ship a 6070, never bend the amount.
+                ...(Math.round(l.qty * l.unitPriceCents) === l.amountCents
+                  ? { UnitPrice: l.unitPriceCents / 100 }
+                  : {}),
               },
             },
       ),
@@ -362,6 +373,19 @@ export class QboInvoices extends Qbo {
    * mirror rides it: balance 0, raw updated, so the fold and the UI see
    * the void immediately; the webhook remains convergence.
    */
+  /**
+   * HARD delete — frees the DocNumber so a later issue can mint the same
+   * number fresh (a VOIDED invoice still matches the idempotent
+   * create-finder; deletion is the only true retraction). Refuses if the
+   * invoice has linked payments or was emailed — those are not retractable.
+   */
+  async deleteInvoice(qboInvoiceId: string): Promise<void> {
+    const cur = await this.request<{ Invoice: QboInvoiceEntity & { SyncToken: string; EmailStatus?: string; LinkedTxn?: { TxnType: string }[] } }>("GET", `/invoice/${qboInvoiceId}`)
+    if (cur.Invoice.EmailStatus === "EmailSent") throw new Error(`invoice ${qboInvoiceId} was emailed — void, don't delete`)
+    if ((cur.Invoice.LinkedTxn ?? []).some((t) => t.TxnType === "Payment")) throw new Error(`invoice ${qboInvoiceId} has linked payments — not retractable`)
+    await this.request("POST", `/invoice?operation=delete`, { Id: qboInvoiceId, SyncToken: cur.Invoice.SyncToken })
+  }
+
   async voidInvoice(qboInvoiceId: string): Promise<void> {
     const cur = await this.request<{ Invoice: QboInvoiceEntity & { SyncToken: string } }>("GET", `/invoice/${qboInvoiceId}`)
     const res = await this.request<{ Invoice: QboInvoiceEntity }>("POST", `/invoice?operation=void`, {

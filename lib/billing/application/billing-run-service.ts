@@ -167,12 +167,21 @@ export class BillingRunService {
         )
       : null
 
-    // PHASE B — the gate, now that the audit has spoken.
+    // PHASE B — the gate, now that the audit has spoken. The verdict
+    // REFRESHES until the month is invoiced (a finding recorded after the
+    // first gating must still hold the month); reasons a PERSON placed
+    // (green_pool_skip, ion_billing_type_wrong, ...) are not gate criteria
+    // and survive the re-judgement.
+    const GATE_CRITERIA = new Set(["has_items", "reconciled", "billing_identity", "route_resolved", "not_on_hold", "credits_settled", "findings_resolved"])
     for (const m of monthsAll) {
       const sources = sourcesBy.get(m.customerId) ?? []
-      if (gateContext && m.nextStep(sources, now) === "gate") {
+      const regate = m.nextStep(sources, now) === "gate" || (m.status === "gated" || m.status === "held") && !m.isInvoiced
+      if (gateContext && regate) {
         const facts = gateContext.get(m.customerId)
-        if (facts) m.markGated(gate(m, facts).heldFor, at)
+        if (facts) {
+          const manual = m.heldFor.filter((r) => !GATE_CRITERIA.has(r))
+          m.markGated([...new Set([...gate(m, facts).heldFor, ...manual])], at)
+        }
       }
       bump(m.status)
       if (m.status === "disputed" && !m.deliveryWasRefreshed) disputed.push(m.id)
