@@ -135,7 +135,7 @@ export interface FcHistoryPoint {
 export function FcHistoryChart({ points, monthStart, monthEnd }: { points: FcHistoryPoint[]; monthStart: string; monthEnd: string }) {
   const rows = useMemo(() => {
     let cya: number | null = null
-    return points
+    const raw = points
       .filter((p) => p.fc != null)
       .map((p) => {
         if (p.cya != null && p.cya > 0) cya = p.cya
@@ -144,10 +144,27 @@ export function FcHistoryChart({ points, monthStart, monthEnd }: { points: FcHis
           iso: p.visit_date.slice(0, 10),
           date: new Date(p.visit_date + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
           fc: Number(p.fc),
-          min: Number(min.toFixed(1)),
-          lsi: null,
+          min,
         }
       })
+    // per-visit FC over two years is noise — smooth BOTH series with a
+    // centered rolling mean so the chart reads as a TREND
+    const WINDOW = 7
+    const half = Math.floor(WINDOW / 2)
+    const smooth = (get: (r: (typeof raw)[number]) => number) =>
+      raw.map((_, i) => {
+        const slice = raw.slice(Math.max(0, i - half), Math.min(raw.length, i + half + 1))
+        return slice.reduce((a, r) => a + get(r), 0) / slice.length
+      })
+    const fcS = smooth((r) => r.fc)
+    const minS = smooth((r) => r.min)
+    return raw.map((r, i) => ({
+      iso: r.iso,
+      date: r.date,
+      fc: Number(fcS[i].toFixed(2)),
+      min: Number(minS[i].toFixed(1)),
+      lsi: null,
+    }))
   }, [points])
 
   const fromX = rows.findIndex((r) => r.iso >= monthStart)
@@ -157,5 +174,5 @@ export function FcHistoryChart({ points, monthStart, monthEnd }: { points: FcHis
   }
   const highlight = fromX >= 0 && toX >= fromX ? { fromX, toX } : undefined
 
-  return <FcChart rows={rows} highlight={highlight} title="Free chlorine vs min — full history" />
+  return <FcChart rows={rows} highlight={highlight} title="Free chlorine trend vs min — full history" />
 }
