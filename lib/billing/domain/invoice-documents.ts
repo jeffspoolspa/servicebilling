@@ -143,8 +143,24 @@ export function documentsOf(
   const separateTasks = new Set(terms.filter((t) => t.consumables === "separate").map((t) => t.taskId))
   const qcTasks = new Set(terms.filter((t) => t.qc).map((t) => t.taskId))
   const greenTasks = new Set(terms.filter((t) => t.green).map((t) => t.taskId))
+  // CUSTOM PRICE (RULED, Carter 2026-08-03): ION prices some properties as
+  // named $0 marker lines per pool plus ONE unnamed line carrying the
+  // visit's rate. The unnamed line adopts its visit's named marker — the
+  // SKU comes from the marker, the rate stays custom.
+  const markerOf = new Map<string, string>()
+  for (const i of m.billableItems) {
+    if (i.kind === "labor" && i.amountCents === 0 && i.itemName && i.serviceDate) {
+      markerOf.set(`${i.taskId}|${i.serviceDate}`, i.itemName)
+    }
+  }
+  const named = m.billableItems.map((i) => {
+    if (i.kind !== "labor" || i.itemName || !i.serviceDate || i.amountCents === 0) return i
+    const marker = markerOf.get(`${i.taskId}|${i.serviceDate}`)
+    return marker ? { ...i, itemName: marker } : i
+  })
+
   // $0 items are claims, not lines — except QC labor, which prints at $0.
-  const billable = m.billableItems.filter(
+  const billable = named.filter(
     (i) => i.amountCents !== 0 || i.sourceKind === "flat" || (i.kind === "labor" && qcTasks.has(i.taskId)),
   )
 

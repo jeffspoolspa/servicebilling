@@ -6,7 +6,8 @@ import type { DocLine, InvoiceDocument } from "@/lib/billing/domain"
  * history), so the document says "POOL MAINTENANCE 55", never a blank
  * service_type. The ladder, most-specific first:
  *
- *  1. exact catalog name match (visit's service_type already canonical)
+ *  1. exact catalog name match (visit's service_type already canonical);
+ *     1.5: longest catalog-name PREFIX (pool-suffixed multi-pool names)
  *  2. flat monthly line -> FLAT RATE
  *  3. the task's CATEGORY names the item (green_pool -> GREEN POOL,
  *     quality_control -> QUALITY CONTROL, one_time_clean -> ONE TIME CLEAN)
@@ -53,6 +54,14 @@ export function resolveLaborDocuments(
     // 1 — exact
     const exact = catalog.get(l.itemName)
     if (exact) return { name: l.itemName, qboItemId: exact.qboItemId }
+    // 1.5 — longest catalog-name PREFIX: multi-pool properties suffix the
+    // pool onto the SKU ("POOL MAINTENANCE 80 Lounge Pool"); the custom
+    // rate rides through untouched.
+    let prefix: string | null = null
+    for (const name of catalog.keys()) {
+      if (l.itemName.startsWith(name + " ") && (!prefix || name.length > prefix.length)) prefix = name
+    }
+    if (prefix) return { name: prefix, qboItemId: catalog.get(prefix)!.qboItemId }
     // 2 — flat: the TERMS say so (name suffix kept as a fallback)
     if ((l.taskId && flatTasks.has(l.taskId) && l.serviceDate === null) || l.itemName.endsWith(" — monthly")) {
       const flat = catalog.get("FLAT RATE")

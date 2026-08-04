@@ -14,10 +14,18 @@ export const maxDuration = 300
  * finish-with-error (3 strikes dead-letters); a parked invoice (declined /
  * unknown collection) simply stops tail-chaining and waits for a person.
  */
-export async function POST() {
-  const sb = await createSupabaseServer()
-  const { data: { user } } = await sb.auth.getUser()
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+export async function POST(req: Request) {
+  // Two doors, both authenticated: a signed-in person, or the wake relay
+  // presenting the machine token (Windmill -> here, per the service-billing
+  // wake pattern). No token configured = machine door closed.
+  const machineToken = process.env.INVOICE_DRAIN_TOKEN
+  const presented = req.headers.get("x-drain-token")
+  const machineOk = Boolean(machineToken && presented && presented === machineToken)
+  if (!machineOk) {
+    const sb = await createSupabaseServer()
+    const { data: { user } } = await sb.auth.getUser()
+    if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  }
 
   const sys = createSupabaseAdmin()
   const queue = new SupabaseInvoiceQueue(sys as never)
