@@ -164,6 +164,10 @@ export interface QboInvoiceInput {
   /** The document carries its own destination — OUR Customers.email is
    *  authoritative (user edits beat QBO), set as BillEmail at create. */
   readonly billEmail: string | null
+  /** QBO Class (Maintenance) — the reporting dimension every maint doc carries. */
+  readonly classId: string | null
+  /** Sales term (Net 15) — QBO computes DueDate from it. */
+  readonly salesTermId: string | null
   readonly lines: readonly QboInvoiceLine[]
 }
 
@@ -237,6 +241,8 @@ export class QboInvoices extends Qbo {
       CustomerRef: { value: inv.qboCustomerId },
       CustomerMemo: { value: inv.memo },
       ...(inv.billEmail ? { BillEmail: { Address: inv.billEmail } } : {}),
+      ...(inv.classId ? { ClassRef: { value: inv.classId } } : {}),
+      ...(inv.salesTermId ? { SalesTermRef: { value: inv.salesTermId } } : {}),
       Line: inv.lines.map((l) => ({
         DetailType: "SalesItemLineDetail",
         Amount: l.amountCents / 100,
