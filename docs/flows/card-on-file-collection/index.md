@@ -110,8 +110,14 @@ locally against real data, but the form is not live.
 - [x] **`WINDMILL_QBO_TOKEN_URL` works.** The live capture obtained a QBO token through it, so
       it is a `run_wait_result`-shaped webhook as required.
 - [x] One end-to-end test with a real card — done by Carter 2026-08-04, succeeded.
-- [ ] **Re-test to confirm the wallet auto-refresh** (added after that first capture, see
-      below). Everything else is verified; this one hop has not yet run in production.
+- [x] **Refactored so the vault holds no domain knowledge** and rolled out 2026-08-04.
+      `/collect` now calls `POST internal.jeffspoolspa.com/api/card-collection/resolve`;
+      the vault's `collect-lookup` is retired to a 410 tombstone (delete it in the Supabase
+      dashboard when convenient — there is no delete API exposed to the agent).
+- [x] **Duplicate detection + expired-card rejection live** (capture v10).
+- [ ] **Re-test with a real card** to confirm two things that have not run in production:
+      the wallet auto-refresh webhook, and the `card_exists` path. Add a card, then add the
+      SAME card again — expect "already on file" and no second $1 hold.
 
 ## Known gaps
 
