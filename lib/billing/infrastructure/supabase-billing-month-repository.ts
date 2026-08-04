@@ -536,17 +536,34 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
    * The month's ION invoice numbers — the consolidation set (RULED: ION's
    * per-task grain is for reconciliation; one of these becomes our doc
    * number and the whole set is recorded on the issued document).
+   *
+   * SOURCE: billing_audit.ion_task_transactions — ION's OWN report, which
+   * the reconciler pulls fresh every run (transaction_id IS the ION
+   * invoice number; July: 522/522 billed tasks covered). NOT the old
+   * pipeline's task_billing_periods, whose numbers only exist where the
+   * QBO-link trigger happened to match (322/522 — the ANDERSON refusal).
+   * Any month that reconciles has its doc number by construction.
    */
   async ionInvoiceNumbers(taskIds: readonly string[], month: string): Promise<string[]> {
-    const q = this.client.schema("billing_audit").from("task_billing_periods") as unknown as {
+    const ids = [...new Set(taskIds)]
+    // taskId (uuid) -> ion_task_id, then the report by (month, ion_task_id).
+    const tasks = this.client.schema("maintenance").from("tasks") as unknown as {
+      select(c: string): { in(col: string, vals: string[]): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+    }
+    const ionIds: string[] = []
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data, error } = await tasks.select("id, ion_task_id").in("id", ids.slice(i, i + 100))
+      if (error) throw new Error(`task ion ids failed: ${JSON.stringify(error).slice(0, 200)}`)
+      for (const r of (data ?? []) as { ion_task_id: string | null }[]) if (r.ion_task_id) ionIds.push(r.ion_task_id)
+    }
+    const txns = this.client.schema("billing_audit").from("ion_task_transactions") as unknown as {
       select(c: string): { in(col: string, vals: string[]): { eq(col: string, v: string): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
     }
     const out = new Set<string>()
-    const ids = [...new Set(taskIds)]
-    for (let i = 0; i < ids.length; i += 100) {
-      const { data, error } = await q.select("ion_invoice_number").in("task_id", ids.slice(i, i + 100)).eq("billing_month", month)
+    for (let i = 0; i < ionIds.length; i += 100) {
+      const { data, error } = await txns.select("transaction_id").in("ion_task_id", ionIds.slice(i, i + 100)).eq("month", month)
       if (error) throw new Error(`ion invoice numbers failed: ${JSON.stringify(error).slice(0, 200)}`)
-      for (const r of (data ?? []) as { ion_invoice_number: string | null }[]) if (r.ion_invoice_number) out.add(r.ion_invoice_number)
+      for (const r of (data ?? []) as { transaction_id: string | null }[]) if (r.transaction_id) out.add(r.transaction_id)
     }
     return [...out]
   }

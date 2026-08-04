@@ -160,9 +160,13 @@ export function documentsOf(
     })
   }
 
-  const docs: InvoiceDocument[] = [
-    { kind: "service", lines: serviceLines, subtotalCents: money(serviceLines.filter((l) => l.kind !== "visit_break") as { amountCents: number }[]) },
-  ]
+  const docs: InvoiceDocument[] = []
+  // An empty document is NOT a document — a month whose only task routes to
+  // its own invoice (green pool) has no service doc at all. [found live:
+  // QBO 400s an invoice with no lines — TAZI's green-only July]
+  if (serviceLines.some((l) => l.kind !== "visit_break")) {
+    docs.push({ kind: "service", lines: serviceLines, subtotalCents: money(serviceLines.filter((l) => l.kind !== "visit_break") as { amountCents: number }[]) })
+  }
   if (consumableItems.length > 0) {
     const lines = render(consumableItems)
     docs.push({ kind: "consumables", lines, subtotalCents: money(lines.filter((l) => l.kind !== "visit_break") as { amountCents: number }[]) })

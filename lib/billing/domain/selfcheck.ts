@@ -701,6 +701,10 @@ check("QC prints at $0; a green-pool task is its OWN invoice, never combined", (
   ]
   const docs = documentsOf(m, terms, "itemized")
   assert.deepStrictEqual(docs.map((d) => d.kind), ["service", "green"])
+  // A month whose ONLY task is green produces NO empty service doc.
+  const onlyGreen = BillingMonth.open("m9", 9, "2026-07-01")
+  onlyGreen.claim(item({ sourceId: "vg2", taskId: "tg", serviceDate: "2026-07-12", itemName: "GREEN POOL", unitPriceCents: 8500, amountCents: 8500 }), { claimedByMonthId: null }, AT)
+  assert.deepStrictEqual(documentsOf(onlyGreen, [{ taskId: "tg", labor: "per_visit", consumables: "included", green: true }], "itemized").map((d) => d.kind), ["green"])
   const svc = docs[0]
   assert.ok(
     svc.lines.some((l) => l.kind === "labor" && l.itemName === "QUALITY CONTROL" && l.amountCents === 0),

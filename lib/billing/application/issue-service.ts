@@ -83,6 +83,7 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
   // (exact -> category -> rate); consumables by catalog name. Everything
   // resolves, or the issue refuses — with the full list of gaps.
   const { documents, unmapped: unmappedLabor } = resolveLaborDocuments(documentsOf(m, terms, presentation), taskCategory, labor, flatTasks)
+  if (documents.length === 0) throw new IssueRefused("the month's ledger produces no document lines — nothing to bill")
   const unmapped = new Set<string>(unmappedLabor)
   for (const d of documents) for (const l of d.lines) {
     if (l.kind !== "consumable") continue
