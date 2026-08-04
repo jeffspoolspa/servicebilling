@@ -13,7 +13,7 @@ import { visitBreakLabel } from "@/lib/billing/domain/invoice-documents"
 import { cn } from "@/lib/utils/cn"
 import { ServiceLog, type ServiceLogVisit } from "../../_components/service-log"
 import { FcHistoryChart, ReadingsOverview, type FcHistoryPoint } from "../../_components/service-log/readings-overview"
-import { VisitCalendar } from "./visit-calendar"
+import { VisitCalendar, type ChemItemCompareRow } from "./visit-calendar"
 import { MONTH_STAGES, stepperStage, type MonthOverviewRow } from "../_lib/months"
 import {
   InvoiceDetailModal,
@@ -200,6 +200,7 @@ export function MonthWorkbench({
   findings,
   summaryNote,
   chemSummary,
+  chemItemSummary,
   fcHistory,
 }: {
   m: MonthOverviewRow
@@ -214,6 +215,7 @@ export function MonthWorkbench({
   findings: MonthFinding[]
   summaryNote: string | null
   chemSummary: ChemSummaryRow[]
+  chemItemSummary: ChemItemCompareRow[]
   fcHistory: FcHistoryPoint[]
 }) {
   const router = useRouter()
@@ -504,6 +506,7 @@ export function MonthWorkbench({
                   month={monthLabel}
                   highlightDates={[...flaggedOpenDates, ...flaggedReviewedDates]}
                   compare={chemSummary}
+                  itemCompare={chemItemSummary}
                 />
               </Card>
 

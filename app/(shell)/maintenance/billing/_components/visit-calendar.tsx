@@ -45,10 +45,48 @@ function cents(v: number | null | undefined): string {
   return v == null ? "—" : formatCurrency(v / 100)
 }
 
-export function VisitCalendar({ customerId, month, highlightDates, compare }: { customerId: number; month: string; highlightDates?: string[]; compare?: { category: string; this_usd: number; self_typical_usd: number; peer_seasonal_usd: number }[] }) {
+export interface ChemItemCompareRow {
+  item_name: string
+  this_qty: number
+  self_avg_qty: number
+  peer_avg_qty: number
+  this_usd: number
+  self_avg_usd: number
+  peer_avg_usd: number
+}
+
+const fmtQty = (n: number) => (n >= 10 ? String(Math.round(n)) : String(Math.round(n * 10) / 10))
+
+/** 'avg  +220%' — the monthly average with a color-coded delta of this month vs it. */
+function CompareCell({ thisVal, avgVal, fmt = formatCurrency, eps = 0.5 }: { thisVal: number; avgVal: number; fmt?: (n: number) => string; eps?: number }) {
+  if (avgVal < eps) {
+    return (
+      <TableCell className="text-right px-2 font-mono num text-ink-mute border-l border-line-soft/30 whitespace-nowrap">
+        {thisVal > eps ? <span className="text-coral">new</span> : ""}
+      </TableCell>
+    )
+  }
+  const pct = Math.round(((thisVal - avgVal) / avgVal) * 100)
+  const tone =
+    pct >= 100 ? "text-coral" : pct >= 25 ? "text-sun" : pct <= -25 ? "text-grass" : "text-ink-mute"
+  return (
+    <TableCell className="text-right px-2 font-mono num border-l border-line-soft/30 whitespace-nowrap">
+      <span className="text-ink-mute">{fmt(avgVal)}</span>{" "}
+      <span className={tone}>
+        {pct >= 0 ? "+" : ""}
+        {pct}%
+      </span>
+    </TableCell>
+  )
+}
+
+export function VisitCalendar({ customerId, month, highlightDates, compare, itemCompare }: { customerId: number; month: string; highlightDates?: string[]; compare?: { category: string; this_usd: number; self_typical_usd: number; peer_seasonal_usd: number }[]; itemCompare?: ChemItemCompareRow[] }) {
   const hl = new Set((highlightDates ?? []).map((d) => d.slice(0, 10)))
   const [days, setDays] = useState<VisitDay[] | "loading" | "error">("loading")
   const [collapsed, setCollapsed] = useState(false)
+  const [hiddenGroups, setHiddenGroups] = useState<Set<string>>(new Set())
+  const [showReadings, setShowReadings] = useState(true)
+  const [showChems, setShowChems] = useState(true)
 
   useEffect(() => {
     let alive = true
@@ -97,6 +135,26 @@ export function VisitCalendar({ customerId, month, highlightDates, compare }: { 
     return b[1].cents - a[1].cents
   })
   const groupOf = (cat: string | null) => CHEM_TAG[cat ?? ""]?.label ?? "other"
+  const cmpByItem = new Map((itemCompare ?? []).map((c) => [c.item_name, c]))
+  const hasItemCmp = cmpByItem.size > 0
+  const extraCols = hasItemCmp ? 2 : 0
+  const groupCmp = (g: string) =>
+    items
+      .filter(([, t2]) => groupOf(t2.category) === g)
+      .reduce(
+        (s2, [name]) => {
+          const c = cmpByItem.get(name)
+          return { self: s2.self + Number(c?.self_avg_usd ?? 0), peer: s2.peer + Number(c?.peer_avg_usd ?? 0) }
+        },
+        { self: 0, peer: 0 },
+      )
+  const toggleGroup = (g: string) =>
+    setHiddenGroups((s) => {
+      const n = new Set(s)
+      if (n.has(g)) n.delete(g)
+      else n.add(g)
+      return n
+    })
   const qtyByItemDate = new Map<string, number>()
   for (const d of days) {
     for (const ch of d.chems ?? []) {
@@ -141,21 +199,32 @@ export function VisitCalendar({ customerId, month, highlightDates, compare }: { 
                 </TableHead>
               )
             })}
-            <TableHead colSpan={2} />
+            <TableHead colSpan={2 + extraCols} />
           </TableRow>
         </TableHeader>
         <TableBody>
           {readingRows.length > 0 && (
             <TableRow className="hover:bg-white/[0.04] bg-white/[0.04]">
               <TableCell
-                colSpan={(collapsed ? 0 : days.length) + 3}
-                className="sticky left-0 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute"
+                colSpan={(collapsed ? 0 : days.length) + 1}
+                className="sticky left-0 py-1"
               >
-                Readings
+                <button
+                  onClick={() => setShowReadings((s) => !s)}
+                  className="text-[9px] uppercase tracking-[0.14em] text-ink-mute hover:text-ink"
+                  title={showReadings ? "Collapse the readings" : "Show the readings"}
+                >
+                  <span className="inline-block w-2.5">{showReadings ? "▾" : "▸"}</span>
+                  Readings
+                </button>
               </TableCell>
+              <TableCell className="text-right pl-4 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                Avg
+              </TableCell>
+              <TableCell colSpan={1 + extraCols} />
             </TableRow>
           )}
-          {readingRows.map(([name, label]) => (
+          {showReadings && readingRows.map(([name, label]) => (
             <TableRow key={name} className="text-ink-dim">
               <TableCell className="sticky left-0 bg-bg-elev z-10">{label}</TableCell>
               {!collapsed && days.map((d) => {
@@ -197,16 +266,23 @@ export function VisitCalendar({ customerId, month, highlightDates, compare }: { 
                   </TableCell>
                 )
               })()}
-              <TableCell />
+              <TableCell colSpan={1 + extraCols} />
             </TableRow>
           ))}
           {items.length > 0 && (
             <TableRow className="hover:bg-white/[0.04] bg-white/[0.04]">
               <TableCell
                 colSpan={(collapsed ? 0 : days.length) + 1}
-                className="sticky left-0 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute"
+                className="sticky left-0 py-1"
               >
-                Chemicals sold
+                <button
+                  onClick={() => setShowChems((s) => !s)}
+                  className="text-[9px] uppercase tracking-[0.14em] text-ink-mute hover:text-ink"
+                  title={showChems ? "Collapse the chemicals" : "Show the chemicals"}
+                >
+                  <span className="inline-block w-2.5">{showChems ? "▾" : "▸"}</span>
+                  Chemicals sold
+                </button>
               </TableCell>
               <TableCell className="text-right pl-4 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
                 Qty
@@ -214,9 +290,19 @@ export function VisitCalendar({ customerId, month, highlightDates, compare }: { 
               <TableCell className="text-right py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
                 Total $
               </TableCell>
+              {hasItemCmp && (
+                <>
+                  <TableCell className="text-right px-2 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                    You / mo
+                  </TableCell>
+                  <TableCell className="text-right px-2 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                    Peers / mo
+                  </TableCell>
+                </>
+              )}
             </TableRow>
           )}
-          {items.map(([item, tot], idx) => {
+          {showChems && items.map(([item, tot], idx) => {
             const g = groupOf(tot.category)
             const prevG = idx > 0 ? groupOf(items[idx - 1][1].category) : null
             const nextG = idx < items.length - 1 ? groupOf(items[idx + 1][1].category) : null
@@ -227,16 +313,33 @@ export function VisitCalendar({ customerId, month, highlightDates, compare }: { 
               <TableRow className="hover:bg-transparent">
                 <TableCell
                   colSpan={(collapsed ? 0 : days.length) + 1}
-                  className="sticky left-0 py-0.5 text-[8.5px] uppercase tracking-[0.12em] text-cyan/80 bg-white/[0.015]"
+                  className="sticky left-0 py-0.5 bg-white/[0.015]"
                 >
-                  {g}
+                  <button
+                    onClick={() => toggleGroup(g)}
+                    className="text-[8.5px] uppercase tracking-[0.12em] text-cyan/80 hover:text-cyan"
+                    title={hiddenGroups.has(g) ? "Show the items" : "Collapse to the group total"}
+                  >
+                    <span className="inline-block w-2.5">{hiddenGroups.has(g) ? "▸" : "▾"}</span>
+                    {g}
+                  </button>
                 </TableCell>
                 <TableCell className="py-0.5 bg-white/[0.015]" />
                 <TableCell className="text-right py-0.5 font-mono num text-[10px] text-ink-dim bg-white/[0.015]">
                   {formatCurrency(groupCents / 100)}
                 </TableCell>
+                {hasItemCmp && (() => {
+                  const gc = groupCmp(g)
+                  return (
+                    <>
+                      <CompareCell thisVal={groupCents / 100} avgVal={gc.self} />
+                      <CompareCell thisVal={groupCents / 100} avgVal={gc.peer} />
+                    </>
+                  )
+                })()}
               </TableRow>
             )}
+            {!hiddenGroups.has(g) && (
             <TableRow className="text-ink-dim">
               <TableCell className="sticky left-0 bg-bg-elev z-10" title={item}>
                 <span className="pl-2">{item}</span>
@@ -267,7 +370,17 @@ export function VisitCalendar({ customerId, month, highlightDates, compare }: { 
               <TableCell className="text-right font-mono num text-ink border-l border-line-soft/30">
                 {formatCurrency(tot.cents / 100)}
               </TableCell>
+              {hasItemCmp && (() => {
+                const c = cmpByItem.get(item)
+                return (
+                  <>
+                    <CompareCell thisVal={tot.qty} avgVal={Number(c?.self_avg_qty ?? 0)} fmt={fmtQty} eps={0.05} />
+                    <CompareCell thisVal={tot.qty} avgVal={Number(c?.peer_avg_qty ?? 0)} fmt={fmtQty} eps={0.05} />
+                  </>
+                )
+              })()}
             </TableRow>
+            )}
             {nextG !== g && null}
             </React.Fragment>
             )
@@ -296,39 +409,25 @@ export function VisitCalendar({ customerId, month, highlightDates, compare }: { 
               <TableCell className="text-right font-mono num font-semibold border-l border-line-soft/30">
                 {formatCurrency(grandTotal / 100)}
               </TableCell>
+              {hasItemCmp &&
+                (compare?.length ? (
+                  <>
+                    <CompareCell
+                      thisVal={grandTotal / 100}
+                      avgVal={compare.reduce((s2, c) => s2 + Number(c.self_typical_usd), 0)}
+                    />
+                    <CompareCell
+                      thisVal={grandTotal / 100}
+                      avgVal={compare.reduce((s2, c) => s2 + Number(c.peer_seasonal_usd), 0)}
+                    />
+                  </>
+                ) : (
+                  <TableCell colSpan={2} />
+                ))}
             </TableRow>
           </TableFooter>
         )}
       </Table>
-      {compare && compare.length > 0 && (
-        <div className="px-3 py-1.5 border-t border-line-soft space-y-0.5">
-          <div className="grid grid-cols-[1fr_repeat(3,90px)] gap-2 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-mute">
-            <span>Vs monthly averages</span>
-            <span className="text-right">This month</span>
-            <span className="text-right">You</span>
-            <span className="text-right">Peers</span>
-          </div>
-          {compare
-            .filter((c) => Number(c.this_usd) > 0 || Number(c.self_typical_usd) > 0.5 || Number(c.peer_seasonal_usd) > 0.5)
-            .map((c) => {
-              const hot = Number(c.self_typical_usd) > 1 && Number(c.this_usd) > 2 * Number(c.self_typical_usd)
-              return (
-                <div key={c.category} className="grid grid-cols-[1fr_repeat(3,90px)] gap-2 font-mono text-[10.5px]">
-                  <span className="text-ink-dim capitalize">{c.category}</span>
-                  <span className={cn("text-right num", hot ? "text-sun" : "text-ink")}>{formatCurrency(Number(c.this_usd))}</span>
-                  <span className="text-right num text-ink-mute">{formatCurrency(Number(c.self_typical_usd))}</span>
-                  <span className="text-right num text-ink-mute">{formatCurrency(Number(c.peer_seasonal_usd))}</span>
-                </div>
-              )
-            })}
-          <div className="grid grid-cols-[1fr_repeat(3,90px)] gap-2 font-mono text-[10.5px] border-t border-line-soft/60 pt-0.5">
-            <span className="text-ink font-medium">Total</span>
-            <span className="text-right num text-ink font-semibold">{formatCurrency(grandTotal / 100)}</span>
-            <span className="text-right num text-ink-dim">{formatCurrency(compare.reduce((s2, c) => s2 + Number(c.self_typical_usd), 0))}</span>
-            <span className="text-right num text-ink-dim">{formatCurrency(compare.reduce((s2, c) => s2 + Number(c.peer_seasonal_usd), 0))}</span>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
