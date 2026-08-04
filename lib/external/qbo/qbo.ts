@@ -337,6 +337,32 @@ export class QboInvoices extends Qbo {
     })
   }
 
+  /**
+   * Void an invoice — the correction for a document that should not exist.
+   * Echo-verified (the void response carries the voided entity) and the
+   * mirror rides it: balance 0, raw updated, so the fold and the UI see
+   * the void immediately; the webhook remains convergence.
+   */
+  async voidInvoice(qboInvoiceId: string): Promise<void> {
+    const cur = await this.request<{ Invoice: QboInvoiceEntity & { SyncToken: string } }>("GET", `/invoice/${qboInvoiceId}`)
+    const res = await this.request<{ Invoice: QboInvoiceEntity }>("POST", `/invoice?operation=void`, {
+      Id: qboInvoiceId,
+      SyncToken: cur.Invoice.SyncToken,
+    })
+    const echo = res.Invoice
+    if (!echo?.Id) throw new Error(`void returned no echo — unproven`)
+    await this.mirror?.invoiceUpserted({
+      qboInvoiceId: echo.Id,
+      docNumber: echo.DocNumber,
+      qboCustomerId: echo.CustomerRef.value,
+      txnDate: echo.TxnDate ?? "",
+      totalAmt: echo.TotalAmt,
+      balance: echo.Balance ?? 0,
+      memo: echo.CustomerMemo?.value ?? null,
+      raw: echo,
+    })
+  }
+
   /** The moment-of-truth balance read — fresh from QBO, mirror updated en route. */
   async openBalance(qboInvoiceId: string): Promise<number> {
     const res = await this.query<{ QueryResponse: { Invoice?: QboInvoiceEntity[] } }>(
