@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { Pill } from "@/components/ui/pill"
 import {
   Table,
@@ -45,7 +45,7 @@ function cents(v: number | null | undefined): string {
   return v == null ? "—" : formatCurrency(v / 100)
 }
 
-export function VisitCalendar({ customerId, month, highlightDates, compare }: { customerId: number; month: string; highlightDates?: string[]; compare?: { selfUsd: number; peerUsd: number } }) {
+export function VisitCalendar({ customerId, month, highlightDates, compare }: { customerId: number; month: string; highlightDates?: string[]; compare?: { category: string; this_usd: number; self_typical_usd: number; peer_seasonal_usd: number }[] }) {
   const hl = new Set((highlightDates ?? []).map((d) => d.slice(0, 10)))
   const [days, setDays] = useState<VisitDay[] | "loading" | "error">("loading")
   const [collapsed, setCollapsed] = useState(false)
@@ -89,7 +89,14 @@ export function VisitCalendar({ customerId, month, highlightDates, compare }: { 
       itemTotals.set(ch.item, t)
     }
   }
-  const items = [...itemTotals.entries()].sort((a, b) => b[1].cents - a[1].cents)
+  const CAT_ORDER = ["core_chemical", "specialty_chemical", "spa", "testing", "replacement_part", null]
+  const items = [...itemTotals.entries()].sort((a, b) => {
+    const ca = CAT_ORDER.indexOf(a[1].category as never)
+    const cb = CAT_ORDER.indexOf(b[1].category as never)
+    if (ca !== cb) return (ca === -1 ? 99 : ca) - (cb === -1 ? 99 : cb)
+    return b[1].cents - a[1].cents
+  })
+  const groupOf = (cat: string | null) => CHEM_TAG[cat ?? ""]?.label ?? "other"
   const qtyByItemDate = new Map<string, number>()
   for (const d of days) {
     for (const ch of d.chems ?? []) {
@@ -209,19 +216,34 @@ export function VisitCalendar({ customerId, month, highlightDates, compare }: { 
               </TableCell>
             </TableRow>
           )}
-          {items.map(([item, tot]) => (
-            <TableRow key={item} className="text-ink-dim">
+          {items.map(([item, tot], idx) => {
+            const g = groupOf(tot.category)
+            const prevG = idx > 0 ? groupOf(items[idx - 1][1].category) : null
+            const nextG = idx < items.length - 1 ? groupOf(items[idx + 1][1].category) : null
+            const groupCents = items.filter(([, t2]) => groupOf(t2.category) === g).reduce((s2, [, t2]) => s2 + t2.cents, 0)
+            return (
+            <React.Fragment key={item}>
+            {g !== prevG && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell
+                  colSpan={(collapsed ? 0 : days.length) + 1}
+                  className="sticky left-0 py-0.5 text-[8.5px] uppercase tracking-[0.12em] text-cyan/80 bg-white/[0.015]"
+                >
+                  {g}
+                </TableCell>
+                <TableCell className="py-0.5 bg-white/[0.015]" />
+                <TableCell className="text-right py-0.5 font-mono num text-[10px] text-ink-dim bg-white/[0.015]">
+                  {formatCurrency(groupCents / 100)}
+                </TableCell>
+              </TableRow>
+            )}
+            <TableRow className="text-ink-dim">
               <TableCell className="sticky left-0 bg-bg-elev z-10" title={item}>
-                {item}
+                <span className="pl-2">{item}</span>
                 {tot.unit_cents != null && (
                   <span className="ml-1 text-ink-mute">
                     ({formatCurrency(tot.unit_cents / 100)})
                   </span>
-                )}
-                {tot.category && CHEM_TAG[tot.category] && (
-                  <Pill tone={CHEM_TAG[tot.category].tone} className="ml-2 align-middle">
-                    {CHEM_TAG[tot.category].label}
-                  </Pill>
                 )}
               </TableCell>
               {!collapsed && days.map((d) => {
@@ -246,7 +268,10 @@ export function VisitCalendar({ customerId, month, highlightDates, compare }: { 
                 {formatCurrency(tot.cents / 100)}
               </TableCell>
             </TableRow>
-          ))}
+            {nextG !== g && null}
+            </React.Fragment>
+            )
+          })}
         </TableBody>
         {items.length > 0 && (
           <TableFooter>
@@ -275,11 +300,33 @@ export function VisitCalendar({ customerId, month, highlightDates, compare }: { 
           </TableFooter>
         )}
       </Table>
-      {compare && (
-        <div className="flex justify-end items-baseline gap-4 px-3 py-1.5 font-mono text-[10.5px] text-ink-mute border-t border-line-soft">
-          <span>this month <span className="text-ink num">{formatCurrency(grandTotal / 100)}</span></span>
-          <span>your typical <span className="text-ink-dim num">{formatCurrency(compare.selfUsd)}</span></span>
-          <span>peer seasonal <span className="text-ink-dim num">{formatCurrency(compare.peerUsd)}</span></span>
+      {compare && compare.length > 0 && (
+        <div className="px-3 py-1.5 border-t border-line-soft space-y-0.5">
+          <div className="grid grid-cols-[1fr_repeat(3,90px)] gap-2 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-mute">
+            <span>Vs monthly averages</span>
+            <span className="text-right">This month</span>
+            <span className="text-right">You</span>
+            <span className="text-right">Peers</span>
+          </div>
+          {compare
+            .filter((c) => Number(c.this_usd) > 0 || Number(c.self_typical_usd) > 0.5 || Number(c.peer_seasonal_usd) > 0.5)
+            .map((c) => {
+              const hot = Number(c.self_typical_usd) > 1 && Number(c.this_usd) > 2 * Number(c.self_typical_usd)
+              return (
+                <div key={c.category} className="grid grid-cols-[1fr_repeat(3,90px)] gap-2 font-mono text-[10.5px]">
+                  <span className="text-ink-dim capitalize">{c.category}</span>
+                  <span className={cn("text-right num", hot ? "text-sun" : "text-ink")}>{formatCurrency(Number(c.this_usd))}</span>
+                  <span className="text-right num text-ink-mute">{formatCurrency(Number(c.self_typical_usd))}</span>
+                  <span className="text-right num text-ink-mute">{formatCurrency(Number(c.peer_seasonal_usd))}</span>
+                </div>
+              )
+            })}
+          <div className="grid grid-cols-[1fr_repeat(3,90px)] gap-2 font-mono text-[10.5px] border-t border-line-soft/60 pt-0.5">
+            <span className="text-ink font-medium">Total</span>
+            <span className="text-right num text-ink font-semibold">{formatCurrency(grandTotal / 100)}</span>
+            <span className="text-right num text-ink-dim">{formatCurrency(compare.reduce((s2, c) => s2 + Number(c.self_typical_usd), 0))}</span>
+            <span className="text-right num text-ink-dim">{formatCurrency(compare.reduce((s2, c) => s2 + Number(c.peer_seasonal_usd), 0))}</span>
+          </div>
         </div>
       )}
     </div>

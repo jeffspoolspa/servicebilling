@@ -117,6 +117,7 @@ export function ServiceLog({
   className = "",
   highlightDates,
   flags,
+  rowAction,
   onOpenInvoice,
 }: {
   visits: ServiceLogVisit[]
@@ -126,6 +127,8 @@ export function ServiceLog({
   highlightDates?: string[]
   /** Two-tier flags: OPEN flagged visits tint coral, REVIEWED tint sun. */
   flags?: { open: string[]; reviewed: string[] }
+  /** Rendered at the end of each visit row — e.g. the Mark reviewed button. */
+  rowAction?: (v: ServiceLogVisit) => React.ReactNode
   /** When provided, a visit's invoice doc renders as a link opening its detail. */
   onOpenInvoice?: (qboInvoiceId: string) => void
 }) {
@@ -182,10 +185,17 @@ export function ServiceLog({
     if (vals.length) avgRaw.set(k, vals.reduce((a, b) => a + b, 0) / vals.length)
   }
   const HEADER_AVGS = ["Free Chlorine", "pH", "Cyanuric Acid", "Total Alkalinity", "Calcium Hardness"]
-  const readingAvgs = HEADER_AVGS.filter((k) => avgRaw.has(k)).map((k) => ({
-    k,
-    avg: k === "pH" ? avgRaw.get(k)!.toFixed(1) : String(Math.round(avgRaw.get(k)!)),
-  }))
+  // same steps a person reads the water in: pH .2, CYA/TA/Calcium 10, FC whole
+  const readingAvgs = HEADER_AVGS.filter((k) => avgRaw.has(k)).map((k) => {
+    const v = avgRaw.get(k)!
+    const avg =
+      k === "pH"
+        ? (Math.round(v / 0.2) * 0.2).toFixed(1)
+        : k === "Cyanuric Acid" || k === "Total Alkalinity" || k === "Calcium Hardness"
+          ? String(Math.round(v / 10) * 10)
+          : String(Math.round(v))
+    return { k, avg }
+  })
 
   // ── chart series: chronological, carry-forward for gaps, assumptions for
   //    never-recorded inputs ─────────────────────────────────────────────
@@ -448,6 +458,7 @@ export function ServiceLog({
                 >
                   {totalCents > 0 ? formatCurrency(totalCents / 100) : "—"}
                 </span>
+                {rowAction && <span className="flex-none" onClick={(e) => e.stopPropagation()}>{rowAction(v)}</span>}
               </div>
               {open && (
                 <div className="px-4 pt-1 pb-4 pl-9 flex items-start gap-5">

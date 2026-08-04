@@ -503,72 +503,50 @@ export function MonthWorkbench({
                   customerId={m.customer_id}
                   month={monthLabel}
                   highlightDates={[...flaggedOpenDates, ...flaggedReviewedDates]}
-                  compare={{
-                    selfUsd: chemSummary.reduce((s2, c) => s2 + Number(c.self_typical_usd), 0),
-                    peerUsd: chemSummary.reduce((s2, c) => s2 + Number(c.peer_seasonal_usd), 0),
-                  }}
+                  compare={chemSummary}
                 />
               </Card>
 
               {/* side by side: the flagged-visit review queue | the narrative + explainer */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Flagged visits</CardTitle>
-                    <span className="ml-auto">
-                      {openFindings.length > 1 && (
-                        <button disabled={reviewing !== null} onClick={() => review("all")} className={actionBtn}>
-                          {reviewing === "all" ? "Reviewing…" : "Mark all reviewed"}
-                        </button>
-                      )}
-                    </span>
-                  </CardHeader>
-                  {findings.length === 0 ? (
-                    <CardBody><span className="text-[12.5px] text-ink-mute">No flagged visits this month.</span></CardBody>
+                <div className="space-y-0">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-display text-[15px]">Flagged visits</span>
+                    {openFindings.length > 1 && (
+                      <button disabled={reviewing !== null} onClick={() => review("all")} className={actionBtn}>
+                        {reviewing === "all" ? "Reviewing…" : "Mark all reviewed"}
+                      </button>
+                    )}
+                  </div>
+                  {flaggedOpenDates.length + flaggedReviewedDates.length === 0 ? (
+                    <Card><CardBody><span className="text-[12.5px] text-ink-mute">No flagged visits this month.</span></CardBody></Card>
                   ) : (
-                    <div>
-                      {findings.map((f) => {
-                        const d = dateOf(f)
-                        const open2 = !f.resolved_at
-                        return (
-                          <div
-                            key={f.id}
-                            className={cn(
-                              "flex items-center gap-2.5 px-5 py-2 border-t border-line-soft first:border-t-0",
-                              open2 ? "bg-coral/[0.06] border-l-2 border-l-coral" : "bg-sun/[0.05] border-l-2 border-l-sun",
-                            )}
-                          >
-                            <div className="w-[76px] flex-none">
-                              <div className="font-mono text-[11px] text-ink">
-                                {d
-                                  ? new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })
-                                  : "—"}
-                              </div>
-                              {f.cents != null && <div className="font-mono text-[10px] text-ink-mute">{formatCurrency(Number(f.cents) / 100)}</div>}
-                            </div>
-                            <div className="flex-1 min-w-0 text-[11.5px] text-ink-dim truncate" title={f.message ?? undefined}>
-                              {(f.message ?? "").replace(/^\d{4}-\d{2}-\d{2}:\s*/, "")}
-                              {!open2 && (
-                                <div className="text-[10.5px] text-sun/90">reviewed{f.resolved_by ? ` — ${f.resolved_by.split("@")[0]}` : ""}</div>
-                              )}
-                            </div>
-                            {open2 ? (
-                              <button
-                                disabled={reviewing !== null}
-                                onClick={() => review([f.id])}
-                                className="flex-none h-6 px-2 rounded-md border border-line bg-bg-elev text-[10.5px] text-ink-dim hover:border-sun hover:text-sun disabled:opacity-50"
-                              >
-                                {reviewing === f.id ? "…" : "Mark reviewed"}
-                              </button>
-                            ) : (
-                              <Pill tone="sun">reviewed</Pill>
-                            )}
-                          </div>
-                        )
+                    <ServiceLog
+                      visits={visits.filter((v) => {
+                        const d = v.visit_date.slice(0, 10)
+                        return flaggedOpenDates.includes(d) || flaggedReviewedDates.includes(d)
                       })}
-                    </div>
+                      flags={{ open: flaggedOpenDates, reviewed: flaggedReviewedDates }}
+                      period={{ label: monthLabel, start: `${monthLabel}-01`, end: monthEndIso }}
+                      rowAction={(v) => {
+                        const d = v.visit_date.slice(0, 10)
+                        const ids = openFindings.filter((f) => dateOf(f) === d).map((f) => f.id)
+                        if (ids.length === 0) {
+                          return flaggedReviewedDates.includes(d) ? <Pill tone="sun">reviewed</Pill> : null
+                        }
+                        return (
+                          <button
+                            disabled={reviewing !== null}
+                            onClick={() => review(ids)}
+                            className="h-6 px-2 rounded-md border border-line bg-bg-elev text-[10.5px] text-ink-dim hover:border-sun hover:text-sun disabled:opacity-50"
+                          >
+                            {reviewing === ids[0] ? "…" : "Mark reviewed"}
+                          </button>
+                        )
+                      }}
+                    />
                   )}
-                </Card>
+                </div>
 
                 <Card>
                   <CardHeader>
