@@ -61,13 +61,6 @@ export interface LedgerItem {
   qbo_line_id: string | null
 }
 
-export interface ChemSummaryRow {
-  category: string
-  this_usd: number
-  self_typical_usd: number
-  peer_seasonal_usd: number
-}
-
 export interface MonthFinding {
   id: number
   rule: string
@@ -199,7 +192,6 @@ export function MonthWorkbench({
   monthTasks,
   findings,
   summaryNote,
-  chemSummary,
   chemItemSummary,
   fcHistory,
 }: {
@@ -214,7 +206,6 @@ export function MonthWorkbench({
   monthTasks: MonthTask[]
   findings: MonthFinding[]
   summaryNote: string | null
-  chemSummary: ChemSummaryRow[]
   chemItemSummary: ChemItemCompareRow[]
   fcHistory: FcHistoryPoint[]
 }) {
@@ -505,7 +496,6 @@ export function MonthWorkbench({
                   customerId={m.customer_id}
                   month={monthLabel}
                   highlightDates={[...flaggedOpenDates, ...flaggedReviewedDates]}
-                  compare={chemSummary}
                   itemCompare={chemItemSummary}
                 />
               </Card>

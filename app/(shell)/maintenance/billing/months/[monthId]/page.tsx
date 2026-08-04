@@ -28,14 +28,13 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
   const { data: custRow } = await sb.from("Customers").select("qbo_customer_id").eq("id", m.customer_id).limit(1)
   const qboCustomerId = ((custRow ?? [])[0] as { qbo_customer_id: string | null } | undefined)?.qbo_customer_id ?? null
   const customerCard = await getCustomerCard(qboCustomerId)
-  const [visitsRes, historyRes, itemsRes, tasksRes, findingsRes, noteRes, chemRes, chemItemRes, fcRes, ...perInvoice] = await Promise.all([
+  const [visitsRes, historyRes, itemsRes, tasksRes, findingsRes, noteRes, chemItemRes, fcRes, ...perInvoice] = await Promise.all([
     sb.rpc("maint_billing_review_visits", { p_customer_id: m.customer_id, p_month: monthDate }),
     sb.rpc("billing_month_history", { p_month_id: m.id }),
     sb.rpc("maint_billing_month_items", { p_month_id: m.id }),
     sb.rpc("maint_billing_month_tasks", { p_customer_id: m.customer_id, p_month: monthDate }),
     sb.schema("billing").from("v_findings_review").select("id, rule, severity, message, cents, detected_at, resolved_at, resolved_by, resolution").eq("billing_month_id", m.id).limit(200),
     sb.schema("billing").from("billing_months").select("summary_note").eq("id", m.id).limit(1),
-    sb.rpc("maint_billing_month_chem_summary", { p_customer_id: m.customer_id, p_month: monthDate }),
     sb.rpc("maint_billing_month_chem_item_summary", { p_customer_id: m.customer_id, p_month: monthDate }),
     sb.rpc("maint_billing_fc_history", { p_customer_id: m.customer_id }),
     ...issued.flatMap((inv) => [
@@ -54,7 +53,6 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
   const monthTasks = (tasksRes.data ?? []) as never[]
   const findings = (findingsRes.data ?? []) as never[]
   const summaryNote = (((noteRes.data ?? [])[0] as { summary_note?: string | null } | undefined)?.summary_note ?? null)
-  const chemSummary = (chemRes.data ?? []) as never[]
   const chemItemSummary = (chemItemRes.data ?? []) as never[]
   const fcHistory = (fcRes.data ?? []) as never[]
   issued.forEach((inv, i) => {
@@ -85,7 +83,6 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
         monthTasks={monthTasks as never}
         findings={findings as never}
         summaryNote={summaryNote}
-        chemSummary={chemSummary as never}
         chemItemSummary={chemItemSummary as never}
         fcHistory={fcHistory as never}
       />

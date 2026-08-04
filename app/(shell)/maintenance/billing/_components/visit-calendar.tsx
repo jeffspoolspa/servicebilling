@@ -31,6 +31,8 @@ const CHEM_TAG: Record<string, { label: string; tone: "cyan" | "indigo" | "neutr
   replacement_part: { label: "part", tone: "neutral" },
   spa: { label: "spa", tone: "teal" },
   testing: { label: "testing", tone: "sun" },
+  extra_service: { label: "service", tone: "neutral" },
+  discount: { label: "discount", tone: "neutral" },
 }
 // display order + short labels for the readings block of the calendar
 const READING_ORDER: [string, string][] = [
@@ -47,21 +49,17 @@ function cents(v: number | null | undefined): string {
 
 export interface ChemItemCompareRow {
   item_name: string
-  this_qty: number
-  self_avg_qty: number
-  peer_avg_qty: number
+  this_qty: number | null
   this_usd: number
-  self_avg_usd: number
-  peer_avg_usd: number
+  self_med_qty: number | null
+  self_med_usd: number | null
+  self_pctl: number | null
+  peer_med_qty: number | null
+  peer_med_usd: number | null
+  peer_pctl: number | null
 }
 
 const fmtQty = (n: number) => (n >= 10 ? String(Math.round(n)) : String(Math.round(n * 10) / 10))
-
-/** This month vs an average: the signed % delta, or 'new' when there's no history. */
-function pctOf(thisVal: number, avgVal: number, eps: number): number | "new" | null {
-  if (avgVal < eps) return thisVal > eps ? "new" : null
-  return Math.round(((thisVal - avgVal) / avgVal) * 100)
-}
 
 function AvgCell({ border, children }: { border?: boolean; children?: React.ReactNode }) {
   return (
@@ -76,40 +74,36 @@ function AvgCell({ border, children }: { border?: boolean; children?: React.Reac
   )
 }
 
-function DiffCell({ pct }: { pct: number | "new" | null }) {
-  const tone =
-    pct === "new" || (typeof pct === "number" && pct >= 100)
-      ? "text-coral"
-      : typeof pct === "number" && pct >= 25
-        ? "text-sun"
-        : typeof pct === "number" && pct <= -25
-          ? "text-grass"
-          : "text-ink-mute"
+/** Where this month sits in the distribution — p95+ is the flag rule's own line. */
+function PctlCell({ pctl, noHistory }: { pctl: number | null; noHistory?: boolean }) {
+  if (pctl == null) {
+    return (
+      <TableCell className="text-right px-2 font-mono num text-coral whitespace-nowrap">
+        {noHistory ? "new" : ""}
+      </TableCell>
+    )
+  }
+  const p = Math.round(Number(pctl))
+  const tone = p >= 95 ? "text-coral" : p >= 75 ? "text-sun" : p <= 25 ? "text-grass" : "text-ink-mute"
   return (
     <TableCell className={cn("text-right px-2 font-mono num whitespace-nowrap", tone)}>
-      {pct === null ? "" : pct === "new" ? "new" : `${pct >= 0 ? "+" : ""}${pct}%`}
+      p{p}
     </TableCell>
   )
 }
 
-/** The six comparison cells: self qty | self $ | self Δ, then the same for peers. */
-function CompareCells({ thisQty, thisUsd, avgQty, avgUsd, qtyless }: { thisQty: number | null; thisUsd: number; avgQty: number | null; avgUsd: number; qtyless?: boolean }) {
+/** One side's three comparison cells: median qty | median $ | percentile. */
+function CompareCells({ medQty, medUsd, pctl }: { medQty: number | null | undefined; medUsd: number | null | undefined; pctl: number | null | undefined }) {
   return (
     <>
-      <AvgCell border>{!qtyless && avgQty != null && avgQty >= 0.05 ? fmtQty(avgQty) : ""}</AvgCell>
-      <AvgCell>{avgUsd >= 0.005 ? formatCurrency(avgUsd) : ""}</AvgCell>
-      <DiffCell
-        pct={
-          qtyless || thisQty == null
-            ? pctOf(thisUsd, avgUsd, 0.5)
-            : pctOf(thisQty, avgQty ?? 0, 0.05)
-        }
-      />
+      <AvgCell border>{medQty != null && Number(medQty) >= 0.05 ? fmtQty(Number(medQty)) : ""}</AvgCell>
+      <AvgCell>{medUsd != null && Number(medUsd) >= 0.005 ? formatCurrency(Number(medUsd)) : ""}</AvgCell>
+      <PctlCell pctl={pctl == null ? null : Number(pctl)} noHistory={medUsd == null} />
     </>
   )
 }
 
-export function VisitCalendar({ customerId, month, highlightDates, compare, itemCompare }: { customerId: number; month: string; highlightDates?: string[]; compare?: { category: string; this_usd: number; self_typical_usd: number; peer_seasonal_usd: number }[]; itemCompare?: ChemItemCompareRow[] }) {
+export function VisitCalendar({ customerId, month, highlightDates, itemCompare }: { customerId: number; month: string; highlightDates?: string[]; itemCompare?: ChemItemCompareRow[] }) {
   const hl = new Set((highlightDates ?? []).map((d) => d.slice(0, 10)))
   const [days, setDays] = useState<VisitDay[] | "loading" | "error">("loading")
   const [collapsed, setCollapsed] = useState(false)
@@ -168,16 +162,10 @@ export function VisitCalendar({ customerId, month, highlightDates, compare, item
   const cmpByItem = new Map((itemCompare ?? []).map((c) => [c.item_name, c]))
   const cmpOn = cmpByItem.size > 0 && showCmp
   const extraCols = cmpOn ? 6 : 0
-  const groupCmp = (g: string) =>
-    items
-      .filter(([, t2]) => groupOf(t2.category) === g)
-      .reduce(
-        (s2, [name]) => {
-          const c = cmpByItem.get(name)
-          return { self: s2.self + Number(c?.self_avg_usd ?? 0), peer: s2.peer + Number(c?.peer_avg_usd ?? 0) }
-        },
-        { self: 0, peer: 0 },
-      )
+  // the category and month-total rows ride the same result set under
+  // sentinel names — their distributions are computed whole, not summed
+  const groupCmp = (cat: string | null) => cmpByItem.get(`@cat:${cat ?? "other"}`)
+  const totalCmp = cmpByItem.get("@total")
   const toggleGroup = (g: string) =>
     setHiddenGroups((s) => {
       const n = new Set(s)
@@ -340,7 +328,7 @@ export function VisitCalendar({ customerId, month, highlightDates, compare, item
                     You $
                   </TableCell>
                   <TableCell className="text-right px-2 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-                    Δ you
+                    You pctl
                   </TableCell>
                   <TableCell className="text-right px-2 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
                     Peer qty
@@ -349,7 +337,7 @@ export function VisitCalendar({ customerId, month, highlightDates, compare, item
                     Peer $
                   </TableCell>
                   <TableCell className="text-right px-2 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-                    Δ peers
+                    Peer pctl
                   </TableCell>
                 </>
               )}
@@ -382,11 +370,11 @@ export function VisitCalendar({ customerId, month, highlightDates, compare, item
                   {formatCurrency(groupCents / 100)}
                 </TableCell>
                 {cmpOn && (() => {
-                  const gc = groupCmp(g)
+                  const gc = groupCmp(tot.category)
                   return (
                     <>
-                      <CompareCells thisQty={null} thisUsd={groupCents / 100} avgQty={null} avgUsd={gc.self} qtyless />
-                      <CompareCells thisQty={null} thisUsd={groupCents / 100} avgQty={null} avgUsd={gc.peer} qtyless />
+                      <CompareCells medQty={null} medUsd={gc?.self_med_usd} pctl={gc?.self_pctl} />
+                      <CompareCells medQty={null} medUsd={gc?.peer_med_usd} pctl={gc?.peer_pctl} />
                     </>
                   )
                 })()}
@@ -427,8 +415,8 @@ export function VisitCalendar({ customerId, month, highlightDates, compare, item
                 const c = cmpByItem.get(item)
                 return (
                   <>
-                    <CompareCells thisQty={tot.qty} thisUsd={tot.cents / 100} avgQty={Number(c?.self_avg_qty ?? 0)} avgUsd={Number(c?.self_avg_usd ?? 0)} />
-                    <CompareCells thisQty={tot.qty} thisUsd={tot.cents / 100} avgQty={Number(c?.peer_avg_qty ?? 0)} avgUsd={Number(c?.peer_avg_usd ?? 0)} />
+                    <CompareCells medQty={c?.self_med_qty} medUsd={c?.self_med_usd} pctl={c?.self_pctl} />
+                    <CompareCells medQty={c?.peer_med_qty} medUsd={c?.peer_med_usd} pctl={c?.peer_pctl} />
                   </>
                 )
               })()}
@@ -463,22 +451,10 @@ export function VisitCalendar({ customerId, month, highlightDates, compare, item
                 {formatCurrency(grandTotal / 100)}
               </TableCell>
               {cmpOn &&
-                (compare?.length ? (
+                (totalCmp ? (
                   <>
-                    <CompareCells
-                      thisQty={null}
-                      thisUsd={grandTotal / 100}
-                      avgQty={null}
-                      avgUsd={compare.reduce((s2, c) => s2 + Number(c.self_typical_usd), 0)}
-                      qtyless
-                    />
-                    <CompareCells
-                      thisQty={null}
-                      thisUsd={grandTotal / 100}
-                      avgQty={null}
-                      avgUsd={compare.reduce((s2, c) => s2 + Number(c.peer_seasonal_usd), 0)}
-                      qtyless
-                    />
+                    <CompareCells medQty={null} medUsd={totalCmp.self_med_usd} pctl={totalCmp.self_pctl} />
+                    <CompareCells medQty={null} medUsd={totalCmp.peer_med_usd} pctl={totalCmp.peer_pctl} />
                   </>
                 ) : (
                   <TableCell colSpan={6} />
