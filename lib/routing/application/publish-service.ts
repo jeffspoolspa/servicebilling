@@ -15,7 +15,7 @@
 import { Scenario, weekOf, type Quota } from "@/lib/routing/domain"
 import type { ScenarioRepository, InvalidChange } from "@/lib/routing/domain"
 import { IonTasks } from "@/lib/external/ion/ion"
-import { IonTaskAcl, type LandedChange, type TaskIdentity } from "@/lib/external/ion/acl"
+import { IonTaskAcl, type LandedChange, type TaskIdentity, type SupersedeWrite } from "@/lib/external/ion/acl"
 import type { MaintenanceFact } from "@/lib/maintenance/infrastructure/supabase-event-log"
 
 /* ------------------------------- the ports ------------------------------- */
@@ -77,6 +77,7 @@ export class PublishService {
     // changes -> ACL -> ION writes. Pure translation of OUR just-refreshed rows.
     const ids = await this.tasks.identities(schedules.map((s) => s.quotaId))
     const writes = []
+    const supersedes: SupersedeWrite[] = []
     const refusals: LandedChange[] = []
     for (const s of schedules) {
       const id = ids.get(s.quotaId)
@@ -86,6 +87,7 @@ export class PublishService {
       }
       const t = this.acl.toIonWrite(s, id)
       if ("refusal" in t) refusals.push({ quotaId: t.refusal.quotaId, accepted: false, detail: t.refusal.reason })
+      else if ("supersede" in t) supersedes.push(t.supersede)
       else writes.push(t.write)
     }
 
@@ -105,6 +107,35 @@ export class PublishService {
     // ION object: merge, POST, read-back proof. One form read per task, which
     // ION requires anyway to POST a complete form.
     const results = this.acl.fromIonResults(await this.ion.applyWeeks(writes, { dryRun: opts.dryRun }))
+
+    // A non-picker day move is not an edit — ION generates visits FROM
+    // StartsOn, so the old contract is ENDED and a new one BEGUN. Order is
+    // forced by tasks_one_open_per_loc: close, then create. A close that
+    // lands without its create leaves the customer unscheduled, so the create
+    // failure is reported against the same quota rather than swallowed.
+    for (const sup of supersedes) {
+      const closed = await this.ion.applyWeeks(
+        [{ key: sup.quotaId, ionTaskId: sup.ionTaskId, ionCustId: sup.ionCustId, weekly: false,
+           changes: { EndsOn: sup.endsOn }, believedDays: {} }],
+        { dryRun: opts.dryRun },
+      )
+      if (!closed[0]?.accepted) {
+        results.push({ quotaId: sup.quotaId, accepted: false, detail: `close refused: ${closed[0]?.detail ?? "no result"}` })
+        continue
+      }
+      const made = await this.ion.createTask(
+        { ionCustId: sup.ionCustId, changes: sup.changes,
+          expect: { serviceRepeat: sup.changes["ServiceRepeat"] ?? "3", startsOn: sup.startsOn } },
+        { dryRun: opts.dryRun },
+      )
+      results.push({
+        quotaId: sup.quotaId,
+        accepted: made.accepted,
+        detail: made.accepted
+          ? `superseded: old contract ends ${sup.endsOn}, new starts ${sup.startsOn}${made.ionTaskId ? ` (ION task ${made.ionTaskId})` : ""}`
+          : `closed ${sup.endsOn} but CREATE FAILED — customer has no live task: ${made.detail}`,
+      })
+    }
 
     // the ones that landed: cache, then events
     const landed = new Set(results.filter((r) => r.accepted).map((r) => r.quotaId))

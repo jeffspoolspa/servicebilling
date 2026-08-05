@@ -35,10 +35,31 @@ export interface TaskIdentity {
   ionTechOf: (techId: string) => string | null
   /** weekday -> ION employee id we currently believe (guards the write). */
   believedDays: Record<string, string>
+  /**
+   * The contract's current anchor and its last serviced date. Both come from
+   * OUR cache, which refresh has just reconciled against ION — the ACL still
+   * makes no call. A non-picker day move needs them to choose its effective
+   * week; absent, the move is refused rather than guessed.
+   */
+  startsOn?: string | null
+  lastVisit?: string | null
+  /** Today, supplied so the ACL never reads a clock. */
+  now?: string
+}
+
+export interface SupersedeWrite {
+  quotaId: string
+  ionTaskId: string
+  ionCustId: string
+  /** The old contract ends the day before the new one begins: no overlap, no gap. */
+  endsOn: string
+  startsOn: string
+  changes: Record<string, string>
 }
 
 export type Translated =
   | { write: WeekWrite }
+  | { supersede: SupersedeWrite }
   | { refusal: { quotaId: string; reason: string } }
 
 /** A task's week as WE hold it: our frequency vocabulary, our employee ids. */
@@ -89,10 +110,33 @@ export class IonTaskAcl {
     }
     const currentDay = Object.keys(id.believedDays)[0]
     if (currentDay !== undefined && Number(currentDay) !== named[0].weekday) {
+      // A non-picker day move cannot be an edit: ION generates visits FROM
+      // StartsOn, so rewriting it re-derives visits already serviced and
+      // invoiced. The contract is superseded instead — old one ended, new one
+      // begun — and the effective week is chosen so the customer never waits
+      // longer than their own cadence (Carter, 2026-08-05).
+      if (!id.startsOn) {
+        return {
+          refusal: {
+            quotaId: schedule.quotaId,
+            reason: `${id.label}: ${id.frequency} day move needs the current StartsOn to supersede from, and the cache holds none — refused, not guessed`,
+          },
+        }
+      }
+      const target = (id.frequency === "monthly" ? "monthly" : anchorOf(id.startsOn, "Bi-Weekly")?.frequency) as TargetCadence | undefined
+      if (!target) {
+        return { refusal: { quotaId: schedule.quotaId, reason: `${id.label}: cannot read a parity from ${id.startsOn}` } }
+      }
+      const week = effectiveWeekFor(id.lastVisit ?? null, id.now ?? new Date().toISOString().slice(0, 10), target)
+      const startsOn = dateInWeek(week, named[0].weekday)
       return {
-        refusal: {
+        supersede: {
           quotaId: schedule.quotaId,
-          reason: `${id.label}: ${id.frequency} day move requires an anchor-preserving StartsOn (setStartDate) — refused, not silently rebased`,
+          ionTaskId: id.ionTaskId,
+          ionCustId: id.ionCustId,
+          endsOn: new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10),
+          startsOn,
+          changes: { AssignedTo: named[0].ionTech, StartsOn: startsOn, ServiceRepeat: target === "monthly" ? "4" : "3" },
         },
       }
     }

@@ -37,11 +37,26 @@ export class SupabaseTaskStore implements TaskStore {
 
   async identities(quotaIds: readonly string[]): Promise<Map<string, TaskIdentity>> {
     const [{ data: tasks }, { data: slots }, { data: emps }] = await Promise.all([
-      this.reads.schema("maintenance").from("tasks").select("id, ion_task_id, customer_id, frequency").in("id", quotaIds as string[]).range(0, PAGE),
+      this.reads.schema("maintenance").from("tasks").select("id, ion_task_id, customer_id, frequency, starts_on").in("id", quotaIds as string[]).range(0, PAGE),
       this.reads.schema("maintenance").from("task_schedules").select("task_id, day_of_week, tech_employee_id, active").in("task_id", quotaIds as string[]).range(0, PAGE),
       this.reads.from("employees").select("id, ion_employee_id").not("ion_employee_id", "is", null).range(0, PAGE),
     ])
     const ionTech = new Map(((emps ?? []) as { id: string; ion_employee_id: string }[]).map((e) => [e.id, e.ion_employee_id]))
+
+    // Last serviced date per task: whether THIS week is still available is the
+    // one thing effectiveWeekFor cannot derive. Retracted visits excluded —
+    // a log ION deleted never happened.
+    const { data: visitRows } = await this.reads
+      .schema("maintenance").from("visits")
+      .select("task_id, scheduled_date")
+      .in("task_id", quotaIds as string[])
+      .not("ion_deleted_at", "is", "null")
+      .range(0, PAGE)
+    const lastVisit = new Map<string, string>()
+    for (const v of (visitRows ?? []) as { task_id: string; scheduled_date: string }[]) {
+      const held = lastVisit.get(v.task_id)
+      if (!held || v.scheduled_date > held) lastVisit.set(v.task_id, v.scheduled_date)
+    }
 
     const custIds = [...new Set(((tasks ?? []) as { customer_id: number | null }[]).map((t) => t.customer_id).filter((c): c is number => c !== null))]
     const { data: custs } = custIds.length
@@ -62,7 +77,8 @@ export class SupabaseTaskStore implements TaskStore {
     }
 
     const out = new Map<string, TaskIdentity>()
-    for (const t of (tasks ?? []) as { id: string; ion_task_id: string | null; customer_id: number | null; frequency: string | null }[]) {
+    const today = new Date().toISOString().slice(0, 10)
+    for (const t of (tasks ?? []) as { id: string; ion_task_id: string | null; customer_id: number | null; frequency: string | null; starts_on: string | null }[]) {
       const cust = t.customer_id !== null ? ionCust.get(t.customer_id) : null
       if (!t.ion_task_id || !cust) continue
       out.set(t.id, {
@@ -73,6 +89,11 @@ export class SupabaseTaskStore implements TaskStore {
         frequency: t.frequency,
         ionTechOf: (techId) => ionTech.get(techId) ?? null,
         believedDays: believed.get(t.id) ?? {},
+        // Refresh has just reconciled these against ION, so the ACL can
+        // compute the supersede anchor without making a call of its own.
+        startsOn: t.starts_on,
+        lastVisit: lastVisit.get(t.id) ?? null,
+        now: today,
       })
     }
     return out
