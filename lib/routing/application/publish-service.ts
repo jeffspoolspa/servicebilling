@@ -104,6 +104,38 @@ export class PublishService {
       }
     }
 
+    // WRITE AHEAD. Every requested change is recorded BEFORE ION is touched,
+    // so the log answers "what did we ask for" independently of what landed.
+    // A Requested with no matching outcome is exactly the recoverable case:
+    // a crash mid-batch, or a close that landed while its create did not.
+    // Dry runs record nothing — nothing was requested of ION.
+    if (!opts.dryRun) {
+      const supersedeOf = new Map(supersedes.map((x) => [x.quotaId, x]))
+      await this.events.append(
+        schedules.map((s) => {
+          const sup = supersedeOf.get(s.quotaId)
+          const id = ids.get(s.quotaId)
+          return {
+            aggregate: "task" as const,
+            aggregateId: s.quotaId,
+            type: "ScheduleChangeRequested",
+            actor: "routing_publish",
+            participants: [
+              `scenario:${scenarioId}`,
+              ...(id?.ionCustId ? [`customer:${id.ionCustId}`] : []),
+              ...new Set(s.stops.map((st) => `tech:${st.techId}`)),
+            ],
+            payload: {
+              scenarioId,
+              kind: sup ? "supersede" : "amend",
+              requested: s.stops.map((st) => ({ weekday: st.weekday, techId: st.techId })),
+              ...(sup ? { endsOn: sup.endsOn, startsOn: sup.startsOn, fromIonTaskId: sup.ionTaskId } : {}),
+            },
+          }
+        }),
+      )
+    }
+
     // ION object: merge, POST, read-back proof. One form read per task, which
     // ION requires anyway to POST a complete form.
     const results = this.acl.fromIonResults(await this.ion.applyWeeks(writes, { dryRun: opts.dryRun }))
@@ -149,10 +181,35 @@ export class PublishService {
           aggregateId: s.quotaId,
           type: "ScheduleChanged",
           actor: "routing_publish",
-          participants: [`scenario:${scenarioId}`, ...new Set(s.stops.map((st) => `tech:${st.techId}`))],
+          participants: [
+            `scenario:${scenarioId}`,
+            ...(ids.get(s.quotaId)?.ionCustId ? [`customer:${ids.get(s.quotaId)!.ionCustId}`] : []),
+            ...new Set(s.stops.map((st) => `tech:${st.techId}`)),
+          ],
           payload: { scenarioId, week: s.stops.map((st) => ({ weekday: st.weekday, techId: st.techId })), changes: s.changes },
         })),
       )
+    }
+
+    // What did not land is a fact too — otherwise a Requested stays open
+    // forever and the log cannot tell "failed" from "still in flight".
+    if (!opts.dryRun) {
+      const failed = results.filter((r) => !r.accepted)
+      if (failed.length > 0) {
+        await this.events.append(
+          failed.map((r) => ({
+            aggregate: "task" as const,
+            aggregateId: r.quotaId,
+            type: "ScheduleChangeFailed",
+            actor: "routing_publish",
+            participants: [
+              `scenario:${scenarioId}`,
+              ...(ids.get(r.quotaId)?.ionCustId ? [`customer:${ids.get(r.quotaId)!.ionCustId}`] : []),
+            ],
+            payload: { scenarioId, detail: r.detail },
+          })),
+        )
+      }
     }
 
     // the batch closes the scenario — never any single edit
