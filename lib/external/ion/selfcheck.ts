@@ -58,6 +58,11 @@ assert.strictEqual(weeklyDayMove.supersede.changes.day2, "")
 assert.strictEqual(weeklyDayMove.supersede.changes.ServiceRepeat, undefined)
 // The close must declare the FORM ION will render, or ION refuses the write.
 assert.strictEqual(weeklyDayMove.supersede.weekly, true, "a weekly close sees the day picker")
+// Ending a weekly contract is still a WEEKLY write: it must restate the days
+// it is ending with, or the week write silently drops the stop.
+assert.strictEqual(weeklyDayMove.supersede.closeChanges.day2, ION.josh, "the close restates Monday")
+assert.strictEqual(weeklyDayMove.supersede.closeChanges.EndsOn, "2026-08-12")
+assert.deepStrictEqual(weeklyDayMove.supersede.believedDays, { "1": ION.josh })
 
 // Not yet served this week: the move may take effect in THIS week.
 const notYetServed = acl.toIonWrite(
