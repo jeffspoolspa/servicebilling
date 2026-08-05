@@ -86,9 +86,17 @@ export function liveContractsOnly(tasks: TaskRow[], today: string): TaskRow[] {
       ? true
       : (!t.starts_on || t.starts_on <= today) && t.ends_on >= today,
   )
+  // A standing agreement only displaces a dated one once it has BEGUN.
+  // Otherwise a superseded pool vanishes: the successor is open-ended so it
+  // counts as live the moment it is published, suppresses the predecessor,
+  // and then has no stop due until it starts — leaving the customer off the
+  // sheet in the very week the predecessor is still serving them (Lucas,
+  // 2026-08-05: Monday/Caleb through 08-12, successor Thursday from 08-13).
   const standing = new Set<number>()
   for (const t of inForce) {
-    if (t.customer_id !== null && t.ends_on === null) standing.add(t.customer_id)
+    if (t.customer_id !== null && t.ends_on === null && (!t.starts_on || t.starts_on <= today)) {
+      standing.add(t.customer_id)
+    }
   }
   return inForce.filter(
     (t) => !t.ends_on || t.customer_id === null || !standing.has(t.customer_id),

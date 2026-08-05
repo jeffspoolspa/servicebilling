@@ -18,12 +18,24 @@ assert.deepStrictEqual(
 // from the moment it is published — the plan is drawn around where the pool
 // is going, not where it is finishing. The dated predecessor loses the
 // tie-break to it.
+// Both are live — but the successor has not begun, so it must NOT displace
+// the contract still serving this week. Losing that stop takes the customer
+// off the route sheet while they are still being visited.
 assert.deepStrictEqual(
   ids(liveContractsOnly([
     t("old", 5641, "2024-12-30", "2026-08-12"),
     t("new", 5641, "2026-08-13", null),
   ], TODAY)),
-  ["new"], "an open-ended successor is live from publication",
+  ["old", "new"], "the serving contract keeps its stop until the successor begins",
+)
+
+// Once the successor has begun it displaces the dated one.
+assert.deepStrictEqual(
+  ids(liveContractsOnly([
+    t("old", 5641, "2024-12-30", "2026-08-31"),
+    t("new", 5641, "2026-08-01", null),
+  ], TODAY)),
+  ["new"], "a STARTED standing agreement displaces a dated one",
 )
 
 // An open-ended contract starting in the future is live NOW. Hiding it until
