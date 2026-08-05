@@ -1,6 +1,7 @@
 /**
  * The routing use cases, from a terminal.
  *
+ *   npx tsx scripts/routing.ts stage <moves.json>   save it as a scenario
  *   npx tsx scripts/routing.ts plan  <scenarioId>   what publishing would do
  *   npx tsx scripts/routing.ts push  <scenarioId>   queue it — what the button does
  *   npx tsx scripts/routing.ts drain [--all]        work the queue, one unit per call
@@ -59,6 +60,16 @@ async function rowsFor(ids?: string[]): Promise<QRow[]> {
 
 async function main() {
   const [cmd, arg] = process.argv.slice(2)
+
+  if (cmd === "stage") {
+    if (!arg) throw new Error("give a moves file: { name, moves: [{ quotaId, weekday, techId }] }")
+    const { status, body } = await call<{ scenario?: { id: string }; staged?: number; error?: string }>(
+      "/api/routing/scenarios", { method: "POST", body: readFileSync(arg, "utf8") },
+    )
+    if (status >= 400) throw new Error(String(body.error ?? status))
+    console.log(`staged ${body.staged} change(s) as scenario ${body.scenario?.id}`)
+    return
+  }
 
   if (cmd === "plan" || cmd === "push") {
     if (!arg) throw new Error("give a scenario id")
