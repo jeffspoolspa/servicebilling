@@ -13,12 +13,17 @@
  * ION. It is durability: the work outlives the connection that asked for it,
  * and a failed step is attempted again instead of stranding someone.
  *
- * Claim-time resolution: the row carries only a task id, never a payload. A
- * snapshot taken at enqueue goes stale while it waits, and for a supersede a
- * stale anchor is exactly what must never be acted on — so the handler
- * re-reads and re-translates every time, and PublishService's resume check
- * makes a second attempt safe (it skips a close that already landed and will
- * not create a successor that already exists).
+ * What travels with the work and what does not: the row names the TARGET —
+ * which contract is being ended — because that is the decision the operator
+ * approved and re-deriving it risks acting on a different task. The DATES are
+ * recomputed at claim time, because an anchor snapshotted at enqueue goes
+ * stale while it waits and a stale anchor is exactly what must never be
+ * applied. PublishService's resume check makes a second attempt safe: it skips
+ * a close that already landed and will not create a successor that exists.
+ *
+ * The outcome comes back too. A unit cannot be recorded as finished without
+ * naming the successor it created — the database refuses it — so the 08-05
+ * shape (close landed, create did not, called done) is now unrepresentable.
  */
 import { readFileSync } from "node:fs"
 for (const l of readFileSync(".env.local", "utf8").split("\n")) {
@@ -86,7 +91,11 @@ async function main() {
       if (!mine?.accepted) throw new Error(mine?.detail ?? "no result for this task")
       console.log(`   ${mine.detail}`)
       // A dry run proves nothing landed, so the unit stays queued.
-      if (live) await m.rpc("finish_schedule_change", { p_id: row.id, p_error: null })
+      if (live) {
+        await m.rpc("finish_schedule_change", {
+          p_id: row.id, p_error: null, p_result_ion_task_id: mine.ionTaskId ?? null,
+        })
+      }
       handled++
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)

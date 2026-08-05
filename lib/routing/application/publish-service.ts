@@ -216,6 +216,9 @@ export class PublishService {
       results.push({
         quotaId: sup.quotaId,
         accepted: made.accepted,
+        // Named, not narrated: the queue records this as the proof a supersede
+        // finished, and a constraint refuses "done" without it.
+        ionTaskId: made.ionTaskId ?? null,
         detail: made.accepted
           ? `superseded: old contract ends ${sup.endsOn}, new starts ${sup.startsOn}${made.ionTaskId ? ` (ION task ${made.ionTaskId})` : ""}${alreadyClosed ? " (close had already landed)" : ""}`
           : `closed ${sup.endsOn} but CREATE FAILED — customer has no live task: ${made.detail}`,

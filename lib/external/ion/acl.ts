@@ -77,6 +77,12 @@ export interface LandedChange {
   quotaId: string
   accepted: boolean
   detail: string
+  /**
+   * The successor's ION EventID when this change created one. Named rather
+   * than narrated inside `detail`: the queue stores it as the proof a
+   * supersede finished, and refuses to record "done" without it.
+   */
+  ionTaskId?: string | null
 }
 
 export class IonTaskAcl {
