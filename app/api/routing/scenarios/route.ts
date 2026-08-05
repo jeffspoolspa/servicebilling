@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { createSupabaseServer } from "@/lib/supabase/server"
+import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { authorize } from "@/lib/api/authorize"
 import { RoutingService } from "@/lib/routing/application/routing-service"
 import {
@@ -18,8 +19,9 @@ import { weekOf, type RoutingEvent } from "@/lib/routing/domain"
  * the world moving underneath. Session-gated (internal app).
  */
 export async function GET(req: Request) {
-  if (!(await authorize(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  const sb = await createSupabaseServer()
+  const caller = await authorize(req)
+  if (!caller) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const sb = caller.viaToken ? createSupabaseAdmin() : await createSupabaseServer()
 
   const scenarios = new SupabaseScenarioRepository(sb as unknown as ScenarioClient)
   const service = new RoutingService(new SupabaseQuotaRepository(sb as unknown as QueryClient))
@@ -42,8 +44,12 @@ export async function GET(req: Request) {
  * is.
  */
 export async function POST(req: Request) {
-  if (!(await authorize(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  const sb = await createSupabaseServer()
+  const caller = await authorize(req)
+  if (!caller) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  // A token caller has no session, so RLS would refuse every read. It IS the
+  // system, and reads as the system; a signed-in operator still reads as
+  // themselves so row policies keep applying to people.
+  const sb = caller.viaToken ? createSupabaseAdmin() : await createSupabaseServer()
 
   const body = (await req.json()) as {
     name?: string

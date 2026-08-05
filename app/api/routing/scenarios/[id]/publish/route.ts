@@ -21,7 +21,7 @@ import type { QueryClient } from "@/lib/routing/infrastructure/supabase-quota-re
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const caller = await authorize(req)
   if (!caller) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  const sb = await createSupabaseServer()
+  const sb = caller.viaToken ? createSupabaseAdmin() : await createSupabaseServer()
 
   const { id } = await ctx.params
   const body = (await req.json().catch(() => ({}))) as { dry_run?: boolean }

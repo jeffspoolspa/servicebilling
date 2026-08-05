@@ -93,6 +93,14 @@ export async function updateSession(request: NextRequest) {
   const isOfficeAuthRoute = path.startsWith("/login") || path.startsWith("/auth")
   const isTechLogin = path.startsWith("/tech-login")
 
+  // An ENDPOINT authorizes itself. Bouncing an API call to /login answers a
+  // programmatic caller with a 307 and an HTML page, which no client can act
+  // on — and it fires before the route can consider any other credential, so
+  // a token-authenticated caller (a terminal, a cron) could never reach the
+  // use case at all. Middleware guards PAGES; the routes guard themselves and
+  // answer 401 in JSON.
+  if (path.startsWith("/api/")) return response
+
   if (!user) {
     if (isOfficeAuthRoute || isTechLogin) return response
     // Unauthenticated hits to tech URLs bounce to the tech login; everything else
