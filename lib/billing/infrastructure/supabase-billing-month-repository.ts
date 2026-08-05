@@ -687,6 +687,10 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   async recordFindings(
     findings: readonly { monthId: string; customerId: number; rule: string; severity: string; sourceKey: string; message: string; cents: number }[],
     auditedMonthIds: readonly string[],
+    /** Every audited visit's CURRENT observation (visitKey -> cents). With it,
+     * STICKY FLAGS applies: an open flag whose visit is unchanged NEVER
+     * retracts on threshold drift or peer-group reassignment. */
+    observed?: ReadonlyMap<string, number>,
   ): Promise<{ recorded: number; alreadyOpen: number; suppressed: number; retracted: number }> {
     const monthIds = [...new Set(auditedMonthIds)]
     const openByKey = new Map<string, { id: string; cents: number }>()
@@ -731,7 +735,26 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       }
     }
 
-    const stale = [...openByKey.entries()].filter(([k]) => !computedKeys.has(k)).map(([, v]) => v.id)
+    const stale = [...openByKey.entries()]
+      .filter(([k, v]) => {
+        if (computedKeys.has(k)) return false
+        // STICKY FLAGS (RULED 2026-08-05): a no-longer-computed open flag
+        // retracts ONLY when its visit's own observation changed (or the
+        // visit vanished). If the visit's cents are exactly what the flag
+        // observed, the release came from the DISTRIBUTION moving — a
+        // drifted p95 or a peer-group flip — and a statistical boundary
+        // shift must never un-flag a month without a person. (The 8-month
+        // incident: borderline flags healed between two ticks with zero
+        // item changes; months issued, charged and emailed unreviewed.)
+        const sep = k.indexOf("|")
+        const sourceKey = sep > 0 ? k.slice(sep + 1) : null
+        if (observed && sourceKey) {
+          const cur = observed.get(sourceKey)
+          if (cur != null && cur === v.cents) return false
+        }
+        return true
+      })
+      .map(([, v]) => v.id)
     if (stale.length > 0) {
       for (let i = 0; i < stale.length; i += 100) {
         const del = this.q("findings").delete().in("id", stale.slice(i, i + 100)) as unknown as PromiseLike<{ error: unknown }>

@@ -88,7 +88,12 @@ export class BillingRunService {
     ])
     const observations = observationsOf(monthsAll, peerGroups, provisions)
     const found = auditConsumables(observations, histories)
-    const wrote = await this.months.recordFindings(found, monthsAll.map((m) => m.id))
+    // STICKY FLAGS (RULED 2026-08-05, after the 8-month incident): the sync
+    // gets every visit's CURRENT observation so an open flag retracts only
+    // when its own visit changed — a drifted p95 or a peer-group
+    // reclassification never silently releases a month.
+    const observed = new Map(observations.map((o) => [o.visitKey, o.chemCents]))
+    const wrote = await this.months.recordFindings(found, monthsAll.map((m) => m.id), observed)
     return { findings: found.length, ...wrote }
   }
 
