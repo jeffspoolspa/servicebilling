@@ -234,7 +234,12 @@ export class PublishService {
       // overwrites only what moved.
       const made = await this.ion.createTask(
         { ionCustId: sup.ionCustId, changes: carried ? { ...carried, ...sup.changes } : sup.changes,
-          expect: { serviceRepeat: sup.changes["ServiceRepeat"] ?? "3", startsOn: sup.startsOn } },
+          expect: {
+            // Inherited when the supersede does not restate it — a weekly
+            // successor keeps its predecessor's cadence.
+            serviceRepeat: sup.changes["ServiceRepeat"] ?? carried?.["ServiceRepeat"] ?? "3",
+            startsOn: sup.startsOn,
+          } },
         { dryRun: opts.dryRun },
       )
       // The successor exists in ION; give it a row here too, so "did it work"

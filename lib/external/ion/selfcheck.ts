@@ -26,12 +26,45 @@ const week = (stops: { weekday: number; techId: string }[]): TaskSchedule =>
   ({ quotaId: "q1", stops, changes: [] }) as unknown as TaskSchedule
 
 // A weekly write states the COMPLETE week: every day, blank where not served.
-const moved = acl.toIonWrite(week([{ weekday: 4, techId: TECH.caleb }]), id())
+// Same day, different tech — nothing about WHEN the customer is served moves,
+// so this stays an in-place picker edit.
+const moved = acl.toIonWrite(week([{ weekday: 5, techId: TECH.caleb }]), id())
 assert("write" in moved)
 assert.deepStrictEqual(moved.write.changes, {
-  day1: "", day2: "", day3: "", day4: "", day5: ION.caleb, day6: "", day7: "",
+  day1: "", day2: "", day3: "", day4: "", day5: "", day6: ION.caleb, day7: "",
 })
 assert.strictEqual(moved.write.weekly, true)
+
+// THE TWO-VISITS-IN-ONE-WEEK REGRESSION (live, 2026-08-05).
+// A weekly pool serviced Monday is moved to Thursday. The day picker applies
+// IMMEDIATELY, so writing it in place gave the customer a Monday visit AND a
+// Thursday visit in the same week. A day move must supersede, and the
+// successor must start in a week that has not been served yet.
+const weeklyDayMove = acl.toIonWrite(
+  week([{ weekday: 4, techId: TECH.caleb }]),
+  id({ believedDays: { "1": ION.josh }, startsOn: "2026-05-07",
+       lastVisit: "2026-08-03", now: "2026-08-05" }),  // serviced Mon of this week
+)
+assert("supersede" in weeklyDayMove, "a weekly DAY move must supersede, not edit in place")
+assert.strictEqual(
+  weeklyDayMove.supersede.startsOn, "2026-08-13",
+  "must start NEXT Thursday — this week was already served on Monday",
+)
+assert.strictEqual(weeklyDayMove.supersede.endsOn, "2026-08-12")
+// The successor states its whole week, and inherits cadence rather than
+// restating it.
+assert.strictEqual(weeklyDayMove.supersede.changes.day5, ION.caleb)
+assert.strictEqual(weeklyDayMove.supersede.changes.day2, "")
+assert.strictEqual(weeklyDayMove.supersede.changes.ServiceRepeat, undefined)
+
+// Not yet served this week: the move may take effect in THIS week.
+const notYetServed = acl.toIonWrite(
+  week([{ weekday: 4, techId: TECH.caleb }]),
+  id({ believedDays: { "1": ION.josh }, startsOn: "2026-05-07",
+       lastVisit: "2026-07-27", now: "2026-08-05" }),
+)
+assert("supersede" in notYetServed)
+assert.strictEqual(notYetServed.supersede.startsOn, "2026-08-06", "this week is still available")
 
 // Days that stay are still stated — omitting one is how ION keeps a stop and
 // the customer gets serviced twice.
@@ -45,7 +78,7 @@ assert.strictEqual(twoDay.write.changes.day5, ION.caleb)
 
 // multi_week and daily are day-picker cadences too.
 for (const frequency of ["multi_week", "daily"]) {
-  const t = acl.toIonWrite(week([{ weekday: 2, techId: TECH.josh }]), id({ frequency }))
+  const t = acl.toIonWrite(week([{ weekday: 5, techId: TECH.josh }]), id({ frequency }))
   assert("write" in t && t.write.weekly, frequency)
 }
 
