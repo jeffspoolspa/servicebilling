@@ -28,15 +28,21 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
   const { data: custRow } = await sb.from("Customers").select("qbo_customer_id").eq("id", m.customer_id).limit(1)
   const qboCustomerId = ((custRow ?? [])[0] as { qbo_customer_id: string | null } | undefined)?.qbo_customer_id ?? null
   const customerCard = await getCustomerCard(qboCustomerId)
-  const [visitsRes, historyRes, itemsRes, tasksRes, findingsRes, noteRes, chemItemRes, fcRes, ...perInvoice] = await Promise.all([
+  const [visitsRes, historyRes, itemsRes, tasksRes, findingsRes, noteRes, chemItemRes, fcRes, followUpsRes, ...perInvoice] = await Promise.all([
     sb.rpc("maint_billing_review_visits", { p_customer_id: m.customer_id, p_month: monthDate }),
     sb.rpc("billing_month_history", { p_month_id: m.id }),
     sb.rpc("maint_billing_month_items", { p_month_id: m.id }),
     sb.rpc("maint_billing_month_tasks", { p_customer_id: m.customer_id, p_month: monthDate }),
     sb.schema("billing").from("v_findings_review").select("id, rule, severity, message, cents, detected_at, resolved_at, resolved_by, resolution").eq("billing_month_id", m.id).limit(200),
-    sb.schema("billing").from("billing_months").select("summary_note").eq("id", m.id).limit(1),
+    sb.schema("billing").from("billing_months").select("summary_note, explainer_generated_at, explainer_attach_requested_at").eq("id", m.id).limit(1),
     sb.rpc("maint_billing_month_chem_item_summary", { p_customer_id: m.customer_id, p_month: monthDate }),
     sb.rpc("maint_billing_fc_history", { p_customer_id: m.customer_id }),
+    sb.from("follow_ups").select("id, created_at, issue, description, status, next_steps, equipment_off, source_tech_name")
+      .eq("customer_id", m.customer_id)
+      .gte("created_at", monthDate)
+      .lt("created_at", new Date(Date.UTC(+monthDate.slice(0, 4), +monthDate.slice(5, 7), 1)).toISOString().slice(0, 10))
+      .order("created_at", { ascending: false })
+      .limit(50),
     ...issued.flatMap((inv) => [
       sb.rpc("maint_billing_invoice_detail", { p_qbo_invoice_id: inv.qbo_invoice_id }),
       sb.rpc("maint_billing_invoice_payments", { p_qbo_invoice_id: inv.qbo_invoice_id }),
@@ -52,7 +58,9 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
   const ledgerItems = (itemsRes.data ?? []) as never[]
   const monthTasks = (tasksRes.data ?? []) as never[]
   const findings = (findingsRes.data ?? []) as never[]
-  const summaryNote = (((noteRes.data ?? [])[0] as { summary_note?: string | null } | undefined)?.summary_note ?? null)
+  const noteRow = ((noteRes.data ?? [])[0] as { summary_note?: string | null; explainer_generated_at?: string | null; explainer_attach_requested_at?: string | null } | undefined)
+  const summaryNote = noteRow?.summary_note ?? null
+  const followUps = (followUpsRes.data ?? []) as never[]
   const chemItemSummary = (chemItemRes.data ?? []) as never[]
   const fcHistory = (fcRes.data ?? []) as never[]
   issued.forEach((inv, i) => {
@@ -84,6 +92,12 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
         findings={findings as never}
         summaryNote={summaryNote}
         chemItemSummary={chemItemSummary as never}
+        followUps={followUps as never}
+        explainer={{
+          generatedAt: noteRow?.explainer_generated_at ?? null,
+          attachRequestedAt: noteRow?.explainer_attach_requested_at ?? null,
+          url: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/explainers/${m.id}.html`,
+        }}
         fcHistory={fcHistory as never}
       />
     </div>

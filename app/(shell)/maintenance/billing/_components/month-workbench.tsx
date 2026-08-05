@@ -61,6 +61,17 @@ export interface LedgerItem {
   qbo_line_id: string | null
 }
 
+export interface FollowUpRow {
+  id: string
+  created_at: string
+  issue: string | null
+  description: string | null
+  status: string | null
+  next_steps: string | null
+  equipment_off: boolean | null
+  source_tech_name: string | null
+}
+
 export interface MonthFinding {
   id: number
   rule: string
@@ -194,6 +205,8 @@ export function MonthWorkbench({
   summaryNote,
   chemItemSummary,
   fcHistory,
+  followUps,
+  explainer,
 }: {
   m: MonthOverviewRow
   visits: ServiceLogVisit[]
@@ -208,12 +221,18 @@ export function MonthWorkbench({
   summaryNote: string | null
   chemItemSummary: ChemItemCompareRow[]
   fcHistory: FcHistoryPoint[]
+  followUps: FollowUpRow[]
+  explainer: { generatedAt: string | null; attachRequestedAt: string | null; url: string }
 }) {
   const router = useRouter()
   const monthLabel = m.month.slice(0, 7)
   const monthEndIso = new Date(Date.UTC(+m.month.slice(0, 4), +m.month.slice(5, 7), 0)).toISOString().slice(0, 10)
   const [openInvoice, setOpenInvoice] = useState<string | null>(null)
-  const [ledgerTab, setLedgerTab] = useState<"summary" | "items" | "tasks" | "visits">("summary")
+  const [ledgerTab, setLedgerTab] = useState<"summary" | "items" | "tasks" | "visits" | "followups">("summary")
+  const [genState, setGenState] = useState<"idle" | "working" | "done" | "error">("idle")
+  const [genErr, setGenErr] = useState<string | null>(null)
+  const [genAt, setGenAt] = useState<string | null>(explainer.generatedAt)
+  const [attachAt, setAttachAt] = useState<string | null>(explainer.attachRequestedAt)
   const [note, setNote] = useState(summaryNote ?? "")
   const [noteState, setNoteState] = useState<"idle" | "saving" | "saved" | "error">("idle")
   const [reviewing, setReviewing] = useState<number | "all" | null>(null)
@@ -438,6 +457,7 @@ export function MonthWorkbench({
               ["summary", "Summary", openFindings.length, true],
               ["items", "Billable items", ledgerItems.length, false],
               ["visits", "Visits", visits.length, false],
+              ["followups", "Follow-ups", followUps.length, false],
               ["tasks", "Tasks", monthTasks.length, false],
             ] as const).map(([key, label, count, hot]) => (
               <button
@@ -566,17 +586,31 @@ export function MonthWorkbench({
                       >
                         {noteState === "saving" ? "Saving…" : "Save note"}
                       </button>
-                      <a
-                        href={`/api/billing/months/${m.id}/explainer`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className={primaryBtn + " inline-flex items-center"}
+                      <button
+                        disabled={genState === "working"}
+                        onClick={async () => {
+                          setGenState("working")
+                          setGenErr(null)
+                          try {
+                            const r = await fetch(`/api/billing/months/${m.id}/explainer-generate`, { method: "POST" })
+                            const j = await r.json()
+                            if (!r.ok) throw new Error(j.error ?? r.status)
+                            setGenAt(new Date().toISOString())
+                            setGenState("done")
+                            window.open(`${explainer.url}?t=${Date.now()}`, "_blank")
+                          } catch (e) {
+                            setGenErr(String(e instanceof Error ? e.message : e).slice(0, 160))
+                            setGenState("error")
+                          }
+                        }}
+                        className={primaryBtn}
+                        title="Send the month's context to the model; the letter lands at a stable link"
                       >
-                        Generate explainer
-                      </a>
+                        {genState === "working" ? "Generating…" : genAt ? "Regenerate" : "Generate explainer"}
+                      </button>
                     </span>
                   </CardHeader>
-                  <CardBody>
+                  <CardBody className="space-y-2">
                     <textarea
                       value={note}
                       onChange={(e) => {
@@ -584,16 +618,84 @@ export function MonthWorkbench({
                         setNoteState("idle")
                       }}
                       rows={6}
-                      placeholder="The overview of this customer's month — becomes the explainer's narrative intro."
+                      placeholder="The overview of this customer's month — steers the explainer; edit and regenerate."
                       className="w-full bg-bg border border-line rounded-lg p-2.5 text-[12.5px] text-ink outline-none focus:border-cyan resize-y"
                     />
+                    <div className="flex items-center gap-3 flex-wrap text-[11.5px]">
+                      {genAt && (
+                        <a href={`${explainer.url}?t=${genAt}`} target="_blank" rel="noreferrer" className="text-cyan underline underline-offset-2">
+                          View letter
+                        </a>
+                      )}
+                      <a href={`/api/billing/months/${m.id}/explainer`} target="_blank" rel="noreferrer" className="text-ink-mute underline underline-offset-2 hover:text-ink">
+                        Print view (facts only)
+                      </a>
+                      {(() => {
+                        const anySent = (m.issued_invoices ?? []).some((i2) => i2.email_status === "EmailSent")
+                        if (anySent) {
+                          return <span className="text-ink-mute" title="invoices already emailed — attaching is frozen">Attach locked — invoices sent</span>
+                        }
+                        return (
+                          <button
+                            disabled={!genAt || acting === "attach"}
+                            onClick={async () => {
+                              const r = await fetch(`/api/billing/months/${m.id}/explainer-attach`, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ attach: !attachAt }),
+                              })
+                              const j = await r.json()
+                              if (r.ok) setAttachAt(attachAt ? null : new Date().toISOString())
+                              else setGenErr(String(j.error ?? "attach failed").slice(0, 160))
+                            }}
+                            className={actionBtn}
+                            title={genAt ? "The send path attaches the letter when emailing the invoices" : "generate the explainer first"}
+                          >
+                            {attachAt ? "Detach from invoices" : "Attach to invoices"}
+                          </button>
+                        )
+                      })()}
+                      {attachAt && <Pill tone="teal">will attach on send</Pill>}
+                      {genAt && <span className="text-ink-mute font-mono text-[10px]">generated {new Date(genAt).toLocaleString()}</span>}
+                      {genErr && <span className="text-coral">{genErr}</span>}
+                    </div>
                   </CardBody>
                 </Card>
               </div>
             </>
           )}
 
-          {ledgerTab !== "visits" && ledgerTab !== "summary" && (
+          {ledgerTab === "followups" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Service follow-ups · {monthLabel}</CardTitle>
+              </CardHeader>
+              <CardBody>
+                {followUps.length === 0 ? (
+                  <div className="text-[12px] text-ink-mute">No follow-ups submitted for this customer this month.</div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {followUps.map((f) => (
+                      <div key={f.id} className="border border-line-soft rounded-lg p-3 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[12.5px] font-medium text-ink">{f.issue ?? "Follow-up"}</span>
+                          {f.equipment_off && <Pill tone="coral">equipment off</Pill>}
+                          {f.status && <Pill tone={f.status === "resolved" ? "grass" : "sun"}>{f.status}</Pill>}
+                          <span className="ml-auto font-mono text-[10.5px] text-ink-mute">
+                            {new Date(f.created_at).toLocaleDateString()} {f.source_tech_name ? `· ${f.source_tech_name}` : ""}
+                          </span>
+                        </div>
+                        {f.description && <div className="text-[12px] text-ink-dim">{f.description}</div>}
+                        {f.next_steps && <div className="text-[11.5px] text-ink-mute">Next: {f.next_steps}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardBody>
+            </Card>
+          )}
+
+          {ledgerTab !== "visits" && ledgerTab !== "summary" && ledgerTab !== "followups" && (
           <Card>
             {ledgerTab === "items" && (
               <CardHeader>

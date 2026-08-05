@@ -59,7 +59,11 @@ export async function updateSession(request: NextRequest) {
   // The caller is pg_cron via pg_net (or an operator's curl) — no session
   // cookie; the routes authenticate the x-drain-token header themselves
   // (INVOICE_DRAIN_TOKEN). A signed-in person still passes their door too.
-  if (path === "/api/billing/tick" || path === "/api/billing/invoice-queue/drain") {
+  if (
+    path === "/api/billing/tick" ||
+    path === "/api/billing/invoice-queue/drain" ||
+    /^\/api\/billing\/months\/[^/]+\/explainer-generate$/.test(path)
+  ) {
     return response
   }
 
