@@ -96,7 +96,7 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
         explainer={{
           generatedAt: noteRow?.explainer_generated_at ?? null,
           attachRequestedAt: noteRow?.explainer_attach_requested_at ?? null,
-          url: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/explainers/${m.id}.html`,
+          url: `/api/billing/months/${m.id}/explainer-view`,
         }}
         fcHistory={fcHistory as never}
       />
