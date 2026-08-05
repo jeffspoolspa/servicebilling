@@ -94,14 +94,16 @@ export class BillingRunService {
     const observations: ChemObservation[] = totals
       .filter((t) => t.chemCents > 0)
       .map((t) => ({
-        monthId: t.monthId,
+        monthId: t.monthId ?? "",
         customerId: t.customerId,
         visitKey: `${t.taskId}:${t.serviceDate}`,
         serviceDate: t.serviceDate,
         peerKey: provisions.get(t.taskId) ?? peerGroups.get(t.customerId) ?? "unclassified",
         chemCents: t.chemCents,
       }))
-    const found = auditConsumables(observations, histories)
+    // Every observation shapes the distribution; only observations with a
+    // billing month can carry a finding.
+    const found = auditConsumables(observations, histories).filter((f) => f.monthId !== "")
     // Every visit's current observation rides along so a RETRACTION EVENT
     // can say WHY: the visit's data changed, the visit vanished, or the
     // population shifted around an unchanged visit (flags legitimately

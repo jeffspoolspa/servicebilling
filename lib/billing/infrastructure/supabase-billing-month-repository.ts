@@ -423,12 +423,15 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
    * plain view, always current as items land, so the app never re-sums an
    * unbounded item pull.
    */
-  async visitChemTotals(month: string): Promise<{ monthId: string; customerId: number; taskId: string; serviceDate: string; chemCents: number }[]> {
-    const rows = await this.pageAll<{ billing_month_id: string; customer_id: number; task_id: string; service_date: string; chem_cents: number }>(
+  async visitChemTotals(month: string): Promise<{ monthId: string | null; customerId: number; taskId: string; serviceDate: string; chemCents: number }[]> {
+    // The view spans ALL ingested data; billing_month_id is a NULLABLE link
+    // — rows without one still feed the distribution, but no finding can
+    // land on a month that does not exist.
+    const rows = await this.pageAll<{ billing_month_id: string | null; customer_id: number; task_id: string; service_date: string; chem_cents: number }>(
       () => (this.q("v_visit_chem_totals")
         .select("billing_month_id, customer_id, task_id, service_date, chem_cents")
-        .eq("month", month) as unknown as { order(c: string): { order(c2: string): unknown } })
-        .order("billing_month_id").order("task_id") as never,
+        .eq("month", month) as unknown as { order(c: string): unknown })
+        .order("task_id") as never,
       "visit chem totals",
       "service_date",
     )
