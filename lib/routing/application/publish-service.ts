@@ -146,19 +146,55 @@ export class PublishService {
     // lands without its create leaves the customer unscheduled, so the create
     // failure is reported against the same quota rather than swallowed.
     for (const sup of supersedes) {
-      const closed = await this.ion.applyWeeks(
-        [{ key: sup.quotaId, ionTaskId: sup.ionTaskId, ionCustId: sup.ionCustId, weekly: false,
-           changes: { EndsOn: sup.endsOn }, believedDays: {},
-           // If ION's anchor moved since our refresh, the effective week we
-           // computed is wrong — refuse the close rather than end a contract
-           // and create a successor from a date ION no longer holds.
-           believedStartsOn: sup.believedStartsOn }],
-        { dryRun: opts.dryRun },
-      )
-      if (!closed[0]?.accepted) {
-        results.push({ quotaId: sup.quotaId, accepted: false, detail: `close refused: ${closed[0]?.detail ?? "no result"}` })
+      // RESUMABLE, because a lost lease re-runs this from the top. Both halves
+      // are irreversible in ION, so each asks what already landed before
+      // acting — closing twice is harmless, but CREATING twice would leave the
+      // customer with two live contracts, which is worse than the failure it
+      // was retrying.
+      let alreadyClosed = false
+      let alreadyCreated: string | null = null
+      if (!opts.dryRun) {
+        try {
+          const before = await this.ion.readTask(sup.ionTaskId, sup.ionCustId)
+          alreadyClosed = (before.startsOn ?? "") !== "" && (before.fields["EndsOn"] ?? "") === sup.endsOn
+          // A successor exists when the customer already carries a task
+          // starting on the date this supersede was computed for.
+          const siblings = await this.ion.listTaskIds(sup.ionCustId)
+          for (const other of siblings) {
+            if (other === sup.ionTaskId) continue
+            const f = await this.ion.readTask(other, sup.ionCustId)
+            if (f.startsOn === sup.startsOn) { alreadyCreated = other; break }
+          }
+        } catch (err) {
+          results.push({ quotaId: sup.quotaId, accepted: false, detail: `could not read ION state before superseding: ${err instanceof Error ? err.message : String(err)}` })
+          continue
+        }
+      }
+
+      if (alreadyCreated) {
+        results.push({
+          quotaId: sup.quotaId, accepted: true,
+          detail: `already superseded on a previous attempt — successor is ION task ${alreadyCreated}, starting ${sup.startsOn}`,
+        })
         continue
       }
+
+      if (!alreadyClosed) {
+        const closed = await this.ion.applyWeeks(
+          [{ key: sup.quotaId, ionTaskId: sup.ionTaskId, ionCustId: sup.ionCustId, weekly: false,
+             changes: { EndsOn: sup.endsOn }, believedDays: {},
+             // If ION's anchor moved since our refresh, the effective week we
+             // computed is wrong — refuse the close rather than end a contract
+             // and create a successor from a date ION no longer holds.
+             believedStartsOn: sup.believedStartsOn }],
+          { dryRun: opts.dryRun },
+        )
+        if (!closed[0]?.accepted) {
+          results.push({ quotaId: sup.quotaId, accepted: false, detail: `close refused: ${closed[0]?.detail ?? "no result"}` })
+          continue
+        }
+      }
+
       const made = await this.ion.createTask(
         { ionCustId: sup.ionCustId, changes: sup.changes,
           expect: { serviceRepeat: sup.changes["ServiceRepeat"] ?? "3", startsOn: sup.startsOn } },
@@ -168,7 +204,7 @@ export class PublishService {
         quotaId: sup.quotaId,
         accepted: made.accepted,
         detail: made.accepted
-          ? `superseded: old contract ends ${sup.endsOn}, new starts ${sup.startsOn}${made.ionTaskId ? ` (ION task ${made.ionTaskId})` : ""}`
+          ? `superseded: old contract ends ${sup.endsOn}, new starts ${sup.startsOn}${made.ionTaskId ? ` (ION task ${made.ionTaskId})` : ""}${alreadyClosed ? " (close had already landed)" : ""}`
           : `closed ${sup.endsOn} but CREATE FAILED — customer has no live task: ${made.detail}`,
       })
     }
