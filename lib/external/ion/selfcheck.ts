@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert"
-import { IonTaskAcl, anchorOf, startsOnFor, type TaskIdentity } from "./acl"
+import { IonTaskAcl, anchorOf, startsOnFor, type TaskIdentity, reviseTask, effectiveWeekFor} from "./acl"
 import type { IonTaskForm } from "./ion"
 import type { TaskSchedule } from "@/lib/routing/domain"
 
@@ -132,3 +132,51 @@ for (const f of ["biweekly_a", "biweekly_b"] as const) {
 }
 
 console.log("ion schedule acl selfcheck: 24 checks passed (incl. 42 anchor roundtrips)")
+
+/* ------------------- revising a live task (2026-08-05) ------------------- */
+{
+  const form = (startsOn: string, repeatText: string, serviceRepeat: string, extra: Record<string, string> = {}) => ({
+    rendered: true, startsOn, serviceRepeat, serviceRepeatText: repeatText,
+    days: {} as Record<string, string>,
+    fields: { StartsOn: startsOn, AssignedTo: ION.josh, ServiceRepeat: serviceRepeat, tasknote: "keep me", ...extra },
+  })
+  const NOW = "2026-08-05"           // Wed, week 2952 (parity A)
+  const LAST = "2026-08-05"          // this week's visit already happened
+
+  // ── the effective-week rule: never skip a qualifying week
+  assert.strictEqual(effectiveWeekFor(LAST, NOW, "biweekly_b"), 2953, "flip -> the ADJACENT week, not +3")
+  assert.strictEqual(effectiveWeekFor(LAST, NOW, "biweekly_a"), 2954, "same parity -> the normal fortnight")
+  assert.strictEqual(effectiveWeekFor(LAST, NOW, "weekly"), 2953)
+  // this week still available when its visit has NOT happened
+  assert.strictEqual(effectiveWeekFor("2026-07-29", NOW, "weekly"), 2952, "current week is not spent")
+  assert.strictEqual(effectiveWeekFor(null, NOW, "weekly"), 2952, "never serviced -> start now")
+
+  // ── tech only: amended in place, anchor untouched
+  const techOnly = reviseTask(form("2026-05-06", "Bi-Weekly", "3"), { ionTech: ION.caleb }, { lastVisit: LAST, now: NOW })
+  assert("amend" in techOnly, "a tech change moves no schedule")
+  assert.strictEqual(techOnly.amend.fields["AssignedTo"], ION.caleb)
+  assert.strictEqual(techOnly.amend.fields["StartsOn"], "2026-05-06", "the anchor is NOT rewritten")
+
+  // ── day move on a biweekly: supersedes, keeps parity, one-week gap
+  const dayMove = reviseTask(form("2026-05-06", "Bi-Weekly", "3"), { weekday: 4 }, { lastVisit: LAST, now: NOW })
+  assert("supersede" in dayMove, "a day move is a new contract")
+  assert.strictEqual(anchorOf(dayMove.supersede.startsOn, "Bi-Weekly")!.frequency, "biweekly_b", "parity preserved")
+  assert.strictEqual(new Date(dayMove.supersede.startsOn + "T00:00:00Z").getUTCDay(), 4, "lands on Thursday")
+  assert.strictEqual(dayMove.supersede.fields["tasknote"], "keep me", "unmodelled fields carry forward")
+  // the old contract ends the day before the new one starts: no overlap, no gap
+  assert.strictEqual(
+    (Date.parse(dayMove.supersede.startsOn) - Date.parse(dayMove.supersede.endsOn)) / 86400000, 1)
+
+  // ── the same TARGET from different sources agrees (no transition table)
+  const fromA = reviseTask(form("2026-08-18", "Bi-Weekly", "3"), { cadence: "biweekly_b", weekday: 4 }, { lastVisit: LAST, now: NOW })
+  const fromW = reviseTask(form("2026-08-11", "Weekly", "2"), { cadence: "biweekly_b", weekday: 4 }, { lastVisit: LAST, now: NOW })
+  assert("supersede" in fromA && "supersede" in fromW)
+  assert.strictEqual(fromA.supersede.startsOn, fromW.supersede.startsOn, "direction does not matter, only the target")
+
+  // ── biweekly -> weekly discards parity and takes the next week
+  const toWeekly = reviseTask(form("2026-05-06", "Bi-Weekly", "3"), { cadence: "weekly" }, { lastVisit: LAST, now: NOW })
+  assert("supersede" in toWeekly && toWeekly.supersede.fields["ServiceRepeat"] === "2")
+
+  // ── an unreadable cadence refuses rather than guessing an anchor
+  assert("refusal" in reviseTask(form("2026-05-06", "???", "9"), { weekday: 4 }, { lastVisit: LAST, now: NOW }))
+}

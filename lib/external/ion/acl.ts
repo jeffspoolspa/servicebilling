@@ -163,6 +163,55 @@ export function anchorOf(startsOn: string, repeatText: string): { weekday: numbe
 }
 
 /**
+ * The week a revision takes effect, chosen so a cadence change never opens a
+ * gap wider than the cadence itself (Carter, 2026-08-05).
+ *
+ * The rule is "never skip a qualifying week", and it is stated on WEEKS, not
+ * dates, because that is what makes it checkable: of any two consecutive
+ * weeks one is A and one is B, so the first qualifying week after a visit is
+ * always the next one or the one after — never further. A biweekly pool that
+ * flips its anchor therefore serves one week later and returns to fortnightly,
+ * instead of disappearing for three weeks.
+ *
+ *   - the current week is still available UNLESS this week's visit is already
+ *     done, in which case the earliest candidate is next week
+ *   - a weekly or monthly target accepts any week, so it takes the first one
+ *   - a biweekly target takes the first week of ITS parity
+ *
+ * Pure: `lastVisit` and `now` are given, never looked up. The caller obtains
+ * the last visit through LastVisitSource.
+ */
+export function effectiveWeekFor(
+  lastVisit: string | null,
+  now: string,
+  target: "weekly" | "biweekly_a" | "biweekly_b" | "monthly",
+): number {
+  const nowWeek = isoWeekIndex(now)
+  if (nowWeek === null) throw new Error(`effectiveWeekFor: unreadable date "${now}"`)
+  const lastWeek = lastVisit ? isoWeekIndex(lastVisit) : null
+  // This week is spent only if the visit for it already happened.
+  const earliest = lastWeek !== null && lastWeek >= nowWeek ? lastWeek + 1 : nowWeek
+  if (target === "weekly" || target === "monthly") return earliest
+  const wantEven = target === "biweekly_a"
+  return ((earliest % 2) + 2) % 2 === (wantEven ? 0 : 1) ? earliest : earliest + 1
+}
+
+/** Week index on the same epoch anchorOf uses — Monday opens the week. */
+export function isoWeekIndex(iso: string): number | null {
+  const d = new Date(`${iso}T00:00:00Z`)
+  if (isNaN(+d)) return null
+  return Math.floor(
+    (Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - Date.UTC(1970, 0, 5)) / (7 * 86400000),
+  )
+}
+
+/** The date of `weekday` inside a given week index. */
+export function dateInWeek(week: number, weekday: number): string {
+  const monday = Date.UTC(1970, 0, 5) + week * 7 * 86400000
+  return new Date(monday + ((weekday + 6) % 7) * 86400000).toISOString().slice(0, 10)
+}
+
+/**
  * The INVERSE of the anchor rule: the first date on/after `notBefore` that a
  * new task must start on so ION generates visits on `weekday` in the right
  * alternating week. No week arithmetic to get wrong — it walks forward and
@@ -188,4 +237,107 @@ export function startsOnFor(
     d.setUTCDate(d.getUTCDate() + 1)
   }
   throw new Error(`no ${frequency} start on weekday ${weekday} within 28 days of ${notBefore} — unreachable`)
+}
+
+/* --------------------------- revising a live task ------------------------- */
+
+export type TargetCadence = "weekly" | "biweekly_a" | "biweekly_b" | "monthly"
+
+/**
+ * The DESIRED END STATE, not a description of the change. Absent fields mean
+ * "leave as ION currently has it" — which is why the current form is required
+ * and why the SOURCE cadence never appears: the anchor is a function of the
+ * TARGET alone (proven 2026-08-05 — the same target resolves to the same date
+ * from weekly, from A and from B, so there is no transition table).
+ */
+export interface TaskRevision {
+  readonly weekday?: number
+  /** ION employee id — the ACL speaks ION's vocabulary; callers translate. */
+  readonly ionTech?: string
+  readonly cadence?: TargetCadence
+}
+
+export type Revised =
+  /** Nothing structural moved: ION can take this in place. */
+  | { amend: { fields: Record<string, string> } }
+  /**
+   * The schedule moved. ION generates visits FROM StartsOn, so rewriting it
+   * re-derives visits already serviced and invoiced. The old contract ends and
+   * a new one begins — the contract is immutable, which is the whole reason
+   * effective-dated terms had to exist for billing.
+   */
+  | { supersede: { endsOn: string; startsOn: string; fields: Record<string, string> } }
+  | { refusal: string }
+
+const REVISE_DAY_FIELDS = ["day1", "day2", "day3", "day4", "day5", "day6", "day7"] as const
+
+/**
+ * Translate a revision into what ION must be told, from its CURRENT form.
+ *
+ * Pure — no HTTP, no clock, no lookups. Every input is given: the refreshed
+ * form (which must be fetched anyway, since ION only accepts a completely
+ * rebuilt form), the desired end state, the last visit and today.
+ *
+ * Carry-forward is the default: the new task begins as a copy of every field
+ * ION holds, and the revision overwrites only what it names, so fields we have
+ * never modeled ride along instead of being dropped.
+ */
+export function reviseTask(
+  current: IonTaskForm,
+  revision: TaskRevision,
+  ctx: { lastVisit: string | null; now: string },
+): Revised {
+  const anchor = anchorOf(current.startsOn, current.serviceRepeatText)
+  const weeklyish = /weekly/i.test(current.serviceRepeatText) && !/bi/i.test(current.serviceRepeatText)
+  const currentCadence = (anchor?.frequency ?? (weeklyish ? "weekly" : null)) as TargetCadence | null
+  if (!currentCadence) {
+    return { refusal: `cannot read a cadence from "${current.serviceRepeatText}" — refusing to guess an anchor` }
+  }
+  const currentWeekday = anchor?.weekday ?? isoWeekday(current.startsOn)
+
+  const cadence = revision.cadence ?? currentCadence
+  const weekday = revision.weekday ?? currentWeekday
+  if (weekday === null) return { refusal: `${current.serviceRepeatText}: no weekday to keep and none supplied` }
+
+  const dayMoved = revision.weekday !== undefined && revision.weekday !== currentWeekday
+  const cadenceMoved = revision.cadence !== undefined && revision.cadence !== currentCadence
+
+  // Tech only: no anchor involved, so nothing about the past is disturbed.
+  if (!dayMoved && !cadenceMoved) {
+    if (!revision.ionTech) return { refusal: "nothing to change" }
+    const fields: Record<string, string> = { ...current.fields }
+    if (current.serviceRepeat === "2" || current.serviceRepeat === "1") {
+      fields[REVISE_DAY_FIELDS[weekday]] = revision.ionTech
+    } else {
+      fields["AssignedTo"] = revision.ionTech
+    }
+    return { amend: { fields } }
+  }
+
+  const startsOn = dateInWeek(effectiveWeekFor(ctx.lastVisit, ctx.now, cadence), weekday)
+  // Read-back agreement: the date chosen must SAY what was meant.
+  if (cadence.startsWith("biweekly")) {
+    const proof = anchorOf(startsOn, "Bi-Weekly")
+    if (proof?.frequency !== cadence) {
+      return { refusal: `computed ${startsOn} reads back as ${proof?.frequency ?? "unreadable"}, not ${cadence}` }
+    }
+  }
+
+  const fields: Record<string, string> = { ...current.fields }
+  for (const f of REVISE_DAY_FIELDS) fields[f] = ""
+  const tech = revision.ionTech ?? current.fields["AssignedTo"] ?? ""
+  if (cadence === "weekly") fields[REVISE_DAY_FIELDS[weekday]] = tech
+  else fields["AssignedTo"] = tech
+  fields["StartsOn"] = startsOn
+  fields["EndsOn"] = ""
+  fields["ServiceRepeat"] = cadence === "weekly" ? "2" : cadence === "monthly" ? "4" : "3"
+
+  // The old contract ends the day before the new begins: no overlap, no gap.
+  const endsOn = new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10)
+  return { supersede: { endsOn, startsOn, fields } }
+}
+
+function isoWeekday(iso: string): number | null {
+  const d = new Date(`${iso}T00:00:00Z`)
+  return isNaN(+d) ? null : d.getUTCDay()
 }

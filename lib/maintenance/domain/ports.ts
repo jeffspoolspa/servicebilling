@@ -71,3 +71,20 @@ export interface ServiceCatalog {
   /** The catalog price for a service type, used when no explicit price is set. */
   priceCents(serviceTypeId: string): number | null
 }
+
+/**
+ * When a task was last actually serviced.
+ *
+ * A revision needs this to choose its effective week — the current week is
+ * still available unless its visit already happened. It is a PORT because the
+ * answer lives outside the model: ION's own record for the task, which is
+ * authoritative for what ION will generate next.
+ *
+ * Kept separate from TaskGateway on purpose: this is a read about SERVICE
+ * DELIVERY, not about the contract, and a caller that only needs the date
+ * should not have to hold a gateway that can write.
+ */
+export interface LastVisitSource {
+  /** ISO date of the most recent completed visit, or null if never serviced. */
+  lastVisitFor(ionTaskId: string): Promise<string | null>
+}

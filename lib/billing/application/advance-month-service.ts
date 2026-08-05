@@ -204,9 +204,10 @@ export class AdvanceMonthService {
     const next = fresh ? fresh.nextStep(sources, now) : null
     return {
       monthId, from, step, to: fresh?.status ?? month.status, detail,
-      // The tail-chain: enqueue again only while there is more to do. The
-      // loop would have found it anyway; this just removes the wait.
-      again: next !== null && next !== "gate" && next !== "issue",
+      // More to do means keep going — gate and issue included (RULED
+      // 2026-08-05: the drainer may fire issue; the old exclusion here made
+      // the issue case unreachable and stranded clean months after gating).
+      again: next !== null,
     }
   }
 
