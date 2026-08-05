@@ -249,6 +249,7 @@ export function MonthWorkbench({
   const [noteDraft, setNoteDraft] = useState("")
   const [notes, setNotes] = useState(explainer.notes)
   const [letterFull, setLetterFull] = useState(false)
+  const [thumbH, setThumbH] = useState<number | null>(null)
   const [reviewing, setReviewing] = useState<number | "all" | null>(null)
   void summaryNote
 
@@ -683,12 +684,25 @@ export function MonthWorkbench({
                             scrollbars; fullscreen is the reading mode. The
                             width/scale pair (182% x 0.55) keeps the letter
                             fitted to the card at any width. */}
-                        <div className="w-full overflow-hidden bg-white" style={{ aspectRatio: "17 / 22" }}>
+                        <div className="w-full overflow-hidden bg-white" style={thumbH ? { height: `${thumbH}px` } : { aspectRatio: "8.5 / 11" }}>
                           <iframe
                             key={genAt}
-                            src={`${explainer.url}?t=${genAt}`}
+                            src={`${explainer.url}?thumb=1&t=${genAt}`}
                             title="Explainer letter"
                             className="pointer-events-none"
+                            onLoad={(e) => {
+                              // Same-origin: measure the letter's true height and
+                              // size the box to EXACTLY the scaled content.
+                              try {
+                                const d = e.currentTarget.contentDocument
+                                // Measure the PAGE element, not the document —
+                                // the document stretches to the iframe's own
+                                // oversized viewport and lies about content.
+                                const page = d?.querySelector(".page")
+                                const h = page ? page.getBoundingClientRect().height : d?.body.scrollHeight
+                                if (h) setThumbH(Math.ceil(h * 0.55))
+                              } catch { /* cross-origin never happens; keep aspect fallback */ }
+                            }}
                             style={{ width: "182%", height: "182%", transform: "scale(0.55)", transformOrigin: "top left", border: "0" }}
                           />
                         </div>

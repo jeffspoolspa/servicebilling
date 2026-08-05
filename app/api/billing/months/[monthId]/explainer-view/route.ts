@@ -19,8 +19,19 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
   )
   if (!r.ok) return NextResponse.json({ error: "no generated explainer for this month yet" }, { status: 404 })
   const headers: Record<string, string> = { "Content-Type": "text/html; charset=utf-8" }
-  if (new URL(req.url).searchParams.get("download") === "1") {
+  const params = new URL(req.url).searchParams
+  if (params.get("download") === "1") {
     headers["Content-Disposition"] = `attachment; filename="explainer-${monthId.slice(0, 8)}.html"`
   }
-  return new NextResponse(await r.text(), { headers })
+  let html = await r.text()
+  if (params.get("thumb") === "1") {
+    // THUMBNAIL mode: the page fills the frame edge to edge — no paper
+    // margins, no shadow, no print bar — so the card's scaled preview has
+    // zero whitespace.
+    html = html.replace(
+      "</head>",
+      `<style>body{background:#FCFBF9 !important}.page{margin:0 !important;width:100% !important;min-height:auto !important;box-shadow:none !important}.printbar{display:none !important}</style></head>`,
+    )
+  }
+  return new NextResponse(html, { headers })
 }
