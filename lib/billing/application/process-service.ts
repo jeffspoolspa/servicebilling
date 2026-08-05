@@ -66,7 +66,11 @@ export async function sendInvoiceStep(inv: InvoiceRef, deps: SendDeps, now: Date
   const at = now.toISOString()
   // The sender's echo flips the mirror's email_status — which is exactly
   // what invoiceNextStep reads, so a re-run converges without a flag.
-  await deps.sender.send(inv.qboInvoiceId, await deps.attachments(inv))
+  const atts = await deps.attachments(inv)
+  await deps.sender.send(inv.qboInvoiceId, atts)
+  for (const a of atts) {
+    await deps.emit("invoice_attachment_uploaded", { qbo_invoice_id: inv.qboInvoiceId, filename: a.filename }, [inv.linkedTo.id], at)
+  }
   await deps.emit("invoice_emailed", { qbo_invoice_id: inv.qboInvoiceId, kind: inv.kind }, [inv.linkedTo.id], at)
   return { qboInvoiceId: inv.qboInvoiceId, sent: true }
 }

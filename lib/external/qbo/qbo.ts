@@ -62,7 +62,7 @@ export abstract class Qbo {
   }
 
   /** Raw-body request (multipart uploads). Same auth door, same re-mint. */
-  protected async requestRaw(method: "POST", path: string, body: Uint8Array, contentType: string, retried = false): Promise<void> {
+  protected async requestRaw(method: "POST", path: string, body: Uint8Array, contentType: string, retried = false): Promise<string> {
     if (!this.keys) this.keys = await this.minter.mint(false)
     const res = await fetch(`${BASE}/${this.keys.realm_id}${path}`, {
       method,
@@ -73,7 +73,9 @@ export abstract class Qbo {
       this.keys = await this.minter.mint(true)
       return this.requestRaw(method, path, body, contentType, true)
     }
-    if (!res.ok) throw new Error(`QBO ${method} ${path} -> ${res.status}: ${(await res.text()).slice(0, 300)}`)
+    const text = await res.text()
+    if (!res.ok) throw new Error(`QBO ${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`)
+    return text
   }
 }
 
@@ -307,14 +309,23 @@ export class QboInvoices extends Qbo {
     const meta = JSON.stringify({
       FileName: filename,
       ContentType: "application/pdf",
-      AttachableRef: [{ EntityRef: { type: "Invoice", value: qboInvoiceId } }],
+      // IncludeOnSend is what makes the file ride the /send email — without
+      // it the attachment only sits on the QBO record.
+      AttachableRef: [{ EntityRef: { type: "Invoice", value: qboInvoiceId }, IncludeOnSend: true }],
     })
     const head =
       `--${boundary}\r\nContent-Disposition: form-data; name="file_metadata_01"; filename="attachment.json"\r\nContent-Type: application/json\r\n\r\n${meta}\r\n` +
       `--${boundary}\r\nContent-Disposition: form-data; name="file_content_01"; filename="${filename}"\r\nContent-Type: application/pdf\r\n\r\n`
     const tail = `\r\n--${boundary}--\r\n`
     const body = new Uint8Array([...new TextEncoder().encode(head), ...pdf, ...new TextEncoder().encode(tail)])
-    await this.requestRaw("POST", "/upload", body, `multipart/form-data; boundary=${boundary}`)
+    const text = await this.requestRaw("POST", "/upload", body, `multipart/form-data; boundary=${boundary}`)
+    // ECHO PROOF: /upload answers 200 even when the file inside failed —
+    // only an Attachable with an Id proves the upload landed.
+    const echo = JSON.parse(text) as { AttachableResponse?: { Attachable?: { Id?: string }; Fault?: unknown }[] }
+    const first = echo.AttachableResponse?.[0]
+    if (!first?.Attachable?.Id) {
+      throw new Error(`attachment upload unproven for invoice ${qboInvoiceId}: ${JSON.stringify(first?.Fault ?? echo).slice(0, 300)}`)
+    }
   }
 
   /**

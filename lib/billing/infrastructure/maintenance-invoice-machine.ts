@@ -267,9 +267,26 @@ export function maintenanceMachineDeps(sys: Db): {
         await qbo.sendInvoice(qboInvoiceId, email)
       },
     },
-    async attachments() {
-      // The usage-report PDF ride-along lands with the report-render bridge.
-      return []
+    async attachments(inv) {
+      // THE ATTACH INTENT: the month's toggle. Off (or a non-month invoice)
+      // means a bare email. On means the explainer letter rides it — and on
+      // with no rendered PDF is a broken precondition: park the send rather
+      // than break the promise the toggle made.
+      if (inv.linkedTo.aggregate !== "billing_month") return []
+      const { data, error } = await monthInvoices()
+        .select("billing_months(month, explainer_attach_requested_at)")
+        .eq("qbo_invoice_id", inv.qboInvoiceId)
+      if (error) throw new Error(`attach intent read failed: ${JSON.stringify(error).slice(0, 200)}`)
+      const bm = ((data ?? [])[0] as { billing_months: { month: string; explainer_attach_requested_at: string | null } | null } | undefined)?.billing_months
+      if (!bm?.explainer_attach_requested_at) return []
+      const r = await fetch(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/explainers/${inv.linkedTo.id}.pdf`,
+        { cache: "no-store" },
+      )
+      if (!r.ok) {
+        throw new Error(`attach is on for this month but no explainer PDF exists — generate the letter (or turn attach off) and re-run`)
+      }
+      return [{ filename: `High-Bill-Explainer-${bm.month.slice(0, 7)}.pdf`, pdf: new Uint8Array(await r.arrayBuffer()) }]
     },
     emit,
   }
