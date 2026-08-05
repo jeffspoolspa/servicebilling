@@ -122,6 +122,30 @@ async function watchQueue(ids: string[], say: (s: string) => void): Promise<Queu
   }
 }
 
+/**
+ * Cadence, short enough to sit in a selection row.
+ *
+ * Which fortnight a pool is on decides whether a move lands next week or the
+ * one after, so it has to be readable while you are choosing what to move —
+ * not only after you have selected a single pool.
+ */
+function CadenceTag({ quota }: { quota: Quota }) {
+  const c = cadence(quota.requirement.intervalWeeks, quota.requirement.anchorWeek)
+  const [text, tone] =
+    c.intervalWeeks === 1
+      ? ["wk", "text-cyan"]
+      : c.intervalWeeks === 4
+        ? ["mo", "text-ink-mute"]
+        : c.anchorWeek % 2 === 0
+          ? ["A", "text-emerald-400"]
+          : ["B", "text-sun"]
+  return (
+    <span className={`font-mono ${tone}`} title={cadenceLabel(c)}>
+      {text}
+    </span>
+  )
+}
+
 export function LiveMap({
   token,
   week,
@@ -2624,6 +2648,9 @@ export function LiveMap({
                           <td className="truncate py-1 pr-2 text-ink-dim">
                             {nameOf(q?.requirement.customerId ?? null)}
                           </td>
+                          <td className="w-6 py-1 pr-2 text-[10px]">
+                            {q ? <CadenceTag quota={q} /> : null}
+                          </td>
                           <td className="w-12 py-1 pr-2 text-ink-mute">
                             {WEEKDAY_NAMES[sel.weekday]}
                           </td>
@@ -2749,14 +2776,38 @@ export function LiveMap({
               <span className="max-w-[13rem] truncate text-[12.5px] font-semibold text-ink">
                 {nameOf(selectedInfo.quota.requirement.customerId)}
               </span>
+              {/* Which fortnight a pool is on decides whether a move lands next
+                  week or the one after, so it belongs where it can be read at a
+                  glance — not folded into the metadata line with on-site
+                  minutes. */}
+              {(() => {
+                const c = cadence(
+                  selectedInfo.quota.requirement.intervalWeeks,
+                  selectedInfo.quota.requirement.anchorWeek,
+                )
+                const label = cadenceLabel(c)
+                const tone =
+                  c.intervalWeeks === 1
+                    ? "border-cyan/40 bg-cyan/10 text-cyan"
+                    : c.intervalWeeks === 4
+                      ? "border-line bg-white/[0.06] text-ink-dim"
+                      : c.anchorWeek % 2 === 0
+                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+                        : "border-sun/40 bg-sun/10 text-sun"
+                return (
+                  <span
+                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${tone}`}
+                    title={
+                      c.intervalWeeks === 2
+                        ? `${label} — serviced every other week, on the ${c.anchorWeek % 2 === 0 ? "A" : "B"} weeks`
+                        : label
+                    }
+                  >
+                    {label}
+                  </span>
+                )
+              })()}
               <span className="text-[10px] text-ink-mute">
-                {cadenceLabel(
-                  cadence(
-                    selectedInfo.quota.requirement.intervalWeeks,
-                    selectedInfo.quota.requirement.anchorWeek,
-                  ),
-                )}
-                {" · "}
                 {selectedInfo.quota.requirement.serviceMinutes ?? "~22"}m on site
                 {" · "}
                 {officeOf(selectedInfo.quota.requirement.customerId) ?? "no office"}
