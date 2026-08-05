@@ -56,6 +56,38 @@ async function fetchAll<T>(query: Query, what: string): Promise<T[]> {
   }
 }
 
+/**
+ * When a supersede has happened, the contract is the SUCCESSOR.
+ *
+ * Both rows are status='active' — the predecessor is active until its end
+ * date — so the plan held two tasks for one customer and the ending one won.
+ * The map then showed the old day (Newcomb, 2026-08-05: still Caleb/Monday
+ * after a confirmed move), and worse, a further edit would have superseded a
+ * contract that was already ending instead of the live one, leaving a third
+ * task behind.
+ *
+ * Only a proven supersede PAIR is dropped: a task whose end date is the day
+ * before a sibling's start, same customer. A customer who genuinely holds two
+ * concurrent contracts — two pools, two locations — keeps both, which a
+ * blanket "prefer ends_on IS NULL" would silently break.
+ */
+export function liveContractsOnly(tasks: TaskRow[]): TaskRow[] {
+  const startsByCustomer = new Map<number, Set<string>>()
+  for (const t of tasks) {
+    if (t.customer_id === null || !t.starts_on) continue
+    let set = startsByCustomer.get(t.customer_id)
+    if (!set) startsByCustomer.set(t.customer_id, (set = new Set()))
+    set.add(t.starts_on)
+  }
+  const dayAfter = (d: string) =>
+    new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
+
+  return tasks.filter((t) => {
+    if (!t.ends_on || t.customer_id === null) return true
+    return !startsByCustomer.get(t.customer_id)?.has(dayAfter(t.ends_on))
+  })
+}
+
 interface TaskRow {
   id: string
   customer_id: number | null
@@ -256,6 +288,7 @@ export class SupabaseQuotaRepository implements QuotaRepository {
     week: WeekIndex,
     serviceMedians: Map<string, number>,
   ): Promise<Quota[]> {
+    tasks = liveContractsOnly(tasks)
     const pinByCustomer = new Map<number, Pin>()
     for (const l of locations) {
       if (l.latitude === null || l.longitude === null) continue
