@@ -411,7 +411,12 @@ export function MonthWorkbench({
                       {acting === "Release hold" ? "Releasing…" : "Release hold"}
                     </button>
                   )}
-                  {m.status === "gated" && !isHeld(m) && !hasInvoices && (
+                  {/* Offered by the COMMAND's own precondition, not a status
+                      guess: clearHold deliberately un-gates (verdict gets
+                      re-judged), which displays as "accruing" — the button
+                      must still be there, and issueMonth refuses with its
+                      reason if anything real blocks. */}
+                  {!hasInvoices && !isHeld(m) && m.status !== "disputed" && monthEndIso < new Date().toISOString().slice(0, 10) && (
                     <button disabled={acting !== null} onClick={() => act("Issue invoices", "POST", `/api/billing/months/${m.id}/issue`)} className={primaryBtn}>
                       {acting === "Issue invoices" ? "Issuing…" : "Issue invoices"}
                     </button>
