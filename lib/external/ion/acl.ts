@@ -129,8 +129,10 @@ export class IonTaskAcl {
       if (!target) {
         return { refusal: { quotaId: schedule.quotaId, reason: `${id.label}: cannot read a parity from ${id.startsOn}` } }
       }
-      const week = effectiveWeekFor(id.lastVisit ?? null, id.now ?? new Date().toISOString().slice(0, 10), target)
-      const startsOn = dateInWeek(week, named[0].weekday)
+      const chosen = supersedeStartsOn(
+        id.lastVisit ?? null, id.now ?? new Date().toISOString().slice(0, 10), target, named[0].weekday,
+      )
+      const startsOn = chosen.startsOn
       return {
         supersede: {
           quotaId: schedule.quotaId,
@@ -243,6 +245,52 @@ export function anchorOf(startsOn: string, repeatText: string): { weekday: numbe
  * day move, not a service failure. Flagging it against a flat 14 would have
  * called correct schedules broken.
  */
+/**
+ * The SOONEST a moved pool may next be served (Carter, 2026-08-05: a biweekly
+ * pool is 7).
+ *
+ * The effective-week rule stops a customer waiting too long; this stops the
+ * opposite. Picking the week first and the day second means the day can land
+ * EARLIER in its week than the last visit did — a Friday pool flipping to a
+ * Thursday anchor could be served 6 days later, two visits inside a week, for
+ * a fortnightly contract. Half the cycle is the floor.
+ */
+export function minGapDaysFor(target: "weekly" | "biweekly_a" | "biweekly_b" | "monthly"): number {
+  if (target === "monthly") return 14
+  if (target === "weekly") return 3
+  return 7
+}
+
+/**
+ * The successor's start date: the effective week, the requested weekday, and
+ * — if that lands too soon after the last visit — the NEXT qualifying week.
+ *
+ * Both bounds in one place, because they pull against each other and a caller
+ * that applied them separately would eventually apply only one.
+ */
+export function supersedeStartsOn(
+  lastVisit: string | null,
+  now: string,
+  target: "weekly" | "biweekly_a" | "biweekly_b" | "monthly",
+  weekday: number,
+): { startsOn: string; week: number; pushedForMinGap: boolean } {
+  const step = target === "weekly" ? 1 : 2
+  let week = effectiveWeekFor(lastVisit, now, target)
+  let startsOn = dateInWeek(week, weekday)
+  if (lastVisit) {
+    const min = minGapDaysFor(target)
+    const gap = (d: string) => Math.round((Date.parse(`${d}T00:00:00Z`) - Date.parse(`${lastVisit}T00:00:00Z`)) / 86_400_000)
+    if (gap(startsOn) < min) {
+      // The next week of the SAME parity — never a different one, or the move
+      // would silently change which weeks the customer is on.
+      week += step
+      startsOn = dateInWeek(week, weekday)
+      return { startsOn, week, pushedForMinGap: true }
+    }
+  }
+  return { startsOn, week, pushedForMinGap: false }
+}
+
 export function maxGapDaysFor(target: "weekly" | "biweekly_a" | "biweekly_b" | "monthly", keepsParity: boolean): number {
   if (target === "weekly") return 13
   return keepsParity ? 20 : 13

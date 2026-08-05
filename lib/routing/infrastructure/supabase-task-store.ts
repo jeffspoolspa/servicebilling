@@ -50,7 +50,10 @@ export class SupabaseTaskStore implements TaskStore {
       .schema("maintenance").from("visits")
       .select("task_id, scheduled_date")
       .in("task_id", quotaIds as string[])
-      .not("ion_deleted_at", "is", "null")
+      // ion_deleted_at IS NULL = not retracted. Written as `is` because the
+      // shared Query has no .is(); negating it selects only DELETED logs,
+      // which is how lastVisit silently read null (Bayens, 2026-08-05).
+      .is("ion_deleted_at", null)
       .range(0, PAGE)
     const lastVisit = new Map<string, string>()
     for (const v of (visitRows ?? []) as { task_id: string; scheduled_date: string }[]) {

@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert"
-import { IonTaskAcl, anchorOf, startsOnFor, type TaskIdentity, reviseTask, effectiveWeekFor, maxGapDaysFor, gapReport} from "./acl"
+import { IonTaskAcl, anchorOf, startsOnFor, type TaskIdentity, reviseTask, effectiveWeekFor, maxGapDaysFor, gapReport, minGapDaysFor, supersedeStartsOn} from "./acl"
 import type { IonTaskForm } from "./ion"
 import type { TaskSchedule } from "@/lib/routing/domain"
 
@@ -202,4 +202,34 @@ console.log("ion schedule acl selfcheck: 24 checks passed (incl. 42 anchor round
 
   // Never serviced: nothing to be late for.
   assert.ok(gapReport(null, "2026-08-13", "weekly", false).withinBound)
+}
+
+/* ---- a move must not land TOO SOON either: half the cycle is the floor ---- */
+{
+  assert.strictEqual(minGapDaysFor("biweekly_a"), 7, "half a fortnight")
+  assert.strictEqual(minGapDaysFor("weekly"), 3)
+  assert.strictEqual(minGapDaysFor("monthly"), 14)
+
+  // Bayens flipping to biweekly_a: last visit Fri 07-31, Thursday anchor.
+  // Week 2952 is parity A and its Thursday is 08-06 — only 6 days, two visits
+  // inside a week for a FORTNIGHTLY contract. Push to the next A week.
+  const flip = supersedeStartsOn("2026-07-31", "2026-08-05", "biweekly_a", 4)
+  assert.strictEqual(flip.pushedForMinGap, true, "6 days is too soon")
+  assert.strictEqual(flip.startsOn, "2026-08-20")
+  assert.strictEqual(anchorOf(flip.startsOn, "Bi-Weekly")!.frequency, "biweekly_a", "pushed a full cycle, so parity is UNCHANGED")
+
+  // Keeping parity needs no push: 08-13 is already 13 days out.
+  const keep = supersedeStartsOn("2026-07-31", "2026-08-05", "biweekly_b", 4)
+  assert.strictEqual(keep.pushedForMinGap, false)
+  assert.strictEqual(keep.startsOn, "2026-08-13")
+
+  // A pool never serviced has nothing to be too soon after.
+  assert.strictEqual(supersedeStartsOn(null, "2026-08-05", "biweekly_b", 4).pushedForMinGap, false)
+
+  // Weekly steps by ONE week when pushed, not two. Serviced Sunday 08-09
+  // (the close of week 2952), moving to Monday: the next Monday is 08-10, one
+  // day later — too soon, so it takes the Monday after.
+  const wk = supersedeStartsOn("2026-08-09", "2026-08-05", "weekly", 1)
+  assert.strictEqual(wk.pushedForMinGap, true, "1 day is too soon even weekly")
+  assert.strictEqual(wk.startsOn, "2026-08-17", "one week on, not two")
 }
