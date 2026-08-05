@@ -66,8 +66,55 @@ export class IonTaskGateway implements TaskGateway {
       create: "f/ION/api/create_task",
       update: "f/ION/api/update_task",
       setStartDate: "f/ION/_discover/set_startson",
+      detail: "f/ION/api/get_task_detail",
+      customerTasks: "f/ION/api/resolve_customer_tasks",
     },
   ) {}
+
+  /**
+   * What ION already holds for this contract, and what else the customer has.
+   *
+   * Exists so a supersede can be RETRIED. Ending a contract and beginning its
+   * successor are both irreversible, and a retry that repeats the create
+   * leaves the customer holding two live agreements — worse than the failure
+   * it was retrying. Reading first is what makes the operation resumable.
+   *
+   * Finding the owning customer is this adapter's job: the model asks about a
+   * contract, not about ION's customer ids.
+   */
+  async inspect(ionTaskId: string): Promise<{
+    endsOn: string | null
+    startsOn: string | null
+    siblings: { ionTaskId: string; startsOn: string | null }[]
+  }> {
+    const mine = await this.windmill.run<{
+      startsOn?: string | null
+      fields?: Record<string, string>
+      ionCustId?: string | null
+    }>(this.paths.detail, { ionTaskId })
+
+    const ionCustId = mine.ionCustId ?? mine.fields?.["CustomerID"] ?? null
+    const endsOn = (mine.fields?.["EndsOn"] ?? "") || null
+    const startsOn = mine.startsOn ?? null
+    if (!ionCustId) {
+      // Without the owner we cannot rule out an existing successor, and
+      // guessing "there is none" is the one answer that creates a duplicate.
+      throw new Error(`ION task ${ionTaskId}: no customer id on the record, so siblings cannot be listed`)
+    }
+
+    const theirs = await this.windmill.run<{
+      tasks?: { ionTaskId?: string; eventId?: string; startsOn?: string | null }[]
+    }>(this.paths.customerTasks, { ionCustId })
+
+    return {
+      endsOn,
+      startsOn,
+      siblings: (theirs.tasks ?? []).map((t) => ({
+        ionTaskId: String(t.ionTaskId ?? t.eventId ?? ""),
+        startsOn: t.startsOn ?? null,
+      })).filter((t) => t.ionTaskId !== ""),
+    }
+  }
 
   async create(week: DesiredWeek, opts: { dryRun: boolean }): Promise<GatewayResult> {
     const fields = this.fieldsFor(week)

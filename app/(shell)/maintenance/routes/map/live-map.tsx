@@ -219,6 +219,8 @@ export function LiveMap({
   const [selected, setSelected] = useState<string | null>(null)
   /** Find a customer by name and fly to their pin — the map has ~580 of them. */
   const [pinQuery, setPinQuery] = useState("")
+  /** Which customer's task we are re-reading from ION right now. */
+  const [refreshingTask, setRefreshingTask] = useState<string | null>(null)
   /**
    * The draw tool. `armed` waits for the click that drops the anchor; the shape
    * then grows with the cursor until a second click settles it into `shapes`.
@@ -511,6 +513,52 @@ export function LiveMap({
     setSelected(m.quotaId)
     setPinQuery("")
     mapRef.current?.flyTo({ center: [m.lng, m.lat], zoom: 15, duration: 900 })
+  }
+
+  /**
+   * Re-read this customer's tasks from ION.
+   *
+   * The one signal nothing else provides: a schedule changed BY HAND in ION —
+   * or a task deleted there — is invisible to us until someone asks. Lucas,
+   * 2026-08-05: corrected in ION, still wrong on this map, and no way to say
+   * so without the command line.
+   */
+  const refreshSelectedTask = async (quotaId: string, customerId: number | null) => {
+    if (customerId === null) {
+      setToast("This pool has no customer link, so ION cannot be asked about it")
+      return
+    }
+    setRefreshingTask(quotaId)
+    try {
+      const res = await fetch("/api/maintenance/tasks/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerId }),
+      })
+      const out = (await res.json()) as {
+        error?: string
+        read?: number
+        slotsChanged?: number
+        skipped?: { taskId: string; reason: string }[]
+        drift?: unknown[]
+      }
+      if (!res.ok) throw new Error(out.error ?? `refresh failed (${res.status})`)
+      const changed = out.drift?.length ?? 0
+      setToast(
+        changed > 0
+          ? `Re-read from ION — ${changed} change${changed === 1 ? "" : "s"} found, the map now shows what ION has`
+          : out.skipped?.length
+            ? `Could not verify: ${out.skipped[0].reason}`
+            : "Re-read from ION — already matched",
+      )
+      // Whatever changed is in the database now, not in the in-memory plan.
+      setPlan(Scenario.from(base()))
+      router.refresh()
+    } catch (err) {
+      setToast(`Refresh failed — ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setRefreshingTask(null)
+    }
   }
 
   const selectedInfo = useMemo(() => {
@@ -2749,6 +2797,22 @@ export function LiveMap({
               )}
             </div>
           </div>
+
+          {/* Re-read from ION. Sits with the pool's own facts, not the move
+              controls: it changes what is TRUE, not what is planned. */}
+          <button
+            className="shrink-0 rounded-full border border-line px-2.5 py-1 text-[11px] font-medium text-ink-dim hover:border-cyan/40 hover:text-cyan disabled:opacity-50"
+            disabled={refreshingTask === selectedInfo.quota.id}
+            title="re-read this customer's tasks from ION — catches edits and deletions made there"
+            onClick={() =>
+              refreshSelectedTask(
+                selectedInfo.quota.id,
+                selectedInfo.quota.requirement.customerId,
+              )
+            }
+          >
+            {refreshingTask === selectedInfo.quota.id ? "reading…" : "Refresh"}
+          </button>
 
           {/* Move: the first placement (or an owed slot) to a new tech-day. */}
           <div className="flex shrink-0 items-center gap-1.5 border-l border-line-soft pl-3">

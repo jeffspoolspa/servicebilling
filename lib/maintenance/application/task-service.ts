@@ -330,12 +330,35 @@ export class TaskService {
         detail: `a successor starting ${startsOn} would end the current contract (${task.terms.startsOn}) before it began` }
     }
 
+    // 0. ask what already landed. Both steps below are irreversible, and a
+    //    second create would leave the customer holding two live contracts —
+    //    strictly worse than the failure being retried. This mirrors the
+    //    publish path, which learned it the hard way on 2026-08-05.
+    let alreadyClosed = false
+    if (!opts.dryRun) {
+      if (!this.ion.inspect) {
+        return { ok: false, taskId: task.id, ionTaskId,
+          detail: "supersede refused: this gateway cannot report what ION already holds, and a blind retry can create a second live contract" }
+      }
+      const seen = await this.ion.inspect(ionTaskId)
+      const successorAlready = seen.siblings.find(
+        (s) => s.ionTaskId !== ionTaskId && s.startsOn === startsOn,
+      )
+      if (successorAlready) {
+        return { ok: true, taskId: task.id, ionTaskId,
+          detail: `already superseded on a previous attempt — successor is ION task ${successorAlready.ionTaskId}, starting ${startsOn}` }
+      }
+      alreadyClosed = seen.endsOn === endsOn
+    }
+
     // 1. close the old contract in ION
-    const closed = await this.ion.update(
-      ionTaskId, { ...task.desiredWeek(), endsOn }, { dryRun: opts.dryRun },
-    )
-    if (!closed.accepted) {
-      return { ok: false, taskId: task.id, ionTaskId, detail: `close refused: ${closed.detail}`, payload: closed.payload }
+    if (!alreadyClosed) {
+      const closed = await this.ion.update(
+        ionTaskId, { ...task.desiredWeek(), endsOn }, { dryRun: opts.dryRun },
+      )
+      if (!closed.accepted) {
+        return { ok: false, taskId: task.id, ionTaskId, detail: `close refused: ${closed.detail}`, payload: closed.payload }
+      }
     }
 
     // 2. begin the successor

@@ -49,6 +49,29 @@ export interface GatewayResult {
  * ADAPTER's business, not this contract's.
  */
 export interface TaskGateway {
+  /**
+   * What the system of record ALREADY holds for this contract.
+   *
+   * A supersede is two irreversible steps — end one agreement, begin another —
+   * and a retry that repeats either is worse than the failure it retries:
+   * creating twice leaves the customer holding two live contracts. So the
+   * operation asks what landed before it acts.
+   *
+   * Optional because an in-memory gateway has nothing to resume from; a
+   * supersede REFUSES when it is absent rather than acting blind, the same way
+   * it refuses without a freshness source.
+   *
+   * Takes only the record's own id: finding the customer that owns it, and
+   * their other contracts, is the adapter's vocabulary and not the model's.
+   */
+  inspect?(ionTaskId: string): Promise<{
+    /** The end date the record currently carries, if any. */
+    endsOn: string | null
+    /** Its anchor, to prove we are looking at the contract we think we are. */
+    startsOn: string | null
+    /** Sibling contracts for the same customer, by anchor. */
+    siblings: { ionTaskId: string; startsOn: string | null }[]
+  }>
   create(week: DesiredWeek, opts: { dryRun: boolean }): Promise<GatewayResult>
   update(ionTaskId: string, week: DesiredWeek, opts: { dryRun: boolean }): Promise<GatewayResult>
   /**
