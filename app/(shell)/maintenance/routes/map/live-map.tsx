@@ -190,6 +190,8 @@ export function LiveMap({
   }, [publishArmed])
 
   const [selected, setSelected] = useState<string | null>(null)
+  /** Find a customer by name and fly to their pin — the map has ~580 of them. */
+  const [pinQuery, setPinQuery] = useState("")
   /**
    * The draw tool. `armed` waits for the click that drops the anchor; the shape
    * then grows with the cursor until a second click settles it into `shapes`.
@@ -455,6 +457,34 @@ export function LiveMap({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [techFilter, techRoutes])
+
+  /**
+   * Name search over the plan. Matches on the customer name we already show
+   * everywhere else, and only offers quotas that HAVE a pin — an unpinned one
+   * cannot be flown to, and offering it would be a dead click.
+   */
+  const pinMatches = useMemo(() => {
+    const q = pinQuery.trim().toLowerCase()
+    if (q.length < 2) return []
+    const out: { quotaId: string; name: string; lat: number; lng: number }[] = []
+    for (const quota of plan.all) {
+      const pin = quota.requirement.pin
+      if (!pin) continue
+      const name = nameOf(quota.requirement.customerId)
+      if (!name.toLowerCase().includes(q)) continue
+      out.push({ quotaId: quota.id, name, lat: pin.lat, lng: pin.lng })
+      if (out.length >= 8) break
+    }
+    return out
+  }, [pinQuery, plan.all, customers])
+
+  const flyToPin = (m: { quotaId: string; lat: number; lng: number }) => {
+    // Select it as well as centre it: the bottom panel then explains the stop,
+    // which is the thing the searcher actually came for.
+    setSelected(m.quotaId)
+    setPinQuery("")
+    mapRef.current?.flyTo({ center: [m.lng, m.lat], zoom: 15, duration: 900 })
+  }
 
   const selectedInfo = useMemo(() => {
     if (!selected) return null
@@ -1745,6 +1775,37 @@ export function LiveMap({
                   mi across · click to stop
                 </span>
               )}
+              {/* Find a pin — in the toolbar with the other map-wide actions,
+                  not floating over the map where it covered the scenario chips. */}
+              <div className="relative">
+                <input
+                  value={pinQuery}
+                  onChange={(e) => setPinQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setPinQuery("")
+                    if (e.key === "Enter" && pinMatches.length > 0) flyToPin(pinMatches[0])
+                  }}
+                  placeholder="Find a customer…"
+                  className="w-44 rounded-full border border-line bg-white/[0.03] px-3 py-1 text-[11px] text-ink placeholder:text-ink-mute outline-none focus:border-cyan/40"
+                />
+                {pinQuery.trim().length >= 2 && (
+                  <div className={`absolute left-0 top-8 z-20 max-h-64 w-60 overflow-y-auto px-1 py-1 ${glass}`}>
+                    {pinMatches.length === 0 ? (
+                      <div className="px-2 py-1 text-[11px] text-ink-mute">no pinned customer matches</div>
+                    ) : (
+                      pinMatches.map((m) => (
+                        <button
+                          key={m.quotaId}
+                          onClick={() => flyToPin(m)}
+                          className="block w-full truncate rounded px-2 py-1 text-left text-[11.5px] text-ink-dim hover:bg-white/[0.05] hover:text-ink"
+                        >
+                          {m.name}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
               <button
                 className={`rounded-full border px-3 py-1 text-[11px] font-medium ${
                   armed || drawing

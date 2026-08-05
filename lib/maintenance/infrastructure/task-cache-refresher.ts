@@ -244,6 +244,14 @@ export class TaskCacheRefresher {
         startsOn: form?.startsOn || task.starts_on || null,
         endsOn: (form?.fields["EndsOn"] ?? "") || null,
       }
+      // The anchor is the contract, not decoration: for a non-picker cadence
+      // StartsOn IS the schedule. Stamping a task verified while leaving its
+      // anchor stale is worse than not refreshing it — the supersede path then
+      // refuses on drift it was told had been reconciled (Bayens: ION
+      // 2024-12-30 vs cache 2025-01-03, refused after a "successful" refresh).
+      if (before.startsOn !== after.startsOn || before.endsOn !== after.endsOn) {
+        await this.updateTask(task.id, { starts_on: after.startsOn, ends_on: after.endsOn })
+      }
       if (JSON.stringify(before) !== JSON.stringify(after)) drift.push({ taskId: task.id, before, after })
       verified.push(task.id)
     }
@@ -314,6 +322,26 @@ export class TaskCacheRefresher {
       .select("id")
     if (error) throw new Error(`task_schedules insert failed: ${JSON.stringify(error).slice(0, 200)}`)
     if (!data || data.length === 0) throw new Error("task_schedules insert touched NO rows")
+  }
+
+  /** One task's own columns. Row-count asserted, like every other write here. */
+  private async updateTask(id: string, patch: Record<string, unknown>): Promise<void> {
+    const c = this.client as unknown as {
+      schema(s: string): {
+        from(t: string): {
+          update(v: Record<string, unknown>): {
+            eq(col: string, v: unknown): { select(cols: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+          }
+        }
+      }
+    }
+    const { data, error } = await c
+      .schema("maintenance").from("tasks")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("id")
+    if (error) throw new Error(`task update failed: ${JSON.stringify(error).slice(0, 200)}`)
+    if (!data || data.length === 0) throw new Error(`task update touched NO rows (${id}) — filtered, not applied`)
   }
 
   private async stamp(taskIds: string[], at: string): Promise<void> {
