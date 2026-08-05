@@ -274,7 +274,7 @@ async function supersedeFreshnessChecks() {
   current.identify("task-461", "5210359")
 
   const { TaskService } = await import("../application/task-service")
-  const repo = { async byId() { return current }, async openTaskFor() { return null }, async save() {}, async history() { return [] } }
+  const repo = { async byId() { return current }, async openTaskFor() { return null }, async liveFor() { return [] }, async save() {}, async history() { return [] } }
   const gateway = {
     async create() { return { accepted: true, ionTaskId: "ion-new", detail: "created" } },
     async update() { return { accepted: true, detail: "updated" } },
@@ -335,6 +335,9 @@ async function refreshDeletionChecks() {
   const repo = {
     async byId(id: string) { return held.find((t) => t.id === id) ?? null },
     async openTaskFor() { return null },
+    // The roster is checked against everything this customer holds open —
+    // that is what lets a refresh find a stray it was never asked about.
+    async liveFor() { return held.filter((t) => t.status !== "closed") },
     async save(t: { id: string | null }) { saved.push(t.id!) },
     async history() { return [] },
   }
@@ -353,7 +356,8 @@ async function refreshDeletionChecks() {
 
   CHECK_ASYNC("an EMPTY roster is a failed read, never 'everything was deleted'", async () => {
     const live = [mk("t-3", "333"), mk("t-4", "444")]
-    const repo2 = { ...repo, async byId(id: string) { return live.find((t) => t.id === id) ?? null } }
+    const repo2 = { ...repo, async byId(id: string) { return live.find((t) => t.id === id) ?? null },
+      async liveFor() { return live } }
     const svc = new TaskService(repo2 as never, gateway as never, fresh as never,
       { async idsFor() { return new Set<string>() } })
     const out = await svc.refreshTasks(["t-3", "t-4"])
@@ -365,7 +369,8 @@ async function refreshDeletionChecks() {
 
   CHECK_ASYNC("a roster read that THROWS leaves the tasks alone", async () => {
     const live = [mk("t-5", "555")]
-    const repo3 = { ...repo, async byId(id: string) { return live.find((t) => t.id === id) ?? null } }
+    const repo3 = { ...repo, async byId(id: string) { return live.find((t) => t.id === id) ?? null },
+      async liveFor() { return live } }
     const svc = new TaskService(repo3 as never, gateway as never, fresh as never,
       { async idsFor() { throw new Error("ION unreachable") } })
     const out = await svc.refreshTasks(["t-5"])
@@ -407,7 +412,7 @@ async function taskEventChecks() {
   CHECK_ASYNC("a supersede resumes instead of creating a second contract", async () => {
     const open = Task.rehydrate("t1", 461, "ion-old", T({ startsOn: "2024-12-30" }), "active")
     const repo = {
-      async byId() { return open }, async openTaskFor() { return open },
+      async byId() { return open }, async openTaskFor() { return open }, async liveFor() { return [open] },
       async save() {}, async history() { return [] },
     }
     const fresh = { async refresh() { return { verified: ["t1"], skipped: [], drift: [] } } }
@@ -435,7 +440,7 @@ async function taskEventChecks() {
   CHECK_ASYNC("a supersede refuses when ION state cannot be read", async () => {
     const open = Task.rehydrate("t1", 461, "ion-old", T({ startsOn: "2024-12-30" }), "active")
     const repo = {
-      async byId() { return open }, async openTaskFor() { return open },
+      async byId() { return open }, async openTaskFor() { return open }, async liveFor() { return [open] },
       async save() {}, async history() { return [] },
     }
     const fresh = { async refresh() { return { verified: ["t1"], skipped: [], drift: [] } } }
@@ -448,7 +453,7 @@ async function taskEventChecks() {
 
   CHECK_ASYNC("a new task emits ONE TaskAdded carrying the whole state", async () => {
     facts.length = 0
-    const repo = { async byId() { return null }, async openTaskFor() { return null }, async save() {}, async history() { return [] } }
+    const repo = { async byId() { return null }, async openTaskFor() { return null }, async liveFor() { return [] }, async save() {}, async history() { return [] } }
     const svc = new TaskService(repo as never, gateway as never, undefined, undefined, log as never)
     const out = await svc.addTask(461, T(), { dryRun: false })
     assert.equal(out.ok, true, out.detail)
@@ -464,7 +469,7 @@ async function taskEventChecks() {
   CHECK_ASYNC("a tech change emits ONE TaskUpdated with both states", async () => {
     facts.length = 0
     const held = Task.open(461, T()); held.identify("t-9", "ion-9")
-    const repo = { async byId() { return held }, async openTaskFor() { return null }, async save() {}, async history() { return [] } }
+    const repo = { async byId() { return held }, async openTaskFor() { return null }, async liveFor() { return [] }, async save() {}, async history() { return [] } }
     const svc = new TaskService(repo as never, gateway as never, undefined, undefined, log as never)
     const out = await svc.editTask("t-9", T({ slots: [{ weekday: 4, techId: "tech-b", frequency: "biweekly_b" }] }), { dryRun: false })
     assert.equal(out.ok, true, out.detail)
@@ -476,7 +481,8 @@ async function taskEventChecks() {
   CHECK_ASYNC("an EXPIRY is an end date on TaskUpdated — never its own event type", async () => {
     facts.length = 0
     const held = Task.open(461, T()); held.identify("t-10", "ion-10")
-    const repo = { async byId() { return held }, async openTaskFor() { return null }, async save() {}, async history() { return [] } }
+    const repo = { async byId() { return held }, async openTaskFor() { return null },
+      async liveFor() { return [held] }, async save() {}, async history() { return [] } }
     const svc = new TaskService(repo as never, gateway as never,
       { async refresh(ids: readonly string[]) { return { verified: [...ids], skipped: [], drift: [] } } } as never,
       { async idsFor() { return new Set(["something-else"]) } } as never, log as never)
