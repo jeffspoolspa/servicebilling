@@ -129,7 +129,7 @@ async function watchQueue(ids: string[], say: (s: string) => void): Promise<Queu
  * one after, so it has to be readable while you are choosing what to move —
  * not only after you have selected a single pool.
  */
-function CadenceTag({ quota }: { quota: Quota }) {
+function CadenceTag({ quota, onFlip }: { quota: Quota; onFlip?: (toAnchorWeek: number) => void }) {
   const c = cadence(quota.requirement.intervalWeeks, quota.requirement.anchorWeek)
   const [text, tone] =
     c.intervalWeeks === 1
@@ -139,10 +139,21 @@ function CadenceTag({ quota }: { quota: Quota }) {
         : c.anchorWeek % 2 === 0
           ? ["A", "text-emerald-400"]
           : ["B", "text-sun"]
+
+  // Only a fortnight has an A and a B, so only a fortnight can be flipped.
+  if (c.intervalWeeks !== 2 || !onFlip) {
+    return <span className={`font-mono ${tone}`} title={cadenceLabel(c)}>{text}</span>
+  }
+  const toAnchor = c.anchorWeek % 2 === 0 ? 1 : 0
   return (
-    <span className={`font-mono ${tone}`} title={cadenceLabel(c)}>
+    <button
+      type="button"
+      className={`font-mono ${tone} hover:underline`}
+      title={`${cadenceLabel(c)} — click to move to the ${toAnchor === 0 ? "A" : "B"} weeks`}
+      onClick={() => onFlip(toAnchor)}
+    >
       {text}
-    </span>
+    </button>
   )
 }
 
@@ -2649,7 +2660,19 @@ export function LiveMap({
                             {nameOf(q?.requirement.customerId ?? null)}
                           </td>
                           <td className="w-6 py-1 pr-2 text-[10px]">
-                            {q ? <CadenceTag quota={q} /> : null}
+                            {q ? (
+                              <CadenceTag
+                                quota={q}
+                                onFlip={(toAnchorWeek) => {
+                                  try {
+                                    plan.shiftAnchor(q.id, toAnchorWeek, q.requirement.startWeek)
+                                    forceRender((n) => n + 1)
+                                  } catch (err) {
+                                    setToast(String(err instanceof Error ? err.message : err))
+                                  }
+                                }}
+                              />
+                            ) : null}
                           </td>
                           <td className="w-12 py-1 pr-2 text-ink-mute">
                             {WEEKDAY_NAMES[sel.weekday]}
@@ -2794,17 +2817,38 @@ export function LiveMap({
                       : c.anchorWeek % 2 === 0
                         ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
                         : "border-sun/40 bg-sun/10 text-sun"
+                // Only a fortnight HAS an A and a B, so only a fortnight is
+                // clickable. The domain already models the move
+                // (Scenario.shiftAnchor -> AnchorShifted), prices it and
+                // restores it — this is the door to it.
+                if (c.intervalWeeks !== 2) {
+                  return (
+                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${tone}`} title={label}>
+                      {label}
+                    </span>
+                  )
+                }
+                const toAnchor = c.anchorWeek % 2 === 0 ? 1 : 0
                 return (
-                  <span
-                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${tone}`}
-                    title={
-                      c.intervalWeeks === 2
-                        ? `${label} — serviced every other week, on the ${c.anchorWeek % 2 === 0 ? "A" : "B"} weeks`
-                        : label
-                    }
+                  <button
+                    type="button"
+                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${tone} hover:brightness-125`}
+                    title={`${label} — click to move to the ${toAnchor === 0 ? "A" : "B"} weeks`}
+                    onClick={() => {
+                      try {
+                        plan.shiftAnchor(
+                          selectedInfo.quota.id,
+                          toAnchor,
+                          selectedInfo.quota.requirement.startWeek,
+                        )
+                        forceRender((n) => n + 1)
+                      } catch (err) {
+                        setToast(String(err instanceof Error ? err.message : err))
+                      }
+                    }}
                   >
                     {label}
-                  </span>
+                  </button>
                 )
               })()}
               <span className="text-[10px] text-ink-mute">
