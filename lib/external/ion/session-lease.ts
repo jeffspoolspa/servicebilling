@@ -14,9 +14,15 @@
  * timer can, and `reports.ts` parses large documents synchronously. The timer
  * exists only for a long SINGLE call with no intervening activity.
  *
- * Losing the lease mid-work is treated as fatal, not as something to retry
- * through: another holder now owns the session, so anything we do next lands
- * under their context.
+ * Losing the lease is fatal to the ATTEMPT, never to the work. Stopping at
+ * once is non-negotiable — another holder owns the session, so the next call
+ * would land under their context — but the operation is then re-run from a
+ * clean start under a fresh lease. Abandoning it would leave a customer's
+ * change half-applied, which is the outcome the lease exists to prevent.
+ *
+ * The body must therefore be RE-RUNNABLE: it re-primes and re-reads from
+ * scratch. That is already how ION work is shaped, because ION only accepts a
+ * completely rebuilt form, so every write reads its merge base first.
  */
 
 export class IonLeaseLost extends Error {}
@@ -136,18 +142,44 @@ export class IonSessionLease {
   }
 }
 
-/** Acquire, run, release — release even when the body throws. */
+/**
+ * Acquire, run, release — releasing even when the body throws, and RE-RUNNING
+ * the body under a fresh lease if the lease is lost mid-flight.
+ *
+ * A lost lease means someone else took the session (we stalled past the TTL,
+ * or a holder was evicted). The work is not abandoned: it is attempted again
+ * from the top, which re-primes and re-reads. Only a lease loss is retried —
+ * a business refusal or an ION error is the caller's to interpret, and
+ * retrying those would just repeat them.
+ *
+ * `attempts` bounds it so a persistently contended session surfaces rather
+ * than spinning forever.
+ */
 export async function withIonLease<T>(
   db: LeaseRpc,
   holder: string,
   purpose: string,
   fn: (lease: IonSessionLease) => Promise<T>,
-  opts: LeaseOptions = {},
+  opts: LeaseOptions & { attempts?: number } = {},
 ): Promise<T> {
-  const lease = await IonSessionLease.acquire(db, holder, purpose, opts)
-  try {
-    return await fn(lease)
-  } finally {
-    await lease.release()
+  const attempts = Math.max(1, opts.attempts ?? 3)
+  let lastLoss: unknown
+  for (let i = 0; i < attempts; i++) {
+    const lease = await IonSessionLease.acquire(db, holder, purpose, opts)
+    try {
+      return await fn(lease)
+    } catch (err) {
+      if (!(err instanceof IonLeaseLost)) throw err
+      lastLoss = err
+      // Fall through and try again under a new lease. Nothing is released
+      // here that the finally does not already release.
+    } finally {
+      await lease.release()
+    }
   }
+  throw new IonLeaseLost(
+    `ION lease lost on ${attempts} successive attempts — the session is contended; last: ${
+      lastLoss instanceof Error ? lastLoss.message : String(lastLoss)
+    }`,
+  )
 }
