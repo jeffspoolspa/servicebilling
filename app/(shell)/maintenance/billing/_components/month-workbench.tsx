@@ -679,7 +679,19 @@ export function MonthWorkbench({
                             className="h-7 w-7 rounded border border-line bg-bg-elev/90 text-ink-dim hover:text-ink text-[13px] inline-flex items-center justify-center"
                           >⇩</a>
                         </div>
-                        <iframe key={genAt} src={`${explainer.url}?t=${genAt}`} title="Explainer letter" className="w-full h-[430px] bg-white" />
+                        {/* A scaled-down THUMBNAIL of the whole page — no
+                            scrollbars; fullscreen is the reading mode. The
+                            width/scale pair (182% x 0.55) keeps the letter
+                            fitted to the card at any width. */}
+                        <div className="w-full overflow-hidden bg-white" style={{ aspectRatio: "17 / 22" }}>
+                          <iframe
+                            key={genAt}
+                            src={`${explainer.url}?t=${genAt}`}
+                            title="Explainer letter"
+                            className="pointer-events-none"
+                            style={{ width: "182%", height: "182%", transform: "scale(0.55)", transformOrigin: "top left", border: "0" }}
+                          />
+                        </div>
                       </div>
                     ) : (
                       <div className="text-[12px] text-ink-mute">
@@ -704,17 +716,13 @@ export function MonthWorkbench({
                       </div>
                     )}
 
-                    {attachAt ? (
-                      <textarea
-                        value={noteDraft}
-                        onChange={(e) => setNoteDraft(e.target.value)}
-                        rows={2}
-                        placeholder="Add a note for the next generation — saved to the log when you hit Generate."
-                        className="w-full bg-bg border border-line rounded-lg p-2.5 text-[12.5px] text-ink outline-none focus:border-cyan resize-y"
-                      />
-                    ) : (
-                      <div className="text-[11px] text-ink-mute">Turn on Attach to invoices to add notes and steer the letter.</div>
-                    )}
+                    <textarea
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value)}
+                      rows={2}
+                      placeholder="Add a note for the next generation — saved to the log when you hit Generate."
+                      className="w-full bg-bg border border-line rounded-lg p-2.5 text-[12.5px] text-ink outline-none focus:border-cyan resize-y"
+                    />
                     <div className="flex items-center gap-3 text-[11px]">
                       {genAt && <span className="text-ink-mute font-mono text-[10px]">generated {new Date(genAt).toLocaleString()}</span>}
                       {genErr && <span className="text-coral">{genErr}</span>}
