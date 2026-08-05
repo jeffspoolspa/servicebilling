@@ -57,35 +57,34 @@ async function fetchAll<T>(query: Query, what: string): Promise<T[]> {
 }
 
 /**
- * When a supersede has happened, the contract is the SUCCESSOR.
+ * The contracts in force TODAY.
  *
- * Both rows are status='active' — the predecessor is active until its end
- * date — so the plan held two tasks for one customer and the ending one won.
- * The map then showed the old day (Newcomb, 2026-08-05: still Caleb/Monday
- * after a confirmed move), and worse, a further edit would have superseded a
- * contract that was already ending instead of the live one, leaving a third
- * task behind.
+ * `status` stays 'active' until something closes the row, so it says nothing
+ * about whether an agreement is currently in force — the dates do. A contract
+ * that has run out is not routed (EURE, CHAD: ended 2026-07-27 and still drew
+ * a Tuesday stop a week later; refreshing could not help, the cache was
+ * already right). Neither is one that has not begun.
  *
- * Only a proven supersede PAIR is dropped: a task whose end date is the day
- * before a sibling's start, same customer. A customer who genuinely holds two
- * concurrent contracts — two pools, two locations — keeps both, which a
- * blanket "prefer ends_on IS NULL" would silently break.
+ * This also keeps a supersede honest in BOTH directions: while the successor
+ * is still in the future, the predecessor is what is genuinely being serviced
+ * and it keeps its stop; the day the successor opens, the predecessor has
+ * expired and drops out on its own. No special case, no tail week lost.
+ *
+ * The tie-break is for real overlap: if a customer holds more than one live
+ * contract and one of them carries an end date, the undated one is the
+ * standing agreement and the dated one is on its way out.
  */
-export function liveContractsOnly(tasks: TaskRow[]): TaskRow[] {
-  const startsByCustomer = new Map<number, Set<string>>()
-  for (const t of tasks) {
-    if (t.customer_id === null || !t.starts_on) continue
-    let set = startsByCustomer.get(t.customer_id)
-    if (!set) startsByCustomer.set(t.customer_id, (set = new Set()))
-    set.add(t.starts_on)
+export function liveContractsOnly(tasks: TaskRow[], today: string): TaskRow[] {
+  const inForce = tasks.filter(
+    (t) => (!t.starts_on || t.starts_on <= today) && (!t.ends_on || t.ends_on >= today),
+  )
+  const standing = new Set<number>()
+  for (const t of inForce) {
+    if (t.customer_id !== null && t.ends_on === null) standing.add(t.customer_id)
   }
-  const dayAfter = (d: string) =>
-    new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
-
-  return tasks.filter((t) => {
-    if (!t.ends_on || t.customer_id === null) return true
-    return !startsByCustomer.get(t.customer_id)?.has(dayAfter(t.ends_on))
-  })
+  return inForce.filter(
+    (t) => !t.ends_on || t.customer_id === null || !standing.has(t.customer_id),
+  )
 }
 
 interface TaskRow {
@@ -288,7 +287,7 @@ export class SupabaseQuotaRepository implements QuotaRepository {
     week: WeekIndex,
     serviceMedians: Map<string, number>,
   ): Promise<Quota[]> {
-    tasks = liveContractsOnly(tasks)
+    tasks = liveContractsOnly(tasks, new Date().toISOString().slice(0, 10))
     const pinByCustomer = new Map<number, Pin>()
     for (const l of locations) {
       if (l.latitude === null || l.longitude === null) continue
