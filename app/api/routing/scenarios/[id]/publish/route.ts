@@ -37,14 +37,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   // A DRY RUN still runs inline: it writes nothing, the caller is a person
   // waiting on a preview, and there is nothing to survive.
   if (!dryRun) {
-    const { data: scenario } = await sys.schema("routing").from("scenarios")
-      .select("changes, status").eq("id", id).maybeSingle()
-    const row = scenario as { changes: { quotaId: string }[] | null; status: string } | null
-    if (!row) return NextResponse.json({ error: `no scenario ${id}` }, { status: 404 })
-    if (row.status !== "pending") {
-      return NextResponse.json({ error: `scenario is ${row.status} — only pending publishes` }, { status: 409 })
+    // Through the repository, never a hand-rolled query: it already knows the
+    // scenarios live in `maintenance` and how a stored change is shaped. The
+    // first cut guessed `routing.scenarios` and turned every live publish into
+    // "no scenario <id>".
+    const stored = await new SupabaseScenarioRepository(sb as unknown as ScenarioClient).byId(id)
+    if (!stored) return NextResponse.json({ error: `no scenario ${id}` }, { status: 404 })
+    if (stored.status !== "pending") {
+      return NextResponse.json({ error: `scenario is ${stored.status} — only pending publishes` }, { status: 409 })
     }
-    const taskIds = [...new Set((row.changes ?? []).map((c) => c.quotaId))]
+    const taskIds = [...new Set(stored.changes.map((c) => c.quotaId))]
     if (taskIds.length === 0) return NextResponse.json({ error: "scenario changes nothing" }, { status: 400 })
 
     // Name the target now. Which contract is being ended is the decision the
