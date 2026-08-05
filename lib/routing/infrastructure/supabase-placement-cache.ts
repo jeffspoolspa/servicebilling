@@ -21,6 +21,8 @@ interface SlotRow {
   day_of_week: number | null
   tech_employee_id: string | null
   active: boolean
+  /** Read so a moved stop can inherit it — see the insert below. */
+  frequency: string | null
 }
 
 export class SupabasePlacementCache implements PlacementCache {
@@ -33,7 +35,7 @@ export class SupabasePlacementCache implements PlacementCache {
     const { data } = await this.client
       .schema("maintenance")
       .from("task_schedules")
-      .select("id, task_id, day_of_week, tech_employee_id, active")
+      .select("id, task_id, day_of_week, tech_employee_id, active, frequency")
       .in("task_id", taskIds)
       .range(0, 999)
     const existing = new Map<string, SlotRow[]>()
@@ -67,7 +69,14 @@ export class SupabasePlacementCache implements PlacementCache {
       // Days the task gained that had no row at all.
       for (const [weekday, techId] of want) {
         if (seen.has(weekday)) continue
-        await this.insert(schedule.quotaId, weekday, techId)
+        // Carry the cadence from the stop this one replaces. A moved day is
+        // the SAME agreement on a different day, so inserting without it
+        // silently drops the task's frequency — and tasks.frequency is
+        // derived from the ACTIVE slots, so it goes null and every future
+        // move for that customer is then refused with "no cached frequency".
+        // 55 of 556 live tasks were left in that state by earlier publishes.
+        const carried = rows.find((r) => r.frequency !== null)?.frequency ?? null
+        await this.insert(schedule.quotaId, weekday, techId, carried)
       }
       out.push({ quotaId: schedule.quotaId, slots: want.size })
     }
@@ -97,7 +106,7 @@ export class SupabasePlacementCache implements PlacementCache {
     }
   }
 
-  private async insert(taskId: string, weekday: number, techId: string): Promise<void> {
+  private async insert(taskId: string, weekday: number, techId: string, frequency: string | null): Promise<void> {
     const c = this.client as unknown as {
       schema(s: string): {
         from(t: string): {
@@ -113,6 +122,7 @@ export class SupabasePlacementCache implements PlacementCache {
         day_of_week: weekday,
         tech_employee_id: techId,
         active: true,
+        frequency,
         external_source: "routing_publish",
       })
       .select("id")

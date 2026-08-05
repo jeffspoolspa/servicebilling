@@ -358,7 +358,7 @@ export function supersedeStartsOn(
   weekday: number,
 ): { startsOn: string; week: number; pushedForMinGap: boolean } {
   const step = target === "weekly" ? 1 : 2
-  let week = effectiveWeekFor(lastVisit, now, target)
+  let week = effectiveWeekFor(now, target)
   let startsOn = dateInWeek(week, weekday)
   if (lastVisit) {
     const min = minGapDaysFor(target)
@@ -409,20 +409,29 @@ export function gapReport(
  */
 export const WEEKS_OF_NOTICE = 1
 
+/**
+ * The week a change may first take effect.
+ *
+ * Needs no visit history, and deliberately so. `maintenance.visits` holds
+ * ingested ION LOGS — service that happened — so the latest one is never
+ * beyond today (verified 2026-08-05: zero visits dated forward). Once the
+ * current week is off-limits anyway, "has this week been served?" can no
+ * longer change the answer: the notice floor is always the later one.
+ *
+ * What remains is pure arithmetic on two week indices. The TARGET carries the
+ * parity, and the target is read from the task's own anchor date, so whether
+ * a fortnight flips is answered by comparing the anchor's week to this one —
+ * no ION call, no visit lookup, nothing that can be stale or null (Carter,
+ * 2026-08-05). `lastVisit` still guards the MINIMUM gap in supersedeStartsOn,
+ * which is a different question.
+ */
 export function effectiveWeekFor(
-  lastVisit: string | null,
   now: string,
   target: "weekly" | "biweekly_a" | "biweekly_b" | "monthly",
 ): number {
   const nowWeek = isoWeekIndex(now)
   if (nowWeek === null) throw new Error(`effectiveWeekFor: unreadable date "${now}"`)
-  const lastWeek = lastVisit ? isoWeekIndex(lastVisit) : null
-  // Two floors, and the later one wins: the plan is fixed for WEEKS_OF_NOTICE
-  // weeks ahead, and a week whose visit already happened is spent regardless.
-  const earliest = Math.max(
-    nowWeek + WEEKS_OF_NOTICE,
-    lastWeek !== null && lastWeek >= nowWeek ? lastWeek + 1 : nowWeek,
-  )
+  const earliest = nowWeek + WEEKS_OF_NOTICE
   if (target === "weekly" || target === "monthly") return earliest
   const wantEven = target === "biweekly_a"
   return ((earliest % 2) + 2) % 2 === (wantEven ? 0 : 1) ? earliest : earliest + 1
@@ -546,7 +555,7 @@ export function reviseTask(
     return { amend: { fields } }
   }
 
-  const startsOn = dateInWeek(effectiveWeekFor(ctx.lastVisit, ctx.now, cadence), weekday)
+  const startsOn = dateInWeek(effectiveWeekFor(ctx.now, cadence), weekday)
   // Read-back agreement: the date chosen must SAY what was meant.
   if (cadence.startsWith("biweekly")) {
     const proof = anchorOf(startsOn, "Bi-Weekly")
