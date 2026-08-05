@@ -1,15 +1,9 @@
-//bun-extra-requirements:
-//playwright@1.48.0
-//chromium-bidi@0.8.0
-import { chromium } from "playwright@1.40.0";
+// No browser here on purpose: the shared session cache owns the ONE login
+// (f/ION/_lib/session), and both report fetches below are plain cookie-authed
+// GETs. This step used to launch its own chromium purely to log in.
+import { getOrRefreshSession, ionFetch, type IonResource } from "/f/ION/_lib/session_cache";
 import { parse } from "node-html-parser";
 import { mkdir } from "fs/promises";
-
-type IonResource = {
-  username: string;
-  password: string;
-  loginUrl: string;
-};
 
 function toIsoDate(dateStr: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
@@ -31,49 +25,16 @@ export async function main(
   console.log(`ScheduleStart: ${isoStartDate}`);
   console.log('========================================');
 
-  const browser = await chromium.launch({
-    executablePath: '/usr/bin/chromium',
-    args: ['--no-sandbox','--single-process','--no-zygote','--disable-setuid-sandbox','--disable-dev-shm-usage','--disable-gpu'],
-  });
-  const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    acceptDownloads: true,
-  });
-  const page = await context.newPage();
-
-  let cfClientId: string | undefined;
-  page.on('request', (req: any) => {
-    const url = req.url();
-    if (url.includes('_cf_clientid=')) {
-      const match = url.match(/_cf_clientid=([A-F0-9]{32})/i);
-      if (match && !cfClientId) {
-        cfClientId = match[1];
-        console.log(`  captured _cf_clientid: ${cfClientId}`);
-      }
-    }
-  });
-
   try {
-    console.log('\nSTEP 1: LOGIN');
-    await page.goto(ion.loginUrl);
-    await page.locator('#txtUserName').fill(ion.username);
-    await page.locator('#txtPassword').fill(ion.password);
-    await page.locator('button:has-text("Log In")').click();
-    await page.waitForLoadState('networkidle', { timeout: 30000 });
-    console.log(`  OK: ${page.url()}`);
-
-    console.log('\nSTEP 2: REDIRECT TO ION');
-    await page.locator('button[data-bs-target="#navbarToggleContent"]').click({ timeout: 5000 });
-    await page.waitForTimeout(1000);
-    await page.locator('text=ION POOL CARE').click({ timeout: 5000 });
-    await page.waitForLoadState('networkidle', { timeout: 45000 });
-    const ionOrigin = new URL(page.url()).origin;
+    console.log('\nSTEP 1: SESSION');
+    const session = await getOrRefreshSession(ion);
+    const { ionOrigin, cfClientId } = session;
     console.log(`  ION: ${ionOrigin}`);
     console.log(`  _cf_clientid: ${cfClientId || 'NONE'}`);
 
     await mkdir('./shared', { recursive: true });
 
-    console.log('\nSTEP 3: FETCH REPORT PICKER');
+    console.log('\nSTEP 2: FETCH REPORT PICKER');
     const pickerParams = new URLSearchParams({
       Office: '',
       Technician: '',
@@ -98,10 +59,8 @@ export async function main(
     const pickerUrl = `${ionOrigin}/reports/woReports.cfm?${pickerParams.toString()}`;
     console.log(`  picker URL: ${pickerUrl.substring(0, 120)}...`);
 
-    const pickerResult = await page.evaluate(async (url: string) => {
-      const res = await fetch(url, { credentials: 'include', headers: { 'Accept': 'text/html, */*' } });
-      return { ok: res.ok, status: res.status, body: await res.text() };
-    }, pickerUrl);
+    const pickerRes = await ionFetch(session, pickerUrl);
+    const pickerResult = { ok: pickerRes.ok, status: pickerRes.status, body: await pickerRes.text() };
 
     console.log(`  picker status: ${pickerResult.status}`);
     if (!pickerResult.ok) throw new Error(`Picker returned HTTP ${pickerResult.status}`);
@@ -131,17 +90,17 @@ export async function main(
     const reportDataUrl = downloadHref.startsWith('http') ? downloadHref : `${ionOrigin}${downloadHref.startsWith('/') ? '' : '/reports/'}${downloadHref}`;
     console.log(`  full report URL: ${reportDataUrl.substring(0, 140)}...`);
 
-    console.log('\nSTEP 4: FETCH REPORT DATA');
+    console.log('\nSTEP 3: FETCH REPORT DATA');
 
-    const reportResult = await page.evaluate(async (url: string) => {
+    const reportResult = await (async () => {
       try {
-        const res = await fetch(url, { credentials: 'include', headers: { 'Accept': 'text/html, */*' } });
+        const res = await ionFetch(session, reportDataUrl);
         const body = await res.text();
-        return { ok: res.ok, status: res.status, contentType: res.headers.get('content-type'), bodyLength: body.length, body };
+        return { ok: res.ok, status: res.status, contentType: res.headers.get('content-type'), bodyLength: body.length, body, error: undefined as string | undefined };
       } catch (err: any) {
-        return { ok: false, status: 0, bodyLength: 0, body: '', error: err.message };
+        return { ok: false, status: 0, contentType: null, bodyLength: 0, body: '', error: err.message };
       }
-    }, reportDataUrl);
+    })();
 
     console.log(`  status: ${reportResult.status}`);
     console.log(`  content-type: ${reportResult.contentType}`);
@@ -156,7 +115,7 @@ export async function main(
     await Bun.write('./shared/raw_report.html', reportResult.body);
     console.log('  saved raw_report.html');
 
-    console.log('\nSTEP 5: PARSE');
+    console.log('\nSTEP 4: PARSE');
     const root = parse(reportResult.body);
 
     const allTables = root.querySelectorAll('table');
@@ -212,14 +171,6 @@ export async function main(
   } catch (error: any) {
     console.log(`\nFATAL: ${error.message}`);
     console.log(error.stack);
-    try {
-      await mkdir('./shared', { recursive: true });
-      await page.screenshot({ path: './shared/error_screenshot.png', fullPage: true });
-      console.log('screenshot saved');
-    } catch {}
     throw error;
-  } finally {
-    await browser.close();
-    console.log('browser closed');
   }
 }

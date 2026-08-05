@@ -1,7 +1,9 @@
-import { chromium } from "playwright@1.40.0";
+// No browser here on purpose: the shared session cache owns the ONE login
+// (f/ION/_lib/session), and every ION endpoint below is a plain cookie-authed
+// GET. This step used to launch its own chromium purely to log in.
+import { getOrRefreshSession, ionFetch, type IonResource } from "/f/ION/_lib/session_cache";
 
 interface PrevResult { wo_numbers: string[]; }
-interface IonResource { username: string; password: string; loginUrl: string; }
 
 function parseWoStatus(html: string): { invoice_number: string | null; schedule_status: string | null } {
   let invoice_number: string | null = null;
@@ -51,61 +53,30 @@ export async function main(previous_result: PrevResult, ion: IonResource) {
     return { results: [], stats: { fetched: 0, errors: 0 } };
   }
 
-  const browser = await chromium.launch({
-    executablePath: '/usr/bin/chromium',
-    args: ['--no-sandbox','--single-process','--no-zygote','--disable-setuid-sandbox','--disable-dev-shm-usage','--disable-gpu'],
-  });
-  const context = await browser.newContext({ userAgent: 'Mozilla/5.0' });
-  const page = await context.newPage();
-
-  let cfClientId: string | undefined;
-  page.on('request', (req: any) => {
-    const m = req.url().match(/_cf_clientid=([A-F0-9]{32})/i);
-    if (m && !cfClientId) cfClientId = m[1];
-  });
-
+  const session = await getOrRefreshSession(ion);
   const results: any[] = [];
   let errors = 0;
 
-  try {
-    await page.goto(ion.loginUrl);
-    await page.locator('#txtUserName').fill(ion.username);
-    await page.locator('#txtPassword').fill(ion.password);
-    await page.locator('button:has-text("Log In")').click();
-    await page.waitForLoadState('networkidle', { timeout: 30000 });
-    await page.locator('button[data-bs-target="#navbarToggleContent"]').click({ timeout: 5000 });
-    await page.waitForTimeout(800);
-    await page.locator('text=ION POOL CARE').click({ timeout: 5000 });
-    await page.waitForLoadState('networkidle', { timeout: 45000 });
-    const ionOrigin = new URL(page.url()).origin;
-
-    for (const wo of wos) {
-      const params = new URLSearchParams({
-        id: wo,
-        _cf_containerId: 'woInfo',
-        _cf_nodebug: 'true',
-        _cf_nocache: 'true',
+  for (const wo of wos) {
+    const params = new URLSearchParams({
+      id: wo,
+      _cf_containerId: 'woInfo',
+      _cf_nodebug: 'true',
+      _cf_nocache: 'true',
+    });
+    if (session.cfClientId) params.set('_cf_clientid', session.cfClientId);
+    const url = `${session.ionOrigin}/workorders/WOStatus.cfm?${params.toString()}`;
+    try {
+      const resp = await ionFetch(session, url, {
+        headers: { 'Referer': `${session.ionOrigin}/main.cfm`, 'Accept': '*/*' },
       });
-      if (cfClientId) params.set('_cf_clientid', cfClientId);
-      const url = `${ionOrigin}/workorders/WOStatus.cfm?${params.toString()}`;
-      try {
-        const resp = await page.evaluate(async (u: string) => {
-          const r = await fetch(u, {
-            credentials: 'include',
-            headers: { 'Referer': 'https://ionpoolcare.com/main.cfm', 'Accept': '*/*' },
-          });
-          return { status: r.status, body: await r.text() };
-        }, url);
-        const parsed = parseWoStatus(resp.body);
-        results.push({ wo_number: wo, http_status: resp.status, ...parsed });
-      } catch (e: any) {
-        errors++;
-        results.push({ wo_number: wo, http_status: 0, invoice_number: null, schedule_status: null, error: e.message });
-      }
-      await new Promise((r) => setTimeout(r, 200));
+      const parsed = parseWoStatus(await resp.text());
+      results.push({ wo_number: wo, http_status: resp.status, ...parsed });
+    } catch (e: any) {
+      errors++;
+      results.push({ wo_number: wo, http_status: 0, invoice_number: null, schedule_status: null, error: e.message });
     }
-  } finally {
-    await browser.close();
+    await new Promise((r) => setTimeout(r, 200));
   }
 
   return { results, stats: { fetched: results.length, errors } };

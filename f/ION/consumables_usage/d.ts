@@ -4,12 +4,11 @@
 
 import { chromium } from "playwright@1.40.0";
 import { parse } from "node-html-parser";
-
-type IonResource = {
-  username: string;
-  password: string;
-  loginUrl: string;
-};
+// Unlike the other ION steps this one still needs a real browser -- it drives the
+// Reports menu and catches a download event, not a fetchable URL. It does NOT log
+// in though: it borrows cookies from the shared session so there stays exactly one
+// login in the codebase (f/ION/_lib/session).
+import { getOrRefreshSession, type IonResource } from "/f/ION/_lib/session_cache";
 
 const REPORT_SELECTORS: Record<string, string> = {
   consumables_detail: 'a[href*="consumablesDetailByTech.cfm"]',
@@ -24,6 +23,7 @@ export async function main(
 ) {
   start_date = start_date.replace(/"/g, '');
   end_date = end_date.replace(/"/g, '');
+  const session = await getOrRefreshSession(ion);
   const browser = await chromium.launch({
     executablePath: "/usr/bin/chromium",
     args: ['--no-sandbox', '--single-process', '--no-zygote', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
@@ -33,17 +33,14 @@ export async function main(
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     acceptDownloads: true
   });
+  await context.addCookies(session.cookies as any);
   const page = await context.newPage();
 
-  await page.goto(ion.loginUrl);
-  await page.locator('#txtUserName').fill(ion.username);
-  await page.locator('#txtPassword').fill(ion.password);
-  await page.locator('button:has-text("Log In")').click();
+  await page.goto(`${session.ionOrigin}/main.cfm`);
   await page.waitForLoadState('networkidle');
-
-  await page.locator('button[data-bs-target="#navbarToggleContent"]').click();
-  await page.locator('text=ION POOL CARE').click();
-  await page.waitForLoadState('networkidle');
+  if (await page.locator('#IPCLogin').count()) {
+    throw new Error(`shared ION session was not accepted -- landed on the login form: ${page.url()}`);
+  }
 
   try {
     await page.locator('#MyPrintWin .x-tool-close').click({ timeout: 2000 });

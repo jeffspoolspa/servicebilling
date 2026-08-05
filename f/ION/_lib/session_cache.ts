@@ -11,13 +11,14 @@
 // (playwright pinned because we import f/ION/_lib/session, which uses it for login.)
 
 import * as wmill from "windmill-client"
-import { loginToIon, isSessionFresh, ionFetch, type IonResource, type IonSession } from "/f/ION/_lib/session"
+import { loginToIon, isSessionFresh, ionFetch, looksLikeLoginPage, type IonResource, type IonSession } from "/f/ION/_lib/session"
 
 // Re-export the authed-fetch helpers so ION scripts import them from HERE, never directly from
 // "/f/ION/_lib/session". The Windmill bun resolver mangles the import when one file references both
 // "session" and "session_cache" (prefix collision -> "session.ts_cache.ts"); routing every consumer
 // through session_cache keeps each file importing only one of the two paths.
-export { ionFetch, ionFetchText, IonSessionExpiredError } from "/f/ION/_lib/session"
+export { ionFetch, ionFetchText, IonSessionExpiredError, looksLikeLoginPage } from "/f/ION/_lib/session"
+export type { IonResource, IonSession } from "/f/ION/_lib/session"
 
 const CACHE_VAR = "f/ION/session_cache"
 
@@ -29,8 +30,7 @@ const CACHE_VAR = "f/ION/session_cache"
 async function isSessionAlive(session: IonSession): Promise<boolean> {
   try {
     const res = await ionFetch(session, `${session.ionOrigin}/main.cfm`, { signal: AbortSignal.timeout(15000) })
-    const body = (await res.text()).toLowerCase()
-    return !body.includes("txtusername") && !body.includes("password")
+    return !looksLikeLoginPage(await res.text())
   } catch {
     return false // redirect-to-login, timeout, or network error -> treat as dead and re-mint
   }

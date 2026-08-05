@@ -652,7 +652,7 @@ f/billing/monthly_autopay flow is retired — see §3.4.)
 
 ```
 1. Schedule fires f/ION/visits flow every 2h
-2. emit_session step (Bun) → logs into Fluidra, captures cookies
+2. emit_session step (Bun) → logs into ionpoolcare.com, captures cookies
 3. parse_normalize_test (Python) → fetches service log XLS, parses HTML tables
  - Parser emits per-row dicts with _readings, _tasks, _consumables nested dicts
 4. _lib/normalize → maps parser dicts to canonical shape
