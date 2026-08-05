@@ -1373,6 +1373,12 @@ export function LiveMap({
       if (res.status === 202 && report.queued?.length) {
         const ids = report.queued.map((q) => q.queueId)
         setPublishPhase(`Queued ${ids.length} change${ids.length === 1 ? "" : "s"} — waiting for ION`)
+        // Poke the drain rather than wait out a cron tick. Not awaited: this
+        // request runs the whole publish and outlives the click. If it never
+        // lands, the schedule picks the row up anyway — that is the point of
+        // having queued it, and why this is fire-and-forget rather than a
+        // second thing that can fail the button.
+        void fetch("/api/routing/schedule-changes/drain", { method: "POST" }).catch(() => {})
         const done = await watchQueue(ids, setPublishPhase)
         const landed = done.filter((r) => r.state === "done")
         const stuck = done.filter((r) => r.state !== "done")
