@@ -29,6 +29,8 @@ export interface TaskStore {
   live(): Promise<Quota[]>
   /** Both-vocabulary identities for the tasks a publish touches. */
   identities(quotaIds: readonly string[]): Promise<Map<string, TaskIdentity>>
+  /** Give a newly created successor a row here, then make it true from ION. */
+  recordSuccessor(from: { predecessorId: string; ionTaskId: string; startsOn: string }): Promise<string | null>
   /** Apply confirmed schedules to our cached slots (row-count-asserted). */
   applyConfirmed(schedules: readonly { quotaId: string; stops: readonly { weekday: number; techId: string }[] }[]): Promise<{ quotaId: string; slots: number }[]>
 }
@@ -213,9 +215,26 @@ export class PublishService {
           expect: { serviceRepeat: sup.changes["ServiceRepeat"] ?? "3", startsOn: sup.startsOn } },
         { dryRun: opts.dryRun },
       )
+      // The successor exists in ION; give it a row here too, so "did it work"
+      // is answerable from our own database.
+      let successorTaskId: string | null = null
+      if (made.accepted && !opts.dryRun && made.ionTaskId) {
+        try {
+          successorTaskId = await this.tasks.recordSuccessor({
+            predecessorId: sup.quotaId, ionTaskId: made.ionTaskId, startsOn: sup.startsOn,
+          })
+        } catch (err) {
+          // ION is already correct. Say so loudly rather than failing the
+          // change: a cache we can rebuild is not worth undoing a contract.
+          successorTaskId = null
+          console.error(`successor ${made.ionTaskId} created in ION but not cached: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+
       results.push({
         quotaId: sup.quotaId,
         accepted: made.accepted,
+        taskId: successorTaskId,
         // Named, not narrated: the queue records this as the proof a supersede
         // finished, and a constraint refuses "done" without it.
         ionTaskId: made.ionTaskId ?? null,

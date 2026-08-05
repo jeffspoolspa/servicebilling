@@ -83,6 +83,8 @@ export interface LandedChange {
    * supersede finished, and refuses to record "done" without it.
    */
   ionTaskId?: string | null
+  /** Our row for the successor, when one was created and cached. */
+  taskId?: string | null
 }
 
 export class IonTaskAcl {

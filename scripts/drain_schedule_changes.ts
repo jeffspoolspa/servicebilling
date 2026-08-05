@@ -90,10 +90,14 @@ async function main() {
       const mine = out.results.find((r) => r.quotaId === row.task_id) ?? out.results[0]
       if (!mine?.accepted) throw new Error(mine?.detail ?? "no result for this task")
       console.log(`   ${mine.detail}`)
-      // A dry run proves nothing landed, so the unit stays queued.
+      // A dry run proves nothing landed, so the unit stays queued — and the
+      // claim is HANDED BACK. Rehearsing must not spend a budget that counts
+      // real failures: three dry runs used to dead-letter untouched work.
+      if (!live) await m.rpc("release_schedule_change", { p_id: row.id })
       if (live) {
         await m.rpc("finish_schedule_change", {
           p_id: row.id, p_error: null, p_result_ion_task_id: mine.ionTaskId ?? null,
+          p_result_task_id: mine.taskId ?? null,
         })
       }
       handled++
@@ -102,7 +106,8 @@ async function main() {
       console.error(`   FAILED: ${detail}`)
       // Re-claimable until attempts >= 3, then it dead-letters and STAYS
       // VISIBLE — a half-applied supersede must be findable, not swallowed.
-      await m.rpc("finish_schedule_change", { p_id: row.id, p_error: detail })
+      if (live) await m.rpc("finish_schedule_change", { p_id: row.id, p_error: detail })
+      else await m.rpc("release_schedule_change", { p_id: row.id })
       if (!live) break
     }
     if (!live) break

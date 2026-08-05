@@ -35,6 +35,44 @@ export class SupabaseTaskStore implements TaskStore {
     return this.quotas.liveIn(weekOf(new Date()))
   }
 
+  /**
+   * Give the successor a row of our own, then make that row true from ION.
+   *
+   * A supersede created a contract in ION that our system could not see: only
+   * TaskService wrote the new row, and the publish path did not, so after a
+   * successful publish ION held a task we had no record of until the nightly
+   * sweep found it. That is Kerry's failure again, only quieter.
+   *
+   * The insert carries the minimum needed to IDENTIFY the task; the refresher
+   * then fills the rest from ION, slots included. Deliberately not mapped by
+   * hand here — a second mapping is a second thing to drift.
+   */
+  async recordSuccessor(from: {
+    predecessorId: string
+    ionTaskId: string
+    startsOn: string
+  }): Promise<string | null> {
+    const { data: prior } = await this.reads.schema("maintenance").from("tasks")
+      .select("customer_id").eq("id", from.predecessorId).range(0, 0)
+    const customerId = ((prior ?? []) as { customer_id: number | null }[])[0]?.customer_id ?? null
+
+    const { data, error } = await (this.writes.schema("maintenance").from("tasks") as unknown as {
+      insert(v: Record<string, unknown>): { select(c: string): PromiseLike<{ data: unknown[] | null; error: { message: string } | null }> }
+    }).insert({
+      customer_id: customerId,
+      ion_task_id: from.ionTaskId,
+      starts_on: from.startsOn,
+      status: "active",
+      external_source: "ion",
+    }).select("id")
+    if (error) throw new Error(`successor row insert failed: ${error.message}`)
+    const id = ((data ?? []) as { id: string }[])[0]?.id ?? null
+
+    // Now make it true. The successor is only as trustworthy as ION says.
+    if (id) await this.refresher.refresh([id], 0)
+    return id
+  }
+
   async identities(quotaIds: readonly string[]): Promise<Map<string, TaskIdentity>> {
     const [{ data: tasks }, { data: slots }, { data: emps }] = await Promise.all([
       this.reads.schema("maintenance").from("tasks").select("id, ion_task_id, customer_id, frequency, starts_on").in("id", quotaIds as string[]).range(0, PAGE),
