@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { createSupabaseServer } from "@/lib/supabase/server"
+import { authorize } from "@/lib/api/authorize"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { PublishService } from "@/lib/routing/application/publish-service"
 import { SupabaseTaskStore } from "@/lib/routing/infrastructure/supabase-task-store"
@@ -18,9 +19,9 @@ import type { QueryClient } from "@/lib/routing/infrastructure/supabase-quota-re
  * in the ACL. dry_run is the default; a live write is explicit.
  */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const caller = await authorize(req)
+  if (!caller) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const sb = await createSupabaseServer()
-  const { data: { user } } = await sb.auth.getUser()
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { id } = await ctx.params
   const body = (await req.json().catch(() => ({}))) as { dry_run?: boolean }
@@ -63,7 +64,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         .rpc("enqueue_schedule_change", {
           p_task_id: taskId, p_scenario_id: id,
           p_ion_task_id: ionOf.get(taskId) ?? null,
-          p_intent: { requested_by: user.id, scenario_id: id },
+          p_intent: { requested_by: caller.id, scenario_id: id },
         })
       if (error) return NextResponse.json({ error: `enqueue failed: ${error.message}` }, { status: 500 })
       queued.push({ taskId, queueId: qid as string })

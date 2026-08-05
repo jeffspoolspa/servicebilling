@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createSupabaseServer } from "@/lib/supabase/server"
+import { authorize } from "@/lib/api/authorize"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 
 /**
@@ -17,18 +17,19 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin"
  * GET ?ids=uuid,uuid
  */
 export async function GET(req: Request) {
-  const sb = await createSupabaseServer()
-  const { data: { user } } = await sb.auth.getUser()
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  if (!(await authorize(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
-  const ids = (new URL(req.url).searchParams.get("ids") ?? "")
-    .split(",").map((s) => s.trim()).filter(Boolean)
-  if (ids.length === 0) return NextResponse.json({ error: "give ?ids=" }, { status: 400 })
+  const params = new URL(req.url).searchParams
+  const ids = (params.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+  // `?open=1` follows everything still in flight — what a watcher wants when
+  // it did not create the rows itself.
+  const open = params.get("open") === "1"
+  if (ids.length === 0 && !open) return NextResponse.json({ error: "give ?ids= or ?open=1" }, { status: 400 })
 
-  const { data, error } = await createSupabaseAdmin()
+  const base = createSupabaseAdmin()
     .schema("maintenance").from("v_schedule_change_queue")
     .select("id, task_id, state, error, attempts, ion_task_id, result_ion_task_id, result_task_id, minutes_waiting")
-    .in("id", ids)
+  const { data, error } = open ? await base.is("finished_at", null) : await base.in("id", ids)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   return NextResponse.json({ rows: data ?? [] })
