@@ -67,6 +67,18 @@ export interface SupersedeWrite {
    * guard caught it (Lucas, 2026-08-05).
    */
   weekly: boolean
+  /**
+   * The close write, built here rather than by the caller.
+   *
+   * Ending a weekly contract is still a WEEKLY write: ION renders the picker,
+   * so the form must restate every day it is ending with — omitting them is
+   * how a week write silently drops a stop. A non-picker close carries only
+   * the end date. The caller cannot know which without re-deriving what this
+   * translation already decided.
+   */
+  closeChanges: Record<string, string>
+  /** The days we believe ION holds, for the close's drift assertion. */
+  believedDays: Record<string, string>
 }
 
 export type Translated =
@@ -149,6 +161,14 @@ export class IonTaskAcl {
             startsOn,
             believedStartsOn: id.startsOn ?? null,
             weekly: true,
+            closeChanges: (() => {
+              const c: Record<string, string> = {}
+              for (const f of DAY_FIELD) c[f] = ""
+              for (const [d, tech] of Object.entries(id.believedDays)) c[DAY_FIELD[Number(d)]] = tech
+              c["EndsOn"] = new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10)
+              return c
+            })(),
+            believedDays: id.believedDays,
             // No ServiceRepeat: the successor inherits the predecessor's
             // cadence with the rest of its form. Stating it here would be a
             // second place for "what cadence is this" to be wrong.
@@ -202,6 +222,8 @@ export class IonTaskAcl {
           startsOn,
           believedStartsOn: id.startsOn ?? null,
           weekly: false,
+          closeChanges: { EndsOn: new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10) },
+          believedDays: {},
           changes: { AssignedTo: named[0].ionTech, StartsOn: startsOn, ServiceRepeat: target === "monthly" ? "4" : "3" },
         },
       }

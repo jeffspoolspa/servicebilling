@@ -214,7 +214,7 @@ export class PublishService {
           // The close must arrive believing the shape ION will render, or ION
           // refuses it — weekly tasks show the day picker, others do not.
           [{ key: sup.quotaId, ionTaskId: sup.ionTaskId, ionCustId: sup.ionCustId, weekly: sup.weekly,
-             changes: { EndsOn: sup.endsOn }, believedDays: {},
+             changes: sup.closeChanges, believedDays: sup.believedDays,
              // If ION's anchor moved since our refresh, the effective week we
              // computed is wrong — refuse the close rather than end a contract
              // and create a successor from a date ION no longer holds.
