@@ -3,6 +3,7 @@ import { createSupabaseServer } from "@/lib/supabase/server"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { buildExplainer, type ExplainerNarrative } from "@/lib/billing/application/explainer"
 import { generateText, parseJsonReply } from "@/lib/external/llm/narrative"
+import { htmlToPdf } from "@/lib/external/pdf/render"
 
 export const maxDuration = 120
 
@@ -116,6 +117,28 @@ Reply with ONLY a JSON object:
   })
   if (!up.ok) return NextResponse.json({ error: `storage write failed: ${up.status} ${(await up.text()).slice(0, 200)}` }, { status: 502 })
 
+  // The PDF — the artifact downloads hand out and the QBO attach path will
+  // upload — rendered right here with serverless chromium, stored beside
+  // the HTML at the same stable path. Best-effort: the letter still lands
+  // if the render hiccups, and the response says so.
+  let pdfOk = false
+  try {
+    const pdf = await htmlToPdf(rendered.html)
+    const up2 = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/explainers/${monthId}.pdf`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/pdf",
+        "x-upsert": "true",
+      },
+      body: new Uint8Array(pdf),
+    })
+    pdfOk = up2.ok
+    if (!up2.ok) console.error(`explainer pdf store failed: ${up2.status}`)
+  } catch (e) {
+    console.error(`explainer pdf render failed: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`)
+  }
+
   const stamp = sys.schema("billing").from("billing_months") as never as {
     update(v: Record<string, unknown>): { eq(k: string, v2: string): PromiseLike<{ error: unknown }> }
   }
@@ -128,5 +151,6 @@ Reply with ONLY a JSON object:
     url: `/api/billing/months/${monthId}/explainer-view`,
     narrative,
     notes,
+    pdf: pdfOk,
   })
 }

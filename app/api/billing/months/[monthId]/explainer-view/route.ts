@@ -13,13 +13,32 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { monthId } = await ctx.params
+  const params = new URL(req.url).searchParams
+
+  // Downloads hand out the PDF (rendered at generation on the chromium
+  // pool); the HTML is the fallback for letters generated before the
+  // renderer existed.
+  if (params.get("download") === "1") {
+    const pdf = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/explainers/${monthId}.pdf`,
+      { cache: "no-store" },
+    )
+    if (pdf.ok) {
+      return new NextResponse(await pdf.arrayBuffer(), {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="explainer-${monthId.slice(0, 8)}.pdf"`,
+        },
+      })
+    }
+  }
+
   const r = await fetch(
     `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/explainers/${monthId}.html`,
     { cache: "no-store" },
   )
   if (!r.ok) return NextResponse.json({ error: "no generated explainer for this month yet" }, { status: 404 })
   const headers: Record<string, string> = { "Content-Type": "text/html; charset=utf-8" }
-  const params = new URL(req.url).searchParams
   if (params.get("download") === "1") {
     headers["Content-Disposition"] = `attachment; filename="explainer-${monthId.slice(0, 8)}.html"`
   }
