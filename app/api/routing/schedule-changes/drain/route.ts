@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createSupabaseServer } from "@/lib/supabase/server"
+import { authorize } from "@/lib/api/authorize"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { PublishService } from "@/lib/routing/application/publish-service"
 import { SupabaseTaskStore } from "@/lib/routing/infrastructure/supabase-task-store"
@@ -31,14 +31,7 @@ export const maxDuration = 300
 export async function POST(req: Request) {
   // Either an authenticated operator (the publish button poking it) or the
   // scheduler carrying the cron secret. Nothing else drains ION.
-  const secret = process.env.CRON_SECRET
-  const auth = req.headers.get("authorization")
-  const isCron = Boolean(secret) && auth === `Bearer ${secret}`
-  if (!isCron) {
-    const sb = await createSupabaseServer()
-    const { data: { user } } = await sb.auth.getUser()
-    if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  }
+  if (!(await authorize(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const sys = createSupabaseAdmin()
   const m = sys.schema("maintenance")

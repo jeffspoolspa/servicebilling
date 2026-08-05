@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createSupabaseServer } from "@/lib/supabase/server"
+import { authorize } from "@/lib/api/authorize"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { TaskService } from "@/lib/maintenance/application/task-service"
 import { SupabaseTaskRepository } from "@/lib/maintenance/infrastructure/supabase-task-repository"
@@ -22,9 +22,8 @@ import { triggerScriptSync } from "@/lib/windmill"
  * POST { taskIds: string[] }  or  { customerId: number } for all of theirs.
  */
 export async function POST(req: Request) {
-  const sb = await createSupabaseServer()
-  const { data: { user } } = await sb.auth.getUser()
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const caller = await authorize(req)
+  if (!caller) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const body = (await req.json().catch(() => ({}))) as { taskIds?: string[]; customerId?: number }
   const sys = createSupabaseAdmin()
@@ -58,7 +57,7 @@ export async function POST(req: Request) {
     // rather than failing the moment a nightly sweep is running.
     const out = await withIonLease(
       sys.schema("maintenance") as unknown as LeaseRpc,
-      `refresh:${user.id}`,
+      `refresh:${caller.id}`,
       `manual refresh of ${taskIds.length} task(s)`,
       async (lease) => {
         ion.withLease(lease)
