@@ -77,7 +77,7 @@ async function leaseRpc(fn: string, args: Record<string, unknown>): Promise<any>
   if (!key) throw new Error("ion lease: no service key on u/carter/supabase")
   const res = await fetch(`${url}/rest/v1/rpc/${fn}`, {
     method: "POST",
-    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Accept-Profile": "ion", "Content-Profile": "ion" },
+    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Accept-Profile": "maintenance", "Content-Profile": "maintenance" },
     body: JSON.stringify(args),
   })
   if (!res.ok) throw new Error(`ion lease ${fn}: ${res.status} ${(await res.text()).slice(0, 200)}`)
@@ -101,7 +101,7 @@ export async function withIonLease<T>(
   const deadline = Date.now() + (opts.waitMs ?? 15 * 60_000)
   let timer: any = null
   for (;;) {
-    const rows = await leaseRpc("acquire_session_lease", { p_holder: holder, p_purpose: purpose, p_ttl_seconds: LEASE_TTL_S })
+    const rows = await leaseRpc("acquire_ion_session_lease", { p_holder: holder, p_purpose: purpose, p_ttl_seconds: LEASE_TTL_S })
     const row = Array.isArray(rows) ? rows[0] : rows
     if (row?.acquired) break
     if (Date.now() >= deadline) throw new Error(`ION session held by ${row?.held_by ?? "?"} (${row?.held_for ?? "?"}) — gave up waiting`)
@@ -109,13 +109,13 @@ export async function withIonLease<T>(
   }
   try {
     timer = setInterval(() => {
-      leaseRpc("renew_session_lease", { p_holder: holder, p_ttl_seconds: LEASE_TTL_S }).catch(() => {})
+      leaseRpc("renew_ion_session_lease", { p_holder: holder, p_ttl_seconds: LEASE_TTL_S }).catch(() => {})
     }, RENEW_EVERY_MS)
     const ion: any = await wmill.getResource("u/carter/ion")
     return await fn(await getOrRefreshSession(ion, { forceRefresh: opts.forceRefresh }))
   } finally {
     if (timer) clearInterval(timer)
-    try { await leaseRpc("release_session_lease", { p_holder: holder }) } catch { /* TTL covers it */ }
+    try { await leaseRpc("release_ion_session_lease", { p_holder: holder }) } catch { /* TTL covers it */ }
   }
 }
 

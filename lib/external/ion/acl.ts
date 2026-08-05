@@ -77,6 +77,14 @@ export interface LandedChange {
   quotaId: string
   accepted: boolean
   detail: string
+  /**
+   * The successor's ION EventID when this change created one. Named rather
+   * than narrated inside `detail`: the queue stores it as the proof a
+   * supersede finished, and refuses to record "done" without it.
+   */
+  ionTaskId?: string | null
+  /** Our row for the successor, when one was created and cached. */
+  taskId?: string | null
 }
 
 export class IonTaskAcl {
@@ -129,8 +137,10 @@ export class IonTaskAcl {
       if (!target) {
         return { refusal: { quotaId: schedule.quotaId, reason: `${id.label}: cannot read a parity from ${id.startsOn}` } }
       }
-      const week = effectiveWeekFor(id.lastVisit ?? null, id.now ?? new Date().toISOString().slice(0, 10), target)
-      const startsOn = dateInWeek(week, named[0].weekday)
+      const chosen = supersedeStartsOn(
+        id.lastVisit ?? null, id.now ?? new Date().toISOString().slice(0, 10), target, named[0].weekday,
+      )
+      const startsOn = chosen.startsOn
       return {
         supersede: {
           quotaId: schedule.quotaId,
@@ -243,6 +253,52 @@ export function anchorOf(startsOn: string, repeatText: string): { weekday: numbe
  * day move, not a service failure. Flagging it against a flat 14 would have
  * called correct schedules broken.
  */
+/**
+ * The SOONEST a moved pool may next be served (Carter, 2026-08-05: a biweekly
+ * pool is 7).
+ *
+ * The effective-week rule stops a customer waiting too long; this stops the
+ * opposite. Picking the week first and the day second means the day can land
+ * EARLIER in its week than the last visit did — a Friday pool flipping to a
+ * Thursday anchor could be served 6 days later, two visits inside a week, for
+ * a fortnightly contract. Half the cycle is the floor.
+ */
+export function minGapDaysFor(target: "weekly" | "biweekly_a" | "biweekly_b" | "monthly"): number {
+  if (target === "monthly") return 14
+  if (target === "weekly") return 3
+  return 7
+}
+
+/**
+ * The successor's start date: the effective week, the requested weekday, and
+ * — if that lands too soon after the last visit — the NEXT qualifying week.
+ *
+ * Both bounds in one place, because they pull against each other and a caller
+ * that applied them separately would eventually apply only one.
+ */
+export function supersedeStartsOn(
+  lastVisit: string | null,
+  now: string,
+  target: "weekly" | "biweekly_a" | "biweekly_b" | "monthly",
+  weekday: number,
+): { startsOn: string; week: number; pushedForMinGap: boolean } {
+  const step = target === "weekly" ? 1 : 2
+  let week = effectiveWeekFor(lastVisit, now, target)
+  let startsOn = dateInWeek(week, weekday)
+  if (lastVisit) {
+    const min = minGapDaysFor(target)
+    const gap = (d: string) => Math.round((Date.parse(`${d}T00:00:00Z`) - Date.parse(`${lastVisit}T00:00:00Z`)) / 86_400_000)
+    if (gap(startsOn) < min) {
+      // The next week of the SAME parity — never a different one, or the move
+      // would silently change which weeks the customer is on.
+      week += step
+      startsOn = dateInWeek(week, weekday)
+      return { startsOn, week, pushedForMinGap: true }
+    }
+  }
+  return { startsOn, week, pushedForMinGap: false }
+}
+
 export function maxGapDaysFor(target: "weekly" | "biweekly_a" | "biweekly_b" | "monthly", keepsParity: boolean): number {
   if (target === "weekly") return 13
   return keepsParity ? 20 : 13
@@ -424,4 +480,51 @@ export function reviseTask(
 function isoWeekday(iso: string): number | null {
   const d = new Date(`${iso}T00:00:00Z`)
   return isNaN(+d) ? null : d.getUTCDay()
+}
+
+/* ------------------- the WHOLE task, ION's form to our row ---------------- */
+
+/**
+ * Every column of maintenance.tasks that ION's form is authoritative for.
+ *
+ * One mapping, applied wholesale. Refreshing a hand-picked subset is how the
+ * cache stayed wrong three separate times tonight — the cadence, then the
+ * slots, then the anchor — each discovered only when something downstream
+ * refused. If we know the field and know the mapping, the refresh writes it;
+ * "verified" must mean the row matches ION, not that some of it does.
+ *
+ * Columns NOT here are ours, not ION's: status (we derive it), customer_id
+ * (ADR 006 resolves it), category (generated), verification stamps.
+ */
+export function taskColumnsFromIonForm(form: IonTaskForm): Record<string, unknown> {
+  const invoiceType = form.fields["InvoiceType_text"] ?? form.fields["InvoiceType"] ?? null
+  const { laborKey, consumablesKey } = parseInvoiceType(invoiceType)
+  const cost = Number(String(form.fields["itemcost"] ?? "").replace(/[^0-9.\-]/g, ""))
+  const cents = Number.isFinite(cost) && String(form.fields["itemcost"] ?? "").trim() !== "" ? Math.round(cost * 100) : null
+
+  return {
+    starts_on: form.startsOn || null,
+    ends_on: (form.fields["EndsOn"] ?? "") || null,
+    billing_method: laborKey,
+    consumables_mode: consumablesKey,
+    // ION states ONE price; which column it belongs in is decided by the
+    // labor policy, and the other is cleared so a stale figure cannot be read
+    // by a later change of method.
+    price_per_visit_cents: laborKey === "per_visit" ? cents : null,
+    flat_rate_monthly_cents: laborKey === "flat_rate_monthly" ? cents : null,
+    ion_invoice_type: invoiceType,
+    notes: form.fields["tasknote"] ?? null,
+  }
+}
+
+/** ION's one Invoice Type string carries two independent decisions. */
+export function parseInvoiceType(raw: string | null | undefined): {
+  laborKey: "per_visit" | "flat_rate_monthly" | "do_not_invoice"
+  consumablesKey: "listed" | "separate"
+} {
+  const t = (raw ?? "").toLowerCase()
+  return {
+    laborKey: t.includes("do not invoice") ? "do_not_invoice" : t.includes("flat") ? "flat_rate_monthly" : "per_visit",
+    consumablesKey: t.includes("separate consumables") ? "separate" : "listed",
+  }
 }

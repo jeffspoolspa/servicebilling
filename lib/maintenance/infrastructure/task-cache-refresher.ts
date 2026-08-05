@@ -16,6 +16,7 @@
 
 import type { QueryClient } from "@/lib/routing/infrastructure/supabase-quota-repository"
 import type { IonTasks } from "@/lib/external/ion/ion"
+import { taskColumnsFromIonForm } from "@/lib/external/ion/acl"
 import type { IonTaskAcl, TranslatedForm } from "@/lib/external/ion/acl"
 
 export interface RefreshReport {
@@ -27,6 +28,36 @@ export interface RefreshReport {
   /** Read but not reconcilable — see `skipped` for why. */
   readonly skipped: { taskId: string; reason: string }[]
   readonly verifiedAt: string
+  /**
+   * What disagreed, old and new. Returned rather than logged: this layer
+   * OBSERVES; the application records, because only it knows whether a slot
+   * going quiet means ION dropped the day or we superseded the contract.
+   */
+  readonly drift: ScheduleDrift[]
+}
+
+/** The whole servicing state of a task — what an edit is measured against. */
+export interface TaskState {
+  /** weekday -> tech, the servicing map. */
+  readonly days: Record<string, string | null>
+  readonly frequency: string | null
+  readonly startsOn: string | null
+  /** Set means the task is over: an expiry is just an end date, not a kind. */
+  readonly endsOn: string | null
+}
+
+/**
+ * One task, before and after — never one entry per slot.
+ *
+ * A day moving, a tech swapping, a cadence changing and a task expiring are
+ * not four kinds of event to categorise; they are four ways the same state
+ * differs. Recording the whole state twice keeps the history readable without
+ * a taxonomy that has to grow every time ION grows a field.
+ */
+export interface ScheduleDrift {
+  readonly taskId: string
+  readonly before: TaskState
+  readonly after: TaskState
 }
 
 interface TaskRow {
@@ -35,6 +66,9 @@ interface TaskRow {
   frequency: string | null
   ion_verified_at: string | null
   customer_id: number | null
+  /** Part of the servicing state, so part of what an edit is measured against. */
+  starts_on: string | null
+  ends_on: string | null
 }
 
 export class TaskCacheRefresher {
@@ -58,7 +92,7 @@ export class TaskCacheRefresher {
     const { data } = await this.client
       .schema("maintenance")
       .from("tasks")
-      .select("id, ion_task_id, frequency, ion_verified_at, customer_id")
+      .select("id, ion_task_id, frequency, ion_verified_at, customer_id, starts_on, ends_on")
       .in("id", taskIds as string[])
       .range(0, 999)
     return ((data ?? []) as TaskRow[]).filter(
@@ -93,7 +127,7 @@ export class TaskCacheRefresher {
       return true
     })
     if (readable.length === 0) {
-      return { alreadyFresh, read: 0, slotsChanged: 0, skipped, verifiedAt }
+      return { alreadyFresh, read: 0, slotsChanged: 0, skipped, verifiedAt, drift: [] }
     }
 
     // ION employee id -> our employee id, so its answer can be stored as ours.
@@ -137,14 +171,24 @@ export class TaskCacheRefresher {
     )
 
     let slotsChanged = 0
+    // Every difference is an edit made OUTSIDE our system. This layer only
+    // OBSERVES it — recording is the application's job, where the intent is
+    // known: the same slot flipping inactive means one thing on a refresh and
+    // another when we superseded the contract ourselves, and a trigger or an
+    // adapter cannot tell those apart.
+    const drift: ScheduleDrift[] = []
     const verified: string[] = []
     for (const task of readable) {
       let translated: TranslatedForm
+      // Keep the form: the ACL translates the SCHEDULE, but the contract dates
+      // are part of the servicing state an edit is measured against.
+      let form: Awaited<ReturnType<typeof this.ion.readTask>> | null = null
       try {
-        translated = this.acl.fromIonForm(
-          await this.ion.readTask(task.ion_task_id!, task.customer_id !== null ? (ionCustOf.get(task.customer_id) ?? undefined) : undefined),
-          ourTechOf,
+        form = await this.ion.readTask(
+          task.ion_task_id!,
+          task.customer_id !== null ? (ionCustOf.get(task.customer_id) ?? undefined) : undefined,
         )
+        translated = this.acl.fromIonForm(form, ourTechOf)
       } catch (err) {
         skipped.push({ taskId: task.id, reason: err instanceof Error ? err.message : String(err) })
         continue
@@ -157,6 +201,14 @@ export class TaskCacheRefresher {
       const slotFrequency = translated.schedule.frequency
 
       const mine = slots.filter((s) => s.task_id === task.id)
+      // The whole state as WE hold it, before touching anything.
+      const before: TaskState = {
+        days: Object.fromEntries(mine.filter((s) => s.active && s.day_of_week !== null)
+          .map((s) => [String(s.day_of_week), s.tech_employee_id])),
+        frequency: mine.find((s) => s.active)?.frequency ?? null,
+        startsOn: task.starts_on ?? null,
+        endsOn: task.ends_on ?? null,
+      }
       const seen = new Set<number>()
       for (const s of mine) {
         if (s.day_of_week !== null && want.has(s.day_of_week)) {
@@ -166,12 +218,19 @@ export class TaskCacheRefresher {
             await this.update(s.id, {
               active: true,
               frequency: slotFrequency,
+              ends_on: null,
               ...(tech ? { tech_employee_id: tech } : {}),
             })
             slotsChanged++
           }
         } else if (s.active) {
-          await this.update(s.id, { active: false })
+          // ION no longer serves this day. Retire it with an END DATE as well
+          // as the flag: the date is what keeps it retired and is what makes
+          // the change legible later ("stopped 2026-08-05"), where a bare
+          // false says only "not now". The routing repository already filters
+          // active = true, so it leaves the map at the same moment.
+          const endsOn = new Date().toISOString().slice(0, 10)
+          await this.update(s.id, { active: false, ends_on: endsOn })
           slotsChanged++
         }
       }
@@ -180,11 +239,24 @@ export class TaskCacheRefresher {
         await this.insert(task.id, task.ion_task_id!, dow, tech, slotFrequency)
         slotsChanged++
       }
+      const after: TaskState = {
+        days: Object.fromEntries([...want].map(([dow, tech]) => [String(dow), tech])),
+        frequency: slotFrequency,
+        startsOn: form?.startsOn || task.starts_on || null,
+        endsOn: (form?.fields["EndsOn"] ?? "") || null,
+      }
+      // The WHOLE mapped row, not a hand-picked subset. Refreshing a few
+      // fields at a time is how the cache stayed wrong three times tonight —
+      // the cadence, then the slots, then the anchor — each found only when
+      // something downstream refused. "Verified" has to mean the row matches
+      // ION, so every column ION is authoritative for is written together.
+      if (form) await this.updateTask(task.id, taskColumnsFromIonForm(form))
+      if (JSON.stringify(before) !== JSON.stringify(after)) drift.push({ taskId: task.id, before, after })
       verified.push(task.id)
     }
 
     if (verified.length > 0) await this.stamp(verified, verifiedAt)
-    return { alreadyFresh, read: readable.length, slotsChanged, skipped, verifiedAt }
+    return { alreadyFresh, read: readable.length, slotsChanged, skipped, verifiedAt, drift }
   }
 
   /**
@@ -249,6 +321,26 @@ export class TaskCacheRefresher {
       .select("id")
     if (error) throw new Error(`task_schedules insert failed: ${JSON.stringify(error).slice(0, 200)}`)
     if (!data || data.length === 0) throw new Error("task_schedules insert touched NO rows")
+  }
+
+  /** One task's own columns. Row-count asserted, like every other write here. */
+  private async updateTask(id: string, patch: Record<string, unknown>): Promise<void> {
+    const c = this.client as unknown as {
+      schema(s: string): {
+        from(t: string): {
+          update(v: Record<string, unknown>): {
+            eq(col: string, v: unknown): { select(cols: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+          }
+        }
+      }
+    }
+    const { data, error } = await c
+      .schema("maintenance").from("tasks")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("id")
+    if (error) throw new Error(`task update failed: ${JSON.stringify(error).slice(0, 200)}`)
+    if (!data || data.length === 0) throw new Error(`task update touched NO rows (${id}) — filtered, not applied`)
   }
 
   private async stamp(taskIds: string[], at: string): Promise<void> {

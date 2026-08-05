@@ -29,6 +29,8 @@ export interface TaskStore {
   live(): Promise<Quota[]>
   /** Both-vocabulary identities for the tasks a publish touches. */
   identities(quotaIds: readonly string[]): Promise<Map<string, TaskIdentity>>
+  /** Give a newly created successor a row here, then make it true from ION. */
+  recordSuccessor(from: { predecessorId: string; ionTaskId: string; startsOn: string }): Promise<string | null>
   /** Apply confirmed schedules to our cached slots (row-count-asserted). */
   applyConfirmed(schedules: readonly { quotaId: string; stops: readonly { weekday: number; techId: string }[] }[]): Promise<{ quotaId: string; slots: number }[]>
 }
@@ -153,10 +155,16 @@ export class PublishService {
       // was retrying.
       let alreadyClosed = false
       let alreadyCreated: string | null = null
+      // The superseded task IS the successor's template — carried here from the
+      // same read that decides whether the close already landed.
+      let carried: Record<string, string> | null = null
       if (!opts.dryRun) {
         try {
           const before = await this.ion.readTask(sup.ionTaskId, sup.ionCustId)
           alreadyClosed = (before.startsOn ?? "") !== "" && (before.fields["EndsOn"] ?? "") === sup.endsOn
+          const { EventID: _e, EndsOn: _x, ...rest } = before.fields
+          void _e; void _x
+          carried = rest
           // A successor exists when the customer already carries a task
           // starting on the date this supersede was computed for.
           const siblings = await this.ion.listTaskIds(sup.ionCustId)
@@ -195,18 +203,78 @@ export class PublishService {
         }
       }
 
+      // A create needs the WHOLE contract, not the delta. A blank addTask form
+      // carries no ServiceType, InvoiceType, ServiceRepeat or AssignedTo
+      // (measured against task 5210359, 2026-08-05), so merging three changed
+      // fields over it builds a task ION will not accept — which is how the
+      // first attempt closed a contract and then created nothing, leaving the
+      // customer with no live task. The successor inherits its predecessor and
+      // overwrites only what moved.
       const made = await this.ion.createTask(
-        { ionCustId: sup.ionCustId, changes: sup.changes,
+        { ionCustId: sup.ionCustId, changes: carried ? { ...carried, ...sup.changes } : sup.changes,
           expect: { serviceRepeat: sup.changes["ServiceRepeat"] ?? "3", startsOn: sup.startsOn } },
         { dryRun: opts.dryRun },
       )
+      // The successor exists in ION; give it a row here too, so "did it work"
+      // is answerable from our own database.
+      let successorTaskId: string | null = null
+      if (made.accepted && !opts.dryRun && made.ionTaskId) {
+        try {
+          successorTaskId = await this.tasks.recordSuccessor({
+            predecessorId: sup.quotaId, ionTaskId: made.ionTaskId, startsOn: sup.startsOn,
+          })
+        } catch (err) {
+          // ION is already correct. Say so loudly rather than failing the
+          // change: a cache we can rebuild is not worth undoing a contract.
+          successorTaskId = null
+          console.error(`successor ${made.ionTaskId} created in ION but not cached: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+
       results.push({
         quotaId: sup.quotaId,
         accepted: made.accepted,
+        taskId: successorTaskId,
+        // Named, not narrated: the queue records this as the proof a supersede
+        // finished, and a constraint refuses "done" without it.
+        ionTaskId: made.ionTaskId ?? null,
         detail: made.accepted
           ? `superseded: old contract ends ${sup.endsOn}, new starts ${sup.startsOn}${made.ionTaskId ? ` (ION task ${made.ionTaskId})` : ""}${alreadyClosed ? " (close had already landed)" : ""}`
           : `closed ${sup.endsOn} but CREATE FAILED — customer has no live task: ${made.detail}`,
       })
+
+      // ONE vocabulary for a task's history, whichever door the change came
+      // through. A supersede is two facts because two contracts changed: the
+      // old one ends, the new one begins — the same shape TaskService emits,
+      // so a task page reads one series and not two.
+      if (made.accepted && !opts.dryRun) {
+        const days = Object.fromEntries(
+          schedules.find((x) => x.quotaId === sup.quotaId)?.stops.map((st) => [String(st.weekday), st.techId]) ?? [],
+        )
+        const cadence = sup.changes["ServiceRepeat"] === "4" ? "monthly" : "biweekly"
+        const wasDays = Object.fromEntries(
+          Object.entries(ids.get(sup.quotaId)?.believedDays ?? {}).map(([d, t]) => [d, t]),
+        )
+        await this.events.append([
+          {
+            aggregate: "task" as const, aggregateId: sup.quotaId, type: "TaskUpdated", actor: "routing_publish",
+            participants: [`scenario:${scenarioId}`],
+            payload: {
+              before: { days: wasDays, frequency: cadence, startsOn: sup.believedStartsOn, endsOn: null },
+              after: { days: wasDays, frequency: cadence, startsOn: sup.believedStartsOn, endsOn: sup.endsOn },
+              source: "app", note: `superseded by ${made.ionTaskId ?? "new task"}`,
+            },
+          },
+          {
+            aggregate: "task" as const, aggregateId: sup.quotaId, type: "TaskAdded", actor: "routing_publish",
+            participants: [`scenario:${scenarioId}`],
+            payload: {
+              after: { days, frequency: cadence, startsOn: sup.startsOn, endsOn: null },
+              ionTaskId: made.ionTaskId, note: `supersedes ${sup.ionTaskId}`,
+            },
+          },
+        ])
+      }
     }
 
     // the ones that landed: cache, then events

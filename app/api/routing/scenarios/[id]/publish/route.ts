@@ -28,6 +28,48 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const sys = createSupabaseAdmin() // system writes: the system correcting itself
 
+  // A LIVE publish is queued, never run inside this request. On 2026-08-05 a
+  // browser's fetch timed out after the server had closed a contract and
+  // before it created the successor; the work existed only inside that HTTP
+  // request, so nothing retried and the customer was left with no live task.
+  // The client now gets row ids to watch — see v_schedule_change_queue.
+  //
+  // A DRY RUN still runs inline: it writes nothing, the caller is a person
+  // waiting on a preview, and there is nothing to survive.
+  if (!dryRun) {
+    const { data: scenario } = await sys.schema("routing").from("scenarios")
+      .select("changes, status").eq("id", id).maybeSingle()
+    const row = scenario as { changes: { quotaId: string }[] | null; status: string } | null
+    if (!row) return NextResponse.json({ error: `no scenario ${id}` }, { status: 404 })
+    if (row.status !== "pending") {
+      return NextResponse.json({ error: `scenario is ${row.status} — only pending publishes` }, { status: 409 })
+    }
+    const taskIds = [...new Set((row.changes ?? []).map((c) => c.quotaId))]
+    if (taskIds.length === 0) return NextResponse.json({ error: "scenario changes nothing" }, { status: 400 })
+
+    // Name the target now. Which contract is being ended is the decision the
+    // operator just approved; re-deriving it at drain time risks acting on a
+    // different task than the one they saw.
+    const { data: known } = await sys.schema("maintenance").from("tasks")
+      .select("id, ion_task_id").in("id", taskIds)
+    const ionOf = new Map(((known ?? []) as { id: string; ion_task_id: string | null }[])
+      .map((t) => [t.id, t.ion_task_id]))
+
+    const queued: { taskId: string; queueId: string }[] = []
+    for (const taskId of taskIds) {
+      const { data: qid, error } = await sys.schema("maintenance")
+        .rpc("enqueue_schedule_change", {
+          p_task_id: taskId, p_scenario_id: id,
+          p_ion_task_id: ionOf.get(taskId) ?? null,
+          p_intent: { requested_by: user.id, scenario_id: id },
+        })
+      if (error) return NextResponse.json({ error: `enqueue failed: ${error.message}` }, { status: 500 })
+      queued.push({ taskId, queueId: qid as string })
+    }
+    // 202: accepted, not done. The client watches the rows.
+    return NextResponse.json({ scenarioId: id, queued, watch: "maintenance.v_schedule_change_queue" }, { status: 202 })
+  }
+
   const ion = new IonTasks({
     mint: async (forceRefresh) =>
       triggerScriptSync("f/ION/api/get_session", { force_refresh: forceRefresh }, { timeoutMs: 180000 }),
@@ -52,7 +94,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     // assert we still own it. Waiting is bounded: a publish is a person
     // watching a button, so it should say "ION is busy" rather than hang.
     const out = await withIonLease(
-      sys as unknown as LeaseRpc,
+      sys.schema("maintenance") as unknown as LeaseRpc,
       `publish:${id}`,
       `publish scenario ${id}${dryRun ? " (dry run)" : ""}`,
       async (lease) => {

@@ -17,7 +17,7 @@
  * one thing to get right.
  */
 
-import { Task, type Terms, type TaskGateway, type TaskRepository, type FreshnessSource } from "@/lib/maintenance/domain"
+import { Task, type Terms, type TaskGateway, type TaskRepository, type FreshnessSource, type TaskRoster } from "@/lib/maintenance/domain"
 
 export interface TaskOutcome {
   readonly ok: boolean
@@ -39,7 +39,123 @@ export class TaskService {
      * produces a confidently wrong date.
      */
     private readonly freshness?: FreshnessSource,
+    /** Needed only to notice DELETED tasks; refresh works without it. */
+    private readonly roster?: TaskRoster,
+    /**
+     * Where an outside edit gets recorded. The APPLICATION records, not the
+     * adapter that noticed: the same slot going quiet means "ION dropped the
+     * day" on a refresh and "we superseded the contract" on an edit, and only
+     * this layer knows which. Optional so a probe can refresh silently.
+     */
+    private readonly events?: {
+      append(facts: readonly {
+        aggregate: "task" | "schedule"; aggregateId: string; type: string
+        actor?: string; participants?: string[]; payload?: Record<string, unknown>
+      }[]): Promise<{ written: number; failed: string[] }>
+    },
   ) {}
+
+  /**
+   * Make our copy of these tasks true — one, a list, or the whole active book.
+   *
+   * The one entry point for freshness, because every caller needs the same
+   * thing and they were each about to grow their own: the nightly sweep, the
+   * map's refresh button, and editTask's own precondition before it computes
+   * an anchor from what we hold.
+   *
+   * DELETION is the case only this can see. A task we hold that ION no longer
+   * lists for its customer is gone — visits cannot tell us, because a deleted
+   * task simply stops producing them, which looks exactly like a pool closed
+   * for the winter until months have passed. The roster is read per CUSTOMER,
+   * so it costs one call however many tasks they have.
+   *
+   * A roster read that FAILS is never treated as deletion. Closing a live
+   * contract because ION was briefly unreachable is worse than staying stale.
+   */
+  async refreshTasks(
+    taskIds: readonly string[],
+    opts: { at?: string; detectDeleted?: boolean } = {},
+  ): Promise<{
+    verified: string[]
+    deleted: { taskId: string; ionTaskId: string }[]
+    skipped: { taskId: string; reason: string }[]
+  }> {
+    if (taskIds.length === 0) return { verified: [], deleted: [], skipped: [] }
+    if (!this.freshness) {
+      return { verified: [], deleted: [], skipped: taskIds.map((taskId) => ({ taskId, reason: "no freshness source configured" })) }
+    }
+
+    const r = await this.freshness.refresh(taskIds)
+
+    // Every disagreement is an edit made outside our system — this log is the
+    // only record it will ever have, so it carries the old value AND the new.
+    if (this.events && r.drift && r.drift.length > 0) {
+      await this.events.append(
+        r.drift.map((d) => ({
+          aggregate: "task" as const,
+          aggregateId: d.taskId,
+          type: "TaskUpdated",
+          actor: "task_refresh",
+          payload: { before: d.before, after: d.after, source: "ion" },
+        })),
+      )
+    }
+
+    const deleted: { taskId: string; ionTaskId: string }[] = []
+    if (!(opts.detectDeleted ?? true) || !this.roster) return { ...r, deleted }
+
+    // Group by customer: one roster read covers all of that customer's tasks.
+    const loaded = (await Promise.all(taskIds.map((id) => this.tasks.byId(id)))).filter((t): t is Task => t !== null)
+    const byCustomer = new Map<number, Task[]>()
+    for (const t of loaded) {
+      if (!t.ionTaskId || t.status === "closed") continue
+      const held = byCustomer.get(t.customerId)
+      if (held) held.push(t)
+      else byCustomer.set(t.customerId, [t])
+    }
+
+    for (const [customerId, tasks] of byCustomer) {
+      let live: Set<string>
+      try {
+        live = await this.roster.idsFor(customerId)
+      } catch (err) {
+        for (const t of tasks) r.skipped.push({ taskId: t.id!, reason: `roster read failed: ${err instanceof Error ? err.message : String(err)}` })
+        continue
+      }
+      // An EMPTY roster is a failed read wearing a success. A customer we hold
+      // tasks for has tasks; believing otherwise would close every one.
+      if (live.size === 0) {
+        for (const t of tasks) r.skipped.push({ taskId: t.id!, reason: "ION returned an empty task list — treated as a failed read, not as deletion" })
+        continue
+      }
+      for (const t of tasks) {
+        if (live.has(t.ionTaskId!)) continue
+        const wasServiced = {
+          days: Object.fromEntries(t.terms.slots.map((sl) => [String(sl.weekday), sl.techId])),
+          frequency: t.terms.slots[0]?.frequency ?? null,
+          startsOn: t.terms.startsOn,
+          endsOn: t.terms.endsOn,
+        }
+        const endsOn = (opts.at ?? new Date().toISOString()).slice(0, 10)
+        t.close(opts.at, endsOn)
+        await this.tasks.save(t)
+        deleted.push({ taskId: t.id!, ionTaskId: t.ionTaskId! })
+        // A task gone from ION is the SAME event as any other change — the
+        // end date is what says it is over. One fact type, no taxonomy.
+        await this.events?.append([{
+          aggregate: "task", aggregateId: t.id!, type: "TaskUpdated", actor: "task_refresh",
+          participants: [`customer:${t.customerId}`],
+          payload: {
+            before: wasServiced,
+            after: { ...wasServiced, days: {}, endsOn },
+            source: "ion",
+            note: "ION no longer lists this task for the customer",
+          },
+        }])
+      }
+    }
+    return { ...r, deleted }
+  }
 
   /**
    * Add a task. No id argument, because the thing being created has no
@@ -92,6 +208,18 @@ export class TaskService {
     // Live and accepted: record it, including the facts the aggregate kept.
     task.identify(crypto.randomUUID(), res.ionTaskId!)
     await this.tasks.save(task)
+    // The counterpart to TaskUpdated: a task begins. Same state shape, no
+    // `before`, so a history reads as one series without special-casing.
+    await this.events?.append([{
+      aggregate: "task", aggregateId: task.id!, type: "TaskAdded", actor: "task_service",
+      participants: [`customer:${task.customerId}`],
+      payload: { after: {
+        days: Object.fromEntries(task.terms.slots.map((sl) => [String(sl.weekday), sl.techId])),
+        frequency: task.terms.slots[0]?.frequency ?? null,
+        startsOn: task.terms.startsOn,
+        endsOn: task.terms.endsOn,
+      }, ionTaskId: task.ionTaskId },
+    }])
     return { ok: true, taskId: task.id, ionTaskId: task.ionTaskId, detail: res.detail }
   }
 
@@ -140,6 +268,12 @@ export class TaskService {
       return this.supersedeTask(fresh as Task & { id: string }, terms, { dryRun, at: opts.at })
     }
 
+    const beforeEdit = {
+        days: Object.fromEntries(task.terms.slots.map((sl) => [String(sl.weekday), sl.techId])),
+        frequency: task.terms.slots[0]?.frequency ?? null,
+        startsOn: task.terms.startsOn,
+        endsOn: task.terms.endsOn,
+      }
     try {
       task.changeTerms(terms, opts.at)
     } catch (err) {
@@ -156,7 +290,18 @@ export class TaskService {
         payload: res.payload,
       }
     }
+    const after = {
+        days: Object.fromEntries(task.terms.slots.map((sl) => [String(sl.weekday), sl.techId])),
+        frequency: task.terms.slots[0]?.frequency ?? null,
+        startsOn: task.terms.startsOn,
+        endsOn: task.terms.endsOn,
+      }
     await this.tasks.save(task)
+    await this.events?.append([{
+      aggregate: "task", aggregateId: taskId, type: "TaskUpdated", actor: "task_service",
+      participants: [`customer:${task.customerId}`],
+      payload: { before: beforeEdit, after, source: "app" },
+    }])
     return { ok: true, taskId, ionTaskId: task.ionTaskId, detail: res.detail }
   }
 
@@ -207,10 +352,34 @@ export class TaskService {
 
     // 3. record both, old first: the one-open-per-location rule is the
     //    database's, and it would reject the successor while this one is open.
+    const oldBefore = {
+        days: Object.fromEntries(task.terms.slots.map((sl) => [String(sl.weekday), sl.techId])),
+        frequency: task.terms.slots[0]?.frequency ?? null,
+        startsOn: task.terms.startsOn,
+        endsOn: task.terms.endsOn,
+      }
     task.close(opts.at, endsOn)
     await this.tasks.save(task)
     successor.identify(crypto.randomUUID(), made.ionTaskId!)
     await this.tasks.save(successor)
+    // Two facts, because two contracts changed: one ended, one began.
+    await this.events?.append([
+      {
+        aggregate: "task", aggregateId: task.id, type: "TaskUpdated", actor: "task_service",
+        participants: [`customer:${task.customerId}`],
+        payload: { before: oldBefore, after: { ...oldBefore, endsOn }, source: "app", note: `superseded by ${made.ionTaskId}` },
+      },
+      {
+        aggregate: "task", aggregateId: successor.id!, type: "TaskAdded", actor: "task_service",
+        participants: [`customer:${successor.customerId}`],
+        payload: { after: {
+        days: Object.fromEntries(successor.terms.slots.map((sl) => [String(sl.weekday), sl.techId])),
+        frequency: successor.terms.slots[0]?.frequency ?? null,
+        startsOn: successor.terms.startsOn,
+        endsOn: successor.terms.endsOn,
+      }, ionTaskId: successor.ionTaskId, note: `supersedes ${ionTaskId}` },
+      },
+    ])
     return { ok: true, taskId: successor.id, ionTaskId: successor.ionTaskId,
       detail: `superseded: ${ionTaskId} ends ${endsOn}, ${made.ionTaskId} starts ${startsOn}` }
   }

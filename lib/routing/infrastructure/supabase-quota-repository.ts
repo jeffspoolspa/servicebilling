@@ -31,6 +31,7 @@ export interface Query {
   in(column: string, values: readonly unknown[]): Query
   gte(column: string, value: unknown): Query
   not(column: string, operator: string, value: unknown): Query
+  is(column: string, value: unknown): Query
   range(from: number, to: number): PromiseLike<{ data: unknown[] | null; error: unknown }>
 }
 

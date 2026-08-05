@@ -95,6 +95,33 @@ const OFFICE_MARKER_COLOR = "#f8fafc"
 const glass =
   "rounded-lg border border-line-soft bg-[#0b1620]/85 backdrop-blur-md shadow-xl shadow-black/40"
 
+/**
+ * Poll queued schedule changes until every one settles.
+ *
+ * Polling, not Realtime: this runs for the seconds a person stares at a
+ * button, and a poll cannot miss an event it was not subscribed for yet.
+ * It gives up watching after ~5 minutes — the WORK is unaffected, the drainer
+ * owns it now, so a bored watcher costs nothing but a stale chip.
+ */
+type QueueRow = { id: string; state: string; error: string | null; result_ion_task_id: string | null }
+
+async function watchQueue(ids: string[], say: (s: string) => void): Promise<QueueRow[]> {
+  const deadline = Date.now() + 5 * 60_000
+  let last: QueueRow[] = []
+  for (;;) {
+    const r = await fetch(`/api/routing/schedule-changes?ids=${ids.join(",")}`)
+    if (r.ok) {
+      last = ((await r.json()) as { rows: QueueRow[] }).rows
+      const settled = last.filter((x) => x.state === "done" || x.state === "dead_letter")
+      if (settled.length === ids.length) return last
+      const running = last.find((x) => x.state === "in_flight")
+      say(running ? "Writing to ION" : `Waiting for ION — ${settled.length}/${ids.length} settled`)
+    }
+    if (Date.now() > deadline) return last
+    await new Promise((res) => setTimeout(res, 2000))
+  }
+}
+
 export function LiveMap({
   token,
   week,
@@ -190,6 +217,8 @@ export function LiveMap({
   }, [publishArmed])
 
   const [selected, setSelected] = useState<string | null>(null)
+  /** Find a customer by name and fly to their pin — the map has ~580 of them. */
+  const [pinQuery, setPinQuery] = useState("")
   /**
    * The draw tool. `armed` waits for the click that drops the anchor; the shape
    * then grows with the cursor until a second click settles it into `shapes`.
@@ -455,6 +484,34 @@ export function LiveMap({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [techFilter, techRoutes])
+
+  /**
+   * Name search over the plan. Matches on the customer name we already show
+   * everywhere else, and only offers quotas that HAVE a pin — an unpinned one
+   * cannot be flown to, and offering it would be a dead click.
+   */
+  const pinMatches = useMemo(() => {
+    const q = pinQuery.trim().toLowerCase()
+    if (q.length < 2) return []
+    const out: { quotaId: string; name: string; lat: number; lng: number }[] = []
+    for (const quota of plan.all) {
+      const pin = quota.requirement.pin
+      if (!pin) continue
+      const name = nameOf(quota.requirement.customerId)
+      if (!name.toLowerCase().includes(q)) continue
+      out.push({ quotaId: quota.id, name, lat: pin.lat, lng: pin.lng })
+      if (out.length >= 8) break
+    }
+    return out
+  }, [pinQuery, plan.all, customers])
+
+  const flyToPin = (m: { quotaId: string; lat: number; lng: number }) => {
+    // Select it as well as centre it: the bottom panel then explains the stop,
+    // which is the thing the searcher actually came for.
+    setSelected(m.quotaId)
+    setPinQuery("")
+    mapRef.current?.flyTo({ center: [m.lng, m.lat], zoom: 15, duration: 900 })
+  }
 
   const selectedInfo = useMemo(() => {
     if (!selected) return null
@@ -1306,8 +1363,34 @@ export function LiveMap({
         committed?: boolean
         results?: { accepted: boolean; detail: string }[]
         invalidated?: { reason: string }[]
+        queued?: { taskId: string; queueId: string }[]
       }
       if (!res.ok) throw new Error(report.error ?? `publish failed (${res.status})`)
+
+      // 202: the work is QUEUED, not done. This response is a receipt, not an
+      // outcome — so watch the rows. Closing the tab here loses nothing; the
+      // drainer finishes regardless, which is why the publish was queued.
+      if (res.status === 202 && report.queued?.length) {
+        const ids = report.queued.map((q) => q.queueId)
+        setPublishPhase(`Queued ${ids.length} change${ids.length === 1 ? "" : "s"} — waiting for ION`)
+        const done = await watchQueue(ids, setPublishPhase)
+        const landed = done.filter((r) => r.state === "done")
+        const stuck = done.filter((r) => r.state !== "done")
+        setToast(
+          stuck.length === 0
+            ? `Published ${landed.length} task${landed.length === 1 ? "" : "s"} to ION${
+                landed[0]?.result_ion_task_id ? ` — new task ${landed[0].result_ion_task_id}` : ""
+              }`
+            : `${landed.length} landed, ${stuck.length} did not: ${stuck[0].error ?? stuck[0].state}`,
+        )
+        setPublishPhase("Re-reading the plan")
+        setPlan(Scenario.from(base()))
+        setViewing(null)
+        setRestoreNote(null)
+        await refreshScenarios()
+        router.refresh()
+        return
+      }
 
       const accepted = (report.results ?? []).filter((r) => r.accepted).length
       const refused = (report.results ?? []).length - accepted
@@ -1745,6 +1828,37 @@ export function LiveMap({
                   mi across · click to stop
                 </span>
               )}
+              {/* Find a pin — in the toolbar with the other map-wide actions,
+                  not floating over the map where it covered the scenario chips. */}
+              <div className="relative">
+                <input
+                  value={pinQuery}
+                  onChange={(e) => setPinQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setPinQuery("")
+                    if (e.key === "Enter" && pinMatches.length > 0) flyToPin(pinMatches[0])
+                  }}
+                  placeholder="Find a customer…"
+                  className="w-44 rounded-full border border-line bg-white/[0.03] px-3 py-1 text-[11px] text-ink placeholder:text-ink-mute outline-none focus:border-cyan/40"
+                />
+                {pinQuery.trim().length >= 2 && (
+                  <div className={`absolute left-0 top-8 z-20 max-h-64 w-60 overflow-y-auto px-1 py-1 ${glass}`}>
+                    {pinMatches.length === 0 ? (
+                      <div className="px-2 py-1 text-[11px] text-ink-mute">no pinned customer matches</div>
+                    ) : (
+                      pinMatches.map((m) => (
+                        <button
+                          key={m.quotaId}
+                          onClick={() => flyToPin(m)}
+                          className="block w-full truncate rounded px-2 py-1 text-left text-[11.5px] text-ink-dim hover:bg-white/[0.05] hover:text-ink"
+                        >
+                          {m.name}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
               <button
                 className={`rounded-full border px-3 py-1 text-[11px] font-medium ${
                   armed || drawing

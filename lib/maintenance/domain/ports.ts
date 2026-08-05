@@ -101,7 +101,58 @@ export interface LastVisitSource {
  * PublishService already treats refresh as a required precondition; editTask
  * had simply been trusting the cache.
  */
+/** The whole servicing state of a task — what an edit is measured against. */
+export interface TaskServicingState {
+  /** weekday -> tech: the servicing map. */
+  days: Record<string, string | null>
+  frequency: string | null
+  startsOn: string | null
+  /** Set means the task is over. An expiry is an end date, not a separate kind. */
+  endsOn: string | null
+}
+
+/**
+ * One task, before and after. NOT one entry per field: a day moving, a tech
+ * swapping, a cadence changing and a task expiring are four ways the same
+ * state differs, not four kinds of event to categorise. Recording the whole
+ * state twice keeps the history readable without a taxonomy that has to grow
+ * every time ION grows a field.
+ */
+export interface TaskStateChange {
+  taskId: string
+  before: TaskServicingState
+  after: TaskServicingState
+}
+
 export interface FreshnessSource {
-  /** Reconcile these tasks with the system of record. Returns those it verified. */
-  refresh(taskIds: readonly string[]): Promise<{ verified: string[]; skipped: { taskId: string; reason: string }[] }>
+  /**
+   * Reconcile these tasks with the system of record. Returns those it
+   * verified, and every disagreement it corrected — old value and new — so
+   * the caller can record what an outside edit changed. An adapter never
+   * writes that history itself: the same correction means different things
+   * depending on why it was made.
+   */
+  refresh(taskIds: readonly string[]): Promise<{
+    verified: string[]
+    skipped: { taskId: string; reason: string }[]
+    drift?: TaskStateChange[]
+  }>
+}
+
+/**
+ * Which tasks a customer actually has in ION, right now.
+ *
+ * The ONLY way to notice a task deleted outside our system: a task we hold
+ * that ION no longer lists is gone. Visits cannot tell us — a deleted task
+ * simply stops producing them, which is indistinguishable from a pool closed
+ * for winter until months have passed.
+ */
+export interface TaskRoster {
+  /**
+   * ION task ids for this customer, keyed by OUR customer id — the adapter
+   * owns the translation, so the model never learns ION's vocabulary.
+   * Throws rather than returning empty on failure: an empty set would read as
+   * "every task deleted".
+   */
+  idsFor(customerId: number): Promise<Set<string>>
 }
