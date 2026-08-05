@@ -95,6 +95,33 @@ const OFFICE_MARKER_COLOR = "#f8fafc"
 const glass =
   "rounded-lg border border-line-soft bg-[#0b1620]/85 backdrop-blur-md shadow-xl shadow-black/40"
 
+/**
+ * Poll queued schedule changes until every one settles.
+ *
+ * Polling, not Realtime: this runs for the seconds a person stares at a
+ * button, and a poll cannot miss an event it was not subscribed for yet.
+ * It gives up watching after ~5 minutes — the WORK is unaffected, the drainer
+ * owns it now, so a bored watcher costs nothing but a stale chip.
+ */
+type QueueRow = { id: string; state: string; error: string | null; result_ion_task_id: string | null }
+
+async function watchQueue(ids: string[], say: (s: string) => void): Promise<QueueRow[]> {
+  const deadline = Date.now() + 5 * 60_000
+  let last: QueueRow[] = []
+  for (;;) {
+    const r = await fetch(`/api/routing/schedule-changes?ids=${ids.join(",")}`)
+    if (r.ok) {
+      last = ((await r.json()) as { rows: QueueRow[] }).rows
+      const settled = last.filter((x) => x.state === "done" || x.state === "dead_letter")
+      if (settled.length === ids.length) return last
+      const running = last.find((x) => x.state === "in_flight")
+      say(running ? "Writing to ION" : `Waiting for ION — ${settled.length}/${ids.length} settled`)
+    }
+    if (Date.now() > deadline) return last
+    await new Promise((res) => setTimeout(res, 2000))
+  }
+}
+
 export function LiveMap({
   token,
   week,
@@ -1336,8 +1363,34 @@ export function LiveMap({
         committed?: boolean
         results?: { accepted: boolean; detail: string }[]
         invalidated?: { reason: string }[]
+        queued?: { taskId: string; queueId: string }[]
       }
       if (!res.ok) throw new Error(report.error ?? `publish failed (${res.status})`)
+
+      // 202: the work is QUEUED, not done. This response is a receipt, not an
+      // outcome — so watch the rows. Closing the tab here loses nothing; the
+      // drainer finishes regardless, which is why the publish was queued.
+      if (res.status === 202 && report.queued?.length) {
+        const ids = report.queued.map((q) => q.queueId)
+        setPublishPhase(`Queued ${ids.length} change${ids.length === 1 ? "" : "s"} — waiting for ION`)
+        const done = await watchQueue(ids, setPublishPhase)
+        const landed = done.filter((r) => r.state === "done")
+        const stuck = done.filter((r) => r.state !== "done")
+        setToast(
+          stuck.length === 0
+            ? `Published ${landed.length} task${landed.length === 1 ? "" : "s"} to ION${
+                landed[0]?.result_ion_task_id ? ` — new task ${landed[0].result_ion_task_id}` : ""
+              }`
+            : `${landed.length} landed, ${stuck.length} did not: ${stuck[0].error ?? stuck[0].state}`,
+        )
+        setPublishPhase("Re-reading the plan")
+        setPlan(Scenario.from(base()))
+        setViewing(null)
+        setRestoreNote(null)
+        await refreshScenarios()
+        router.refresh()
+        return
+      }
 
       const accepted = (report.results ?? []).filter((r) => r.accepted).length
       const refused = (report.results ?? []).length - accepted
