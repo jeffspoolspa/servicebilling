@@ -1,6 +1,5 @@
 //bun-extra-requirements:
 //playwright@1.40.0
-//postgres@3.4.4
 
 // ION background-session manager.
 //
@@ -12,7 +11,6 @@
 // (playwright pinned because we import f/ION/_lib/session, which uses it for login.)
 
 import * as wmill from "windmill-client"
-import postgres from "postgres@3.4.4"
 import { loginToIon, isSessionFresh, ionFetch, looksLikeLoginPage, type IonResource, type IonSession } from "/f/ION/_lib/session"
 
 // Re-export the authed-fetch helpers so ION scripts import them from HERE, never directly from
@@ -56,60 +54,68 @@ export async function getOrRefreshSession(ion: IonResource, opts: { forceRefresh
 
 
 /* ------------------------------- the lease -------------------------------
- * ION is ONE shared session and EVERY entry point writes server-side context
- * before it reads (customerTabs priming, the reports set=1 chain,
- * customerlist reset=1). Windmill flows serialize against each other through
- * the ion_chromium concurrency key, but that key cannot see the APP, which
- * talks to ION directly over HTTP with these same session keys.
+ * ION is ONE shared session and every entry point writes server-side context
+ * before it reads. ion_chromium serializes Windmill flows against each other,
+ * but it cannot see the APP, which talks to ION directly over HTTP with these
+ * same keys. The lease is what makes app-vs-Windmill exclusive, and this file
+ * is the right home: every ION script already comes through here for its
+ * session, so no script has to remember to take it.
  *
- * So the lease is what makes app-vs-Windmill exclusive, and this is the right
- * place for it: every ION script already comes through here for its session,
- * so taking it here means no script has to remember to.
+ * Reached over Supabase's REST endpoint on purpose. The first attempt imported
+ * `postgres` and broke the bun bundle for EVERY script that imports this file
+ * (2026-08-05) — a dependency here is a dependency for all of ION. fetch is
+ * already in the runtime and cannot fail to resolve.
  * ------------------------------------------------------------------------ */
 
 const LEASE_TTL_S = 60
 const RENEW_EVERY_MS = 20_000
 
+async function leaseRpc(fn: string, args: Record<string, unknown>): Promise<any> {
+  const sb: any = await wmill.getResource("u/carter/supabase")
+  const url = sb.url ?? `https://${sb.host.replace(/^db\./, "").replace(/\.supabase\.co$/, "")}.supabase.co`
+  const key = sb.service_role_key ?? sb.serviceRoleKey ?? sb.key
+  if (!key) throw new Error("ion lease: no service key on u/carter/supabase")
+  const res = await fetch(`${url}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Accept-Profile": "ion", "Content-Profile": "ion" },
+    body: JSON.stringify(args),
+  })
+  if (!res.ok) throw new Error(`ion lease ${fn}: ${res.status} ${(await res.text()).slice(0, 200)}`)
+  return res.json()
+}
+
 /**
  * Hold the ION session for the duration of `fn`.
  *
- * Waiting happens on ACQUISITION, which is side-effect-free — a loser primes
+ * Waiting happens on ACQUISITION, which is side-effect-free: a loser primes
  * nothing, so there is nothing to undo and nothing to livelock over. The lease
- * is renewed while the body runs, so a crashed holder frees ION in ~a TTL
- * rather than wedging it for the length of the longest job (the day-grid
- * ingest runs ~45 minutes).
+ * renews while the body runs, so a crashed holder frees ION in ~a TTL instead
+ * of wedging it for the length of the day-grid ingest.
  */
 export async function withIonLease<T>(
   purpose: string,
   fn: (session: IonSession) => Promise<T>,
   opts: { forceRefresh?: boolean; waitMs?: number } = {},
 ): Promise<T> {
-  const sb: any = await wmill.getResource("u/carter/supabase")
-  const sql = postgres({ host: sb.host, port: sb.port, database: sb.dbname, username: sb.user,
-                         password: sb.password, ssl: "require", max: 1 })
   const holder = `wm:${process.env.WM_JOB_ID ?? Math.random().toString(36).slice(2)}`
   const deadline = Date.now() + (opts.waitMs ?? 15 * 60_000)
-  let timer: ReturnType<typeof setInterval> | null = null
+  let timer: any = null
+  for (;;) {
+    const rows = await leaseRpc("acquire_session_lease", { p_holder: holder, p_purpose: purpose, p_ttl_seconds: LEASE_TTL_S })
+    const row = Array.isArray(rows) ? rows[0] : rows
+    if (row?.acquired) break
+    if (Date.now() >= deadline) throw new Error(`ION session held by ${row?.held_by ?? "?"} (${row?.held_for ?? "?"}) — gave up waiting`)
+    await new Promise((r) => setTimeout(r, 5000))
+  }
   try {
-    for (;;) {
-      const [row] = await sql`SELECT * FROM ion.acquire_session_lease(${holder}, ${purpose}, ${LEASE_TTL_S})`
-      if (row?.acquired) break
-      if (Date.now() >= deadline) {
-        throw new Error(`ION session held by ${row?.held_by ?? "?"} (${row?.held_for ?? "?"}) — gave up waiting`)
-      }
-      await new Promise((r) => setTimeout(r, 5000))
-    }
     timer = setInterval(() => {
-      sql`SELECT ion.renew_session_lease(${holder}, ${LEASE_TTL_S})`.catch(() => {})
+      leaseRpc("renew_session_lease", { p_holder: holder, p_ttl_seconds: LEASE_TTL_S }).catch(() => {})
     }, RENEW_EVERY_MS)
-
     const ion: any = await wmill.getResource("u/carter/ion")
-    const session = await getOrRefreshSession(ion, { forceRefresh: opts.forceRefresh })
-    return await fn(session)
+    return await fn(await getOrRefreshSession(ion, { forceRefresh: opts.forceRefresh }))
   } finally {
     if (timer) clearInterval(timer)
-    try { await sql`SELECT ion.release_session_lease(${holder})` } catch { /* TTL covers it */ }
-    await sql.end()
+    try { await leaseRpc("release_session_lease", { p_holder: holder }) } catch { /* TTL covers it */ }
   }
 }
 

@@ -88,3 +88,20 @@ export interface LastVisitSource {
   /** ISO date of the most recent completed visit, or null if never serviced. */
   lastVisitFor(ionTaskId: string): Promise<string | null>
 }
+
+/**
+ * Make our copy of a task true before anything is computed FROM it.
+ *
+ * Not optional for a supersede: the effective week and the successor's anchor
+ * are derived from the CURRENT contract, so a stale row silently produces a
+ * wrong date. Proven 2026-08-05 on Bayens — our cache held starts_on
+ * 2025-01-03 with no live cadence, while ION held 2024-12-30 Bi-Weekly.
+ *
+ * A port because refreshing is I/O the model must not do, and because
+ * PublishService already treats refresh as a required precondition; editTask
+ * had simply been trusting the cache.
+ */
+export interface FreshnessSource {
+  /** Reconcile these tasks with the system of record. Returns those it verified. */
+  refresh(taskIds: readonly string[]): Promise<{ verified: string[]; skipped: { taskId: string; reason: string }[] }>
+}

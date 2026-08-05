@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert"
-import { IonTaskAcl, anchorOf, startsOnFor, type TaskIdentity, reviseTask, effectiveWeekFor} from "./acl"
+import { IonTaskAcl, anchorOf, startsOnFor, type TaskIdentity, reviseTask, effectiveWeekFor, maxGapDaysFor, gapReport} from "./acl"
 import type { IonTaskForm } from "./ion"
 import type { TaskSchedule } from "@/lib/routing/domain"
 
@@ -179,4 +179,27 @@ console.log("ion schedule acl selfcheck: 24 checks passed (incl. 42 anchor round
 
   // ── an unreadable cadence refuses rather than guessing an anchor
   assert("refusal" in reviseTask(form("2026-05-06", "???", "9"), { weekday: 4 }, { lastVisit: LAST, now: NOW }))
+}
+
+/* ---------- gap bounds belong to the KIND of move, not a flat 14 ---------- */
+{
+  // The bounds are arithmetic, not policy: adjacent week 7+6=13, week after 14+6=20.
+  assert.strictEqual(maxGapDaysFor("weekly", false), 13)
+  assert.strictEqual(maxGapDaysFor("biweekly_b", false), 13, "a parity FLIP lands adjacent")
+  assert.strictEqual(maxGapDaysFor("biweekly_b", true), 20, "keeping parity is a normal fortnight, day-shifted")
+
+  // Kerry Bayens, computed live 2026-08-05: last visit 07-31, keep biweekly_b,
+  // Monday -> Thursday => 2026-08-13. 13 days, and WITHIN a same-parity bound.
+  const g = gapReport("2026-07-31", "2026-08-13", "biweekly_b", true)
+  assert.strictEqual(g.days, 13)
+  assert.strictEqual(g.max, 20)
+  assert.ok(g.withinBound, "a flat 14-day rule would have wrongly flagged this")
+
+  // The genuinely long one still reports as long.
+  const long = gapReport("2026-07-31", "2026-08-21", "biweekly_b", true)
+  assert.strictEqual(long.days, 21)
+  assert.ok(!long.withinBound, "21 days skipped a qualifying week — that IS a failure")
+
+  // Never serviced: nothing to be late for.
+  assert.ok(gapReport(null, "2026-08-13", "weekly", false).withinBound)
 }

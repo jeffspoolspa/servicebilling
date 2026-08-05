@@ -228,6 +228,43 @@ export function anchorOf(startsOn: string, repeatText: string): { weekday: numbe
  * Pure: `lastVisit` and `now` are given, never looked up. The caller obtains
  * the last visit through LastVisitSource.
  */
+/**
+ * The widest gap each kind of move may legitimately open (Carter, 2026-08-05:
+ * there is no flat 14-day rule — the bound belongs to the KIND of move).
+ *
+ * The numbers are not policy, they are arithmetic: the effective week is
+ * adjacent (N+1) or the one after (N+2), and the day may move up to 6 days
+ * later within it.
+ *
+ *   adjacent week  -> 7 + 6  = 13
+ *   week after     -> 14 + 6 = 20
+ *
+ * A same-parity biweekly reaching 20 is its NORMAL fortnight stretched by a
+ * day move, not a service failure. Flagging it against a flat 14 would have
+ * called correct schedules broken.
+ */
+export function maxGapDaysFor(target: "weekly" | "biweekly_a" | "biweekly_b" | "monthly", keepsParity: boolean): number {
+  if (target === "weekly") return 13
+  return keepsParity ? 20 : 13
+}
+
+/**
+ * What a computed move actually costs the customer, and whether that is within
+ * the bound for its kind. Returned rather than thrown: a long gap is worth
+ * SEEING before a write, and only the caller knows if it is acceptable.
+ */
+export function gapReport(
+  lastVisit: string | null,
+  startsOn: string,
+  target: "weekly" | "biweekly_a" | "biweekly_b" | "monthly",
+  keepsParity: boolean,
+): { days: number | null; max: number; withinBound: boolean } {
+  const max = maxGapDaysFor(target, keepsParity)
+  if (!lastVisit) return { days: null, max, withinBound: true }
+  const days = Math.round((Date.parse(`${startsOn}T00:00:00Z`) - Date.parse(`${lastVisit}T00:00:00Z`)) / 86_400_000)
+  return { days, max, withinBound: days <= max }
+}
+
 export function effectiveWeekFor(
   lastVisit: string | null,
   now: string,

@@ -17,7 +17,7 @@
  * one thing to get right.
  */
 
-import { Task, type Terms, type TaskGateway, type TaskRepository } from "@/lib/maintenance/domain"
+import { Task, type Terms, type TaskGateway, type TaskRepository, type FreshnessSource } from "@/lib/maintenance/domain"
 
 export interface TaskOutcome {
   readonly ok: boolean
@@ -33,6 +33,12 @@ export class TaskService {
   constructor(
     private readonly tasks: TaskRepository,
     private readonly ion: TaskGateway,
+    /**
+     * Optional, but a supersede REFUSES without it: the successor's anchor is
+     * derived from the current contract, so computing it from a stale row
+     * produces a confidently wrong date.
+     */
+    private readonly freshness?: FreshnessSource,
   ) {}
 
   /**
@@ -115,8 +121,23 @@ export class TaskService {
     // one begins.
     const kind = task.revisionKind(terms)
     if (kind === "supersede") {
+      // The successor's anchor comes from the CURRENT contract, so it must be
+      // true first. Bayens (2026-08-05): our row held starts_on 2025-01-03 and
+      // no live cadence while ION held 2024-12-30 Bi-Weekly — computing from
+      // the cache would have anchored the new task in the wrong week.
+      if (!this.freshness) {
+        return { ok: false, taskId, ionTaskId: task.ionTaskId,
+          detail: "refusing to supersede without a freshness source — the anchor would be computed from a possibly stale contract" }
+      }
+      const r = await this.freshness.refresh([taskId])
+      if (!r.verified.includes(taskId)) {
+        const why = r.skipped.find((x) => x.taskId === taskId)?.reason ?? "not verified"
+        return { ok: false, taskId, ionTaskId: task.ionTaskId, detail: `could not verify this task against ION before superseding: ${why}` }
+      }
+      const fresh = await this.tasks.byId(taskId)
+      if (!fresh) return { ok: false, taskId, ionTaskId: task.ionTaskId, detail: "task vanished during refresh" }
       // byId returned it, so it is persisted and carries an id.
-      return this.supersedeTask(task as Task & { id: string }, terms, { dryRun, at: opts.at })
+      return this.supersedeTask(fresh as Task & { id: string }, terms, { dryRun, at: opts.at })
     }
 
     try {
