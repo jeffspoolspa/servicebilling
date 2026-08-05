@@ -82,12 +82,18 @@ export async function POST(req: Request) {
   const started = await run.startMonth(currentPeriod)
 
   // 2. The active periods, from the specification's one named home.
-  const view = sys.schema("billing").from("v_active_months") as unknown as {
-    select(c: string): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+  // Paged to exhaustion — PostgREST clamps any single response to max_rows.
+  const active: { id: string; customer_id: number; month: string }[] = []
+  for (let off = 0; ; off += 1000) {
+    const view = sys.schema("billing").from("v_active_months") as unknown as {
+      select(c: string): { order(col: string): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
+    }
+    const { data, error } = await view.select("id, customer_id, month").order("id").range(off, off + 999)
+    if (error) return NextResponse.json({ error: `active months read failed: ${JSON.stringify(error).slice(0, 200)}` }, { status: 500 })
+    const page = (data ?? []) as typeof active
+    active.push(...page)
+    if (page.length < 1000) break
   }
-  const { data: activeRows, error: activeErr } = await view.select("id, customer_id, month").range(0, 9999)
-  if (activeErr) return NextResponse.json({ error: `active months read failed: ${JSON.stringify(activeErr).slice(0, 200)}` }, { status: 500 })
-  const active = (activeRows ?? []) as { id: string; customer_id: number; month: string }[]
   const periods = [...new Set(active.map((r) => r.month))].sort()
 
   const bulk: Record<string, unknown> = {}

@@ -232,6 +232,27 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     if (insErr) throw new Error(`variance write failed: ${JSON.stringify(insErr).slice(0, 240)}`)
   }
 
+  /**
+   * THE read primitive (2026-08-05). PostgREST clamps every response to
+   * max_rows (1000 here) no matter the range requested — a single-shot
+   * .range(0, 9999) silently truncates, UNORDERED, differently per run as
+   * heap order shifts. That truncation was the flag-churn root cause. So
+   * the repository's contract is enforced in ONE place: every multi-row
+   * read pages to exhaustion with a stable ORDER BY. Completeness and
+   * determinism by construction, not per-call-site vigilance.
+   */
+  private async pageAll<T>(build: () => { order(col: string): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } }, what: string, orderCol = "id"): Promise<T[]> {
+    const out: T[] = []
+    for (let off = 0; ; off += 1000) {
+      const { data, error } = await build().order(orderCol).range(off, off + 999)
+      if (error) throw new Error(`${what} page failed: ${JSON.stringify(error).slice(0, 200)}`)
+      const page = (data ?? []) as T[]
+      out.push(...page)
+      if (page.length < 1000) break
+    }
+    return out
+  }
+
   private async appendFact(fact: { type: string; monthId: string; at: string; payload: Record<string, unknown> }): Promise<void> {
     // append_event lives in the MAINTENANCE schema, not public — a bare
     // .rpc() searches public and fails with PGRST202, silently losing the
@@ -265,18 +286,20 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     for (let i = 0; i < ids.length; i += CHUNK) {
       const c = ids.slice(i, i + CHUNK)
       jobs.push((async () => {
-        const { data, error } = await this.q("billable_items")
-          .select("billing_month_id, source_kind, source_id, task_id, kind, service_date, item_name, qty, unit_price_cents, amount_cents, created_at, task_terms_id, qbo_invoice_id, qbo_line_id")
-          .in("billing_month_id", c).range(0, 9999)
-        if (error) throw new Error(`items page failed: ${JSON.stringify(error).slice(0, 200)}`)
-        itemChunks.push((data ?? []) as Record<string, unknown>[])
+        itemChunks.push(await this.pageAll<Record<string, unknown>>(
+          () => this.q("billable_items")
+            .select("id, billing_month_id, source_kind, source_id, task_id, kind, service_date, item_name, qty, unit_price_cents, amount_cents, created_at, task_terms_id, qbo_invoice_id, qbo_line_id")
+            .in("billing_month_id", c) as never,
+          "items",
+        ))
       })())
       jobs.push((async () => {
-        const { data, error } = await this.q("variances")
-          .select("billing_month_id, source_id, kind, origin, reason, delta_cents, tech_id, disposition, recorded_at")
-          .in("billing_month_id", c).range(0, 9999)
-        if (error) throw new Error(`variances page failed: ${JSON.stringify(error).slice(0, 200)}`)
-        varChunks.push((data ?? []) as Record<string, unknown>[])
+        varChunks.push(await this.pageAll<Record<string, unknown>>(
+          () => this.q("variances")
+            .select("id, billing_month_id, source_id, kind, origin, reason, delta_cents, tech_id, disposition, recorded_at")
+            .in("billing_month_id", c) as never,
+          "variances",
+        ))
       })())
     }
     await Promise.all(jobs)
@@ -421,11 +444,13 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     const ids = monthRows.map((r) => r.id)
     for (let i = 0; i < ids.length; i += 40) {
       const c = ids.slice(i, i + 40)
-      const { data, error } = await this.q("billable_items")
-        .select("billing_month_id, task_id, service_date, kind, item_name, amount_cents")
-        .in("billing_month_id", c).range(0, 19999)
-      if (error) throw new Error(`history items failed: ${JSON.stringify(error).slice(0, 200)}`)
-      for (const r of (data ?? []) as { billing_month_id: string; task_id: string | null; service_date: string | null; kind: string; item_name: string | null; amount_cents: number | null }[]) {
+      const data = await this.pageAll<{ billing_month_id: string; task_id: string | null; service_date: string | null; kind: string; item_name: string | null; amount_cents: number | null }>(
+        () => this.q("billable_items")
+          .select("id, billing_month_id, task_id, service_date, kind, item_name, amount_cents")
+          .in("billing_month_id", c) as never,
+        "history items",
+      )
+      for (const r of data) {
         if (r.kind !== "consumable" || !r.task_id || !r.service_date) continue
         const key = `${r.billing_month_id}|${r.task_id}|${r.service_date}`
         const cur = perVisit.get(key) ?? { customerId: custOf.get(r.billing_month_id)!, cents: 0 }
@@ -697,9 +722,11 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     const reviewedCents = new Map<string, Set<number>>()
     for (let i = 0; i < monthIds.length; i += 40) {
       const c = monthIds.slice(i, i + 40)
-      const { data, error } = await this.q("findings").select("id, billing_month_id, rule, source_key, cents, resolved_at").eq("phase", "audit").in("billing_month_id", c).range(0, 4999)
-      if (error) throw new Error(`findings read failed: ${JSON.stringify(error).slice(0, 200)}`)
-      for (const r of (data ?? []) as { id: string; billing_month_id: string; rule: string; source_key: string | null; cents: number | null; resolved_at: string | null }[]) {
+      const data = await this.pageAll<{ id: string; billing_month_id: string; rule: string; source_key: string | null; cents: number | null; resolved_at: string | null }>(
+        () => this.q("findings").select("id, billing_month_id, rule, source_key, cents, resolved_at").eq("phase", "audit").in("billing_month_id", c) as never,
+        "findings",
+      )
+      for (const r of data) {
         // Legacy rows (pre-source_key) get an unmatchable key: open ones
         // retract and re-insert keyed on this pass; resolved ones keep.
         const key = r.source_key ? `${r.rule}|${r.source_key}` : `legacy:${r.id}`
@@ -742,33 +769,26 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       }
     }
 
-    const staleRows = [...openByKey.entries()]
-      .filter(([k, v]) => {
-        if (computedKeys.has(k)) return false
-        // STICKY FLAGS (RULED 2026-08-05): a no-longer-computed open flag
-        // retracts ONLY when its visit's own observation changed (or the
-        // visit vanished). If the visit's cents are exactly what the flag
-        // observed, the release came from the DISTRIBUTION moving — a
-        // drifted p95 or a peer-group flip — and a statistical boundary
-        // shift must never un-flag a month without a person. (The 8-month
-        // incident: borderline flags healed between two ticks with zero
-        // item changes; months issued, charged and emailed unreviewed.)
-        const sep = k.indexOf("|")
-        const sourceKey = sep > 0 ? k.slice(sep + 1) : null
-        if (observed && sourceKey) {
-          const cur = observed.get(sourceKey)
-          if (cur != null && cur === v.cents) return false
-        }
-        return true
-      })
-      .map(([, v]) => v)
+    // RULED (Carter 2026-08-05, superseding same-day "sticky flags"): a
+    // no-longer-computed open flag RETRACTS — flags legitimately move with
+    // the population. The 8-month incident's real cause was the PostgREST
+    // max_rows clamp truncating hydration (fixed above with paged, ordered
+    // reads), not population semantics. The retraction EVENT carries the
+    // why: the visit's own observation changed, the visit vanished, or the
+    // population shifted around an unchanged visit.
+    const staleRows = [...openByKey.entries()].filter(([k]) => !computedKeys.has(k)).map(([, v]) => v)
     const stale = staleRows.map((v) => v.id)
     for (const v of staleRows) {
+      const cur = v.sourceKey === null ? undefined : observed?.get(v.sourceKey)
       facts.push({
         type: "VisitFlagRetracted", monthId: v.monthId, at,
         payload: {
           rule: v.rule, source_key: v.sourceKey, observed_cents: v.cents,
-          reason: v.sourceKey === null ? "legacy_rekey" : observed?.has(v.sourceKey) ? "observation_changed" : "visit_vanished",
+          current_cents: cur ?? null,
+          reason: v.sourceKey === null ? "legacy_rekey"
+            : cur == null ? "visit_vanished"
+            : cur !== v.cents ? "observation_changed"
+            : "population_shift",
         },
       })
     }
