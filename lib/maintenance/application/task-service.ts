@@ -17,6 +17,7 @@
  * one thing to get right.
  */
 
+import { supersededEndsOn } from "@/lib/external/ion/acl"
 import { Task, type Terms, type TaskGateway, type TaskRepository, type FreshnessSource, type TaskRoster } from "@/lib/maintenance/domain"
 
 export interface TaskOutcome {
@@ -329,7 +330,10 @@ export class TaskService {
   ): Promise<TaskOutcome> {
     const ionTaskId = task.ionTaskId!
     const startsOn = next.startsOn
-    const endsOn = new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10)
+    // The Sunday closing the week this change is made in — NOT the day before
+    // the successor starts. See supersededEndsOn: closing the day before
+    // leaves the old contract firing in the successor's own week.
+    const endsOn = supersededEndsOn(opts.at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10))
     if (endsOn < task.terms.startsOn) {
       return { ok: false, taskId: task.id, ionTaskId,
         detail: `a successor starting ${startsOn} would end the current contract (${task.terms.startsOn}) before it began` }

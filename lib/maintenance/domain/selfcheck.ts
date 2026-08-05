@@ -304,7 +304,9 @@ async function supersedeFreshnessChecks() {
     })
     const out = await svc.editTask("task-461", t(), { dryRun: true })
     assert.equal(out.ok, true, out.detail)
-    assert.match(out.detail, /2026-08-12/, "old contract ends the day before the successor starts")
+    // The old contract ends with the CURRENT week, not the day before the
+    // successor — otherwise it fires again inside the successor's own week.
+    assert.match(out.detail, /2026-08-09/, "ends the Sunday closing this week")
     assert.match(out.detail, /2026-08-13/)
   })
 
