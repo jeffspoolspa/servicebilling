@@ -50,7 +50,14 @@ assert.strictEqual(
   weeklyDayMove.supersede.startsOn, "2026-08-13",
   "must start NEXT Thursday — this week was already served on Monday",
 )
-assert.strictEqual(weeklyDayMove.supersede.endsOn, "2026-08-12")
+// THE TWO-VISITS-IN-THE-SUCCESSOR'S-WEEK BUG (live, 2026-08-05).
+// Closing the day before the successor starts (08-12) left the Monday
+// contract firing on Monday 08-10 and the Thursday successor on 08-13 — two
+// visits in one week. The old contract ends with the CURRENT week instead.
+assert.strictEqual(weeklyDayMove.supersede.endsOn, "2026-08-09", "the Sunday closing this week")
+assert.ok(weeklyDayMove.supersede.endsOn < "2026-08-10",
+  "must end before the successor's week opens, or both fire in it")
+assert.strictEqual(weeklyDayMove.supersede.closeChanges.EndsOn, "2026-08-09")
 // The successor states its whole week, and inherits cadence rather than
 // restating it.
 assert.strictEqual(weeklyDayMove.supersede.changes.day5, ION.caleb)
@@ -61,7 +68,6 @@ assert.strictEqual(weeklyDayMove.supersede.weekly, true, "a weekly close sees th
 // Ending a weekly contract is still a WEEKLY write: it must restate the days
 // it is ending with, or the week write silently drops the stop.
 assert.strictEqual(weeklyDayMove.supersede.closeChanges.day2, ION.josh, "the close restates Monday")
-assert.strictEqual(weeklyDayMove.supersede.closeChanges.EndsOn, "2026-08-12")
 assert.deepStrictEqual(weeklyDayMove.supersede.believedDays, { "1": ION.josh })
 
 // Even UNSERVED, this week is not ours to change: the crew's week is locked
@@ -236,9 +242,16 @@ console.log("ion schedule acl selfcheck: 24 checks passed (incl. 42 anchor round
   assert.strictEqual(anchorOf(dayMove.supersede.startsOn, "Bi-Weekly")!.frequency, "biweekly_b", "parity preserved")
   assert.strictEqual(new Date(dayMove.supersede.startsOn + "T00:00:00Z").getUTCDay(), 4, "lands on Thursday")
   assert.strictEqual(dayMove.supersede.fields["tasknote"], "keep me", "unmodelled fields carry forward")
-  // the old contract ends the day before the new one starts: no overlap, no gap
-  assert.strictEqual(
-    (Date.parse(dayMove.supersede.startsOn) - Date.parse(dayMove.supersede.endsOn)) / 86400000, 1)
+  // The old contract ends with the CURRENT week, not the day before the new
+  // one starts. Ending it the day before leaves it firing inside the
+  // successor's own week — a Monday pool moving to Thursday would be serviced
+  // Monday AND Thursday of that week (live, 2026-08-05).
+  assert.strictEqual(dayMove.supersede.endsOn, "2026-08-09", "the Sunday closing this week")
+  assert.ok(dayMove.supersede.endsOn < dayMove.supersede.startsOn, "no overlap")
+  assert.ok(
+    Math.floor((Date.parse(dayMove.supersede.endsOn) - Date.parse("2026-08-03")) / 86400000) < 7,
+    "the old contract cannot reach into the successor's week",
+  )
 
   // ── the same TARGET from different sources agrees (no transition table)
   const fromA = reviseTask(form("2026-08-18", "Bi-Weekly", "3"), { cadence: "biweekly_b", weekday: 4 }, { lastVisit: LAST, now: NOW })

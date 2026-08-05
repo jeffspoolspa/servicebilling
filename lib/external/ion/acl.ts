@@ -157,7 +157,7 @@ export class IonTaskAcl {
             quotaId: schedule.quotaId,
             ionTaskId: id.ionTaskId,
             ionCustId: id.ionCustId,
-            endsOn: new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10),
+            endsOn: supersededEndsOn(id.now ?? new Date().toISOString().slice(0, 10)),
             startsOn,
             believedStartsOn: id.startsOn ?? null,
             weekly: true,
@@ -165,7 +165,7 @@ export class IonTaskAcl {
               const c: Record<string, string> = {}
               for (const f of DAY_FIELD) c[f] = ""
               for (const [d, tech] of Object.entries(id.believedDays)) c[DAY_FIELD[Number(d)]] = tech
-              c["EndsOn"] = new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10)
+              c["EndsOn"] = supersededEndsOn(id.now ?? new Date().toISOString().slice(0, 10))
               return c
             })(),
             believedDays: id.believedDays,
@@ -218,11 +218,11 @@ export class IonTaskAcl {
           quotaId: schedule.quotaId,
           ionTaskId: id.ionTaskId,
           ionCustId: id.ionCustId,
-          endsOn: new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10),
+          endsOn: supersededEndsOn(id.now ?? new Date().toISOString().slice(0, 10)),
           startsOn,
           believedStartsOn: id.startsOn ?? null,
           weekly: false,
-          closeChanges: { EndsOn: new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10) },
+          closeChanges: { EndsOn: supersededEndsOn(id.now ?? new Date().toISOString().slice(0, 10)) },
           believedDays: {},
           changes: { AssignedTo: named[0].ionTech, StartsOn: startsOn, ServiceRepeat: target === "monthly" ? "4" : "3" },
         },
@@ -425,6 +425,27 @@ export const WEEKS_OF_NOTICE = 1
  * 2026-08-05). `lastVisit` still guards the MINIMUM gap in supersedeStartsOn,
  * which is a different question.
  */
+/**
+ * When a superseded contract ENDS: the Sunday closing the week the change is
+ * made in.
+ *
+ * Not the day before the successor starts, which is the obvious answer and is
+ * wrong. A Monday pool moving to Thursday, closed the day before its Thursday
+ * successor, is still valid on the MONDAY of that same week — so it fires
+ * once on Monday and again on Thursday, two visits in a week the customer
+ * pays for one (live, 2026-08-05). A fortnightly move hides the same fault a
+ * week further out.
+ *
+ * Ending the old contract with the current week is safe because a change
+ * always gives WEEKS_OF_NOTICE: the successor opens in a later week, so the
+ * old agreement has already served everything it was going to.
+ */
+export function supersededEndsOn(now: string): string {
+  const week = isoWeekIndex(now)
+  if (week === null) throw new Error(`supersededEndsOn: unreadable date "${now}"`)
+  return dateInWeek(week, 7)          // Sunday closes the week
+}
+
 export function effectiveWeekFor(
   now: string,
   target: "weekly" | "biweekly_a" | "biweekly_b" | "monthly",
@@ -579,7 +600,7 @@ export function reviseTask(
   fields["ServiceRepeat"] = cadence === "weekly" ? "2" : cadence === "monthly" ? "4" : "3"
 
   // The old contract ends the day before the new begins: no overlap, no gap.
-  const endsOn = new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10)
+  const endsOn = supersededEndsOn(ctx.now)
   return { supersede: { endsOn, startsOn, fields } }
 }
 
