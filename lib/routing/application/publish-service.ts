@@ -63,8 +63,30 @@ export class PublishService {
     // take a scenario id
     const stored = await this.scenarios.byId(scenarioId)
     if (!stored) throw new Error(`no scenario ${scenarioId}`)
-    if (stored.status !== "pending") throw new Error(`scenario is ${stored.status} — only pending publishes`)
     const taskIds = [...new Set(stored.changes.map((c) => c.quotaId))]
+
+    // Publishing a scenario that is ALREADY committed is a no-op, not an
+    // error. One scenario becomes one queue unit per changed task, and the
+    // first unit to drain publishes the whole scenario — so its siblings
+    // arrive to find the work already done. Treating that as a failure
+    // dead-lettered rows whose changes had landed perfectly (observed
+    // 2026-08-05: two customers moved correctly, one row marked dead).
+    //
+    // `committed` means every change in it was accepted, so answering
+    // accepted is the truth, not an optimistic guess.
+    if (stored.status === "committed") {
+      const known = await this.tasks.identities(taskIds)
+      return {
+        scenarioId, dryRun: opts.dryRun, committed: true, invalidated: [],
+        refreshed: { alreadyFresh: 0, read: 0, slotsChanged: 0, skipped: [] },
+        results: taskIds.map((q) => ({
+          quotaId: q, accepted: true,
+          ionTaskId: known.get(q)?.ionTaskId ?? null,
+          detail: "already published — this scenario was committed by an earlier unit of the same publish",
+        })),
+      }
+    }
+    if (stored.status !== "pending") throw new Error(`scenario is ${stored.status} — only pending publishes`)
 
     // refresh whichever of its tasks are stale — a REQUIRED precondition
     const refreshed = await this.tasks.refresh(taskIds)
