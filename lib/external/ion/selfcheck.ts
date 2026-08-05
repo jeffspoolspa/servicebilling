@@ -198,13 +198,18 @@ console.log("ion schedule acl selfcheck: 24 checks passed (incl. 42 anchor round
   const LAST = "2026-08-05"          // this week's visit already happened
 
   // ── the effective-week rule: never skip a qualifying week
-  assert.strictEqual(effectiveWeekFor(LAST, NOW, "biweekly_b"), 2953, "flip -> the ADJACENT week, not +3")
-  assert.strictEqual(effectiveWeekFor(LAST, NOW, "biweekly_a"), 2954, "same parity -> the normal fortnight")
-  assert.strictEqual(effectiveWeekFor(LAST, NOW, "weekly"), 2953)
+  assert.strictEqual(effectiveWeekFor(NOW, "biweekly_b"), 2953, "flip -> the ADJACENT week, not +3")
+  assert.strictEqual(effectiveWeekFor(NOW, "biweekly_a"), 2954, "same parity -> the normal fortnight")
+  assert.strictEqual(effectiveWeekFor(NOW, "weekly"), 2953)
+  // The effective week needs NO visit history. visits are ingested ION logs,
+  // never forward bookings, so the latest one cannot outrun the notice floor —
+  // which means a task whose successor has no visits yet still computes.
+  assert.strictEqual(effectiveWeekFor(NOW, "weekly"), 2953, "arithmetic on two week indices, nothing else")
+
   // The current week is never available, served or not: its routes are locked
   // on Monday, so a change landing in it builds a visit nobody was routed to.
-  assert.strictEqual(effectiveWeekFor("2026-07-29", NOW, "weekly"), 2953, "the plan is locked for this week")
-  assert.strictEqual(effectiveWeekFor(null, NOW, "weekly"), 2953, "never serviced -> still a week of notice")
+  assert.strictEqual(effectiveWeekFor(NOW, "weekly"), 2953, "the plan is locked for this week")
+  assert.strictEqual(effectiveWeekFor(NOW, "weekly"), 2953, "never serviced -> still a week of notice")
 
   // ── tech only: amended in place, anchor untouched
   const techOnly = reviseTask(form("2026-05-06", "Bi-Weekly", "3"), { ionTech: ION.caleb }, { lastVisit: LAST, now: NOW })
