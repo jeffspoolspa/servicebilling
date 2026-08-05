@@ -27,6 +27,20 @@ export interface RefreshReport {
   /** Read but not reconcilable — see `skipped` for why. */
   readonly skipped: { taskId: string; reason: string }[]
   readonly verifiedAt: string
+  /**
+   * What disagreed, old and new. Returned rather than logged: this layer
+   * OBSERVES; the application records, because only it knows whether a slot
+   * going quiet means ION dropped the day or we superseded the contract.
+   */
+  readonly drift: ScheduleDrift[]
+}
+
+export interface ScheduleDrift {
+  readonly taskId: string
+  readonly kind: string
+  readonly before: Record<string, unknown> | null
+  readonly after: Record<string, unknown> | null
+  readonly endsOn: string | null
 }
 
 interface TaskRow {
@@ -93,7 +107,7 @@ export class TaskCacheRefresher {
       return true
     })
     if (readable.length === 0) {
-      return { alreadyFresh, read: 0, slotsChanged: 0, skipped, verifiedAt }
+      return { alreadyFresh, read: 0, slotsChanged: 0, skipped, verifiedAt, drift: [] }
     }
 
     // ION employee id -> our employee id, so its answer can be stored as ours.
@@ -137,6 +151,12 @@ export class TaskCacheRefresher {
     )
 
     let slotsChanged = 0
+    // Every difference is an edit made OUTSIDE our system. This layer only
+    // OBSERVES it — recording is the application's job, where the intent is
+    // known: the same slot flipping inactive means one thing on a refresh and
+    // another when we superseded the contract ourselves, and a trigger or an
+    // adapter cannot tell those apart.
+    const drift: ScheduleDrift[] = []
     const verified: string[] = []
     for (const task of readable) {
       let translated: TranslatedForm
@@ -163,20 +183,42 @@ export class TaskCacheRefresher {
           seen.add(s.day_of_week)
           const tech = want.get(s.day_of_week)!
           if (!s.active || s.frequency !== slotFrequency || (tech && s.tech_employee_id !== tech)) {
+            drift.push({
+              taskId: task.id, kind: s.active ? "day_changed" : "day_restored",
+              before: { weekday: s.day_of_week, tech: s.tech_employee_id, frequency: s.frequency, active: s.active },
+              after: { weekday: s.day_of_week, tech: tech ?? s.tech_employee_id, frequency: slotFrequency, active: true },
+              endsOn: null,
+            })
             await this.update(s.id, {
               active: true,
               frequency: slotFrequency,
+              ends_on: null,
               ...(tech ? { tech_employee_id: tech } : {}),
             })
             slotsChanged++
           }
         } else if (s.active) {
-          await this.update(s.id, { active: false })
+          // ION no longer serves this day. Retire it with an END DATE as well
+          // as the flag: the date is what keeps it retired and is what makes
+          // the change legible later ("stopped 2026-08-05"), where a bare
+          // false says only "not now". The routing repository already filters
+          // active = true, so it leaves the map at the same moment.
+          const endsOn = new Date().toISOString().slice(0, 10)
+          await this.update(s.id, { active: false, ends_on: endsOn })
+          drift.push({
+            taskId: task.id, kind: "day_dropped",
+            before: { weekday: s.day_of_week, tech: s.tech_employee_id, frequency: s.frequency },
+            after: null, endsOn,
+          })
           slotsChanged++
         }
       }
       for (const [dow, tech] of want) {
         if (seen.has(dow)) continue
+        drift.push({
+          taskId: task.id, kind: "day_added",
+          before: null, after: { weekday: dow, tech, frequency: slotFrequency, active: true }, endsOn: null,
+        })
         await this.insert(task.id, task.ion_task_id!, dow, tech, slotFrequency)
         slotsChanged++
       }
@@ -184,7 +226,7 @@ export class TaskCacheRefresher {
     }
 
     if (verified.length > 0) await this.stamp(verified, verifiedAt)
-    return { alreadyFresh, read: readable.length, slotsChanged, skipped, verifiedAt }
+    return { alreadyFresh, read: readable.length, slotsChanged, skipped, verifiedAt, drift }
   }
 
   /**

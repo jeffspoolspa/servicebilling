@@ -30,14 +30,14 @@ export class RefresherFreshness implements FreshnessSource {
     private readonly maxAgeMinutes = 5,
   ) {}
 
-  async refresh(taskIds: readonly string[]): Promise<{
-    verified: string[]
-    skipped: { taskId: string; reason: string }[]
-  }> {
-    if (taskIds.length === 0) return { verified: [], skipped: [] }
+  async refresh(taskIds: readonly string[]) {
+    if (taskIds.length === 0) return { verified: [], skipped: [], drift: [] }
     const report = await this.refresher.refresh(taskIds, this.maxAgeMinutes)
-    const skipped = report.skipped
-    const failed = new Set(skipped.map((s) => s.taskId))
-    return { verified: taskIds.filter((id) => !failed.has(id)), skipped }
+    const failed = new Set(report.skipped.map((s) => s.taskId))
+    return {
+      verified: taskIds.filter((id) => !failed.has(id)),
+      skipped: report.skipped,
+      drift: report.drift,
+    }
   }
 }

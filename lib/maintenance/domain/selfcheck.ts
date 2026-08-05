@@ -316,3 +316,68 @@ async function supersedeFreshnessChecks() {
   })
 }
 void supersedeFreshnessChecks()
+
+/* ---------------- refresh: the only way to notice a DELETION -------------- */
+async function refreshDeletionChecks() {
+  const { TaskService } = await import("../application/task-service")
+  const mk = (id: string, ionId: string, cust = 7) => {
+    const t = Task.open(cust, {
+      serviceTypeId: "svc-1", billingMethod: "per_visit", priceCents: 5000,
+      startsOn: "2026-01-05", endsOn: null, note: "",
+      slots: [{ weekday: 1, techId: "tech-a", frequency: "weekly" }],
+    })
+    t.identify(id, ionId)
+    return t
+  }
+  const held = [mk("t-1", "111"), mk("t-2", "222")]
+  const saved: string[] = []
+  const repo = {
+    async byId(id: string) { return held.find((t) => t.id === id) ?? null },
+    async openTaskFor() { return null },
+    async save(t: { id: string | null }) { saved.push(t.id!) },
+    async history() { return [] },
+  }
+  const fresh = { async refresh(ids: readonly string[]) { return { verified: [...ids], skipped: [] as { taskId: string; reason: string }[] } } }
+  const gateway = { async create() { return { accepted: true, detail: "" } }, async update() { return { accepted: true, detail: "" } }, async changeStartDate() { return { accepted: true, detail: "" } } }
+
+  CHECK_ASYNC("a task ION no longer lists is closed as DELETED", async () => {
+    saved.length = 0
+    const svc = new TaskService(repo as never, gateway as never, fresh as never,
+      { async idsFor() { return new Set(["111"]) } })            // 222 is gone
+    const out = await svc.refreshTasks(["t-1", "t-2"])
+    assert.deepEqual(out.deleted.map((d) => d.ionTaskId), ["222"])
+    assert.equal(held.find((t) => t.id === "t-2")!.status, "closed")
+    assert.ok(saved.includes("t-2"), "and it was persisted")
+  })
+
+  CHECK_ASYNC("an EMPTY roster is a failed read, never 'everything was deleted'", async () => {
+    const live = [mk("t-3", "333"), mk("t-4", "444")]
+    const repo2 = { ...repo, async byId(id: string) { return live.find((t) => t.id === id) ?? null } }
+    const svc = new TaskService(repo2 as never, gateway as never, fresh as never,
+      { async idsFor() { return new Set<string>() } })
+    const out = await svc.refreshTasks(["t-3", "t-4"])
+    assert.equal(out.deleted.length, 0, "nothing closed")
+    assert.equal(out.skipped.length, 2)
+    assert.match(out.skipped[0].reason, /empty task list/)
+    assert.ok(live.every((t) => t.status === "active"))
+  })
+
+  CHECK_ASYNC("a roster read that THROWS leaves the tasks alone", async () => {
+    const live = [mk("t-5", "555")]
+    const repo3 = { ...repo, async byId(id: string) { return live.find((t) => t.id === id) ?? null } }
+    const svc = new TaskService(repo3 as never, gateway as never, fresh as never,
+      { async idsFor() { throw new Error("ION unreachable") } })
+    const out = await svc.refreshTasks(["t-5"])
+    assert.equal(out.deleted.length, 0, "staying stale beats closing a live contract")
+    assert.match(out.skipped[0].reason, /roster read failed/)
+    assert.equal(live[0].status, "active")
+  })
+
+  CHECK_ASYNC("refresh takes one, a list, or nothing at all", async () => {
+    const svc = new TaskService(repo as never, gateway as never, fresh as never)
+    assert.deepEqual(await svc.refreshTasks([]), { verified: [], deleted: [], skipped: [] })
+    const one = await svc.refreshTasks(["t-1"], { detectDeleted: false })
+    assert.deepEqual(one.verified, ["t-1"])
+  })
+}
+void refreshDeletionChecks()

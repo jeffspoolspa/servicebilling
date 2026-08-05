@@ -102,6 +102,40 @@ export interface LastVisitSource {
  * had simply been trusting the cache.
  */
 export interface FreshnessSource {
-  /** Reconcile these tasks with the system of record. Returns those it verified. */
-  refresh(taskIds: readonly string[]): Promise<{ verified: string[]; skipped: { taskId: string; reason: string }[] }>
+  /**
+   * Reconcile these tasks with the system of record. Returns those it
+   * verified, and every disagreement it corrected — old value and new — so
+   * the caller can record what an outside edit changed. An adapter never
+   * writes that history itself: the same correction means different things
+   * depending on why it was made.
+   */
+  refresh(taskIds: readonly string[]): Promise<{
+    verified: string[]
+    skipped: { taskId: string; reason: string }[]
+    drift?: {
+      taskId: string
+      kind: string
+      before: Record<string, unknown> | null
+      after: Record<string, unknown> | null
+      endsOn: string | null
+    }[]
+  }>
+}
+
+/**
+ * Which tasks a customer actually has in ION, right now.
+ *
+ * The ONLY way to notice a task deleted outside our system: a task we hold
+ * that ION no longer lists is gone. Visits cannot tell us — a deleted task
+ * simply stops producing them, which is indistinguishable from a pool closed
+ * for winter until months have passed.
+ */
+export interface TaskRoster {
+  /**
+   * ION task ids for this customer, keyed by OUR customer id — the adapter
+   * owns the translation, so the model never learns ION's vocabulary.
+   * Throws rather than returning empty on failure: an empty set would read as
+   * "every task deleted".
+   */
+  idsFor(customerId: number): Promise<Set<string>>
 }

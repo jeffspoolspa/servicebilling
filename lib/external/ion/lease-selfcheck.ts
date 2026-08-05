@@ -15,15 +15,15 @@ class FakeDb {
   async rpc(fn: string, args: Record<string, unknown>) {
     this.calls.push(fn)
     const me = args.p_holder as string
-    if (fn === "acquire_session_lease") {
+    if (fn === "acquire_ion_session_lease") {
       if (this.holder === null || this.holder === me || this.freeOnNextAcquire) {
         this.freeOnNextAcquire = false; this.renewOk = true; this.holder = me
         return { data: [{ acquired: true, held_by: me, held_for: "t" }], error: null }
       }
       return { data: [{ acquired: false, held_by: this.holder, held_for: "other" }], error: null }
     }
-    if (fn === "renew_session_lease") return { data: this.renewOk && this.holder === me, error: null }
-    if (fn === "release_session_lease") { if (this.holder === me) this.holder = null; return { data: true, error: null } }
+    if (fn === "renew_ion_session_lease") return { data: this.renewOk && this.holder === me, error: null }
+    if (fn === "release_ion_session_lease") { if (this.holder === me) this.holder = null; return { data: true, error: null } }
     return { data: null, error: null }
   }
 }
@@ -37,10 +37,10 @@ CHECK("a busy session refuses rather than proceeding unprimed", async () => {
 CHECK("waiting happens on ACQUISITION — the loser touches ION not at all", async () => {
   const db = new FakeDb()
   const a = await IonSessionLease.acquire(db, "A", "publish")
-  const before = db.calls.filter((c) => c === "acquire_session_lease").length
+  const before = db.calls.filter((c) => c === "acquire_ion_session_lease").length
   setTimeout(() => void a.release(), 40)
   const b = await IonSessionLease.acquire(db, "B", "ingest", { waitMs: 2000, pollMs: 20 })
-  assert.ok(db.calls.filter((c) => c === "acquire_session_lease").length > before, "it polled")
+  assert.ok(db.calls.filter((c) => c === "acquire_ion_session_lease").length > before, "it polled")
   assert.ok(db.calls.every((c) => c.includes("lease")), "and did nothing else — no priming to undo")
   await b.release()
 })
@@ -49,7 +49,7 @@ CHECK("touch renews only once the TTL is part spent — chatty work is cheap", a
   const db = new FakeDb()
   const l = await IonSessionLease.acquire(db, "A", "publish", { renewAfterMs: 10_000 })
   for (let i = 0; i < 50; i++) await l.touch()
-  assert.equal(db.calls.filter((c) => c === "renew_session_lease").length, 0, "50 calls, 0 renewals")
+  assert.equal(db.calls.filter((c) => c === "renew_ion_session_lease").length, 0, "50 calls, 0 renewals")
   await l.release()
 })
 

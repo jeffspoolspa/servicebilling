@@ -32,7 +32,12 @@ export class IonLeaseBusy extends Error {
   }
 }
 
-/** The two calls the lease needs. Postgres via RPC — the app has no PG driver. */
+/**
+ * The calls the lease needs, as RPCs — the app has no PG driver.
+ *
+ * They live in `maintenance` because PostgREST does not expose the `ion`
+ * schema; the table stays in `ion` and these are its callable face.
+ */
 export interface LeaseRpc {
   rpc(fn: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: { message: string } | null }>
 }
@@ -75,7 +80,7 @@ export class IonSessionLease {
     const o = { ...DEFAULTS, ...opts }
     const deadline = Date.now() + o.waitMs
     for (;;) {
-      const { data, error } = await db.rpc("acquire_session_lease", {
+      const { data, error } = await db.rpc("acquire_ion_session_lease", {
         p_holder: holder, p_purpose: purpose, p_ttl_seconds: o.ttlSeconds,
       })
       if (error) throw new Error(`ion lease acquire failed: ${error.message}`)
@@ -104,7 +109,7 @@ export class IonSessionLease {
   }
 
   private async renew(): Promise<void> {
-    const { data, error } = await this.db.rpc("renew_session_lease", {
+    const { data, error } = await this.db.rpc("renew_ion_session_lease", {
       p_holder: this.holder, p_ttl_seconds: this.ttlSeconds,
     })
     if (error) throw new Error(`ion lease renew failed: ${error.message}`)
@@ -122,7 +127,7 @@ export class IonSessionLease {
   async release(): Promise<void> {
     this.stopBackstop()
     if (this.lost) return
-    await this.db.rpc("release_session_lease", { p_holder: this.holder })
+    await this.db.rpc("release_ion_session_lease", { p_holder: this.holder })
   }
 
   /** The one case activity cannot cover: a single call that blocks for minutes. */

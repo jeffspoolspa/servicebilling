@@ -17,7 +17,7 @@
  * one thing to get right.
  */
 
-import { Task, type Terms, type TaskGateway, type TaskRepository, type FreshnessSource } from "@/lib/maintenance/domain"
+import { Task, type Terms, type TaskGateway, type TaskRepository, type FreshnessSource, type TaskRoster } from "@/lib/maintenance/domain"
 
 export interface TaskOutcome {
   readonly ok: boolean
@@ -39,7 +39,109 @@ export class TaskService {
      * produces a confidently wrong date.
      */
     private readonly freshness?: FreshnessSource,
+    /** Needed only to notice DELETED tasks; refresh works without it. */
+    private readonly roster?: TaskRoster,
+    /**
+     * Where an outside edit gets recorded. The APPLICATION records, not the
+     * adapter that noticed: the same slot going quiet means "ION dropped the
+     * day" on a refresh and "we superseded the contract" on an edit, and only
+     * this layer knows which. Optional so a probe can refresh silently.
+     */
+    private readonly events?: {
+      append(facts: readonly {
+        aggregate: "task" | "schedule"; aggregateId: string; type: string
+        actor?: string; participants?: string[]; payload?: Record<string, unknown>
+      }[]): Promise<{ written: number; failed: string[] }>
+    },
   ) {}
+
+  /**
+   * Make our copy of these tasks true — one, a list, or the whole active book.
+   *
+   * The one entry point for freshness, because every caller needs the same
+   * thing and they were each about to grow their own: the nightly sweep, the
+   * map's refresh button, and editTask's own precondition before it computes
+   * an anchor from what we hold.
+   *
+   * DELETION is the case only this can see. A task we hold that ION no longer
+   * lists for its customer is gone — visits cannot tell us, because a deleted
+   * task simply stops producing them, which looks exactly like a pool closed
+   * for the winter until months have passed. The roster is read per CUSTOMER,
+   * so it costs one call however many tasks they have.
+   *
+   * A roster read that FAILS is never treated as deletion. Closing a live
+   * contract because ION was briefly unreachable is worse than staying stale.
+   */
+  async refreshTasks(
+    taskIds: readonly string[],
+    opts: { at?: string; detectDeleted?: boolean } = {},
+  ): Promise<{
+    verified: string[]
+    deleted: { taskId: string; ionTaskId: string }[]
+    skipped: { taskId: string; reason: string }[]
+  }> {
+    if (taskIds.length === 0) return { verified: [], deleted: [], skipped: [] }
+    if (!this.freshness) {
+      return { verified: [], deleted: [], skipped: taskIds.map((taskId) => ({ taskId, reason: "no freshness source configured" })) }
+    }
+
+    const r = await this.freshness.refresh(taskIds)
+
+    // Every disagreement is an edit made outside our system — this log is the
+    // only record it will ever have, so it carries the old value AND the new.
+    if (this.events && r.drift && r.drift.length > 0) {
+      await this.events.append(
+        r.drift.map((d) => ({
+          aggregate: "task" as const,
+          aggregateId: d.taskId,
+          type: "ScheduleChangeObserved",
+          actor: "task_refresh",
+          payload: { kind: d.kind, before: d.before, after: d.after, endsOn: d.endsOn, source: "ion" },
+        })),
+      )
+    }
+
+    const deleted: { taskId: string; ionTaskId: string }[] = []
+    if (!(opts.detectDeleted ?? true) || !this.roster) return { ...r, deleted }
+
+    // Group by customer: one roster read covers all of that customer's tasks.
+    const loaded = (await Promise.all(taskIds.map((id) => this.tasks.byId(id)))).filter((t): t is Task => t !== null)
+    const byCustomer = new Map<number, Task[]>()
+    for (const t of loaded) {
+      if (!t.ionTaskId || t.status === "closed") continue
+      const held = byCustomer.get(t.customerId)
+      if (held) held.push(t)
+      else byCustomer.set(t.customerId, [t])
+    }
+
+    for (const [customerId, tasks] of byCustomer) {
+      let live: Set<string>
+      try {
+        live = await this.roster.idsFor(customerId)
+      } catch (err) {
+        for (const t of tasks) r.skipped.push({ taskId: t.id!, reason: `roster read failed: ${err instanceof Error ? err.message : String(err)}` })
+        continue
+      }
+      // An EMPTY roster is a failed read wearing a success. A customer we hold
+      // tasks for has tasks; believing otherwise would close every one.
+      if (live.size === 0) {
+        for (const t of tasks) r.skipped.push({ taskId: t.id!, reason: "ION returned an empty task list — treated as a failed read, not as deletion" })
+        continue
+      }
+      for (const t of tasks) {
+        if (live.has(t.ionTaskId!)) continue
+        t.close(opts.at, undefined)
+        await this.tasks.save(t)
+        deleted.push({ taskId: t.id!, ionTaskId: t.ionTaskId! })
+        await this.events?.append([{
+          aggregate: "task", aggregateId: t.id!, type: "TaskDeletedInIon", actor: "task_refresh",
+          participants: [`customer:${t.customerId}`],
+          payload: { ionTaskId: t.ionTaskId, detail: "ION no longer lists this task for the customer" },
+        }])
+      }
+    }
+    return { ...r, deleted }
+  }
 
   /**
    * Add a task. No id argument, because the thing being created has no

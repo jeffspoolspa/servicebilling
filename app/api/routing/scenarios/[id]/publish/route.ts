@@ -52,7 +52,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     // assert we still own it. Waiting is bounded: a publish is a person
     // watching a button, so it should say "ION is busy" rather than hang.
     const out = await withIonLease(
-      sys as unknown as LeaseRpc,
+      sys.schema("maintenance") as unknown as LeaseRpc,
       `publish:${id}`,
       `publish scenario ${id}${dryRun ? " (dry run)" : ""}`,
       async (lease) => {
