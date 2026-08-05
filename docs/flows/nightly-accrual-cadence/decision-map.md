@@ -61,6 +61,20 @@ The rules the cadence runs by. Each rule names the DDD concept doing the work.
    is the rule's authored observation. One rule exists today; per-rule grain waits for a
    second rule.
 
+   **STICKY FLAGS (RULED 2026-08-05, after the 8-month incident):** an open flag
+   retracts ONLY when its visit's own observation changed or the visit vanished. A
+   drifted p95 or a peer-group reclassification never releases a month — a
+   statistical boundary moving is not review. (The incident: 8 borderline flags
+   healed between two ticks with zero item changes; the months issued, charged and
+   emailed unreviewed.)
+
+   **The audit's decision points are FACTS** (same ruling): `VisitFlagRaised`,
+   `VisitFlagObservationRefreshed`, and `VisitFlagRetracted` (payload carries the
+   reason: `observation_changed` | `visit_vanished` | `legacy_rekey`) append to the
+   month's event stream — retractions were silent deletes, which made the incident
+   unreconstructable from history. A first-ever clean-pass fact per visit is designed
+   but not built (needs a judged-marker; see open questions).
+
 5. **The period-open invariant.** The issue command is **prohibited
    while the month's period is open** — visits may still be uncompleted, so the visit set
    is not complete. This is a precondition of the issue command, NOT a gate criterion:

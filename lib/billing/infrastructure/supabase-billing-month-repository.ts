@@ -693,17 +693,17 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     observed?: ReadonlyMap<string, number>,
   ): Promise<{ recorded: number; alreadyOpen: number; suppressed: number; retracted: number }> {
     const monthIds = [...new Set(auditedMonthIds)]
-    const openByKey = new Map<string, { id: string; cents: number }>()
+    const openByKey = new Map<string, { id: string; cents: number; monthId: string; rule: string; sourceKey: string | null }>()
     const reviewedCents = new Map<string, Set<number>>()
     for (let i = 0; i < monthIds.length; i += 40) {
       const c = monthIds.slice(i, i + 40)
-      const { data, error } = await this.q("findings").select("id, rule, source_key, cents, resolved_at").eq("phase", "audit").in("billing_month_id", c).range(0, 4999)
+      const { data, error } = await this.q("findings").select("id, billing_month_id, rule, source_key, cents, resolved_at").eq("phase", "audit").in("billing_month_id", c).range(0, 4999)
       if (error) throw new Error(`findings read failed: ${JSON.stringify(error).slice(0, 200)}`)
-      for (const r of (data ?? []) as { id: string; rule: string; source_key: string | null; cents: number | null; resolved_at: string | null }[]) {
+      for (const r of (data ?? []) as { id: string; billing_month_id: string; rule: string; source_key: string | null; cents: number | null; resolved_at: string | null }[]) {
         // Legacy rows (pre-source_key) get an unmatchable key: open ones
         // retract and re-insert keyed on this pass; resolved ones keep.
         const key = r.source_key ? `${r.rule}|${r.source_key}` : `legacy:${r.id}`
-        if (r.resolved_at === null) openByKey.set(key, { id: r.id, cents: r.cents ?? 0 })
+        if (r.resolved_at === null) openByKey.set(key, { id: r.id, cents: r.cents ?? 0, monthId: r.billing_month_id, rule: r.rule, sourceKey: r.source_key })
         else {
           const set = reviewedCents.get(key) ?? new Set<number>()
           set.add(r.cents ?? 0)
@@ -711,6 +711,11 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
         }
       }
     }
+    // The audit's decision points are FACTS (Carter 2026-08-05): raises,
+    // observation refreshes, and retractions-with-reason all emit — the
+    // 8-month incident was unreconstructable because retracts were silent.
+    const at = new Date().toISOString()
+    const facts: { type: string; monthId: string; at: string; payload: Record<string, unknown> }[] = []
 
     const computedKeys = new Set<string>()
     const fresh: typeof findings[number][] = []
@@ -727,15 +732,17 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
           const upd = this.q("findings").update({ cents: f.cents, message: f.message }).eq("id", open.id) as unknown as PromiseLike<{ error: unknown }>
           const { error } = await upd
           if (error) throw new Error(`findings refresh failed: ${JSON.stringify(error).slice(0, 200)}`)
+          facts.push({ type: "VisitFlagObservationRefreshed", monthId: f.monthId, at, payload: { customer_id: f.customerId, rule: f.rule, source_key: f.sourceKey, prior_cents: open.cents, cents: f.cents } })
         }
       } else if (reviewedCents.get(key)?.has(f.cents)) {
         suppressed++
       } else {
         fresh.push(f)
+        facts.push({ type: "VisitFlagRaised", monthId: f.monthId, at, payload: { customer_id: f.customerId, rule: f.rule, source_key: f.sourceKey, cents: f.cents, message: f.message } })
       }
     }
 
-    const stale = [...openByKey.entries()]
+    const staleRows = [...openByKey.entries()]
       .filter(([k, v]) => {
         if (computedKeys.has(k)) return false
         // STICKY FLAGS (RULED 2026-08-05): a no-longer-computed open flag
@@ -754,7 +761,17 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
         }
         return true
       })
-      .map(([, v]) => v.id)
+      .map(([, v]) => v)
+    const stale = staleRows.map((v) => v.id)
+    for (const v of staleRows) {
+      facts.push({
+        type: "VisitFlagRetracted", monthId: v.monthId, at,
+        payload: {
+          rule: v.rule, source_key: v.sourceKey, observed_cents: v.cents,
+          reason: v.sourceKey === null ? "legacy_rekey" : observed?.has(v.sourceKey) ? "observation_changed" : "visit_vanished",
+        },
+      })
+    }
     if (stale.length > 0) {
       for (let i = 0; i < stale.length; i += 100) {
         const del = this.q("findings").delete().in("id", stale.slice(i, i + 100)) as unknown as PromiseLike<{ error: unknown }>
@@ -774,6 +791,14 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       }))).select("id")
       if (error) throw new Error(`findings insert failed: ${JSON.stringify(error).slice(0, 240)}`)
       if (!data || data.length !== fresh.length) throw new Error(`findings insert wrote ${data?.length ?? 0} of ${fresh.length}`)
+    }
+    // Batched through the one door; history is recorded, never gating.
+    for (let i = 0; i < facts.length; i += 200) {
+      const batch = facts.slice(i, i + 200).map((f) => ({
+        aggregate: "billing_month", aggregate_id: f.monthId, type: f.type, payload: f.payload, actor: "billing_pipeline", occurred_at: f.at,
+      }))
+      const { error } = await this.client.schema("maintenance").rpc("append_events", { p_events: batch })
+      if (error) console.error(`flag fact batch not appended: ${JSON.stringify(error).slice(0, 200)}`)
     }
     return { recorded: fresh.length, alreadyOpen, suppressed, retracted: stale.length }
   }
