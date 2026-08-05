@@ -308,6 +308,8 @@ export class PublishService {
 
     // the ones that landed: cache, then events
     const landed = new Set(results.filter((r) => r.accepted).map((r) => r.quotaId))
+    // Successors get their own rows, so they are their own tasks to re-read.
+    const successorIds = results.map((r) => r.taskId).filter((id): id is string => !!id)
     const committed = !opts.dryRun && results.length > 0 && landed.size === results.length
     if (!opts.dryRun && landed.size > 0) {
       // A superseded contract was ENDED, not moved. Its quotaId still keys the
@@ -323,8 +325,26 @@ export class PublishService {
       // The predecessor's truth now lives in ION — its end date, and the
       // retirement of the slots it no longer serves. Read it back rather than
       // inferring it from the plan that replaced it.
-      const endedTasks = [...superseded].filter((id) => landed.has(id))
-      if (endedTasks.length > 0) await this.tasks.refresh(endedTasks, 0)
+      // EVERY task ION accepted a write for is re-read, without exception.
+      // Not just the superseded ones: an amend changes ION too, and a cache
+      // that is only refreshed on some paths is a cache nobody can trust.
+      // This is the last thing publish does, so "ION was written" and "our
+      // copy says so" cannot come apart (Carter, 2026-08-05: "this needs to
+      // happen every time a task is edited without fail").
+      //
+      // maxAge 0 forces the read — a task verified moments ago by the
+      // PRE-flight refresh would otherwise be considered fresh and skipped,
+      // which is exactly the window in which we changed it.
+      const touched = [...new Set([...landed, ...successorIds])]
+      if (touched.length > 0) {
+        try {
+          await this.tasks.refresh(touched, 0)
+        } catch (err) {
+          // ION is already correct; say so loudly rather than failing a change
+          // that landed. The next refresh reconciles.
+          console.error(`published ${touched.length} task(s) but could not re-read them: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
       await this.events.append(
         confirmed.map((s) => ({
           aggregate: "task" as const,
