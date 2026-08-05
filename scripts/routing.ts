@@ -4,6 +4,7 @@
  *   npx tsx scripts/routing.ts stage <moves.json>   save it as a scenario
  *   npx tsx scripts/routing.ts plan  <scenarioId>   what publishing would do
  *   npx tsx scripts/routing.ts push  <scenarioId>   queue it — what the button does
+ *   npx tsx scripts/routing.ts expire <file.json> [--live]  end contracts on a date
  *   npx tsx scripts/routing.ts drain [--all]        work the queue, one unit per call
  *   npx tsx scripts/routing.ts watch [seconds]      follow the rows until they settle
  *
@@ -88,6 +89,19 @@ async function main() {
     const queued = (body as unknown as { queued: { queueId: string }[] }).queued ?? []
     console.log(`queued ${queued.length} change(s)`)
     console.log(render(await rowsFor(queued.map((q) => q.queueId))))
+    return
+  }
+
+  if (cmd === "expire") {
+    if (!arg) throw new Error("give a file: { taskIds: [...], endsOn: 'YYYY-MM-DD' }")
+    const payload = JSON.parse(readFileSync(arg, "utf8")) as Record<string, unknown>
+    payload.dry_run = !process.argv.includes("--live")
+    const { status, body } = await call<{ results?: { key: string; accepted: boolean; detail: string }[]; error?: string; dryRun?: boolean }>(
+      "/api/maintenance/tasks/expire", { method: "POST", body: JSON.stringify(payload) },
+    )
+    if (status >= 400) throw new Error(String(body.error ?? status))
+    console.log(`\n${body.dryRun ? "DRY RUN" : "LIVE"} — end on ${payload.endsOn}\n`)
+    for (const r of body.results ?? []) console.log(`  ${r.accepted ? "OK " : "NO "} ${r.key.slice(0, 8)}  ${r.detail}`)
     return
   }
 
