@@ -756,8 +756,36 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   }
 
   async customersWithDelivery(month: string): Promise<number[]> {
-    const { data, error } = await this.q("billing_months").select("customer_id").eq("month", month).range(0, 4999)
-    if (error) throw new Error(`month scan failed: ${JSON.stringify(error).slice(0, 200)}`)
-    return ((data ?? []) as { customer_id: number }[]).map((r) => r.customer_id)
+    // The month BOOTSTRAP reads delivery facts (visits), not billing_months —
+    // a brand-new period has no month rows yet, so reading them back could
+    // never open one (the tick's startMonth found 0 for August, 2026-08-04).
+    const from = month.slice(0, 10)
+    const to = new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7), 1)).toISOString().slice(0, 10)
+    const out = new Set<number>()
+    for (let off = 0; ; off += 1000) {
+      const q = this.client.schema("maintenance").from("visits") as unknown as {
+        select(c: string): {
+          gte(c2: string, v: string): {
+            lt(c3: string, v2: string): {
+              is(c4: string, v3: null): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+            }
+          }
+        }
+      }
+      const { data, error } = await q
+        .select("tasks!inner(customer_id)")
+        .gte("visit_date", from)
+        .lt("visit_date", to)
+        .is("ion_deleted_at", null)
+        .range(off, off + 999)
+      if (error) throw new Error(`delivery scan failed: ${JSON.stringify(error).slice(0, 200)}`)
+      const rows = (data ?? []) as { tasks: { customer_id: number | null } | { customer_id: number | null }[] }[]
+      for (const r of rows) {
+        const t = Array.isArray(r.tasks) ? r.tasks[0] : r.tasks
+        if (t?.customer_id != null) out.add(t.customer_id)
+      }
+      if (rows.length < 1000) break
+    }
+    return [...out]
   }
 }
