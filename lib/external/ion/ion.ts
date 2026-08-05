@@ -127,9 +127,55 @@ export abstract class Ion {
     return `_cf_containerId=csttasks&_cf_nodebug=true&_cf_nocache=true&_cf_clientid=${cid}&_cf_rc=${rc}`
   }
 
-  /** ION context-loads per customer; some reads/writes misbehave unprimed. */
+  /* ------------------------------- priming -------------------------------
+   * ION keeps your context on the SERVER, so every action must establish its
+   * context before it reads. Enumerated 2026-08-05 across the app and f/ION:
+   * there are exactly THREE kinds, and every entry point uses one of them.
+   *
+   * Each is its own method so an action names the priming it needs and that
+   * resolves BEFORE the action fires — and so actions sharing a kind share the
+   * method instead of each inlining the chain (which is how the reports filter
+   * chain and the reset=1 calls drifted apart in the first place).
+   *
+   * Every prime touches the lease when one is held: priming IS the mutating
+   * act, so it is the moment to prove we still own the session.
+   * --------------------------------------------------------------------- */
+
+  /** Lease held for this session's work, when the caller took one. */
+  protected lease: { touch(): Promise<void> } | null = null
+
+  /** Run under a lease — every prime then asserts we still hold it. */
+  withLease<T extends Ion>(this: T, lease: { touch(): Promise<void> } | null): T {
+    this.lease = lease
+    return this
+  }
+
+  /** KIND 1 — customer context. readTask, listTaskIds, createTask, task_detail. */
   protected async primeCustomer(ionCustId: string): Promise<void> {
+    await this.lease?.touch()
     await this.get(`/customers/customerTabs.cfm?customerid=${ionCustId}`)
+  }
+
+  /**
+   * KIND 2 — a server-held FILTER. The date pickers and report windows are set
+   * by _proxy.cfm/set=1 and then read back; a bare POST of the value is
+   * silently dropped (a full day of discovery, see setStartDate).
+   */
+  protected async primeFilter(source: string, value: string, rc = 1): Promise<void> {
+    await this.lease?.touch()
+    await this.get(`/includes/_proxy.cfm?source=${source}&date=${encodeURIComponent(value)}&set=1&${this.cfEnvelope(rc)}`)
+  }
+
+  /**
+   * KIND 3 — list state. customerlist and the resolve endpoints carry reset=1,
+   * which clears whatever the previous caller left behind.
+   */
+  protected async primeListReset(path: string): Promise<string> {
+    await this.lease?.touch()
+    // For this kind the prime IS the read: reset=1 clears the previous
+    // caller's list state and returns the list in the same request. Returning
+    // the body keeps callers from issuing a second, unprimed fetch.
+    return this.get(path.includes("reset=1") ? path : `${path}${path.includes("?") ? "&" : "?"}reset=1`)
   }
 }
 
@@ -293,7 +339,7 @@ export class IonTasks extends Ion {
       return { key: t.ionCustId, accepted: true, detail: `dry run: would create (${Object.keys(t.changes).length} fields over defaults)` }
     }
 
-    await this.get(`/includes/_proxy.cfm?source=addtask&date=${encodeURIComponent(t.expect.startsOn)}&set=1&${this.cfEnvelope(1)}`)
+    await this.primeFilter("addtask", t.expect.startsOn)
     const payload = { ...form.fields, ...t.changes }
     if (!payload["LinkUsed"]) payload["LinkUsed"] = "Save"
     if (!payload["Submit"]) payload["Submit"] = "Submit"
@@ -326,7 +372,7 @@ export class IonTasks extends Ion {
     const form = await this.readTask(ionTaskId, ionCustId)
     if (form.startsOn === date) return { key: ionTaskId, accepted: true, detail: "already correct" }
     if (opts.dryRun) return { key: ionTaskId, accepted: true, detail: `dry run: StartsOn ${form.startsOn} -> ${date}` }
-    await this.get(`/includes/_proxy.cfm?source=addtask&date=${encodeURIComponent(date)}&set=1&${this.cfEnvelope(1)}`)
+    await this.primeFilter("addtask", date)
     const payload = { ...form.fields, StartsOn: date, LinkUsed: form.fields["LinkUsed"] || "Save", Submit: form.fields["Submit"] || "Submit" }
     await this.post(`/tasks/addTask.cfm?EventID=${ionTaskId}&isIFrame=1`, payload)
     const after = await this.readTask(ionTaskId)
@@ -396,7 +442,7 @@ export class IonCustomers extends Ion {
    * judging is translation (the ACL), not transport.
    */
   async search(term: string): Promise<IonCustomerHit[]> {
-    const html = await this.get(
+    const html = await this.primeListReset(
       `/customers/customerlist.cfm?officeid=0&techid=0&routeid=0&search=${encodeURIComponent(term)}&reset=1`,
     )
     const root = parse(html)
