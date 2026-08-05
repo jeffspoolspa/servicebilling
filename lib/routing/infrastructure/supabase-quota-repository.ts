@@ -86,17 +86,12 @@ export function liveContractsOnly(tasks: TaskRow[], today: string): TaskRow[] {
       ? true
       : (!t.starts_on || t.starts_on <= today) && t.ends_on >= today,
   )
-  // A standing agreement only displaces a dated one once it has BEGUN.
-  // Otherwise a superseded pool vanishes: the successor is open-ended so it
-  // counts as live the moment it is published, suppresses the predecessor,
-  // and then has no stop due until it starts — leaving the customer off the
-  // sheet in the very week the predecessor is still serving them (Lucas,
-  // 2026-08-05: Monday/Caleb through 08-12, successor Thursday from 08-13).
+  // A standing agreement displaces a dated one, begun or not. This view is
+  // not a week — it is what each pool's arrangement IS, so a supersede shows
+  // its successor from the moment it is published, not from its first visit.
   const standing = new Set<number>()
   for (const t of inForce) {
-    if (t.customer_id !== null && t.ends_on === null && (!t.starts_on || t.starts_on <= today)) {
-      standing.add(t.customer_id)
-    }
+    if (t.customer_id !== null && t.ends_on === null) standing.add(t.customer_id)
   }
   return inForce.filter(
     (t) => !t.ends_on || t.customer_id === null || !standing.has(t.customer_id),
@@ -384,8 +379,16 @@ export class SupabaseQuotaRepository implements QuotaRepository {
         weekday: s.day_of_week as Weekday,
       }))
 
-      const quota = Quota.rehydrate(requirement, stops)
-      if (quota.isLiveIn(week)) quotas.push(quota)
+      // NOT gated on isLiveIn(week). That asks "does this contract's date
+      // range cover this week", which is the same question liveContractsOnly
+      // already answered — and the two disagree about a successor that has
+      // not started: the selection keeps it (it IS the arrangement now) and
+      // the week test drops it, so a superseded pool fell out of the view
+      // entirely (Lucas, 2026-08-05). This view is not a week; it is what
+      // each pool's arrangement IS. Membership is decided in one place, and
+      // `firesIn(week)` remains for the different question of which stops
+      // fall in a given week.
+      quotas.push(Quota.rehydrate(requirement, stops))
     }
     return quotas
   }
