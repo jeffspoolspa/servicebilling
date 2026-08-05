@@ -281,6 +281,7 @@ async function supersedeFreshnessChecks() {
     async changeStartDate() { return { accepted: true, detail: "" } },
   }
 
+
   CHECK_ASYNC("without a freshness source a supersede REFUSES — it will not guess an anchor", async () => {
     const svc = new TaskService(repo as never, gateway as never)
     const out = await svc.editTask("task-461", t(), { dryRun: true })
@@ -400,6 +401,50 @@ async function taskEventChecks() {
     async update() { return { accepted: true, detail: "updated" } },
     async changeStartDate() { return { accepted: true, detail: "" } },
   }
+
+  // A supersede must be RETRYABLE. Both of its steps are irreversible, and a
+  // second create leaves the customer holding two live contracts.
+  CHECK_ASYNC("a supersede resumes instead of creating a second contract", async () => {
+    const open = Task.rehydrate("t1", 461, "ion-old", T({ startsOn: "2024-12-30" }), "active")
+    const repo = {
+      async byId() { return open }, async openTaskFor() { return open },
+      async save() {}, async history() { return [] },
+    }
+    const fresh = { async refresh() { return { verified: ["t1"], skipped: [], drift: [] } } }
+    const creates: number[] = []
+
+    // The successor this attempt would create is ALREADY in ION.
+    const resumed = {
+      ...gateway,
+      async inspect() {
+        return { endsOn: "2026-08-12", startsOn: "2024-12-30",
+                 siblings: [{ ionTaskId: "ion-old", startsOn: "2024-12-30" },
+                            { ionTaskId: "ion-successor", startsOn: "2026-08-13" }] }
+      },
+      async create() { creates.push(1); return { accepted: true, ionTaskId: "ion-2nd", detail: "" } },
+    }
+    const svc = new TaskService(repo as never, resumed as never, fresh as never, undefined, log as never)
+    const out = await svc.editTask("t1", T({ startsOn: "2026-08-13",
+      slots: [{ weekday: 1, techId: "tech-b", frequency: "biweekly_b" }] }), { dryRun: false })
+    assert.equal(out.ok, true, out.detail)
+    assert.equal(creates.length, 0, "it must NOT create a second contract")
+    assert.match(out.detail, /already superseded/)
+  })
+
+  // A gateway that cannot say what ION holds must not be allowed to guess.
+  CHECK_ASYNC("a supersede refuses when ION state cannot be read", async () => {
+    const open = Task.rehydrate("t1", 461, "ion-old", T({ startsOn: "2024-12-30" }), "active")
+    const repo = {
+      async byId() { return open }, async openTaskFor() { return open },
+      async save() {}, async history() { return [] },
+    }
+    const fresh = { async refresh() { return { verified: ["t1"], skipped: [], drift: [] } } }
+    const svc = new TaskService(repo as never, gateway as never, fresh as never, undefined, log as never)
+    const out = await svc.editTask("t1", T({ startsOn: "2026-08-13",
+      slots: [{ weekday: 1, techId: "tech-b", frequency: "biweekly_b" }] }), { dryRun: false })
+    assert.equal(out.ok, false)
+    assert.match(out.detail, /cannot report what ION already holds/)
+  })
 
   CHECK_ASYNC("a new task emits ONE TaskAdded carrying the whole state", async () => {
     facts.length = 0
