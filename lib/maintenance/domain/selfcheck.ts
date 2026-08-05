@@ -223,3 +223,36 @@ async function serviceCheck() {
 }
 
 serviceCheck().then(() => console.log(`\n${checks} checks passed\n`))
+
+/* ------------------ I-T8: what moved decides the shape ------------------ */
+{
+  const base = (over: Partial<Terms> = {}): Terms => ({
+    serviceTypeId: "svc-1", billingMethod: "per_visit", priceCents: 5000,
+    startsOn: "2026-05-06", endsOn: null, note: "",
+    slots: [{ weekday: 3, techId: "tech-a", frequency: "biweekly_a" }], ...over,
+  })
+  const t = Task.open(1, base())
+
+  check("a tech change is a genuine EDIT — no anchor, no history disturbed", () => {
+    assert.equal(t.revisionKind(base({ slots: [{ weekday: 3, techId: "tech-b", frequency: "biweekly_a" }] })), "amend")
+  })
+  check("a DAY change supersedes — the anchor would have to be rewritten", () => {
+    assert.equal(t.revisionKind(base({ slots: [{ weekday: 4, techId: "tech-a", frequency: "biweekly_a" }] })), "supersede")
+  })
+  check("a CADENCE change supersedes", () => {
+    assert.equal(t.revisionKind(base({ slots: [{ weekday: 3, techId: "tech-a", frequency: "weekly" }] })), "supersede")
+  })
+  check("adding or dropping a day supersedes", () => {
+    assert.equal(t.revisionKind(base({ slots: [
+      { weekday: 3, techId: "tech-a", frequency: "biweekly_a" },
+      { weekday: 6, techId: "tech-a", frequency: "biweekly_a" }] })), "supersede")
+  })
+  check("changing what is SOLD supersedes — a new agreement, not an edit", () => {
+    assert.equal(t.revisionKind(base({ priceCents: 7500 })), "supersede")
+    assert.equal(t.revisionKind(base({ serviceTypeId: "svc-2" })), "supersede")
+    assert.equal(t.revisionKind(base({ billingMethod: "flat_rate_monthly" })), "supersede")
+  })
+  check("an identical revision is an amend, not a spurious new contract", () => {
+    assert.equal(t.revisionKind(base()), "amend")
+  })
+}

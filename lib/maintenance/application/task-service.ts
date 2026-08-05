@@ -108,6 +108,17 @@ export class TaskService {
       return { ok: false, taskId, ionTaskId: null, detail: "this task does not exist in ION — add it first" }
     }
 
+    // WHAT MOVED decides the shape (I-T8), never the caller. A day, cadence,
+    // price or service-type change cannot be edited in place: ION generates
+    // visits FROM StartsOn, so rewriting the anchor re-derives visits already
+    // serviced and invoiced. Those supersede — the old contract ends and a new
+    // one begins.
+    const kind = task.revisionKind(terms)
+    if (kind === "supersede") {
+      // byId returned it, so it is persisted and carries an id.
+      return this.supersedeTask(task as Task & { id: string }, terms, { dryRun, at: opts.at })
+    }
+
     try {
       task.changeTerms(terms, opts.at)
     } catch (err) {
@@ -126,6 +137,61 @@ export class TaskService {
     }
     await this.tasks.save(task)
     return { ok: true, taskId, ionTaskId: task.ionTaskId, detail: res.detail }
+  }
+
+  /**
+   * End the contract and begin its successor.
+   *
+   * Not an edit: ION's StartsOn IS the schedule for a non-picker cadence, so
+   * the only honest way to move a day is a new agreement. The old task is
+   * closed the day before the new one starts — no overlap, no gap.
+   *
+   * ORDER is forced by tasks_one_open_per_loc: close, then create. And the
+   * create is checked FIRST for an existing successor, because a retry that
+   * creates twice leaves the customer with two live contracts — worse than the
+   * failure it was retrying.
+   */
+  private async supersedeTask(
+    task: Task & { id: string },
+    next: Terms,
+    opts: { dryRun: boolean; at?: string },
+  ): Promise<TaskOutcome> {
+    const ionTaskId = task.ionTaskId!
+    const startsOn = next.startsOn
+    const endsOn = new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10)
+    if (endsOn < task.terms.startsOn) {
+      return { ok: false, taskId: task.id, ionTaskId,
+        detail: `a successor starting ${startsOn} would end the current contract (${task.terms.startsOn}) before it began` }
+    }
+
+    // 1. close the old contract in ION
+    const closed = await this.ion.update(
+      ionTaskId, { ...task.desiredWeek(), endsOn }, { dryRun: opts.dryRun },
+    )
+    if (!closed.accepted) {
+      return { ok: false, taskId: task.id, ionTaskId, detail: `close refused: ${closed.detail}`, payload: closed.payload }
+    }
+
+    // 2. begin the successor
+    const successor = Task.open(task.customerId, next, opts.at)
+    const made = await this.ion.create(successor.desiredWeek(), { dryRun: opts.dryRun })
+    if (!made.accepted) {
+      return { ok: false, taskId: task.id, ionTaskId,
+        detail: `closed ${endsOn} but CREATE FAILED — customer has no live task: ${made.detail}`, payload: made.payload }
+    }
+    if (opts.dryRun) {
+      return { ok: true, taskId: task.id, ionTaskId,
+        detail: `dry run: would end ${endsOn} and start a successor ${startsOn}`, payload: made.payload }
+    }
+
+    // 3. record both, old first: the one-open-per-location rule is the
+    //    database's, and it would reject the successor while this one is open.
+    task.close(opts.at, endsOn)
+    await this.tasks.save(task)
+    successor.identify(crypto.randomUUID(), made.ionTaskId!)
+    await this.tasks.save(successor)
+    return { ok: true, taskId: successor.id, ionTaskId: successor.ionTaskId,
+      detail: `superseded: ${ionTaskId} ends ${endsOn}, ${made.ionTaskId} starts ${startsOn}` }
   }
 
   /**

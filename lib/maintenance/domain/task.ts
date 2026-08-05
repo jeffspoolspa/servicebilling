@@ -229,6 +229,35 @@ export class Task {
   /* --------------------------------------------------------------- edits */
 
   /** Restate the contract. Same validation as opening — a task cannot be edited into invalidity. */
+  /**
+   * Is this revision an EDIT, or a new contract?
+   *
+   * ION generates visits from StartsOn, so a day or cadence change cannot be
+   * edited in place: rewriting the anchor re-derives visits already serviced
+   * and invoiced — the reason billing needed effective-dated terms at all
+   * (RULED 2026-08-05). A tech change touches no anchor and disturbs no
+   * history, so it is a genuine edit.
+   *
+   *   I-T8 the shape of a revision is decided by WHAT MOVED, never by the
+   *        caller. A caller that could choose would eventually choose to
+   *        rewrite an anchor.
+   */
+  revisionKind(next: Terms): "amend" | "supersede" {
+    const mine = [...this._terms.slots].sort((a, b) => a.weekday - b.weekday)
+    const theirs = [...next.slots].sort((a, b) => a.weekday - b.weekday)
+    if (mine.length !== theirs.length) return "supersede"
+    for (let i = 0; i < mine.length; i++) {
+      if (mine[i].weekday !== theirs[i].weekday) return "supersede"
+      if (mine[i].frequency !== theirs[i].frequency) return "supersede"
+    }
+    // Money and service type ride on the contract too: changing what is sold
+    // is a new agreement, not an edit to the old one.
+    if (next.billingMethod !== this._terms.billingMethod) return "supersede"
+    if (next.priceCents !== this._terms.priceCents) return "supersede"
+    if (next.serviceTypeId !== this._terms.serviceTypeId) return "supersede"
+    return "amend"
+  }
+
   changeTerms(terms: Terms, at = "1970-01-01T00:00:00Z"): void {
     if (this._status === "closed") throw new TaskRuleError("a closed task cannot be changed")
     Task.validate(terms)
