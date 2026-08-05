@@ -7,7 +7,9 @@ const nextConfig = {
   // The chromium binary is brotli files loaded at runtime — static tracing
   // can't see them, so the generate route must name them explicitly.
   outputFileTracingIncludes: {
-    "/api/billing/months/[monthId]/explainer-generate": ["./node_modules/@sparticuz/chromium/bin/**"],
+    // The key is a glob: [monthId] would be a character class, so the
+    // brackets must be escaped to match the literal route path.
+    "/api/billing/months/\\[monthId\\]/explainer-generate": ["./node_modules/@sparticuz/chromium/bin/**/*"],
   },
   turbopack: {
     root: import.meta.dirname,
