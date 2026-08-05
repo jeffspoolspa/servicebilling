@@ -104,14 +104,19 @@ export class TaskService {
     const deleted: { taskId: string; ionTaskId: string }[] = []
     if (!(opts.detectDeleted ?? true) || !this.roster) return { ...r, deleted }
 
-    // Group by customer: one roster read covers all of that customer's tasks.
-    const loaded = (await Promise.all(taskIds.map((id) => this.tasks.byId(id)))).filter((t): t is Task => t !== null)
+    // Reconcile the SET, not the sample. The roster read is per customer and
+    // already paid for, so every task we hold open for that customer is
+    // checked against it — not merely the ones this call happened to name.
+    // Reading a task BY ID can never reveal that ION stopped listing it:
+    // get_task_detail answers for a task the roster no longer carries. Only
+    // the roster is a statement about the SET, so a targeted refresh that
+    // checked only its argument would leave a stray drawing stops forever.
+    const named = (await Promise.all(taskIds.map((id) => this.tasks.byId(id)))).filter((t): t is Task => t !== null)
+    const customers = [...new Set(named.map((t) => t.customerId))]
     const byCustomer = new Map<number, Task[]>()
-    for (const t of loaded) {
-      if (!t.ionTaskId || t.status === "closed") continue
-      const held = byCustomer.get(t.customerId)
-      if (held) held.push(t)
-      else byCustomer.set(t.customerId, [t])
+    for (const customerId of customers) {
+      const held = (await this.tasks.liveFor(customerId)).filter((t) => t.ionTaskId && t.status !== "closed")
+      if (held.length > 0) byCustomer.set(customerId, held)
     }
 
     for (const [customerId, tasks] of byCustomer) {

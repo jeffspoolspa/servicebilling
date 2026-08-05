@@ -173,6 +173,16 @@ export class SupabaseTaskRepository implements TaskRepository {
     return open ? this.byId(open.id) : null
   }
 
+  async liveFor(customerId: number): Promise<Task[]> {
+    const { data, error } = await this.client.schema("maintenance").from("tasks")
+      .select("id, status").eq("customer_id", customerId).limit(200)
+    if (error) throw new Error(`live-task lookup failed: ${JSON.stringify(error).slice(0, 200)}`)
+    const open = ((data ?? []) as { id: string; status: string }[])
+      .filter((r) => r.status === "active" || r.status === "paused")
+    const loaded = await Promise.all(open.map((r) => this.byId(r.id)))
+    return loaded.filter((x): x is Task => x !== null)
+  }
+
   /**
    * Persist an EDITED task and its facts. Called only after ION accepted and
    * the write was read back — our cache records what the system of record

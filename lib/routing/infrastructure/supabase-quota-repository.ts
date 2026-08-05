@@ -75,8 +75,16 @@ async function fetchAll<T>(query: Query, what: string): Promise<T[]> {
  * standing agreement and the dated one is on its way out.
  */
 export function liveContractsOnly(tasks: TaskRow[], today: string): TaskRow[] {
-  const inForce = tasks.filter(
-    (t) => (!t.starts_on || t.starts_on <= today) && (!t.ends_on || t.ends_on >= today),
+  // An open-ended contract is live whatever its start date says. A successor
+  // that opens next week is the agreement now — it is what the route is being
+  // planned around, and hiding it until its first service day would make a
+  // published change look like it never happened (Carter, 2026-08-05).
+  // A DATED contract is judged on its dates: not yet begun, or already run
+  // out, and it is not drawn.
+  const inForce = tasks.filter((t) =>
+    t.ends_on === null
+      ? true
+      : (!t.starts_on || t.starts_on <= today) && t.ends_on >= today,
   )
   const standing = new Set<number>()
   for (const t of inForce) {
