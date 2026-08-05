@@ -281,8 +281,21 @@ export class PublishService {
     const landed = new Set(results.filter((r) => r.accepted).map((r) => r.quotaId))
     const committed = !opts.dryRun && results.length > 0 && landed.size === results.length
     if (!opts.dryRun && landed.size > 0) {
-      const confirmed = schedules.filter((s) => landed.has(s.quotaId))
+      // A superseded contract was ENDED, not moved. Its quotaId still keys the
+      // scenario change, so applying "confirmed" placements to it would write
+      // the SUCCESSOR's day onto the predecessor — which is how Bayens came
+      // out of a correct ION write reading as two live Thursday contracts.
+      const superseded = new Set(supersedes.map((x) => x.quotaId))
+      // Plain moves only. A supersede already speaks for itself in
+      // TaskUpdated + TaskAdded; a ScheduleChanged on the ended contract
+      // would be a third fact claiming it moved.
+      const confirmed = schedules.filter((s) => landed.has(s.quotaId) && !superseded.has(s.quotaId))
       await this.tasks.applyConfirmed(confirmed)
+      // The predecessor's truth now lives in ION — its end date, and the
+      // retirement of the slots it no longer serves. Read it back rather than
+      // inferring it from the plan that replaced it.
+      const endedTasks = [...superseded].filter((id) => landed.has(id))
+      if (endedTasks.length > 0) await this.tasks.refresh(endedTasks, 0)
       await this.events.append(
         confirmed.map((s) => ({
           aggregate: "task" as const,
