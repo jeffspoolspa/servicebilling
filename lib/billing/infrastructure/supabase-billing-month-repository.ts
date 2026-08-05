@@ -418,56 +418,56 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   }
 
   /**
+   * The audit's OBSERVATIONS, at the judgment grain (RULED 2026-08-05):
+   * one row per serviced task-day from billing.v_visit_chem_totals — a
+   * plain view, always current as items land, so the app never re-sums an
+   * unbounded item pull.
+   */
+  async visitChemTotals(month: string): Promise<{ monthId: string; customerId: number; taskId: string; serviceDate: string; chemCents: number }[]> {
+    const rows = await this.pageAll<{ billing_month_id: string; customer_id: number; task_id: string; service_date: string; chem_cents: number }>(
+      () => (this.q("v_visit_chem_totals")
+        .select("billing_month_id, customer_id, task_id, service_date, chem_cents")
+        .eq("month", month) as unknown as { order(c: string): { order(c2: string): unknown } })
+        .order("billing_month_id").order("task_id") as never,
+      "visit chem totals",
+      "service_date",
+    )
+    return rows.map((r) => ({
+      monthId: r.billing_month_id,
+      customerId: r.customer_id,
+      taskId: r.task_id,
+      serviceDate: String(r.service_date),
+      chemCents: Number(r.chem_cents),
+    }))
+  }
+
+  /**
    * The audit's self-history: each customer's median chemicals-per-visit
    * over the trailing window, from the SAME priced items the months bill.
    * The repository owns the criteria; the domain only judges (Evans).
    */
   async chemHistory(beforeMonth: string, windowMonths = 6): Promise<Map<number, { customerId: number; medianChemCents: number; p95ChemCents: number; visits: number }>> {
-    const [y, m] = beforeMonth.split("-").map(Number)
-    const months: string[] = []
-    for (let i = 1; i <= windowMonths; i++) {
-      const d = new Date(Date.UTC(y, m - 1 - i, 1))
-      months.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`)
-    }
-    const monthRows: { id: string; customer_id: number }[] = []
-    for (const mm of months) {
-      for (let off = 0; ; off += 1000) {
-        const { data, error } = await this.q("billing_months").select("id, customer_id").eq("month", mm).range(off, off + 999)
-        if (error) throw new Error(`history months failed: ${JSON.stringify(error).slice(0, 200)}`)
-        const page = (data ?? []) as { id: string; customer_id: number }[]
-        monthRows.push(...page)
-        if (page.length < 1000) break
-      }
-    }
-    const custOf = new Map(monthRows.map((r) => [r.id, r.customer_id]))
-    const perVisit = new Map<string, { customerId: number; cents: number }>()
-    const ids = monthRows.map((r) => r.id)
-    for (let i = 0; i < ids.length; i += 40) {
-      const c = ids.slice(i, i + 40)
-      const data = await this.pageAll<{ billing_month_id: string; task_id: string | null; service_date: string | null; kind: string; item_name: string | null; amount_cents: number | null }>(
-        () => this.q("billable_items")
-          .select("id, billing_month_id, task_id, service_date, kind, item_name, amount_cents")
-          .in("billing_month_id", c) as never,
-        "history items",
-      )
-      for (const r of data) {
-        if (r.kind !== "consumable" || !r.task_id || !r.service_date) continue
-        const key = `${r.billing_month_id}|${r.task_id}|${r.service_date}`
-        const cur = perVisit.get(key) ?? { customerId: custOf.get(r.billing_month_id)!, cents: 0 }
-        cur.cents += r.amount_cents ?? 0
-        perVisit.set(key, cur)
-      }
-    }
-    const byCustomer = new Map<number, number[]>()
-    for (const v of perVisit.values()) byCustomer.set(v.customerId, [...(byCustomer.get(v.customerId) ?? []), v.cents])
+    // Aggregated where the data lives (billing.chem_history over the visit
+    // totals view): one row per customer, however much history accrues.
+    const { data, error } = await (this.client.schema("billing") as unknown as {
+      rpc(fn: string, args: Record<string, unknown>): PromiseLike<{ data: unknown[] | null; error: unknown }>
+    }).rpc("chem_history", {
+      p_before: beforeMonth,
+      p_window: windowMonths,
+    })
+    if (error) throw new Error(`chem history failed: ${JSON.stringify(error).slice(0, 200)}`)
     const out = new Map<number, { customerId: number; medianChemCents: number; p95ChemCents: number; visits: number }>()
-    for (const [cid, arr] of byCustomer) {
-      const sorted = arr.sort((a, b) => a - b)
-      const p95 = sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(0.95 * sorted.length) - 1))]
-      out.set(cid, { customerId: cid, medianChemCents: sorted[Math.floor(sorted.length / 2)], p95ChemCents: p95, visits: sorted.length })
+    for (const r of (data ?? []) as { customer_id: number; median_chem_cents: number; p95_chem_cents: number; visits: number }[]) {
+      out.set(r.customer_id, {
+        customerId: r.customer_id,
+        medianChemCents: Number(r.median_chem_cents),
+        p95ChemCents: Number(r.p95_chem_cents),
+        visits: r.visits,
+      })
     }
     return out
   }
+
 
   /**
    * The audit's peer groups: billing_audit.v_customer_peer_group — the

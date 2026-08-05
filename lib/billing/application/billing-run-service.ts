@@ -76,17 +76,31 @@ export class BillingRunService {
   }
 
   private async runAudit(monthsAll: BillingMonth[], month: string) {
-    // Repository selects the criteria rows (peer groups, task provisions,
-    // trailing self-history), the factory shapes observations, the domain
-    // judges: chem-per-visit vs the peer group's percentile AND the
-    // customer's own median.
-    const taskIds = monthsAll.flatMap((m) => m.billableItems.map((i) => i.taskId)).filter((t): t is string => !!t)
+    // The criteria are PUBLISHED READ SURFACES at the judgment grain
+    // (RULED 2026-08-05): per-visit totals from billing.v_visit_chem_totals
+    // — always current, WHOLE-period by construction (an invoiced month's
+    // visits still belong to the distribution everyone else is judged
+    // against; an active-only population would let survivor bias un-flag
+    // the held tail) — and per-customer history bars from
+    // billing.chem_history(). The domain judges; nothing here re-sums an
+    // unbounded item pull.
+    const totals = await this.months.visitChemTotals(month)
+    const taskIds = [...new Set(totals.map((t) => t.taskId))]
     const [peerGroups, provisions, histories] = await Promise.all([
-      this.months.customerPeerGroups(monthsAll.map((m) => m.customerId)),
+      this.months.customerPeerGroups([...new Set(totals.map((t) => t.customerId))]),
       this.months.taskChemProvision(taskIds),
       this.months.chemHistory(month),
     ])
-    const observations = observationsOf(monthsAll, peerGroups, provisions)
+    const observations: ChemObservation[] = totals
+      .filter((t) => t.chemCents > 0)
+      .map((t) => ({
+        monthId: t.monthId,
+        customerId: t.customerId,
+        visitKey: `${t.taskId}:${t.serviceDate}`,
+        serviceDate: t.serviceDate,
+        peerKey: provisions.get(t.taskId) ?? peerGroups.get(t.customerId) ?? "unclassified",
+        chemCents: t.chemCents,
+      }))
     const found = auditConsumables(observations, histories)
     // Every visit's current observation rides along so a RETRACTION EVENT
     // can say WHY: the visit's data changed, the visit vanished, or the
@@ -233,46 +247,4 @@ export class BillingRunService {
       seconds: Math.round((Date.now() - t0) / 1000),
     }
   }
-}
-
-/**
- * The FACTORY: month aggregates in, audit observations out. One observation
- * per serviced task-day — the same grain labour bills at — with the chem
- * total summed and the peer group taken from that day's labour line (the
- * service type's name), because "normal chemicals" only means something
- * within a service type.
- */
-export function observationsOf(
-  months: readonly BillingMonth[],
-  peerGroups: ReadonlyMap<number, string>,
-  provisions: ReadonlyMap<string, string> = new Map(),
-): ChemObservation[] {
-  const out: ChemObservation[] = []
-  for (const m of months) {
-    const byVisit = new Map<string, { chemCents: number; serviceDate: string }>()
-    for (const it of m.billableItems) {
-      if (!it.taskId || !it.serviceDate || it.kind !== "consumable") continue
-      const key = `${it.taskId}:${it.serviceDate}`
-      const v = byVisit.get(key) ?? { chemCents: 0, serviceDate: it.serviceDate }
-      v.chemCents += it.amountCents
-      byVisit.set(key, v)
-    }
-    for (const [key, v] of byVisit) {
-      if (v.chemCents <= 0) continue
-      const taskId = key.slice(0, key.lastIndexOf(":"))
-      out.push({
-        monthId: m.id,
-        customerId: m.customerId,
-        visitKey: key,
-        serviceDate: v.serviceDate,
-        // The TASK's chem provision (bulk_refill / provides_chems) is its
-        // peer group; otherwise v_customer_peer_group — the already-ruled
-        // classification the live chem-flag medians use. One rule judges
-        // every group against its own distribution.
-        peerKey: provisions.get(taskId) ?? peerGroups.get(m.customerId) ?? "unclassified",
-        chemCents: v.chemCents,
-      })
-    }
-  }
-  return out
 }
