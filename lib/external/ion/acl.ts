@@ -396,6 +396,19 @@ export function gapReport(
   return { days, max, withinBound: days <= max }
 }
 
+/**
+ * Weeks of notice a schedule change must give.
+ *
+ * The crew's week is locked on Monday and worked from that plan, so the
+ * CURRENT week is not ours to change — not merely the days already served.
+ * Moving a Friday pool to Wednesday mid-week would otherwise build a visit on
+ * a day nobody was routed to (Carter, 2026-08-05).
+ *
+ * One number, not a rule: if dispatch ever becomes day-by-day, this drops to 0
+ * and the "already served" floor below still holds on its own.
+ */
+export const WEEKS_OF_NOTICE = 1
+
 export function effectiveWeekFor(
   lastVisit: string | null,
   now: string,
@@ -404,8 +417,12 @@ export function effectiveWeekFor(
   const nowWeek = isoWeekIndex(now)
   if (nowWeek === null) throw new Error(`effectiveWeekFor: unreadable date "${now}"`)
   const lastWeek = lastVisit ? isoWeekIndex(lastVisit) : null
-  // This week is spent only if the visit for it already happened.
-  const earliest = lastWeek !== null && lastWeek >= nowWeek ? lastWeek + 1 : nowWeek
+  // Two floors, and the later one wins: the plan is fixed for WEEKS_OF_NOTICE
+  // weeks ahead, and a week whose visit already happened is spent regardless.
+  const earliest = Math.max(
+    nowWeek + WEEKS_OF_NOTICE,
+    lastWeek !== null && lastWeek >= nowWeek ? lastWeek + 1 : nowWeek,
+  )
   if (target === "weekly" || target === "monthly") return earliest
   const wantEven = target === "biweekly_a"
   return ((earliest % 2) + 2) % 2 === (wantEven ? 0 : 1) ? earliest : earliest + 1

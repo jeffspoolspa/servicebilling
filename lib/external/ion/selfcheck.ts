@@ -64,14 +64,28 @@ assert.strictEqual(weeklyDayMove.supersede.closeChanges.day2, ION.josh, "the clo
 assert.strictEqual(weeklyDayMove.supersede.closeChanges.EndsOn, "2026-08-12")
 assert.deepStrictEqual(weeklyDayMove.supersede.believedDays, { "1": ION.josh })
 
-// Not yet served this week: the move may take effect in THIS week.
+// Even UNSERVED, this week is not ours to change: the crew's week is locked
+// on Monday, so a Friday-to-Wednesday move would build a visit on a day
+// nobody was routed to. Notice is a week, not "whatever is left of this one".
 const notYetServed = acl.toIonWrite(
   week([{ weekday: 4, techId: TECH.caleb }]),
   id({ believedDays: { "1": ION.josh }, startsOn: "2026-05-07",
        lastVisit: "2026-07-27", now: "2026-08-05" }),
 )
 assert("supersede" in notYetServed)
-assert.strictEqual(notYetServed.supersede.startsOn, "2026-08-06", "this week is still available")
+assert.strictEqual(notYetServed.supersede.startsOn, "2026-08-13", "the current week's plan is locked")
+
+// The hazard that motivated it: moving to a day EARLIER in the current week.
+const backwardsInWeek = acl.toIonWrite(
+  week([{ weekday: 3, techId: TECH.caleb }]),           // Wednesday
+  id({ believedDays: { "5": ION.josh }, startsOn: "2026-05-07",   // was Friday
+       lastVisit: "2026-07-31", now: "2026-08-05" }),   // today IS Wednesday
+)
+assert("supersede" in backwardsInWeek)
+assert.ok(
+  backwardsInWeek.supersede.startsOn > "2026-08-05",
+  "never builds a visit today or earlier",
+)
 
 // Days that stay are still stated — omitting one is how ION keeps a stop and
 // the customer gets serviced twice.
@@ -187,9 +201,10 @@ console.log("ion schedule acl selfcheck: 24 checks passed (incl. 42 anchor round
   assert.strictEqual(effectiveWeekFor(LAST, NOW, "biweekly_b"), 2953, "flip -> the ADJACENT week, not +3")
   assert.strictEqual(effectiveWeekFor(LAST, NOW, "biweekly_a"), 2954, "same parity -> the normal fortnight")
   assert.strictEqual(effectiveWeekFor(LAST, NOW, "weekly"), 2953)
-  // this week still available when its visit has NOT happened
-  assert.strictEqual(effectiveWeekFor("2026-07-29", NOW, "weekly"), 2952, "current week is not spent")
-  assert.strictEqual(effectiveWeekFor(null, NOW, "weekly"), 2952, "never serviced -> start now")
+  // The current week is never available, served or not: its routes are locked
+  // on Monday, so a change landing in it builds a visit nobody was routed to.
+  assert.strictEqual(effectiveWeekFor("2026-07-29", NOW, "weekly"), 2953, "the plan is locked for this week")
+  assert.strictEqual(effectiveWeekFor(null, NOW, "weekly"), 2953, "never serviced -> still a week of notice")
 
   // ── tech only: amended in place, anchor untouched
   const techOnly = reviseTask(form("2026-05-06", "Bi-Weekly", "3"), { ionTech: ION.caleb }, { lastVisit: LAST, now: NOW })
@@ -244,6 +259,9 @@ console.log("ion schedule acl selfcheck: 24 checks passed (incl. 42 anchor round
   assert.ok(gapReport(null, "2026-08-13", "weekly", false).withinBound)
 }
 
+const daysBetween = (a: string, b: string) =>
+  Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000)
+
 /* ---- a move must not land TOO SOON either: half the cycle is the floor ---- */
 {
   assert.strictEqual(minGapDaysFor("biweekly_a"), 7, "half a fortnight")
@@ -251,17 +269,22 @@ console.log("ion schedule acl selfcheck: 24 checks passed (incl. 42 anchor round
   assert.strictEqual(minGapDaysFor("monthly"), 14)
 
   // Bayens flipping to biweekly_a: last visit Fri 07-31, Thursday anchor.
-  // Week 2952 is parity A and its Thursday is 08-06 — only 6 days, two visits
-  // inside a week for a FORTNIGHTLY contract. Push to the next A week.
+  // Week 2952's Thursday is 08-06 — six days, two visits inside a week for a
+  // FORTNIGHTLY contract. Assert the GUARANTEE, not which guard delivered it:
+  // a week of notice now rules 2952 out before min-gap is ever consulted, so
+  // pushedForMinGap says nothing useful about whether the date is safe.
   const flip = supersedeStartsOn("2026-07-31", "2026-08-05", "biweekly_a", 4)
-  assert.strictEqual(flip.pushedForMinGap, true, "6 days is too soon")
+  assert.ok(
+    daysBetween("2026-07-31", flip.startsOn) >= minGapDaysFor("biweekly_a"),
+    `too soon after the last visit: ${flip.startsOn}`,
+  )
   assert.strictEqual(flip.startsOn, "2026-08-20")
   assert.strictEqual(anchorOf(flip.startsOn, "Bi-Weekly")!.frequency, "biweekly_a", "pushed a full cycle, so parity is UNCHANGED")
 
   // Keeping parity needs no push: 08-13 is already 13 days out.
   const keep = supersedeStartsOn("2026-07-31", "2026-08-05", "biweekly_b", 4)
-  assert.strictEqual(keep.pushedForMinGap, false)
   assert.strictEqual(keep.startsOn, "2026-08-13")
+  assert.ok(daysBetween("2026-07-31", keep.startsOn) >= minGapDaysFor("biweekly_b"))
 
   // A pool never serviced has nothing to be too soon after.
   assert.strictEqual(supersedeStartsOn(null, "2026-08-05", "biweekly_b", 4).pushedForMinGap, false)
@@ -270,6 +293,6 @@ console.log("ion schedule acl selfcheck: 24 checks passed (incl. 42 anchor round
   // (the close of week 2952), moving to Monday: the next Monday is 08-10, one
   // day later — too soon, so it takes the Monday after.
   const wk = supersedeStartsOn("2026-08-09", "2026-08-05", "weekly", 1)
-  assert.strictEqual(wk.pushedForMinGap, true, "1 day is too soon even weekly")
   assert.strictEqual(wk.startsOn, "2026-08-17", "one week on, not two")
+  assert.ok(daysBetween("2026-08-09", wk.startsOn) >= minGapDaysFor("weekly"))
 }
