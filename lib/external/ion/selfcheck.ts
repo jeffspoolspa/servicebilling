@@ -56,6 +56,8 @@ assert.strictEqual(weeklyDayMove.supersede.endsOn, "2026-08-12")
 assert.strictEqual(weeklyDayMove.supersede.changes.day5, ION.caleb)
 assert.strictEqual(weeklyDayMove.supersede.changes.day2, "")
 assert.strictEqual(weeklyDayMove.supersede.changes.ServiceRepeat, undefined)
+// The close must declare the FORM ION will render, or ION refuses the write.
+assert.strictEqual(weeklyDayMove.supersede.weekly, true, "a weekly close sees the day picker")
 
 // Not yet served this week: the move may take effect in THIS week.
 const notYetServed = acl.toIonWrite(

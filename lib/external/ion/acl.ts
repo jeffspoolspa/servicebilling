@@ -57,6 +57,16 @@ export interface SupersedeWrite {
   changes: Record<string, string>
   /** The anchor this supersede was computed from; the close asserts it. */
   believedStartsOn: string | null
+  /**
+   * Which FORM ION will render for the close.
+   *
+   * A weekly task shows the day picker; a non-weekly one does not, and ION
+   * refuses a write that arrives believing the wrong shape. This was implicit
+   * while only non-weekly cadences superseded — once weekly day moves started
+   * superseding too, the close was still declaring "not weekly" and ION's own
+   * guard caught it (Lucas, 2026-08-05).
+   */
+  weekly: boolean
 }
 
 export type Translated =
@@ -138,6 +148,7 @@ export class IonTaskAcl {
             endsOn: new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10),
             startsOn,
             believedStartsOn: id.startsOn ?? null,
+            weekly: true,
             // No ServiceRepeat: the successor inherits the predecessor's
             // cadence with the rest of its form. Stating it here would be a
             // second place for "what cadence is this" to be wrong.
@@ -190,6 +201,7 @@ export class IonTaskAcl {
           endsOn: new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10),
           startsOn,
           believedStartsOn: id.startsOn ?? null,
+          weekly: false,
           changes: { AssignedTo: named[0].ionTech, StartsOn: startsOn, ServiceRepeat: target === "monthly" ? "4" : "3" },
         },
       }

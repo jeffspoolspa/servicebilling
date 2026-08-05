@@ -211,7 +211,9 @@ export class PublishService {
 
       if (!alreadyClosed) {
         const closed = await this.ion.applyWeeks(
-          [{ key: sup.quotaId, ionTaskId: sup.ionTaskId, ionCustId: sup.ionCustId, weekly: false,
+          // The close must arrive believing the shape ION will render, or ION
+          // refuses it — weekly tasks show the day picker, others do not.
+          [{ key: sup.quotaId, ionTaskId: sup.ionTaskId, ionCustId: sup.ionCustId, weekly: sup.weekly,
              changes: { EndsOn: sup.endsOn }, believedDays: {},
              // If ION's anchor moved since our refresh, the effective week we
              // computed is wrong — refuse the close rather than end a contract
