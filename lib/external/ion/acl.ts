@@ -55,6 +55,8 @@ export interface SupersedeWrite {
   endsOn: string
   startsOn: string
   changes: Record<string, string>
+  /** The anchor this supersede was computed from; the close asserts it. */
+  believedStartsOn: string | null
 }
 
 export type Translated =
@@ -136,12 +138,13 @@ export class IonTaskAcl {
           ionCustId: id.ionCustId,
           endsOn: new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10),
           startsOn,
+          believedStartsOn: id.startsOn ?? null,
           changes: { AssignedTo: named[0].ionTech, StartsOn: startsOn, ServiceRepeat: target === "monthly" ? "4" : "3" },
         },
       }
     }
     changes["AssignedTo"] = named[0].ionTech
-    return { write: { key: schedule.quotaId, ionTaskId: id.ionTaskId, ionCustId: id.ionCustId, weekly: false, changes, believedDays: id.believedDays } }
+    return { write: { key: schedule.quotaId, ionTaskId: id.ionTaskId, ionCustId: id.ionCustId, weekly: false, changes, believedDays: id.believedDays, believedStartsOn: id.startsOn ?? null } }
   }
 
   /**

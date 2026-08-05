@@ -148,7 +148,11 @@ export class PublishService {
     for (const sup of supersedes) {
       const closed = await this.ion.applyWeeks(
         [{ key: sup.quotaId, ionTaskId: sup.ionTaskId, ionCustId: sup.ionCustId, weekly: false,
-           changes: { EndsOn: sup.endsOn }, believedDays: {} }],
+           changes: { EndsOn: sup.endsOn }, believedDays: {},
+           // If ION's anchor moved since our refresh, the effective week we
+           // computed is wrong — refuse the close rather than end a contract
+           // and create a successor from a date ION no longer holds.
+           believedStartsOn: sup.believedStartsOn }],
         { dryRun: opts.dryRun },
       )
       if (!closed[0]?.accepted) {

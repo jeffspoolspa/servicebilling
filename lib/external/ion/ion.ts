@@ -141,6 +141,13 @@ export interface WeekWrite {
   ionCustId: string
   /** The ACL decided this from our refreshed cache; ION's form must agree. */
   weekly: boolean
+  /**
+   * The anchor we believed when the write was planned. A non-picker task
+   * states its whole schedule through StartsOn, so this is the ONLY thing that
+   * can drift for it — and drifting is exactly the case where we would compute
+   * an effective week from a date ION no longer holds.
+   */
+  believedStartsOn?: string | null
   /** Form fields to change (day1..day7 for weekly, AssignedTo for non-weekly). */
   changes: Record<string, string>
   /** weekday -> ION employee id our cache holds, for the free race guard. */
@@ -187,6 +194,12 @@ export class IonTasks extends Ion {
           })
           continue
         }
+        // Optimistic concurrency, both shapes. The form was read a moment ago,
+        // so comparing it to what we believed is what makes a write safe
+        // WITHOUT a lock — it asks ION rather than coordinating with the other
+        // writers (Windmill flows share this session and cannot be seen from
+        // here). A picker task drifts by its days; a non-picker task has no
+        // days, so it drifts by its ANCHOR, which until now went unchecked.
         if (w.weekly) {
           const drift = Object.entries({ ...w.believedDays, ...form.days })
             .filter(([d]) => (w.believedDays[d] ?? null) !== (form.days[d] ?? null))
@@ -195,6 +208,13 @@ export class IonTasks extends Ion {
             out.push({ key: w.key, accepted: false, detail: `moved in ION since our refresh: ${drift.join("; ")}` })
             continue
           }
+        } else if (w.believedStartsOn != null && form.startsOn !== w.believedStartsOn) {
+          out.push({
+            key: w.key,
+            accepted: false,
+            detail: `moved in ION since our refresh: StartsOn ION=${form.startsOn || "none"} cache=${w.believedStartsOn} — refusing to supersede from a stale anchor`,
+          })
+          continue
         }
 
         if (opts.dryRun) {
