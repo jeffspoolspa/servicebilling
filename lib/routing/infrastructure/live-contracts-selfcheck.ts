@@ -4,35 +4,54 @@ import { liveContractsOnly } from "./supabase-quota-repository"
 
 const t = (id: string, customer_id: number | null, starts_on: string | null, ends_on: string | null) =>
   ({ id, customer_id, starts_on, ends_on, ion_task_id: id })
+const TODAY = "2026-08-05"
+const ids = (rows: { id: string }[]) => rows.map((r) => r.id)
 
-// Newcomb, live 2026-08-05: predecessor ends 08-12, successor starts 08-13.
-// The plan must hold the successor only — both are status='active'.
-const superseded = liveContractsOnly([
-  t("old", 5641, "2024-12-30", "2026-08-12"),
-  t("new", 5641, "2026-08-13", null),
-])
-assert.deepStrictEqual(superseded.map((x) => x.id), ["new"], "the successor is the contract")
+// EURE, CHAD: ended 2026-07-27, still drawing a Tuesday stop a week later.
+// status stays 'active' until something closes it, so the dates are the truth.
+assert.deepStrictEqual(
+  ids(liveContractsOnly([t("chad", 91, "2026-07-21", "2026-07-27")], TODAY)), [],
+  "an expired contract is not in force",
+)
 
-// A customer with TWO concurrent pools keeps both. A blanket
-// "prefer ends_on IS NULL" would have dropped the ending one and stopped
-// routing a pool that is still being serviced.
-const twoPools = liveContractsOnly([
-  t("poolA", 77, "2025-01-01", "2026-12-31"),
-  t("poolB", 77, "2025-06-01", null),
-])
-assert.strictEqual(twoPools.length, 2, "concurrent contracts are not a supersede")
+// Newcomb mid-supersede: the successor opens 08-13, so TODAY the predecessor
+// is what is genuinely serviced — it keeps its stop and the tail is not lost.
+assert.deepStrictEqual(
+  ids(liveContractsOnly([
+    t("old", 5641, "2024-12-30", "2026-08-12"),
+    t("new", 5641, "2026-08-13", null),
+  ], TODAY)),
+  ["old"], "before the successor opens, the predecessor is the contract",
+)
 
-// An ending contract with no successor still routes — it is being serviced
-// right up to its last day.
-const endingAlone = liveContractsOnly([t("solo", 88, "2025-01-01", "2026-09-30")])
-assert.strictEqual(endingAlone.length, 1)
+// The day it opens, the predecessor has expired and drops out on its own.
+assert.deepStrictEqual(
+  ids(liveContractsOnly([
+    t("old", 5641, "2024-12-30", "2026-08-12"),
+    t("new", 5641, "2026-08-13", null),
+  ], "2026-08-13")),
+  ["new"], "the successor takes over with no special case",
+)
 
-// A gap is not a supersede: a successor starting later than the day after
-// leaves the predecessor in the plan for the days it still serves.
-const gapped = liveContractsOnly([
-  t("old", 99, "2025-01-01", "2026-08-12"),
-  t("new", 99, "2026-09-01", null),
-])
-assert.strictEqual(gapped.length, 2, "only an adjacent pair is a supersede")
+// Real overlap: two live contracts, one dated. The undated one is standing;
+// the dated one is on its way out and is not drawn.
+assert.deepStrictEqual(
+  ids(liveContractsOnly([
+    t("dated", 77, "2025-01-01", "2026-09-30"),
+    t("standing", 77, "2025-06-01", null),
+  ], TODAY)),
+  ["standing"], "an end date loses to a standing agreement",
+)
 
-console.log("live contracts selfcheck: 4 checks passed")
+// A lone dated contract still routes — it is in force, and there is nothing
+// standing to prefer over it.
+assert.deepStrictEqual(
+  ids(liveContractsOnly([t("solo", 88, "2025-01-01", "2026-09-30")], TODAY)), ["solo"],
+)
+
+// Two concurrent pools, neither dated: both route.
+assert.strictEqual(
+  liveContractsOnly([t("a", 99, "2025-01-01", null), t("b", 99, "2025-06-01", null)], TODAY).length, 2,
+)
+
+console.log("live contracts selfcheck: 6 checks passed")
