@@ -14,14 +14,7 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
   const browser = await puppeteer.launch(
     process.platform === "darwin"
       ? { executablePath: MAC_CHROME, headless: true }
-      : {
-          args: chromium.args,
-          defaultViewport: chromium.defaultViewport,
-          executablePath: await chromium.executablePath(),
-          // The packaged binary is chromium's headless SHELL — it only
-          // runs in the mode the package declares, not plain headless.
-          headless: chromium.headless,
-        },
+      : { args: chromium.args, executablePath: await chromium.executablePath(), headless: true },
   )
   try {
     const page = await browser.newPage()
