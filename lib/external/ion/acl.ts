@@ -555,7 +555,12 @@ export function reviseTask(
     return { amend: { fields } }
   }
 
-  const startsOn = dateInWeek(effectiveWeekFor(ctx.now, cadence), weekday)
+  // The SAME arithmetic the publish path uses. These two had drifted: revise
+  // applied the notice floor but not the minimum gap, so editing a task could
+  // schedule a visit closer to the last one than publishing the identical
+  // change would. One function, both callers — a supersede is a supersede
+  // whichever door it came through.
+  const startsOn = supersedeStartsOn(ctx.lastVisit ?? null, ctx.now, cadence, weekday).startsOn
   // Read-back agreement: the date chosen must SAY what was meant.
   if (cadence.startsWith("biweekly")) {
     const proof = anchorOf(startsOn, "Bi-Weekly")

@@ -217,6 +217,19 @@ console.log("ion schedule acl selfcheck: 24 checks passed (incl. 42 anchor round
   assert.strictEqual(techOnly.amend.fields["AssignedTo"], ION.caleb)
   assert.strictEqual(techOnly.amend.fields["StartsOn"], "2026-05-06", "the anchor is NOT rewritten")
 
+  // The edit path and the publish path must agree. They had drifted: revise
+  // applied the notice floor but not the minimum gap, so the same change made
+  // through task.edit could land closer to the last visit than a publish of it.
+  {
+    const viaRevise = reviseTask(form("2026-05-06", "Bi-Weekly", "3"), { weekday: 4 },
+      { lastVisit: "2026-07-31", now: NOW })
+    const viaPublish = supersedeStartsOn("2026-07-31", NOW,
+      anchorOf("2026-05-06", "Bi-Weekly")!.frequency as never, 4).startsOn
+    assert("supersede" in viaRevise)
+    assert.strictEqual(viaRevise.supersede.fields["StartsOn"], viaPublish,
+      "task.edit and publish must choose the same date")
+  }
+
   // ── day move on a biweekly: supersedes, keeps parity, one-week gap
   const dayMove = reviseTask(form("2026-05-06", "Bi-Weekly", "3"), { weekday: 4 }, { lastVisit: LAST, now: NOW })
   assert("supersede" in dayMove, "a day move is a new contract")
