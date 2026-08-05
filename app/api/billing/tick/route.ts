@@ -2,16 +2,15 @@ import { NextResponse } from "next/server"
 import { createSupabaseServer } from "@/lib/supabase/server"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { BillingRunService } from "@/lib/billing/application/billing-run-service"
-import { AdvanceMonthService } from "@/lib/billing/application/advance-month-service"
 import { issueMonth, IssueRefused } from "@/lib/billing/application/issue-service"
 import { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
 import { SupabaseBillingFacts } from "@/lib/billing/infrastructure/supabase-billing-facts"
 import { IonReportInvoiceFacts } from "@/lib/billing/infrastructure/ion-report-invoice-facts"
-import { IonDeliveryRefresher } from "@/lib/billing/infrastructure/ion-delivery-refresher"
 import { SupabaseMonthGateFacts } from "@/lib/billing/infrastructure/supabase-month-gate-facts"
 import { SupabaseBillingQueue } from "@/lib/billing/infrastructure/supabase-billing-queue"
 import { buildIssueDeps } from "@/lib/billing/infrastructure/issue-deps"
 import { drainInvoiceQueue } from "@/lib/billing/infrastructure/drain-invoice-queue"
+import { drainMonthQueue } from "@/lib/billing/infrastructure/drain-month-queue"
 import { IonReports, IonVisits } from "@/lib/external/ion/ion"
 import { runScriptAndWait, triggerScriptSync } from "@/lib/windmill"
 
@@ -72,11 +71,6 @@ export async function POST(req: Request) {
   const ionReport = new IonReportInvoiceFacts(sys as never, new IonReports(mint, jobs))
   const gateFacts = new SupabaseMonthGateFacts(sys as never)
   const run = new BillingRunService(months, queue, facts, ionReport, gateFacts)
-  const advance = new AdvanceMonthService(
-    months, facts, facts, facts, ionReport,
-    new IonDeliveryRefresher(sys as never, new IonVisits(mint, jobs)),
-    gateFacts, months,
-  )
 
   // 1. The current period's months exist and are queued (idempotent).
   const started = await run.startMonth(currentPeriod)
@@ -102,26 +96,13 @@ export async function POST(req: Request) {
     bulk[period] = await run.advanceAll(period, { now, refreshReport: closed })
   }
 
-  // 3. The heals, depth-first: one claim runs its month as far as it goes.
-  let healed = 0
-  let healErrors = 0
-  while (left() > 90_000) {
-    const cmd = await queue.claim()
-    if (!cmd) break
-    try {
-      let out = await advance.advance(cmd.monthId, { dryRun: false })
-      let steps = 1
-      while (out.again && steps < 8 && left() > 60_000) {
-        out = await advance.advance(cmd.monthId, { dryRun: false })
-        steps++
-      }
-      await queue.finish(cmd.queueId)
-      healed++
-    } catch (e) {
-      healErrors++
-      await queue.finish(cmd.queueId, String(e instanceof Error ? e.message : e).slice(0, 400))
-    }
-  }
+  // 3. The heals, depth-first through the ONE advance path (issue included
+  // when money is enabled — the drainer may fire issue, RULED 2026-08-05).
+  const heal = left() > 90_000
+    ? await drainMonthQueue(sys as never, Math.max(10_000, left() - 90_000), { issue: moneyEnabled })
+    : { claimed: 0, errors: 0, tally: {} }
+  const healed = heal.claimed
+  const healErrors = heal.errors
 
   // 4. Re-gate closed periods the heals may have moved (in-memory, cheap).
   if (healed > 0) {

@@ -53,6 +53,10 @@ export class AdvanceMonthService {
       laborItems(): Promise<Map<string, LaborCatalogEntry>>
       taskDocMeta(ids: readonly string[]): Promise<Map<string, { category: string | null }>>
     },
+    /** RULED (2026-08-05): the drainer MAY fire issue — the button is just a
+     * nudge onto the advance queue. Absent (safe mode / callers without the
+     * QBO wiring), the issue step reports instead of running. */
+    private readonly issuer?: (month: Parameters<BillingMonthRepository["save"]>[0]) => Promise<void>,
   ) {}
 
   async advance(monthId: string, opts: { now?: Date; dryRun?: boolean } = {}): Promise<AdvanceOutcome> {
@@ -174,17 +178,21 @@ export class AdvanceMonthService {
         break
       }
 
-      case "issue":
-        // Issue runs through its EXPLICIT service until Carter rules the
-        // drainer may fire it. After issue the month is DONE — each invoice
-        // runs its own machine. Deliberately NOT a silent no-op — a pipeline
-        // that appears to advance past the money steps is worse than one
-        // that stops and says so.
-        return {
-          monthId, from, step, to: from,
-          detail: `${step} runs via its explicit service — not drainer-wired yet`,
-          again: false,
+      case "issue": {
+        // RULED (2026-08-05): the drainer fires issue. After issue the month
+        // is DONE — each invoice runs its own machine. Without an issuer
+        // wired (safe mode), stop and say so — never a silent no-op.
+        if (!this.issuer) {
+          return { monthId, from, step, to: from, detail: "issue not wired for this caller (safe mode)", again: false }
         }
+        if (opts.dryRun) {
+          return { monthId, from, step, to: from, detail: "dry run: would issue this month's invoices", again: false }
+        }
+        // issueMonth persists everything itself (create -> saveIssued ->
+        // markInvoiced -> save -> link -> enqueue the invoice machine).
+        await this.issuer(month)
+        return { monthId, from, step, to: "invoiced", detail: "issued — each invoice runs its own machine", again: false }
+      }
     }
 
     if (opts.dryRun) {

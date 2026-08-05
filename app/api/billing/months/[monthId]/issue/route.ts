@@ -3,8 +3,10 @@ import { createSupabaseServer } from "@/lib/supabase/server"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
 import { SupabaseBillingFacts } from "@/lib/billing/infrastructure/supabase-billing-facts"
+import { SupabaseMonthGateFacts } from "@/lib/billing/infrastructure/supabase-month-gate-facts"
 import { buildIssueDeps } from "@/lib/billing/infrastructure/issue-deps"
 import { issueMonth, IssueRefused } from "@/lib/billing/application/issue-service"
+import { gate } from "@/lib/billing/domain"
 
 /**
  * ISSUE one month's invoices in QBO — an EXPLICIT, per-month human act.
@@ -25,6 +27,22 @@ export async function POST(_req: Request, ctx: { params: Promise<{ monthId: stri
 
   const facts = new SupabaseBillingFacts(sys as never)
   const delivered = await facts.sourcesFor(month.customerId, month.month)
+
+  // RULED (2026-08-05): the ISSUE COMMAND re-judges the gate itself — the
+  // verdict is always fresh at click time, so reviewing flags is enough
+  // (no separate release step, no stale stored holds). Person-placed
+  // reasons (not gate criteria) survive the re-judge and refuse below.
+  const GATE_CRITERIA = new Set(["has_items", "reconciled", "billing_identity", "route_resolved", "not_on_hold", "credits_settled", "findings_resolved"])
+  const ctx2 = await new SupabaseMonthGateFacts(sys as never).forCustomers([month.customerId], new Map([[month.customerId, month.id]]), new Date())
+  const gateCtx = ctx2.get(month.customerId)
+  if (gateCtx) {
+    const manual = month.heldFor.filter((r) => !GATE_CRITERIA.has(r))
+    month.markGated([...new Set([...gate(month, gateCtx).heldFor, ...manual])], new Date().toISOString())
+    await months.save(month)
+  }
+  if (month.heldFor.length > 0) {
+    return NextResponse.json({ error: `held by the gate: ${month.heldFor.join(", ")}` }, { status: 409 })
+  }
 
   try {
     const outcome = await issueMonth(month, buildIssueDeps(sys as never, months), new Date(), delivered)

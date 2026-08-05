@@ -406,21 +406,30 @@ export function MonthWorkbench({
                   )}
                 </span>
                 <span className="flex items-center gap-2 flex-none">
-                  {isHeld(m) && (
-                    <button disabled={acting !== null} onClick={() => act("Release hold", "DELETE", `/api/billing/months/${m.id}/hold`)} className={actionBtn}>
-                      {acting === "Release hold" ? "Releasing…" : "Release hold"}
-                    </button>
-                  )}
-                  {/* Offered by the COMMAND's own precondition, not a status
-                      guess: clearHold deliberately un-gates (verdict gets
-                      re-judged), which displays as "accruing" — the button
-                      must still be there, and issueMonth refuses with its
-                      reason if anything real blocks. */}
-                  {!hasInvoices && !isHeld(m) && m.status !== "disputed" && monthEndIso < new Date().toISOString().slice(0, 10) && (
-                    <button disabled={acting !== null} onClick={() => act("Issue invoices", "POST", `/api/billing/months/${m.id}/issue`)} className={primaryBtn}>
-                      {acting === "Issue invoices" ? "Issuing…" : "Issue invoices"}
-                    </button>
-                  )}
+                  {/* THE one action (RULED 2026-08-05): a nudge onto the
+                      advance queue — same depth-first path as the tick
+                      (fresh gate verdict -> issue -> invoice machine).
+                      Disabled with the reason; the command chain is the
+                      only authority beyond that. Release hold retired —
+                      reviewing the flags IS the release. */}
+                  {!hasInvoices && m.status !== "disputed" && (() => {
+                    const periodOpen = monthEndIso >= new Date().toISOString().slice(0, 10)
+                    const blocked = openFindings.length > 0
+                      ? `${openFindings.length} flagged visit${openFindings.length === 1 ? "" : "s"} await review`
+                      : periodOpen
+                        ? `the month isn't over until ${monthEndIso}`
+                        : null
+                    return (
+                      <button
+                        disabled={acting !== null || blocked !== null}
+                        title={blocked ?? "advance this month: gate, issue, run the invoice machine"}
+                        onClick={() => act("Issue invoices", "POST", `/api/billing/months/${m.id}/advance`)}
+                        className={cn(primaryBtn, blocked && "opacity-50 cursor-not-allowed")}
+                      >
+                        {acting === "Issue invoices" ? "Issuing…" : "Issue invoices"}
+                      </button>
+                    )
+                  })()}
                   {hasInvoices && m.status !== "closed" && (
                     <button disabled={acting !== null} onClick={() => act("Run machine", "POST", `/api/billing/months/${m.id}/machine`)} className={actionBtn}>
                       {acting === "Run machine" ? "Running…" : "Run machine"}
