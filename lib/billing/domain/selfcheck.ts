@@ -546,39 +546,38 @@ check("re-accrual REPLACES the month; a vanished source is released", () => {
 const ob = (o: { monthId: string; customerId: number; visitKey: string; serviceDate: string; peerKey: string; chemCents: number }) => o
 
 check("the audit flags a peer-group outlier, with the numbers in the sentence", () => {
-  // 24 normal visits at $10, one at $200 — above p95 of the group, and the
-  // customer has no history, so peers alone decide.
-  const obs = []
-  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `m${i}`, customerId: i, visitKey: `t${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "weekly_residential", chemCents: 1000 }))
-  obs.push(ob({ monthId: "mX", customerId: 99, visitKey: "tX:2026-07-15", serviceDate: "2026-07-15", peerKey: "weekly_residential", chemCents: 20000 }))
-  const f = auditConsumables(obs, new Map())
+  // The bar is a PUBLISHED SURFACE row (RULED 2026-08-05): pool p95 $10
+  // over 25 visits; a $200 visit crosses it, and the customer has no
+  // history, so peers alone decide.
+  const bars = new Map([["weekly_residential", { p95ChemCents: 1000, visits: 25 }]])
+  const obs = [ob({ monthId: "mX", customerId: 99, visitKey: "tX:2026-07-15", serviceDate: "2026-07-15", peerKey: "weekly_residential", chemCents: 20000 })]
+  const f = auditConsumables(obs, new Map(), bars)
   assert.strictEqual(f.length, 1)
   assert.strictEqual(f[0].customerId, 99)
   assert.ok(f[0].message.startsWith("2026-07-15: $200.00"), "the finding leads with the date+dollars — the dedupe key and the sentence a person reads")
   assert.ok(f[0].message.includes("95th percentile"), "says WHICH bar was crossed")
 })
 
-check("self history VETOES the peers — a pool that always eats chlorine is not an outlier", () => {
-  const obs = []
-  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `m${i}`, customerId: i, visitKey: `t${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "P", chemCents: 1000 }))
-  obs.push(ob({ monthId: "mX", customerId: 99, visitKey: "tX:2026-07-15", serviceDate: "2026-07-15", peerKey: "P", chemCents: 20000 }))
-  // $200 is under 2x this customer's own $150 median: their normal, not a finding.
-  const history = new Map([[99, { customerId: 99, medianChemCents: 15000, p95ChemCents: 30000, visits: 12 }]])
-  assert.strictEqual(auditConsumables(obs, history).length, 0)
-  // ...but a thin history (below minSelfVisits) cannot veto.
-  const thin = new Map([[99, { customerId: 99, medianChemCents: 15000, p95ChemCents: 30000, visits: 2 }]])
-  assert.strictEqual(auditConsumables(obs, thin).length, 1)
+check("the SELF bar flags on its own — and a thin history cannot", () => {
+  // RULED (2026-08-04): peer OR self. $200 is UNDER this pool's $300 bar,
+  // but over the customer's own p95 with real history — flags. The same
+  // visit with a 2-visit history has no self distribution — silent.
+  const bars = new Map([["P", { p95ChemCents: 30000, visits: 25 }]])
+  const obs = [ob({ monthId: "mX", customerId: 99, visitKey: "tX:2026-07-15", serviceDate: "2026-07-15", peerKey: "P", chemCents: 20000 })]
+  const history = new Map([[99, { customerId: 99, medianChemCents: 9000, p95ChemCents: 15000, visits: 21 }]])
+  const f = auditConsumables(obs, history, bars)
+  assert.strictEqual(f.length, 1)
+  assert.ok(f[0].message.includes("their own 95th percentile"), "says the SELF bar was the one crossed")
+  const thin = new Map([[99, { customerId: 99, medianChemCents: 9000, p95ChemCents: 15000, visits: 2 }]])
+  assert.strictEqual(auditConsumables(obs, thin, bars).length, 0)
 })
 
 check("a peer group too small to define normal flags NOTHING", () => {
   // 3 visits is not a distribution. Flagging against it would be noise with
   // a percentile attached.
-  const obs = [
-    ob({ monthId: "a", customerId: 1, visitKey: "t1:2026-07-01", serviceDate: "2026-07-01", peerKey: "RARE", chemCents: 100 }),
-    ob({ monthId: "b", customerId: 2, visitKey: "t2:2026-07-01", serviceDate: "2026-07-01", peerKey: "RARE", chemCents: 100 }),
-    ob({ monthId: "c", customerId: 3, visitKey: "t3:2026-07-01", serviceDate: "2026-07-01", peerKey: "RARE", chemCents: 99999 }),
-  ]
-  assert.strictEqual(auditConsumables(obs, new Map()).length, 0)
+  const bars = new Map([["RARE", { p95ChemCents: 100, visits: 3 }]])
+  const obs = [ob({ monthId: "c", customerId: 3, visitKey: "t3:2026-07-01", serviceDate: "2026-07-01", peerKey: "RARE", chemCents: 99999 })]
+  assert.strictEqual(auditConsumables(obs, new Map(), bars).length, 0)
 })
 
 check("bulk_refill is exempt from CPV; provides_chems is judged in its OWN group", () => {
@@ -588,13 +587,16 @@ check("bulk_refill is exempt from CPV; provides_chems is judged in its OWN group
   // own chemicals — so $80 of chems flags THERE while being unremarkable
   // among ordinary residentials. Both keep their spend out of everyone
   // else's baselines.
-  const obs = []
-  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `b${i}`, customerId: 100 + i, visitKey: `tb${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "bulk_refill", chemCents: 35000 }))
-  obs.push(ob({ monthId: "bX", customerId: 200, visitKey: "tbX:2026-07-08", serviceDate: "2026-07-08", peerKey: "bulk_refill", chemCents: 160000 }))
-  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `p${i}`, customerId: 500 + i, visitKey: `tp${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "provides_chems", chemCents: 500 }))
-  obs.push(ob({ monthId: "pX", customerId: 201, visitKey: "tpX:2026-07-08", serviceDate: "2026-07-08", peerKey: "provides_chems", chemCents: 8000 }))
-  for (let i = 0; i < 24; i++) obs.push(ob({ monthId: `r${i}`, customerId: 300 + i, visitKey: `tr${i}:2026-07-01`, serviceDate: "2026-07-01", peerKey: "weekly_residential", chemCents: 10000 }))
-  const f = auditConsumables(obs, new Map())
+  const bars = new Map([
+    ["bulk_refill", { p95ChemCents: 35000, visits: 25 }],
+    ["provides_chems", { p95ChemCents: 500, visits: 25 }],
+    ["weekly_residential", { p95ChemCents: 10000, visits: 25 }],
+  ])
+  const obs = [
+    ob({ monthId: "bX", customerId: 200, visitKey: "tbX:2026-07-08", serviceDate: "2026-07-08", peerKey: "bulk_refill", chemCents: 160000 }),
+    ob({ monthId: "pX", customerId: 201, visitKey: "tpX:2026-07-08", serviceDate: "2026-07-08", peerKey: "provides_chems", chemCents: 8000 }),
+  ]
+  const f = auditConsumables(obs, new Map(), bars)
   assert.deepStrictEqual(f.map((x) => x.customerId).sort(), [201], "the towering bucket stays silent; the provider's $80 flags against its own $5 normal")
 })
 

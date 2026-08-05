@@ -92,33 +92,26 @@ export interface AuditFinding {
   readonly cents: number
 }
 
-const percentileOf = (sorted: number[], p: number): number => {
-  if (sorted.length === 0) return Infinity
-  const i = Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1))
-  return sorted[i]
+/** One pool's bar, read from the published surface (billing.v_peer_group_bars). */
+export interface PeerBar {
+  readonly p95ChemCents: number
+  readonly visits: number
 }
 
 /**
- * Judge one run's observations. The peer distributions are built from THIS
- * run's population, which is why the audit wants the bulk path: the whole
- * month is the peer group, in memory.
+ * Judge one run's observations against the PUBLISHED bars (RULED
+ * 2026-08-05): the distributions are a read surface — one row per pool,
+ * always current as visits land — and the domain keeps only the POLICY:
+ * which pools are exempt, how many peers define "normal", when the self
+ * bar applies, and the comparison itself.
  */
 export function auditConsumables(
   observations: readonly ChemObservation[],
   histories: ReadonlyMap<number, ChemHistory>,
+  bars: ReadonlyMap<string, PeerBar>,
   policy: AuditPolicy = AUDIT_POLICY,
 ): AuditFinding[] {
   const exempt = new Set(policy.cpvExemptGroups)
-  const byPeer = new Map<string, number[]>()
-  for (const o of observations) {
-    if (exempt.has(o.peerKey)) continue
-    byPeer.set(o.peerKey, [...(byPeer.get(o.peerKey) ?? []), o.chemCents])
-  }
-  const thresholds = new Map<string, number>()
-  for (const [key, values] of byPeer) {
-    if (values.length < policy.minPeers) continue // too few peers to define normal
-    thresholds.set(key, percentileOf([...values].sort((a, b) => a - b), policy.percentile))
-  }
 
   const findings: AuditFinding[] = []
   for (const o of observations) {
@@ -129,7 +122,8 @@ export function auditConsumables(
     // or above the PEER group's 95th percentile, OR at or above the
     // customer's OWN 95th percentile when they have the history to justify
     // a distribution (minSelfVisits of their own visits).
-    const peerBar = thresholds.get(o.peerKey)
+    const bar = bars.get(o.peerKey)
+    const peerBar = bar !== undefined && bar.visits >= policy.minPeers ? bar.p95ChemCents : undefined
     const self = histories.get(o.customerId)
     const selfBar = self !== undefined && self.visits >= policy.minSelfVisits ? self.p95ChemCents : undefined
     const overPeer = peerBar !== undefined && o.chemCents > peerBar

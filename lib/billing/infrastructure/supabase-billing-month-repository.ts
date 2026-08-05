@@ -423,13 +423,14 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
    * plain view, always current as items land, so the app never re-sums an
    * unbounded item pull.
    */
-  async visitChemTotals(month: string): Promise<{ monthId: string | null; customerId: number; taskId: string; serviceDate: string; chemCents: number }[]> {
-    // The view spans ALL ingested data; billing_month_id is a NULLABLE link
-    // — rows without one still feed the distribution, but no finding can
-    // land on a month that does not exist.
-    const rows = await this.pageAll<{ billing_month_id: string | null; customer_id: number; task_id: string; service_date: string; chem_cents: number }>(
+  async visitChemTotals(month: string): Promise<{ monthId: string | null; customerId: number; taskId: string; serviceDate: string; chemCents: number; pool: string }[]> {
+    // The view spans ALL ingested data and carries the POOL (provision
+    // overrides group); billing_month_id is a NULLABLE link — rows without
+    // one still feed the distribution, but no finding can land on a month
+    // that does not exist.
+    const rows = await this.pageAll<{ billing_month_id: string | null; customer_id: number; task_id: string; service_date: string; chem_cents: number; pool: string }>(
       () => (this.q("v_visit_chem_totals")
-        .select("billing_month_id, customer_id, task_id, service_date, chem_cents")
+        .select("billing_month_id, customer_id, task_id, service_date, chem_cents, pool")
         .eq("month", month) as unknown as { order(c: string): unknown })
         .order("task_id") as never,
       "visit chem totals",
@@ -441,7 +442,22 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       taskId: r.task_id,
       serviceDate: String(r.service_date),
       chemCents: Number(r.chem_cents),
+      pool: r.pool,
     }))
+  }
+
+  /** The BARS surface: one row per pool for the month — p95 + count. */
+  async peerGroupBars(month: string): Promise<Map<string, { p95ChemCents: number; visits: number }>> {
+    const { data, error } = await this.q("v_peer_group_bars")
+      .select("pool, visits, p95_chem_cents")
+      .eq("month", month)
+      .range(0, 99)
+    if (error) throw new Error(`peer bars read failed: ${JSON.stringify(error).slice(0, 200)}`)
+    const out = new Map<string, { p95ChemCents: number; visits: number }>()
+    for (const r of (data ?? []) as { pool: string; visits: number; p95_chem_cents: number }[]) {
+      out.set(r.pool, { p95ChemCents: Number(r.p95_chem_cents), visits: r.visits })
+    }
+    return out
   }
 
   /**
