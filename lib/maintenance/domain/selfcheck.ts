@@ -10,6 +10,12 @@ import { BillingTerms } from "./billing-terms"
 import { Task, TaskRuleError, type Terms } from "./task"
 
 let checks = 0
+const asyncPending: (() => Promise<void>)[] = []
+function CHECK_ASYNC(name: string, fn: () => Promise<void>) {
+  asyncPending.push(async () => { await fn(); checks++; console.log(`  ok  ${name}`) })
+}
+process.on("beforeExit", () => { void (async () => { for (const p of asyncPending) await p() })() })
+
 function check(name: string, fn: () => void) {
   fn()
   checks++
@@ -256,3 +262,57 @@ serviceCheck().then(() => console.log(`\n${checks} checks passed\n`))
     assert.equal(t.revisionKind(base()), "amend")
   })
 }
+
+/* ------- a supersede must not compute an anchor from a stale contract ------ */
+async function supersedeFreshnessChecks() {
+  const t = (over: Partial<Terms> = {}): Terms => ({
+    serviceTypeId: "svc-1", billingMethod: "per_visit", priceCents: 5000,
+    startsOn: "2026-08-13", endsOn: null, note: "",
+    slots: [{ weekday: 4, techId: "tech-a", frequency: "biweekly_b" }], ...over,
+  })
+  const current = Task.open(461, t({ startsOn: "2024-12-30", slots: [{ weekday: 1, techId: "tech-a", frequency: "biweekly_b" }] }))
+  current.identify("task-461", "5210359")
+
+  const { TaskService } = await import("../application/task-service")
+  const repo = { async byId() { return current }, async openTaskFor() { return null }, async save() {}, async history() { return [] } }
+  const gateway = {
+    async create() { return { accepted: true, ionTaskId: "ion-new", detail: "created" } },
+    async update() { return { accepted: true, detail: "updated" } },
+    async changeStartDate() { return { accepted: true, detail: "" } },
+  }
+
+  CHECK_ASYNC("without a freshness source a supersede REFUSES — it will not guess an anchor", async () => {
+    const svc = new TaskService(repo as never, gateway as never)
+    const out = await svc.editTask("task-461", t(), { dryRun: true })
+    assert.equal(out.ok, false)
+    assert.match(out.detail, /freshness source/)
+  })
+
+  CHECK_ASYNC("a task that could not be verified REFUSES rather than proceeding", async () => {
+    const svc = new TaskService(repo as never, gateway as never, {
+      async refresh(ids: readonly string[]) { return { verified: [], skipped: ids.map((id) => ({ taskId: id, reason: "ION read failed" })) } },
+    })
+    const out = await svc.editTask("task-461", t(), { dryRun: true })
+    assert.equal(out.ok, false)
+    assert.match(out.detail, /could not verify/)
+  })
+
+  CHECK_ASYNC("verified against ION, the supersede proceeds", async () => {
+    const svc = new TaskService(repo as never, gateway as never, {
+      async refresh(ids: readonly string[]) { return { verified: [...ids], skipped: [] } },
+    })
+    const out = await svc.editTask("task-461", t(), { dryRun: true })
+    assert.equal(out.ok, true, out.detail)
+    assert.match(out.detail, /2026-08-12/, "old contract ends the day before the successor starts")
+    assert.match(out.detail, /2026-08-13/)
+  })
+
+  CHECK_ASYNC("a tech-only change needs no freshness — no anchor is involved", async () => {
+    const svc = new TaskService(repo as never, gateway as never)
+    const out = await svc.editTask("task-461", t({
+      startsOn: "2024-12-30", slots: [{ weekday: 1, techId: "tech-b", frequency: "biweekly_b" }],
+    }), { dryRun: true })
+    assert.equal(out.ok, true, out.detail)
+  })
+}
+void supersedeFreshnessChecks()
