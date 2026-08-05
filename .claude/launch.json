@@ -18,6 +18,16 @@
       "autoPort": true
     },
     {
+      "name": "worktree-dev-followup",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/cartergasia/servicebilling/servicebilling/.claude/worktrees/musing-booth-cc0f97 && npx next dev -p ${PORT:-3101}"
+      ],
+      "port": 3101,
+      "autoPort": true
+    },
+    {
       "name": "docs-static",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
