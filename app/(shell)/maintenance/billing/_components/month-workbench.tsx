@@ -615,8 +615,8 @@ export function MonthWorkbench({
                           <button
                             role="switch"
                             aria-checked={!!attachAt}
-                            disabled={anySent || acting === "attach"}
-                            title={anySent ? "invoices already emailed — the attach decision is frozen" : attachAt ? "the send path will attach the letter — click to turn off" : "attach the letter when the invoices email"}
+                            disabled={anySent || acting === "attach" || (!attachAt && !explainer.generatedAt)}
+                            title={anySent ? "invoices already emailed — the attach decision is frozen" : !attachAt && !explainer.generatedAt ? "generate the letter first" : attachAt ? "the send path will attach the letter — click to turn off" : "attach the letter when the invoices email"}
                             onClick={async () => {
                               const r = await fetch(`/api/billing/months/${m.id}/explainer-attach`, {
                                 method: "POST",

@@ -58,7 +58,7 @@ export async function collectInvoice(inv: InvoiceRef, deps: CollectDeps, now: Da
 
 export interface SendDeps {
   sender: InvoiceSender
-  attachments(inv: InvoiceRef): Promise<{ filename: string; pdf: Uint8Array }[]>
+  attachments(inv: InvoiceRef): Promise<{ filename: string; pdf: Uint8Array; includeOnSend: boolean }[]>
   emit(type: string, payload: Record<string, unknown>, participants: string[], at: string): Promise<void>
 }
 

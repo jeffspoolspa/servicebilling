@@ -251,8 +251,8 @@ export function maintenanceMachineDeps(sys: Db): {
 
   const send: SendDeps = {
     sender: {
-      async send(qboInvoiceId: string, attachments: readonly { filename: string; pdf: Uint8Array }[]) {
-        for (const a of attachments) await qbo.attachPdf(qboInvoiceId, a.filename, a.pdf)
+      async send(qboInvoiceId: string, attachments: readonly { filename: string; pdf: Uint8Array; includeOnSend: boolean }[]) {
+        for (const a of attachments) await qbo.attachPdf(qboInvoiceId, a.filename, a.pdf, a.includeOnSend)
         // Direct the send to OUR email — authoritative over whatever the
         // QBO entity carries (and covers docs created before BillEmail).
         const { data } = await monthInvoices().select("billing_month_id, billing_months(customer_id)").eq("qbo_invoice_id", qboInvoiceId)
@@ -286,7 +286,9 @@ export function maintenanceMachineDeps(sys: Db): {
       if (!r.ok) {
         throw new Error(`attach is on for this month but no explainer PDF exists — generate the letter (or turn attach off) and re-run`)
       }
-      return [{ filename: `High-Bill-Explainer-${bm.month.slice(0, 7)}.pdf`, pdf: new Uint8Array(await r.arrayBuffer()) }]
+      // includeOnSend true precisely BECAUSE the toggle is on — that is
+      // the intent this attachment fulfills.
+      return [{ filename: `High-Bill-Explainer-${bm.month.slice(0, 7)}.pdf`, pdf: new Uint8Array(await r.arrayBuffer()), includeOnSend: true }]
     },
     emit,
   }

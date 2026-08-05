@@ -20,11 +20,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ monthId: strin
 
   const { data: bmRows } = await (sys.schema("billing").from("billing_months") as never as {
     select(c: string): { eq(k: string, v: string): PromiseLike<{ data: unknown[] | null }> }
-  }).select("id, explainer_generated_at").eq("id", monthId)
-  const bm = ((bmRows ?? [])[0] ?? null) as { id: string; explainer_generated_at: string | null } | null
+  }).select("id").eq("id", monthId)
+  const bm = ((bmRows ?? [])[0] ?? null) as { id: string } | null
   if (!bm) return NextResponse.json({ error: "month not found" }, { status: 404 })
-  if (body.attach !== false && !bm.explainer_generated_at) {
-    return NextResponse.json({ error: "generate the explainer first" }, { status: 409 })
+  if (body.attach !== false) {
+    // The precondition is the PDF ITSELF, not the generation stamp — a
+    // failed render (or a pre-renderer letter) has a stamp and no file,
+    // and intent without a file is unrepresentable.
+    const pdf = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/explainers/${monthId}.pdf`,
+      { method: "HEAD", cache: "no-store" },
+    )
+    if (!pdf.ok) {
+      return NextResponse.json({ error: "generate the explainer first — attach needs the rendered PDF" }, { status: 409 })
+    }
   }
 
   // The lock: any emailed invoice on this month freezes the attach decision.

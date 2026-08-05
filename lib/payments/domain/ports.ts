@@ -65,7 +65,7 @@ export interface ReceiptSender {
 
 /** Sends the invoice itself, with any attached documents (the usage report). */
 export interface InvoiceSender {
-  send(qboInvoiceId: string, attachments: readonly { filename: string; pdf: Uint8Array }[]): Promise<void>
+  send(qboInvoiceId: string, attachments: readonly { filename: string; pdf: Uint8Array; includeOnSend: boolean }[]): Promise<void>
 }
 
 export interface ChargeRepository {

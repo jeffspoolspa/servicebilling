@@ -304,14 +304,15 @@ export class QboInvoices extends Qbo {
    * rides the maintenance service invoice. Idempotent enough for the
    * pipeline: QBO tolerates duplicate attachments; the send is the act.
    */
-  async attachPdf(qboInvoiceId: string, filename: string, pdf: Uint8Array): Promise<void> {
+  async attachPdf(qboInvoiceId: string, filename: string, pdf: Uint8Array, includeOnSend: boolean): Promise<void> {
     const boundary = "jpsb" + Math.random().toString(36).slice(2)
     const meta = JSON.stringify({
       FileName: filename,
       ContentType: "application/pdf",
       // IncludeOnSend is what makes the file ride the /send email — without
-      // it the attachment only sits on the QBO record.
-      AttachableRef: [{ EntityRef: { type: "Invoice", value: qboInvoiceId }, IncludeOnSend: true }],
+      // it the attachment only sits on the QBO record. The caller decides;
+      // it is never a blanket.
+      AttachableRef: [{ EntityRef: { type: "Invoice", value: qboInvoiceId }, IncludeOnSend: includeOnSend }],
     })
     const head =
       `--${boundary}\r\nContent-Disposition: form-data; name="file_metadata_01"; filename="attachment.json"\r\nContent-Type: application/json\r\n\r\n${meta}\r\n` +
