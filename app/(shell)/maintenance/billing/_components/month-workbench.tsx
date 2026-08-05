@@ -430,11 +430,23 @@ export function MonthWorkbench({
                       </button>
                     )
                   })()}
-                  {hasInvoices && m.status !== "closed" && (
-                    <button disabled={acting !== null} onClick={() => act("Run machine", "POST", `/api/billing/months/${m.id}/machine`)} className={actionBtn}>
-                      {acting === "Run machine" ? "Running…" : "Run machine"}
-                    </button>
-                  )}
+                  {hasInvoices && m.status !== "closed" && (() => {
+                    // The ladder ends at SEND: every invoice emailed means
+                    // the machine is done — disable so nobody hunts for a
+                    // step that doesn't exist (open balances await payment,
+                    // not the machine).
+                    const machineDone = (m.issued_invoices ?? []).every((i2) => i2.email_status === "EmailSent")
+                    return (
+                      <button
+                        disabled={acting !== null || machineDone}
+                        title={machineDone ? "machine done — every invoice emailed; open balances await payment" : "run each invoice's ladder: credit check, charge, send"}
+                        onClick={() => act("Run machine", "POST", `/api/billing/months/${m.id}/machine`)}
+                        className={cn(actionBtn, machineDone && "opacity-50 cursor-not-allowed")}
+                      >
+                        {acting === "Run machine" ? "Running…" : "Run machine"}
+                      </button>
+                    )
+                  })()}
                 </span>
               </div>
               <StatusStepper stages={[...MONTH_STAGES]} current={stepperStage(m.status)} />
