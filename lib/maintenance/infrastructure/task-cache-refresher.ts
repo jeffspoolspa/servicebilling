@@ -35,12 +35,28 @@ export interface RefreshReport {
   readonly drift: ScheduleDrift[]
 }
 
+/** The whole servicing state of a task — what an edit is measured against. */
+export interface TaskState {
+  /** weekday -> tech, the servicing map. */
+  readonly days: Record<string, string | null>
+  readonly frequency: string | null
+  readonly startsOn: string | null
+  /** Set means the task is over: an expiry is just an end date, not a kind. */
+  readonly endsOn: string | null
+}
+
+/**
+ * One task, before and after — never one entry per slot.
+ *
+ * A day moving, a tech swapping, a cadence changing and a task expiring are
+ * not four kinds of event to categorise; they are four ways the same state
+ * differs. Recording the whole state twice keeps the history readable without
+ * a taxonomy that has to grow every time ION grows a field.
+ */
 export interface ScheduleDrift {
   readonly taskId: string
-  readonly kind: string
-  readonly before: Record<string, unknown> | null
-  readonly after: Record<string, unknown> | null
-  readonly endsOn: string | null
+  readonly before: TaskState
+  readonly after: TaskState
 }
 
 interface TaskRow {
@@ -49,6 +65,9 @@ interface TaskRow {
   frequency: string | null
   ion_verified_at: string | null
   customer_id: number | null
+  /** Part of the servicing state, so part of what an edit is measured against. */
+  starts_on: string | null
+  ends_on: string | null
 }
 
 export class TaskCacheRefresher {
@@ -72,7 +91,7 @@ export class TaskCacheRefresher {
     const { data } = await this.client
       .schema("maintenance")
       .from("tasks")
-      .select("id, ion_task_id, frequency, ion_verified_at, customer_id")
+      .select("id, ion_task_id, frequency, ion_verified_at, customer_id, starts_on, ends_on")
       .in("id", taskIds as string[])
       .range(0, 999)
     return ((data ?? []) as TaskRow[]).filter(
@@ -160,11 +179,15 @@ export class TaskCacheRefresher {
     const verified: string[] = []
     for (const task of readable) {
       let translated: TranslatedForm
+      // Keep the form: the ACL translates the SCHEDULE, but the contract dates
+      // are part of the servicing state an edit is measured against.
+      let form: Awaited<ReturnType<typeof this.ion.readTask>> | null = null
       try {
-        translated = this.acl.fromIonForm(
-          await this.ion.readTask(task.ion_task_id!, task.customer_id !== null ? (ionCustOf.get(task.customer_id) ?? undefined) : undefined),
-          ourTechOf,
+        form = await this.ion.readTask(
+          task.ion_task_id!,
+          task.customer_id !== null ? (ionCustOf.get(task.customer_id) ?? undefined) : undefined,
         )
+        translated = this.acl.fromIonForm(form, ourTechOf)
       } catch (err) {
         skipped.push({ taskId: task.id, reason: err instanceof Error ? err.message : String(err) })
         continue
@@ -177,18 +200,20 @@ export class TaskCacheRefresher {
       const slotFrequency = translated.schedule.frequency
 
       const mine = slots.filter((s) => s.task_id === task.id)
+      // The whole state as WE hold it, before touching anything.
+      const before: TaskState = {
+        days: Object.fromEntries(mine.filter((s) => s.active && s.day_of_week !== null)
+          .map((s) => [String(s.day_of_week), s.tech_employee_id])),
+        frequency: mine.find((s) => s.active)?.frequency ?? null,
+        startsOn: task.starts_on ?? null,
+        endsOn: task.ends_on ?? null,
+      }
       const seen = new Set<number>()
       for (const s of mine) {
         if (s.day_of_week !== null && want.has(s.day_of_week)) {
           seen.add(s.day_of_week)
           const tech = want.get(s.day_of_week)!
           if (!s.active || s.frequency !== slotFrequency || (tech && s.tech_employee_id !== tech)) {
-            drift.push({
-              taskId: task.id, kind: s.active ? "day_changed" : "day_restored",
-              before: { weekday: s.day_of_week, tech: s.tech_employee_id, frequency: s.frequency, active: s.active },
-              after: { weekday: s.day_of_week, tech: tech ?? s.tech_employee_id, frequency: slotFrequency, active: true },
-              endsOn: null,
-            })
             await this.update(s.id, {
               active: true,
               frequency: slotFrequency,
@@ -205,23 +230,21 @@ export class TaskCacheRefresher {
           // active = true, so it leaves the map at the same moment.
           const endsOn = new Date().toISOString().slice(0, 10)
           await this.update(s.id, { active: false, ends_on: endsOn })
-          drift.push({
-            taskId: task.id, kind: "day_dropped",
-            before: { weekday: s.day_of_week, tech: s.tech_employee_id, frequency: s.frequency },
-            after: null, endsOn,
-          })
           slotsChanged++
         }
       }
       for (const [dow, tech] of want) {
         if (seen.has(dow)) continue
-        drift.push({
-          taskId: task.id, kind: "day_added",
-          before: null, after: { weekday: dow, tech, frequency: slotFrequency, active: true }, endsOn: null,
-        })
         await this.insert(task.id, task.ion_task_id!, dow, tech, slotFrequency)
         slotsChanged++
       }
+      const after: TaskState = {
+        days: Object.fromEntries([...want].map(([dow, tech]) => [String(dow), tech])),
+        frequency: slotFrequency,
+        startsOn: form?.startsOn || task.starts_on || null,
+        endsOn: (form?.fields["EndsOn"] ?? "") || null,
+      }
+      if (JSON.stringify(before) !== JSON.stringify(after)) drift.push({ taskId: task.id, before, after })
       verified.push(task.id)
     }
 

@@ -94,9 +94,9 @@ export class TaskService {
         r.drift.map((d) => ({
           aggregate: "task" as const,
           aggregateId: d.taskId,
-          type: "ScheduleChangeObserved",
+          type: "TaskUpdated",
           actor: "task_refresh",
-          payload: { kind: d.kind, before: d.before, after: d.after, endsOn: d.endsOn, source: "ion" },
+          payload: { before: d.before, after: d.after, source: "ion" },
         })),
       )
     }
@@ -130,13 +130,27 @@ export class TaskService {
       }
       for (const t of tasks) {
         if (live.has(t.ionTaskId!)) continue
-        t.close(opts.at, undefined)
+        const wasServiced = {
+          days: Object.fromEntries(t.terms.slots.map((sl) => [String(sl.weekday), sl.techId])),
+          frequency: t.terms.slots[0]?.frequency ?? null,
+          startsOn: t.terms.startsOn,
+          endsOn: t.terms.endsOn,
+        }
+        const endsOn = (opts.at ?? new Date().toISOString()).slice(0, 10)
+        t.close(opts.at, endsOn)
         await this.tasks.save(t)
         deleted.push({ taskId: t.id!, ionTaskId: t.ionTaskId! })
+        // A task gone from ION is the SAME event as any other change — the
+        // end date is what says it is over. One fact type, no taxonomy.
         await this.events?.append([{
-          aggregate: "task", aggregateId: t.id!, type: "TaskDeletedInIon", actor: "task_refresh",
+          aggregate: "task", aggregateId: t.id!, type: "TaskUpdated", actor: "task_refresh",
           participants: [`customer:${t.customerId}`],
-          payload: { ionTaskId: t.ionTaskId, detail: "ION no longer lists this task for the customer" },
+          payload: {
+            before: wasServiced,
+            after: { ...wasServiced, days: {}, endsOn },
+            source: "ion",
+            note: "ION no longer lists this task for the customer",
+          },
         }])
       }
     }
@@ -194,6 +208,18 @@ export class TaskService {
     // Live and accepted: record it, including the facts the aggregate kept.
     task.identify(crypto.randomUUID(), res.ionTaskId!)
     await this.tasks.save(task)
+    // The counterpart to TaskUpdated: a task begins. Same state shape, no
+    // `before`, so a history reads as one series without special-casing.
+    await this.events?.append([{
+      aggregate: "task", aggregateId: task.id!, type: "TaskAdded", actor: "task_service",
+      participants: [`customer:${task.customerId}`],
+      payload: { after: {
+        days: Object.fromEntries(task.terms.slots.map((sl) => [String(sl.weekday), sl.techId])),
+        frequency: task.terms.slots[0]?.frequency ?? null,
+        startsOn: task.terms.startsOn,
+        endsOn: task.terms.endsOn,
+      }, ionTaskId: task.ionTaskId },
+    }])
     return { ok: true, taskId: task.id, ionTaskId: task.ionTaskId, detail: res.detail }
   }
 
@@ -242,6 +268,12 @@ export class TaskService {
       return this.supersedeTask(fresh as Task & { id: string }, terms, { dryRun, at: opts.at })
     }
 
+    const beforeEdit = {
+        days: Object.fromEntries(task.terms.slots.map((sl) => [String(sl.weekday), sl.techId])),
+        frequency: task.terms.slots[0]?.frequency ?? null,
+        startsOn: task.terms.startsOn,
+        endsOn: task.terms.endsOn,
+      }
     try {
       task.changeTerms(terms, opts.at)
     } catch (err) {
@@ -258,7 +290,18 @@ export class TaskService {
         payload: res.payload,
       }
     }
+    const after = {
+        days: Object.fromEntries(task.terms.slots.map((sl) => [String(sl.weekday), sl.techId])),
+        frequency: task.terms.slots[0]?.frequency ?? null,
+        startsOn: task.terms.startsOn,
+        endsOn: task.terms.endsOn,
+      }
     await this.tasks.save(task)
+    await this.events?.append([{
+      aggregate: "task", aggregateId: taskId, type: "TaskUpdated", actor: "task_service",
+      participants: [`customer:${task.customerId}`],
+      payload: { before: beforeEdit, after, source: "app" },
+    }])
     return { ok: true, taskId, ionTaskId: task.ionTaskId, detail: res.detail }
   }
 
@@ -309,10 +352,34 @@ export class TaskService {
 
     // 3. record both, old first: the one-open-per-location rule is the
     //    database's, and it would reject the successor while this one is open.
+    const oldBefore = {
+        days: Object.fromEntries(task.terms.slots.map((sl) => [String(sl.weekday), sl.techId])),
+        frequency: task.terms.slots[0]?.frequency ?? null,
+        startsOn: task.terms.startsOn,
+        endsOn: task.terms.endsOn,
+      }
     task.close(opts.at, endsOn)
     await this.tasks.save(task)
     successor.identify(crypto.randomUUID(), made.ionTaskId!)
     await this.tasks.save(successor)
+    // Two facts, because two contracts changed: one ended, one began.
+    await this.events?.append([
+      {
+        aggregate: "task", aggregateId: task.id, type: "TaskUpdated", actor: "task_service",
+        participants: [`customer:${task.customerId}`],
+        payload: { before: oldBefore, after: { ...oldBefore, endsOn }, source: "app", note: `superseded by ${made.ionTaskId}` },
+      },
+      {
+        aggregate: "task", aggregateId: successor.id!, type: "TaskAdded", actor: "task_service",
+        participants: [`customer:${successor.customerId}`],
+        payload: { after: {
+        days: Object.fromEntries(successor.terms.slots.map((sl) => [String(sl.weekday), sl.techId])),
+        frequency: successor.terms.slots[0]?.frequency ?? null,
+        startsOn: successor.terms.startsOn,
+        endsOn: successor.terms.endsOn,
+      }, ionTaskId: successor.ionTaskId, note: `supersedes ${ionTaskId}` },
+      },
+    ])
     return { ok: true, taskId: successor.id, ionTaskId: successor.ionTaskId,
       detail: `superseded: ${ionTaskId} ends ${endsOn}, ${made.ionTaskId} starts ${startsOn}` }
   }

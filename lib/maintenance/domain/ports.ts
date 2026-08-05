@@ -101,6 +101,29 @@ export interface LastVisitSource {
  * PublishService already treats refresh as a required precondition; editTask
  * had simply been trusting the cache.
  */
+/** The whole servicing state of a task — what an edit is measured against. */
+export interface TaskServicingState {
+  /** weekday -> tech: the servicing map. */
+  days: Record<string, string | null>
+  frequency: string | null
+  startsOn: string | null
+  /** Set means the task is over. An expiry is an end date, not a separate kind. */
+  endsOn: string | null
+}
+
+/**
+ * One task, before and after. NOT one entry per field: a day moving, a tech
+ * swapping, a cadence changing and a task expiring are four ways the same
+ * state differs, not four kinds of event to categorise. Recording the whole
+ * state twice keeps the history readable without a taxonomy that has to grow
+ * every time ION grows a field.
+ */
+export interface TaskStateChange {
+  taskId: string
+  before: TaskServicingState
+  after: TaskServicingState
+}
+
 export interface FreshnessSource {
   /**
    * Reconcile these tasks with the system of record. Returns those it
@@ -112,13 +135,7 @@ export interface FreshnessSource {
   refresh(taskIds: readonly string[]): Promise<{
     verified: string[]
     skipped: { taskId: string; reason: string }[]
-    drift?: {
-      taskId: string
-      kind: string
-      before: Record<string, unknown> | null
-      after: Record<string, unknown> | null
-      endsOn: string | null
-    }[]
+    drift?: TaskStateChange[]
   }>
 }
 

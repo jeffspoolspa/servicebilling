@@ -381,3 +381,64 @@ async function refreshDeletionChecks() {
   })
 }
 void refreshDeletionChecks()
+
+/* ---------- one series: TaskAdded begins it, TaskUpdated continues it ------- */
+async function taskEventChecks() {
+  const { TaskService } = await import("../application/task-service")
+  const T = (over: Partial<Terms> = {}): Terms => ({
+    serviceTypeId: "svc-1", billingMethod: "per_visit", priceCents: 5000,
+    startsOn: "2026-08-13", endsOn: null, note: "",
+    slots: [{ weekday: 4, techId: "tech-a", frequency: "biweekly_b" }], ...over,
+  })
+  const facts: { type: string; payload: Record<string, unknown> }[] = []
+  const log = { async append(fs: readonly { type: string; payload?: Record<string, unknown> }[]) {
+    for (const f of fs) facts.push({ type: f.type, payload: f.payload ?? {} })
+    return { written: fs.length, failed: [] as string[] }
+  } }
+  const gateway = {
+    async create() { return { accepted: true, ionTaskId: "ion-new", detail: "created" } },
+    async update() { return { accepted: true, detail: "updated" } },
+    async changeStartDate() { return { accepted: true, detail: "" } },
+  }
+
+  CHECK_ASYNC("a new task emits ONE TaskAdded carrying the whole state", async () => {
+    facts.length = 0
+    const repo = { async byId() { return null }, async openTaskFor() { return null }, async save() {}, async history() { return [] } }
+    const svc = new TaskService(repo as never, gateway as never, undefined, undefined, log as never)
+    const out = await svc.addTask(461, T(), { dryRun: false })
+    assert.equal(out.ok, true, out.detail)
+    assert.deepEqual(facts.map((f) => f.type), ["TaskAdded"])
+    const after = facts[0].payload.after as Record<string, unknown>
+    assert.deepEqual(after.days, { "4": "tech-a" }, "the servicing map")
+    assert.equal(after.frequency, "biweekly_b")
+    assert.equal(after.startsOn, "2026-08-13")
+    assert.equal(after.endsOn, null)
+    assert.equal(facts[0].payload.before, undefined, "nothing precedes a task beginning")
+  })
+
+  CHECK_ASYNC("a tech change emits ONE TaskUpdated with both states", async () => {
+    facts.length = 0
+    const held = Task.open(461, T()); held.identify("t-9", "ion-9")
+    const repo = { async byId() { return held }, async openTaskFor() { return null }, async save() {}, async history() { return [] } }
+    const svc = new TaskService(repo as never, gateway as never, undefined, undefined, log as never)
+    const out = await svc.editTask("t-9", T({ slots: [{ weekday: 4, techId: "tech-b", frequency: "biweekly_b" }] }), { dryRun: false })
+    assert.equal(out.ok, true, out.detail)
+    assert.deepEqual(facts.map((f) => f.type), ["TaskUpdated"])
+    assert.deepEqual((facts[0].payload.before as Record<string, unknown>).days, { "4": "tech-a" })
+    assert.deepEqual((facts[0].payload.after as Record<string, unknown>).days, { "4": "tech-b" })
+  })
+
+  CHECK_ASYNC("an EXPIRY is an end date on TaskUpdated — never its own event type", async () => {
+    facts.length = 0
+    const held = Task.open(461, T()); held.identify("t-10", "ion-10")
+    const repo = { async byId() { return held }, async openTaskFor() { return null }, async save() {}, async history() { return [] } }
+    const svc = new TaskService(repo as never, gateway as never,
+      { async refresh(ids: readonly string[]) { return { verified: [...ids], skipped: [], drift: [] } } } as never,
+      { async idsFor() { return new Set(["something-else"]) } } as never, log as never)
+    const out = await svc.refreshTasks(["t-10"])
+    assert.equal(out.deleted.length, 1, "ION no longer lists it")
+    assert.deepEqual(facts.map((f) => f.type), ["TaskUpdated"], "not TaskDeleted — one vocabulary")
+    assert.ok((facts[0].payload.after as Record<string, unknown>).endsOn, "the end date is what says it is over")
+  })
+}
+void taskEventChecks()
