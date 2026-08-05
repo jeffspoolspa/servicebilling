@@ -16,6 +16,7 @@
 
 import type { QueryClient } from "@/lib/routing/infrastructure/supabase-quota-repository"
 import type { IonTasks } from "@/lib/external/ion/ion"
+import { taskColumnsFromIonForm } from "@/lib/external/ion/acl"
 import type { IonTaskAcl, TranslatedForm } from "@/lib/external/ion/acl"
 
 export interface RefreshReport {
@@ -244,14 +245,12 @@ export class TaskCacheRefresher {
         startsOn: form?.startsOn || task.starts_on || null,
         endsOn: (form?.fields["EndsOn"] ?? "") || null,
       }
-      // The anchor is the contract, not decoration: for a non-picker cadence
-      // StartsOn IS the schedule. Stamping a task verified while leaving its
-      // anchor stale is worse than not refreshing it — the supersede path then
-      // refuses on drift it was told had been reconciled (Bayens: ION
-      // 2024-12-30 vs cache 2025-01-03, refused after a "successful" refresh).
-      if (before.startsOn !== after.startsOn || before.endsOn !== after.endsOn) {
-        await this.updateTask(task.id, { starts_on: after.startsOn, ends_on: after.endsOn })
-      }
+      // The WHOLE mapped row, not a hand-picked subset. Refreshing a few
+      // fields at a time is how the cache stayed wrong three times tonight —
+      // the cadence, then the slots, then the anchor — each found only when
+      // something downstream refused. "Verified" has to mean the row matches
+      // ION, so every column ION is authoritative for is written together.
+      if (form) await this.updateTask(task.id, taskColumnsFromIonForm(form))
       if (JSON.stringify(before) !== JSON.stringify(after)) drift.push({ taskId: task.id, before, after })
       verified.push(task.id)
     }

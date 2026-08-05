@@ -153,10 +153,16 @@ export class PublishService {
       // was retrying.
       let alreadyClosed = false
       let alreadyCreated: string | null = null
+      // The superseded task IS the successor's template — carried here from the
+      // same read that decides whether the close already landed.
+      let carried: Record<string, string> | null = null
       if (!opts.dryRun) {
         try {
           const before = await this.ion.readTask(sup.ionTaskId, sup.ionCustId)
           alreadyClosed = (before.startsOn ?? "") !== "" && (before.fields["EndsOn"] ?? "") === sup.endsOn
+          const { EventID: _e, EndsOn: _x, ...rest } = before.fields
+          void _e; void _x
+          carried = rest
           // A successor exists when the customer already carries a task
           // starting on the date this supersede was computed for.
           const siblings = await this.ion.listTaskIds(sup.ionCustId)
@@ -195,8 +201,15 @@ export class PublishService {
         }
       }
 
+      // A create needs the WHOLE contract, not the delta. A blank addTask form
+      // carries no ServiceType, InvoiceType, ServiceRepeat or AssignedTo
+      // (measured against task 5210359, 2026-08-05), so merging three changed
+      // fields over it builds a task ION will not accept — which is how the
+      // first attempt closed a contract and then created nothing, leaving the
+      // customer with no live task. The successor inherits its predecessor and
+      // overwrites only what moved.
       const made = await this.ion.createTask(
-        { ionCustId: sup.ionCustId, changes: sup.changes,
+        { ionCustId: sup.ionCustId, changes: carried ? { ...carried, ...sup.changes } : sup.changes,
           expect: { serviceRepeat: sup.changes["ServiceRepeat"] ?? "3", startsOn: sup.startsOn } },
         { dryRun: opts.dryRun },
       )

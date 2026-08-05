@@ -473,3 +473,50 @@ function isoWeekday(iso: string): number | null {
   const d = new Date(`${iso}T00:00:00Z`)
   return isNaN(+d) ? null : d.getUTCDay()
 }
+
+/* ------------------- the WHOLE task, ION's form to our row ---------------- */
+
+/**
+ * Every column of maintenance.tasks that ION's form is authoritative for.
+ *
+ * One mapping, applied wholesale. Refreshing a hand-picked subset is how the
+ * cache stayed wrong three separate times tonight — the cadence, then the
+ * slots, then the anchor — each discovered only when something downstream
+ * refused. If we know the field and know the mapping, the refresh writes it;
+ * "verified" must mean the row matches ION, not that some of it does.
+ *
+ * Columns NOT here are ours, not ION's: status (we derive it), customer_id
+ * (ADR 006 resolves it), category (generated), verification stamps.
+ */
+export function taskColumnsFromIonForm(form: IonTaskForm): Record<string, unknown> {
+  const invoiceType = form.fields["InvoiceType_text"] ?? form.fields["InvoiceType"] ?? null
+  const { laborKey, consumablesKey } = parseInvoiceType(invoiceType)
+  const cost = Number(String(form.fields["itemcost"] ?? "").replace(/[^0-9.\-]/g, ""))
+  const cents = Number.isFinite(cost) && String(form.fields["itemcost"] ?? "").trim() !== "" ? Math.round(cost * 100) : null
+
+  return {
+    starts_on: form.startsOn || null,
+    ends_on: (form.fields["EndsOn"] ?? "") || null,
+    billing_method: laborKey,
+    consumables_mode: consumablesKey,
+    // ION states ONE price; which column it belongs in is decided by the
+    // labor policy, and the other is cleared so a stale figure cannot be read
+    // by a later change of method.
+    price_per_visit_cents: laborKey === "per_visit" ? cents : null,
+    flat_rate_monthly_cents: laborKey === "flat_rate_monthly" ? cents : null,
+    ion_invoice_type: invoiceType,
+    notes: form.fields["tasknote"] ?? null,
+  }
+}
+
+/** ION's one Invoice Type string carries two independent decisions. */
+export function parseInvoiceType(raw: string | null | undefined): {
+  laborKey: "per_visit" | "flat_rate_monthly" | "do_not_invoice"
+  consumablesKey: "listed" | "separate"
+} {
+  const t = (raw ?? "").toLowerCase()
+  return {
+    laborKey: t.includes("do not invoice") ? "do_not_invoice" : t.includes("flat") ? "flat_rate_monthly" : "per_visit",
+    consumablesKey: t.includes("separate consumables") ? "separate" : "listed",
+  }
+}
