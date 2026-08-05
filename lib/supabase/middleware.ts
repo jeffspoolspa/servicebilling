@@ -55,6 +55,14 @@ export async function updateSession(request: NextRequest) {
     return response
   }
 
+  // Machine drain doors: the nightly tick and the invoice-queue drainer.
+  // The caller is pg_cron via pg_net (or an operator's curl) — no session
+  // cookie; the routes authenticate the x-drain-token header themselves
+  // (INVOICE_DRAIN_TOKEN). A signed-in person still passes their door too.
+  if (path === "/api/billing/tick" || path === "/api/billing/invoice-queue/drain") {
+    return response
+  }
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
