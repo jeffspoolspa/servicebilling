@@ -106,7 +106,48 @@ export class IonTaskAcl {
     const changes: Record<string, string> = {}
 
     if (WEEKLY_CLASS.includes(id.frequency)) {
-      // Complete week: every day stated, blank where not served.
+      const want = [...new Set(named.map((n) => n.weekday))].sort((a, b) => a - b)
+      const have = Object.keys(id.believedDays).map(Number).sort((a, b) => a - b)
+      const sameDays = want.length === have.length && want.every((d, i) => d === have[i])
+
+      // A DAY move is a supersession here too. The picker looked like a safe
+      // in-place edit because it does not touch StartsOn — but it applies
+      // IMMEDIATELY, so moving Monday -> Thursday in a week already serviced
+      // on Monday hands the customer a SECOND visit that week. Observed
+      // 2026-08-05 on a live weekly pool. The reason to supersede differs from
+      // the non-picker case (no anchor is rewritten) but the rule is the same:
+      // the old contract ends, the successor begins in a week that has not
+      // been served yet, chosen by the same effective-week arithmetic.
+      if (!sameDays) {
+        if (!id.startsOn) {
+          return { refusal: { quotaId: schedule.quotaId, reason: `${id.label}: ${id.frequency} day move needs the current StartsOn to supersede from, and the cache holds none — refused, not guessed` } }
+        }
+        const chosen = supersedeStartsOn(
+          id.lastVisit ?? null, id.now ?? new Date().toISOString().slice(0, 10), "weekly", want[0],
+        )
+        const startsOn = chosen.startsOn
+        // The successor states its whole week; blanks retire the old days.
+        const dayFields: Record<string, string> = {}
+        for (const f of DAY_FIELD) dayFields[f] = ""
+        for (const n of named) dayFields[DAY_FIELD[n.weekday]] = n.ionTech
+        return {
+          supersede: {
+            quotaId: schedule.quotaId,
+            ionTaskId: id.ionTaskId,
+            ionCustId: id.ionCustId,
+            endsOn: new Date(Date.parse(`${startsOn}T00:00:00Z`) - 86400000).toISOString().slice(0, 10),
+            startsOn,
+            believedStartsOn: id.startsOn ?? null,
+            // No ServiceRepeat: the successor inherits the predecessor's
+            // cadence with the rest of its form. Stating it here would be a
+            // second place for "what cadence is this" to be wrong.
+            changes: { ...dayFields, StartsOn: startsOn },
+          },
+        }
+      }
+
+      // Same days, different tech — nothing about WHEN the customer is served
+      // changes, so the picker is exactly the right instrument.
       for (const f of DAY_FIELD) changes[f] = ""
       for (const n of named) changes[DAY_FIELD[n.weekday]] = n.ionTech
       return { write: { key: schedule.quotaId, ionTaskId: id.ionTaskId, ionCustId: id.ionCustId, weekly: true, changes, believedDays: id.believedDays } }
