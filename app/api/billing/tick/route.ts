@@ -49,6 +49,14 @@ export async function POST(req: Request) {
     if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   }
 
+  // {"issue": false} = SAFE MODE for watched/test runs: accrue, reconcile,
+  // audit and gate run in full, but the money half (issue + the invoice
+  // machine) is skipped — a test tick can never touch QBO. The scheduled
+  // nightly run omits the flag and issues normally. Added 2026-08-04 after
+  // a watched run issued 8 months whose flags had healed between ticks.
+  const body = (await req.json().catch(() => ({}))) as { issue?: boolean }
+  const moneyEnabled = body.issue !== false
+
   const t0 = Date.now()
   const budgetMs = 4.5 * 60 * 1000
   const left = () => budgetMs - (Date.now() - t0)
@@ -122,7 +130,7 @@ export async function POST(req: Request) {
   const issued: string[] = []
   const refused: Record<string, string> = {}
   const issueDeps = buildIssueDeps(sys as never, months)
-  for (const period of periods.filter((p) => p < currentPeriod)) {
+  for (const period of moneyEnabled ? periods.filter((p) => p < currentPeriod) : []) {
     if (left() < 75_000) break
     const sourcesBy = await facts.sourcesForMonth(period)
     for (const row of active.filter((r) => r.month === period)) {
@@ -142,11 +150,12 @@ export async function POST(req: Request) {
   }
 
   // 6. The invoice machine, depth-first, with whatever budget remains.
-  const invoices = left() > 10_000
+  const invoices = moneyEnabled && left() > 10_000
     ? await drainInvoiceQueue(sys as never, left())
     : { advanced: 0, errors: 0, parked: [] as string[] }
 
   const summary = {
+    issueEnabled: moneyEnabled,
     started,
     periods,
     bulk,
