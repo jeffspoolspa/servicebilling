@@ -207,6 +207,39 @@ export class PublishService {
           ? `superseded: old contract ends ${sup.endsOn}, new starts ${sup.startsOn}${made.ionTaskId ? ` (ION task ${made.ionTaskId})` : ""}${alreadyClosed ? " (close had already landed)" : ""}`
           : `closed ${sup.endsOn} but CREATE FAILED — customer has no live task: ${made.detail}`,
       })
+
+      // ONE vocabulary for a task's history, whichever door the change came
+      // through. A supersede is two facts because two contracts changed: the
+      // old one ends, the new one begins — the same shape TaskService emits,
+      // so a task page reads one series and not two.
+      if (made.accepted && !opts.dryRun) {
+        const days = Object.fromEntries(
+          schedules.find((x) => x.quotaId === sup.quotaId)?.stops.map((st) => [String(st.weekday), st.techId]) ?? [],
+        )
+        const cadence = sup.changes["ServiceRepeat"] === "4" ? "monthly" : "biweekly"
+        const wasDays = Object.fromEntries(
+          Object.entries(ids.get(sup.quotaId)?.believedDays ?? {}).map(([d, t]) => [d, t]),
+        )
+        await this.events.append([
+          {
+            aggregate: "task" as const, aggregateId: sup.quotaId, type: "TaskUpdated", actor: "routing_publish",
+            participants: [`scenario:${scenarioId}`],
+            payload: {
+              before: { days: wasDays, frequency: cadence, startsOn: sup.believedStartsOn, endsOn: null },
+              after: { days: wasDays, frequency: cadence, startsOn: sup.believedStartsOn, endsOn: sup.endsOn },
+              source: "app", note: `superseded by ${made.ionTaskId ?? "new task"}`,
+            },
+          },
+          {
+            aggregate: "task" as const, aggregateId: sup.quotaId, type: "TaskAdded", actor: "routing_publish",
+            participants: [`scenario:${scenarioId}`],
+            payload: {
+              after: { days, frequency: cadence, startsOn: sup.startsOn, endsOn: null },
+              ionTaskId: made.ionTaskId, note: `supersedes ${sup.ionTaskId}`,
+            },
+          },
+        ])
+      }
     }
 
     // the ones that landed: cache, then events
