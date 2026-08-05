@@ -7,7 +7,7 @@ import { createSupabaseServer } from "@/lib/supabase/server"
  * returns the stored letter with its real content type. This is the
  * stable internal link; regeneration replaces the object underneath it.
  */
-export async function GET(_req: Request, ctx: { params: Promise<{ monthId: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ monthId: string }> }) {
   const sb = await createSupabaseServer()
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
@@ -18,5 +18,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ monthId: strin
     { cache: "no-store" },
   )
   if (!r.ok) return NextResponse.json({ error: "no generated explainer for this month yet" }, { status: 404 })
-  return new NextResponse(await r.text(), { headers: { "Content-Type": "text/html; charset=utf-8" } })
+  const headers: Record<string, string> = { "Content-Type": "text/html; charset=utf-8" }
+  if (new URL(req.url).searchParams.get("download") === "1") {
+    headers["Content-Disposition"] = `attachment; filename="explainer-${monthId.slice(0, 8)}.html"`
+  }
+  return new NextResponse(await r.text(), { headers })
 }

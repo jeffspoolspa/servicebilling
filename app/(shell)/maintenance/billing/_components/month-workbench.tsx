@@ -61,6 +61,19 @@ export interface LedgerItem {
   qbo_line_id: string | null
 }
 
+export interface ExplainerNote {
+  note: string
+  by: string
+  at: string
+}
+
+/** 'carter@jeffspoolspa.com' -> 'CA'; 'billing_pipeline' -> 'BP'. */
+function initialsOf(by: string): string {
+  const local = by.split("@")[0]
+  const parts = local.split(/[._-]/).filter(Boolean)
+  return (parts.length >= 2 ? parts[0][0] + parts[1][0] : local.slice(0, 2)).toUpperCase()
+}
+
 export interface FollowUpRow {
   id: string
   created_at: string
@@ -222,7 +235,7 @@ export function MonthWorkbench({
   chemItemSummary: ChemItemCompareRow[]
   fcHistory: FcHistoryPoint[]
   followUps: FollowUpRow[]
-  explainer: { generatedAt: string | null; attachRequestedAt: string | null; url: string }
+  explainer: { generatedAt: string | null; attachRequestedAt: string | null; url: string; notes: ExplainerNote[] }
 }) {
   const router = useRouter()
   const monthLabel = m.month.slice(0, 7)
@@ -233,9 +246,11 @@ export function MonthWorkbench({
   const [genErr, setGenErr] = useState<string | null>(null)
   const [genAt, setGenAt] = useState<string | null>(explainer.generatedAt)
   const [attachAt, setAttachAt] = useState<string | null>(explainer.attachRequestedAt)
-  const [note, setNote] = useState(summaryNote ?? "")
-  const [noteState, setNoteState] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [noteDraft, setNoteDraft] = useState("")
+  const [notes, setNotes] = useState(explainer.notes)
+  const [letterFull, setLetterFull] = useState(false)
   const [reviewing, setReviewing] = useState<number | "all" | null>(null)
+  void summaryNote
 
   // Flagged visits: the finding's message leads with the visit date.
   const dateOf = (f: MonthFinding) => f.message?.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null
@@ -589,81 +604,18 @@ export function MonthWorkbench({
 
                 <Card>
                   <CardHeader>
-                    <CardTitle>Summary note</CardTitle>
-                    <span className="ml-auto flex items-center gap-2">
-                      {noteState === "saved" && <span className="text-[11px] text-grass">saved</span>}
-                      {noteState === "error" && <span className="text-[11px] text-coral">save failed</span>}
-                      <button
-                        disabled={noteState === "saving"}
-                        onClick={async () => {
-                          setNoteState("saving")
-                          try {
-                            const r = await fetch(`/api/billing/months/${m.id}/summary-note`, {
-                              method: "PATCH",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ note }),
-                            })
-                            setNoteState(r.ok ? "saved" : "error")
-                          } catch {
-                            setNoteState("error")
-                          }
-                        }}
-                        className={actionBtn}
-                      >
-                        {noteState === "saving" ? "Saving…" : "Save note"}
-                      </button>
-                      <button
-                        disabled={genState === "working"}
-                        onClick={async () => {
-                          setGenState("working")
-                          setGenErr(null)
-                          try {
-                            const r = await fetch(`/api/billing/months/${m.id}/explainer-generate`, { method: "POST" })
-                            const j = await r.json()
-                            if (!r.ok) throw new Error(j.error ?? r.status)
-                            setGenAt(new Date().toISOString())
-                            setGenState("done")
-                            window.open(`${explainer.url}?t=${Date.now()}`, "_blank")
-                          } catch (e) {
-                            setGenErr(String(e instanceof Error ? e.message : e).slice(0, 160))
-                            setGenState("error")
-                          }
-                        }}
-                        className={primaryBtn}
-                        title="Send the month's context to the model; the letter lands at a stable link"
-                      >
-                        {genState === "working" ? "Generating…" : genAt ? "Regenerate" : "Generate explainer"}
-                      </button>
-                    </span>
-                  </CardHeader>
-                  <CardBody className="space-y-2">
-                    <textarea
-                      value={note}
-                      onChange={(e) => {
-                        setNote(e.target.value)
-                        setNoteState("idle")
-                      }}
-                      rows={6}
-                      placeholder="The overview of this customer's month — steers the explainer; edit and regenerate."
-                      className="w-full bg-bg border border-line rounded-lg p-2.5 text-[12.5px] text-ink outline-none focus:border-cyan resize-y"
-                    />
-                    <div className="flex items-center gap-3 flex-wrap text-[11.5px]">
-                      {genAt && (
-                        <a href={`${explainer.url}?t=${genAt}`} target="_blank" rel="noreferrer" className="text-cyan underline underline-offset-2">
-                          View letter
-                        </a>
-                      )}
-                      <a href={`/api/billing/months/${m.id}/explainer`} target="_blank" rel="noreferrer" className="text-ink-mute underline underline-offset-2 hover:text-ink">
-                        Print view (facts only)
-                      </a>
+                    <CardTitle>Explainer</CardTitle>
+                    <span className="ml-auto flex items-center gap-3">
+                      {/* ATTACH TOGGLE: freely switched until any invoice is
+                          emailed, then frozen at its value. */}
                       {(() => {
                         const anySent = (m.issued_invoices ?? []).some((i2) => i2.email_status === "EmailSent")
-                        if (anySent) {
-                          return <span className="text-ink-mute" title="invoices already emailed — attaching is frozen">Attach locked — invoices sent</span>
-                        }
                         return (
                           <button
-                            disabled={!genAt || acting === "attach"}
+                            role="switch"
+                            aria-checked={!!attachAt}
+                            disabled={anySent || acting === "attach"}
+                            title={anySent ? "invoices already emailed — the attach decision is frozen" : attachAt ? "the send path will attach the letter — click to turn off" : "attach the letter when the invoices email"}
                             onClick={async () => {
                               const r = await fetch(`/api/billing/months/${m.id}/explainer-attach`, {
                                 method: "POST",
@@ -674,19 +626,109 @@ export function MonthWorkbench({
                               if (r.ok) setAttachAt(attachAt ? null : new Date().toISOString())
                               else setGenErr(String(j.error ?? "attach failed").slice(0, 160))
                             }}
-                            className={actionBtn}
-                            title={genAt ? "The send path attaches the letter when emailing the invoices" : "generate the explainer first"}
+                            className={cn("flex items-center gap-2 text-[11.5px]", anySent ? "text-ink-mute cursor-not-allowed" : "text-ink-dim hover:text-ink")}
                           >
-                            {attachAt ? "Detach from invoices" : "Attach to invoices"}
+                            <span className={cn("relative inline-flex h-4 w-7 rounded-full transition-colors", attachAt ? "bg-teal-500/70" : "bg-line", anySent && "opacity-50")}>
+                              <span className={cn("absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all", attachAt ? "left-3.5" : "left-0.5")} />
+                            </span>
+                            Attach to invoices{anySent && " (locked)"}
                           </button>
                         )
                       })()}
-                      {attachAt && <Pill tone="teal">will attach on send</Pill>}
+                      <button
+                        disabled={genState === "working"}
+                        onClick={async () => {
+                          setGenState("working")
+                          setGenErr(null)
+                          try {
+                            const r = await fetch(`/api/billing/months/${m.id}/explainer-generate`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ note: noteDraft }),
+                            })
+                            const j = await r.json()
+                            if (!r.ok) throw new Error(j.error ?? r.status)
+                            setNotes(j.notes ?? notes)
+                            setNoteDraft("")
+                            setGenAt(new Date().toISOString())
+                            setGenState("done")
+                          } catch (e) {
+                            setGenErr(String(e instanceof Error ? e.message : e).slice(0, 160))
+                            setGenState("error")
+                          }
+                        }}
+                        className={primaryBtn}
+                        title="Save the note, send the log + the current letter to the model, replace the letter at its link"
+                      >
+                        {genState === "working" ? "Generating…" : genAt ? "Regenerate" : "Generate explainer"}
+                      </button>
+                    </span>
+                  </CardHeader>
+                  <CardBody className="space-y-3">
+                    {genAt ? (
+                      <div className="relative border border-line-soft rounded-lg overflow-hidden">
+                        <div className="absolute top-2 right-2 z-10 flex gap-1.5">
+                          <button
+                            onClick={() => setLetterFull(true)}
+                            title="fullscreen"
+                            className="h-7 w-7 rounded border border-line bg-bg-elev/90 text-ink-dim hover:text-ink text-[13px]"
+                          >⤢</button>
+                          <a
+                            href={`${explainer.url}?download=1`}
+                            title="download"
+                            className="h-7 w-7 rounded border border-line bg-bg-elev/90 text-ink-dim hover:text-ink text-[13px] inline-flex items-center justify-center"
+                          >⇩</a>
+                        </div>
+                        <iframe key={genAt} src={`${explainer.url}?t=${genAt}`} title="Explainer letter" className="w-full h-[430px] bg-white" />
+                      </div>
+                    ) : (
+                      <div className="text-[12px] text-ink-mute">
+                        No letter yet — add a note and hit Generate explainer.{" "}
+                        <a href={`/api/billing/months/${m.id}/explainer`} target="_blank" rel="noreferrer" className="text-cyan underline underline-offset-2">Print view (facts only)</a>
+                      </div>
+                    )}
+
+                    {notes.length > 0 && (
+                      <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
+                        {notes.map((n, i2) => (
+                          <div key={i2} className="flex items-start gap-2">
+                            <span className="flex-none h-5 w-7 rounded bg-bg-elev border border-line text-[9px] font-mono text-ink-dim inline-flex items-center justify-center uppercase" title={n.by}>
+                              {initialsOf(n.by)}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="text-[12px] text-ink leading-snug">{n.note}</div>
+                              <div className="text-[10px] font-mono text-ink-mute">{new Date(n.at).toLocaleString()}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {attachAt ? (
+                      <textarea
+                        value={noteDraft}
+                        onChange={(e) => setNoteDraft(e.target.value)}
+                        rows={2}
+                        placeholder="Add a note for the next generation — saved to the log when you hit Generate."
+                        className="w-full bg-bg border border-line rounded-lg p-2.5 text-[12.5px] text-ink outline-none focus:border-cyan resize-y"
+                      />
+                    ) : (
+                      <div className="text-[11px] text-ink-mute">Turn on Attach to invoices to add notes and steer the letter.</div>
+                    )}
+                    <div className="flex items-center gap-3 text-[11px]">
                       {genAt && <span className="text-ink-mute font-mono text-[10px]">generated {new Date(genAt).toLocaleString()}</span>}
                       {genErr && <span className="text-coral">{genErr}</span>}
                     </div>
                   </CardBody>
                 </Card>
+                {letterFull && (
+                  <div className="fixed inset-0 z-50 bg-black/75 flex flex-col" onClick={() => setLetterFull(false)}>
+                    <div className="flex justify-end p-3">
+                      <button onClick={() => setLetterFull(false)} className="h-8 px-3 rounded border border-white/30 text-white/90 text-[13px] hover:bg-white/10">Close</button>
+                    </div>
+                    <iframe src={`${explainer.url}?t=${genAt ?? ""}`} title="Explainer letter — fullscreen" className="flex-1 bg-white mx-auto w-full max-w-[980px] mb-4 rounded-lg" onClick={(e) => e.stopPropagation()} />
+                  </div>
+                )}
               </div>
             </>
           )}

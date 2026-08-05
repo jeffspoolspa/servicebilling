@@ -34,7 +34,7 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
     sb.rpc("maint_billing_month_items", { p_month_id: m.id }),
     sb.rpc("maint_billing_month_tasks", { p_customer_id: m.customer_id, p_month: monthDate }),
     sb.schema("billing").from("v_findings_review").select("id, rule, severity, message, cents, detected_at, resolved_at, resolved_by, resolution").eq("billing_month_id", m.id).limit(200),
-    sb.schema("billing").from("billing_months").select("summary_note, explainer_generated_at, explainer_attach_requested_at").eq("id", m.id).limit(1),
+    sb.schema("billing").from("billing_months").select("summary_note, explainer_generated_at, explainer_attach_requested_at, explainer_notes").eq("id", m.id).limit(1),
     sb.rpc("maint_billing_month_chem_item_summary", { p_customer_id: m.customer_id, p_month: monthDate }),
     sb.rpc("maint_billing_fc_history", { p_customer_id: m.customer_id }),
     sb.from("follow_ups").select("id, created_at, issue, description, status, next_steps, equipment_off, source_tech_name")
@@ -58,7 +58,7 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
   const ledgerItems = (itemsRes.data ?? []) as never[]
   const monthTasks = (tasksRes.data ?? []) as never[]
   const findings = (findingsRes.data ?? []) as never[]
-  const noteRow = ((noteRes.data ?? [])[0] as { summary_note?: string | null; explainer_generated_at?: string | null; explainer_attach_requested_at?: string | null } | undefined)
+  const noteRow = ((noteRes.data ?? [])[0] as { summary_note?: string | null; explainer_generated_at?: string | null; explainer_attach_requested_at?: string | null; explainer_notes?: unknown[] } | undefined)
   const summaryNote = noteRow?.summary_note ?? null
   const followUps = (followUpsRes.data ?? []) as never[]
   const chemItemSummary = (chemItemRes.data ?? []) as never[]
@@ -97,6 +97,7 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
           generatedAt: noteRow?.explainer_generated_at ?? null,
           attachRequestedAt: noteRow?.explainer_attach_requested_at ?? null,
           url: `/api/billing/months/${m.id}/explainer-view`,
+          notes: (noteRow?.explainer_notes ?? []) as never,
         }}
         fcHistory={fcHistory as never}
       />

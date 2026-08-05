@@ -34,14 +34,25 @@ export async function POST(req: Request, ctx: { params: Promise<{ monthId: strin
   if (!base) return NextResponse.json({ error: "month not found" }, { status: 404 })
   const c = base.context
 
-  // The extra evidence the letter itself doesn't table: per-item medians and
-  // percentiles, the flags, and any service follow-ups from the month.
-  const monthDate = `${c.monthLabel && ""}` // (placeholder scope keeper)
-  void monthDate
+  // The NOTE LOG (RULED 2026-08-05): the request's note appends to the
+  // month's chronological log with author + timestamp, and the WHOLE log
+  // plus the letter's current narrative rides into the prompt.
+  const reqBody = (await req.json().catch(() => ({}))) as { note?: string }
   const { data: bmRow } = await (sys.schema("billing").from("billing_months") as never as {
     select(s: string): { eq(k: string, v: string): PromiseLike<{ data: unknown[] | null }> }
-  }).select("month").eq("id", monthId)
-  const month = ((bmRow ?? [])[0] as { month: string }).month.slice(0, 10)
+  }).select("month, explainer_notes, explainer_narrative").eq("id", monthId)
+  const bmr = ((bmRow ?? [])[0] as { month: string; explainer_notes: { note: string; by: string; at: string }[] | null; explainer_narrative: ExplainerNarrative | null })
+  const month = bmr.month.slice(0, 10)
+  const notes = [...(bmr.explainer_notes ?? [])]
+  const draft = (reqBody.note ?? "").trim()
+  if (draft) {
+    // Person door has a user; machine door signs as the pipeline.
+    let by = "billing_pipeline"
+    const sb2 = await createSupabaseServer()
+    const { data: { user: u2 } } = await sb2.auth.getUser()
+    if (u2?.email) by = u2.email
+    notes.push({ note: draft, by, at: new Date().toISOString() })
+  }
 
   const [itemsRes, flagsRes, fuRes] = await Promise.all([
     (sys as never as { rpc(f: string, a: Record<string, unknown>): PromiseLike<{ data: unknown }> })
@@ -71,7 +82,9 @@ Keep every claim tied to the numbers given. Do not invent readings or amounts. S
 FACTS
 Customer: ${c.customerName}, month: ${c.monthLabel}
 This month's chemicals: $${(c.thisMonthCents / 100).toFixed(2)} — ${c.pctOfNormal ?? "?"}% of their 12-month average ($${(c.avgCents / 100).toFixed(2)}); similar pools' median: ${c.peerMedianCents != null ? `$${(c.peerMedianCents / 100).toFixed(2)}` : "n/a"} (${c.peerLine || "n/a"})
-Operator notes (steering — fold in, do not quote verbatim): ${c.summaryNote ?? "(none)"}
+Current letter narrative (the letter as it stands — revise it, don't start over unless the notes ask): ${bmr.explainer_narrative ? JSON.stringify(bmr.explainer_narrative) : "(first generation)"}
+Operator notes, chronological — later notes take precedence; fold in, do not quote verbatim:
+${notes.length ? notes.map((n) => `[${n.at.slice(0, 10)} ${n.by}] ${n.note}`).join("\n") : "(none)"}
 Top items this month: ${c.drivers.map((d) => `${d.name}: ${d.qty} used, $${(d.cents / 100).toFixed(2)}`).join("; ")}
 Per-item comparison (qty this month / own median / peer median / own pctl / peer pctl): ${itemCmp.slice(0, 10).map((r) => `${r.item_name}: ${r.this_qty ?? "?"} / ${r.self_med_qty ?? 0} / ${r.peer_med_qty ?? 0} / p${Math.round(Number(r.self_pctl ?? 0))} / p${Math.round(Number(r.peer_pctl ?? 0))}`).join("; ")}
 Flagged visits (audit): ${flags.length ? flags.map((f) => `${f.message}${f.resolved_at ? " (reviewed)" : ""}`).join(" | ") : "(none)"}
@@ -107,12 +120,13 @@ Reply with ONLY a JSON object:
     update(v: Record<string, unknown>): { eq(k: string, v2: string): PromiseLike<{ error: unknown }> }
   }
   const { error: stampErr } = await stamp
-    .update({ explainer_generated_at: new Date().toISOString(), explainer_narrative: narrative })
+    .update({ explainer_generated_at: new Date().toISOString(), explainer_narrative: narrative, explainer_notes: notes })
     .eq("id", monthId)
   if (stampErr) return NextResponse.json({ error: `stamp failed: ${JSON.stringify(stampErr).slice(0, 200)}` }, { status: 500 })
 
   return NextResponse.json({
-    url: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/explainers/${monthId}.html`,
+    url: `/api/billing/months/${monthId}/explainer-view`,
     narrative,
+    notes,
   })
 }
