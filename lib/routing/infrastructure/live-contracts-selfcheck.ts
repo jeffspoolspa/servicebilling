@@ -14,23 +14,30 @@ assert.deepStrictEqual(
   "an expired contract is not in force",
 )
 
-// Newcomb mid-supersede: the successor opens 08-13, so TODAY the predecessor
-// is what is genuinely serviced — it keeps its stop and the tail is not lost.
+// Newcomb mid-supersede: the successor is open-ended, so it is the contract
+// from the moment it is published — the plan is drawn around where the pool
+// is going, not where it is finishing. The dated predecessor loses the
+// tie-break to it.
 assert.deepStrictEqual(
   ids(liveContractsOnly([
     t("old", 5641, "2024-12-30", "2026-08-12"),
     t("new", 5641, "2026-08-13", null),
   ], TODAY)),
-  ["old"], "before the successor opens, the predecessor is the contract",
+  ["new"], "an open-ended successor is live from publication",
 )
 
-// The day it opens, the predecessor has expired and drops out on its own.
+// An open-ended contract starting in the future is live NOW. Hiding it until
+// its first service day is what made a published change look like nothing
+// happened.
 assert.deepStrictEqual(
-  ids(liveContractsOnly([
-    t("old", 5641, "2024-12-30", "2026-08-12"),
-    t("new", 5641, "2026-08-13", null),
-  ], "2026-08-13")),
-  ["new"], "the successor takes over with no special case",
+  ids(liveContractsOnly([t("future", 60, "2026-12-01", null)], TODAY)), ["future"],
+  "no end date means live, whatever the start date says",
+)
+
+// A DATED contract that has not begun is not drawn — the dates govern it.
+assert.deepStrictEqual(
+  ids(liveContractsOnly([t("later", 61, "2026-09-01", "2026-12-31")], TODAY)), [],
+  "a dated contract is judged on its dates",
 )
 
 // Real overlap: two live contracts, one dated. The undated one is standing;

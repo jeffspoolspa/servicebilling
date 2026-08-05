@@ -25,6 +25,16 @@ export interface TaskRepository {
    * task — the caller decides what to do about that, not this port.
    */
   openTaskFor(customerId: number): Promise<Task | null>
+  /**
+   * EVERY task we hold open for this customer.
+   *
+   * Deletion is a statement about a SET: ION's roster says which contracts
+   * exist, so anything we hold that is not in it is a stray. Checking only
+   * the tasks a caller happened to name cannot find one — a targeted refresh
+   * would verify the task it was given and never ask about the customer's
+   * others, though the roster read that would settle it is already paid for.
+   */
+  liveFor(customerId: number): Promise<Task[]>
   /** Persist the task and append whatever it recorded, in one breath. */
   save(task: Task): Promise<void>
   /** The task's history, oldest first — audit and verification, not state. */
