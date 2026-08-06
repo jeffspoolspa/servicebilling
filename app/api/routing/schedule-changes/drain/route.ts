@@ -22,10 +22,16 @@ import type { QueryClient } from "@/lib/routing/infrastructure/supabase-quota-re
  * the ION lease makes a double-call harmless — the loser simply finds nothing
  * to claim, because claiming is FOR UPDATE SKIP LOCKED.
  *
- * ONE unit per invocation. A publish takes tens of seconds against ION and
- * this is a serverless function with a wall clock; finishing one change
- * honestly beats timing out halfway through the third.
+ * Drains until the queue is EMPTY, then stops. One poke should finish the
+ * batch it was fired for — making the caller poke once per row put the loop
+ * in the client, where a closed tab could strand the rest.
+ *
+ * Bounded by the wall clock, not by a count: it stops starting new units when
+ * too little of the budget remains to finish one honestly. Whatever is left
+ * stays queued, which is what the queue is for.
  */
+const BUDGET_MS = 240_000        // of a 300s function
+const UNIT_MS = 70_000           // a publish against ION, generously
 export const maxDuration = 300
 
 export async function POST(req: Request) {
@@ -35,12 +41,6 @@ export async function POST(req: Request) {
 
   const sys = createSupabaseAdmin()
   const m = sys.schema("maintenance")
-
-  const { data, error } = await m.rpc("claim_schedule_change", {})
-  if (error) return NextResponse.json({ error: `claim failed: ${error.message}` }, { status: 500 })
-  const row = (Array.isArray(data) ? data[0] : data) as
-    { id: string; task_id: string; scenario_id: string | null; attempts: number } | undefined
-  if (!row) return NextResponse.json({ drained: 0, detail: "queue empty" })
 
   const ion = new IonTasks({
     mint: async (forceRefresh) =>
@@ -58,35 +58,57 @@ export async function POST(req: Request) {
     new SupabaseMaintenanceEventLog(sys as unknown as ConstructorParameters<typeof SupabaseMaintenanceEventLog>[0]),
   )
 
-  try {
-    if (!row.scenario_id) throw new Error("queue row has no scenario — nothing to publish")
-    const out = await withIonLease(
-      m as unknown as LeaseRpc,
-      `drain:${row.id}`, `schedule change ${row.task_id.slice(0, 8)}`,
-      async (lease) => { ion.withLease(lease); return service.publish(row.scenario_id!, { dryRun: false }) },
-      { waitMs: 60_000, pollMs: 5_000, attempts: 2 },
-    )
-    const mine = out.results.find((r) => r.quotaId === row.task_id) ?? out.results[0]
-    if (!mine?.accepted) throw new Error(mine?.detail ?? "no result for this task")
+  const started = Date.now()
+  const drained: { taskId: string; detail: string; ionTaskId: string | null }[] = []
+  const failed: { taskId: string; error: string }[] = []
 
-    await m.rpc("finish_schedule_change", {
-      p_id: row.id, p_error: null,
-      p_result_ion_task_id: mine.ionTaskId ?? null,
-      p_result_task_id: mine.taskId ?? null,
-    })
-    return NextResponse.json({ drained: 1, taskId: row.task_id, detail: mine.detail, ionTaskId: mine.ionTaskId ?? null })
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err)
-    // A busy lease is not a failure of THIS change — hand it back with its
-    // budget intact so a contended session cannot dead-letter honest work.
-    if (err instanceof IonLeaseBusy) {
-      await m.rpc("release_schedule_change", { p_id: row.id })
-      return NextResponse.json({ drained: 0, detail: `ION busy, requeued: ${detail}`, retryable: true })
+  try {
+    while (Date.now() - started < BUDGET_MS - UNIT_MS) {
+      const { data, error } = await m.rpc("claim_schedule_change", {})
+      if (error) return NextResponse.json({ error: `claim failed: ${error.message}` }, { status: 500 })
+      const row = (Array.isArray(data) ? data[0] : data) as
+        { id: string; task_id: string; scenario_id: string | null; attempts: number } | undefined
+      if (!row) break
+
+      try {
+        if (!row.scenario_id) throw new Error("queue row has no scenario — nothing to publish")
+        const out = await withIonLease(
+          m as unknown as LeaseRpc,
+          `drain:${row.id}`, `schedule change ${row.task_id.slice(0, 8)}`,
+          async (lease) => { ion.withLease(lease); return service.publish(row.scenario_id!, { dryRun: false }) },
+          { waitMs: 60_000, pollMs: 5_000, attempts: 2 },
+        )
+        const mine = out.results.find((x) => x.quotaId === row.task_id) ?? out.results[0]
+        if (!mine?.accepted) throw new Error(mine?.detail ?? "no result for this task")
+        await m.rpc("finish_schedule_change", {
+          p_id: row.id, p_error: null,
+          p_result_ion_task_id: mine.ionTaskId ?? null,
+          p_result_task_id: mine.taskId ?? null,
+        })
+        drained.push({ taskId: row.task_id, detail: mine.detail, ionTaskId: mine.ionTaskId ?? null })
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err)
+        // A busy lease is not this change's fault — hand it back with its
+        // budget intact rather than spending an attempt on contention.
+        if (err instanceof IonLeaseBusy) {
+          await m.rpc("release_schedule_change", { p_id: row.id })
+          break
+        }
+        await m.rpc("finish_schedule_change", { p_id: row.id, p_error: detail })
+        failed.push({ taskId: row.task_id, error: detail })
+      }
     }
-    // Re-claimable until attempts >= 3, then it dead-letters and STAYS
-    // VISIBLE — a half-applied supersede must be findable, not swallowed.
-    await m.rpc("finish_schedule_change", { p_id: row.id, p_error: detail })
-    return NextResponse.json({ drained: 0, taskId: row.task_id, error: detail }, { status: 200 })
+
+    const { count } = await m.from("v_schedule_change_queue")
+      .select("id", { count: "exact", head: true }).is("finished_at", null)
+    return NextResponse.json({ drained: drained.length, failed: failed.length, remaining: count ?? 0, results: drained, errors: failed })
+  } catch (err) {
+    // Per-unit failures are handled inside the loop; reaching here means the
+    // drain itself could not run at all.
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err), drained: drained.length },
+      { status: 500 },
+    )
   }
 }
 

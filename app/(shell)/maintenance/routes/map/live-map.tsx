@@ -133,10 +133,6 @@ async function watchQueue(ids: string[], say: (s: string) => void): Promise<Queu
       if (settled.length === ids.length) return last
       const running = last.find((x) => x.state === "in_flight")
       say(running ? "Writing to ION" : `Waiting for ION — ${settled.length}/${ids.length} settled`)
-      // A drain call works ONE unit, so a batch needs one poke per row. Only
-      // poke when nothing is in flight — the ION lease admits one writer, and
-      // piling on would just queue behind it.
-      if (!running && settled.length < ids.length) void poke()
     }
     if (Date.now() > deadline) return last
     await new Promise((res) => setTimeout(res, 2000))
