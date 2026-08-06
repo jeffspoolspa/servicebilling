@@ -105,6 +105,23 @@ const glass =
  */
 type QueueRow = { id: string; state: string; error: string | null; result_ion_task_id: string | null }
 
+/**
+ * Ask the server to work one unit. Returns null on success, or why not.
+ *
+ * The queue is durable, so a failed poke costs nothing but time — but a poke
+ * that fails INVISIBLY costs a day of wondering why nothing moved.
+ */
+async function poke(): Promise<string | null> {
+  try {
+    const r = await fetch("/api/routing/schedule-changes/drain", { method: "POST" })
+    if (r.ok) return null
+    const body = (await r.json().catch(() => ({}))) as { error?: string }
+    return `${r.status}${body.error ? `: ${body.error}` : ""}`
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err)
+  }
+}
+
 async function watchQueue(ids: string[], say: (s: string) => void): Promise<QueueRow[]> {
   const deadline = Date.now() + 5 * 60_000
   let last: QueueRow[] = []
@@ -116,6 +133,10 @@ async function watchQueue(ids: string[], say: (s: string) => void): Promise<Queu
       if (settled.length === ids.length) return last
       const running = last.find((x) => x.state === "in_flight")
       say(running ? "Writing to ION" : `Waiting for ION — ${settled.length}/${ids.length} settled`)
+      // A drain call works ONE unit, so a batch needs one poke per row. Only
+      // poke when nothing is in flight — the ION lease admits one writer, and
+      // piling on would just queue behind it.
+      if (!running && settled.length < ids.length) void poke()
     }
     if (Date.now() > deadline) return last
     await new Promise((res) => setTimeout(res, 2000))
@@ -1456,12 +1477,11 @@ export function LiveMap({
       if (res.status === 202 && report.queued?.length) {
         const ids = report.queued.map((q) => q.queueId)
         setPublishPhase(`Queued ${ids.length} change${ids.length === 1 ? "" : "s"} — waiting for ION`)
-        // Poke the drain rather than wait out a cron tick. Not awaited: this
-        // request runs the whole publish and outlives the click. If it never
-        // lands, the schedule picks the row up anyway — that is the point of
-        // having queued it, and why this is fire-and-forget rather than a
-        // second thing that can fail the button.
-        void fetch("/api/routing/schedule-changes/drain", { method: "POST" }).catch(() => {})
+        // Poke the drain. NOT silently: the first version threw the result
+        // away, so a 401 or a 500 looked exactly like success and rows sat
+        // queued four separate times with no evidence anywhere. Whatever this
+        // says, the queue row survives — but we say it.
+        void poke().then((why) => { if (why) setToast(`Queued, but the drainer did not start — ${why}`) })
         const done = await watchQueue(ids, setPublishPhase)
         const landed = done.filter((r) => r.state === "done")
         const stuck = done.filter((r) => r.state !== "done")
