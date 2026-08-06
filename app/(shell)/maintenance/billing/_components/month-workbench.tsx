@@ -132,6 +132,18 @@ function monthHistoryRows(history: HistoryEvent[]): HistoryRow[] {
   const rows: HistoryRow[] = []
   const bursts = new Map<string, { count: number; cents: number; at: string; seq: number; type: string; reason: string | null }>()
 
+  // GATE DEDUPE: the gate re-computes until invoiced, so an unchanged
+  // outcome repeats nightly — only a CHANGED outcome is a fact worth a row.
+  const gateKeep = new Set<number>()
+  {
+    let prevSig: string | null = null
+    for (const g of [...history].filter((e) => e.type === "MonthGated").sort((a, b) => (a.occurred_at < b.occurred_at ? -1 : 1))) {
+      const sig = JSON.stringify(((g.payload ?? {}) as { heldFor?: string[] }).heldFor ?? [])
+      if (sig !== prevSig) gateKeep.add(g.seq)
+      prevSig = sig
+    }
+  }
+
   for (const e of history) {
     const p = (e.payload ?? {}) as Record<string, unknown>
     if (e.type === "SourceClaimed" || e.type === "SourceReleased") {
@@ -157,6 +169,7 @@ function monthHistoryRows(history: HistoryEvent[]): HistoryRow[] {
         rows.push({ ...base, action: "Delivery re-read from ION" })
         break
       case "MonthGated": {
+        if (!gateKeep.has(e.seq)) break
         const held = Array.isArray(p.heldFor) ? (p.heldFor as string[]) : []
         rows.push({
           ...base,
@@ -166,7 +179,7 @@ function monthHistoryRows(history: HistoryEvent[]): HistoryRow[] {
         break
       }
       case "MonthInvoiced":
-        rows.push({ ...base, action: "Invoice created — the ledger is frozen" })
+        rows.push({ ...base, action: "Month issued — the ledger is frozen" })
         break
       case "MonthPreprocessed":
         rows.push({ ...base, action: <>Preprocessed<span className="text-ink-dim"> · route: {String(p.route ?? "—")}{Number(p.appliedCredits ?? 0) > 0 ? ` · ${p.appliedCredits} credit(s) applied` : ""}</span></> })
@@ -180,8 +193,52 @@ function monthHistoryRows(history: HistoryEvent[]): HistoryRow[] {
       case "ChemProvisionChanged":
         rows.push({ ...base, action: <>Peer group reassigned<span className="text-ink-dim"> · {String(p.provision ?? "")}</span></> })
         break
+      // ── the invoice half of the story, as it names this month
+      case "invoice_created":
+        rows.push({
+          ...base,
+          action: (
+            <>
+              Invoice {typeof p.doc_number === "string" ? `#${p.doc_number} ` : ""}created
+              {p.how === "already_existed" ? " — adopted the existing document" : ""}
+              <span className="text-ink-dim"> · {formatCurrency(Number(p.subtotal_cents ?? 0) / 100)}</span>
+            </>
+          ),
+        })
+        break
+      case "invoice_emailed":
+        rows.push({ ...base, action: "Invoice emailed" })
+        break
+      case "invoice_deleted":
+        rows.push({ ...base, action: "Invoice deleted", note: typeof p.reason === "string" ? p.reason : null })
+        break
+      case "invoice_attachment_uploaded":
+        rows.push({ ...base, action: "Explainer letter attached", note: typeof p.filename === "string" ? p.filename : null })
+        break
+      case "charge_captured":
+        rows.push({ ...base, action: <>Charge captured<span className="text-ink-dim"> · {formatCurrency(Number(p.amount_cents ?? 0) / 100)}</span></> })
+        break
+      case "charge_declined":
+        rows.push({ ...base, action: "Charge declined", note: typeof p.reason === "string" ? p.reason : null })
+        break
+      case "credit_applied":
+        rows.push({ ...base, action: "Credit applied" })
+        break
+      // ── the audit's flags — the facts a reviewer acts on
+      case "VisitFlagRaised":
+        rows.push({
+          ...base,
+          action: <>Visit flagged<span className="text-ink-dim"> · {formatCurrency(Number(p.cents ?? 0) / 100)}</span></>,
+          note: typeof p.message === "string" ? p.message : null,
+        })
+        break
+      case "VisitFlagRetracted":
+        rows.push({ ...base, action: "Flag retracted", note: typeof p.reason === "string" ? p.reason : null })
+        break
       default:
-        rows.push({ ...base, action: e.type.replace(/_/g, " "), note: JSON.stringify(e.payload).slice(0, 140) })
+        // Outside the month's lens (observation echoes, credit-check passes,
+        // schedule/task churn) — those live on their own surfaces.
+        break
     }
   }
 
