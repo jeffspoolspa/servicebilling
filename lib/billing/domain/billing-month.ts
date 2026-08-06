@@ -308,7 +308,11 @@ export class BillingMonth {
     // CLOSED when every linked invoice is sent and paid — a fold the read
     // model derives, never a command the month is owed.
     if (this.isInvoiced) return null
-    if (this.gateHeldFor.length > 0) return null
+    // A hold is a SNAPSHOT of gate facts — a person changes those facts by
+    // resolving findings, so a held month's step is to RE-ASK the gate
+    // (RULED: the gate re-computes until invoiced). The advance service
+    // stops the chain when a re-ask leaves the month still held.
+    if (this.gateHeldFor.length > 0) return "gate"
     // A dispute buys ONE trip back to the system of record; a second one is
     // a real issue for a person, not something to retry forever.
     if (this.disputedAt) return this.deliveryRefreshedAt ? null : "refresh_delivery"

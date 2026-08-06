@@ -153,7 +153,7 @@ check("nextStep is the ONE statement of the sequence", () => {
   assert.strictEqual(m.status, "invoiced")
 })
 
-check("a held month stops the loop and waits for a person", () => {
+check("a held month re-asks the gate — the hold is a snapshot, not a verdict", () => {
   const delivered = [src()]
   const m = BillingMonth.open("m1", 1016400, "2026-07-01")
   m.claim(item(), { claimedByMonthId: null }, AT)
@@ -162,12 +162,17 @@ check("a held month stops the loop and waits for a person", () => {
 
   assert.strictEqual(m.status, "held")
   assert.deepStrictEqual(m.heldFor, ["credits_settled", "memo_present"])
-  assert.strictEqual(m.nextStep(delivered, AUG), null, "the loop does not retry a judgment")
+  // RULED: the gate re-computes until invoiced. A person changes the FACTS
+  // (resolving findings); the machine re-asks rather than trusting the
+  // stale snapshot (Debbie Romanelli: reviewed flag, Issue click no-oped).
+  // The advance service stops the chain when a re-ask leaves it held.
+  assert.strictEqual(m.nextStep(delivered, AUG), "gate", "held = re-ask the gate")
   assert.match(m.issueBlockers(AUG).join(" "), /held by the gate: credits_settled, memo_present/)
 
-  m.clearHold(AT, "carter")
-  assert.strictEqual(m.status, "reconciled")
-  assert.strictEqual(m.nextStep(delivered, AUG), "gate", "re-gated, not waved through")
+  // The re-ask with clean facts clears the hold and the month owes issue.
+  m.markGated([], AT)
+  assert.strictEqual(m.status, "gated")
+  assert.strictEqual(m.nextStep(delivered, AUG), "issue")
 })
 
 check("gating before reconciling is refused — order is a rule", () => {

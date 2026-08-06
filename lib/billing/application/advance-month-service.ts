@@ -175,6 +175,12 @@ export class AdvanceMonthService {
         detail = g.cleared
           ? "cleared the gate"
           : `held: ${g.heldFor.join(", ")} — ${g.criteria.find((c) => !c.passed)?.detail ?? ""}`
+        if (!g.cleared) {
+          // Still held after the re-ask: the chain STOPS here — a held
+          // month's nextStep is "gate" again, and looping on it would spin.
+          if (!opts.dryRun) await this.months.save(month)
+          return { monthId, from, step, to: month.status, detail, again: false }
+        }
         break
       }
 
