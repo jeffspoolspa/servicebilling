@@ -34,6 +34,29 @@ function warn(name: string, v: number): boolean {
   return false
 }
 
+const BRANDS = {
+  perfect_pools: {
+    name: "Perfect Pools",
+    phone: "(912) 459-2486",
+    email: "info@perfectpoolscleaning.com",
+    city: "Richmond Hill, GA",
+  },
+  jeffs: {
+    name: "Jeff's Pool &amp; Spa Service",
+    phone: "(912) 554-0636",
+    email: "jpsbilling@jeffspoolspa.com",
+    city: "Brunswick, GA",
+  },
+} as const
+
+/** RULED 2026-08-07: Perfect Pools branding for Savannah + Richmond Hill
+ *  customers; Jeff's for Brunswick + St. Marys (and when the office is
+ *  unknown — the parent brand is the safe default). */
+function brandFor(office: string | null): (typeof BRANDS)[keyof typeof BRANDS] {
+  const o = (office ?? "").toLowerCase()
+  return o.includes("richmond") || o.includes("savannah") ? BRANDS.perfect_pools : BRANDS.jeffs
+}
+
 export interface ExplainerNarrative {
   intro?: string
   drivers?: { item: string; note: string }[]
@@ -83,6 +106,10 @@ export async function buildExplainer(
     select(c: string): { eq(k: string, v: unknown): { limit(n: number): PromiseLike<{ data: unknown[] | null }> } }
   }).select("display_name, qbo_customer_id, city").eq("id", bm.customer_id).limit(1)
   const cust = ((custRows ?? [])[0] ?? {}) as { display_name?: string; qbo_customer_id?: string; city?: string | null }
+  const { data: officeRows } = await (sys.schema("maintenance").from("v_task_schedules_with_context") as never as {
+    select(c: string): { eq(k: string, v: unknown): { not(k2: string, op: string, v2: null): { limit(n: number): PromiseLike<{ data: unknown[] | null }> } } }
+  }).select("office").eq("customer_id", bm.customer_id).not("office", "is", null).limit(1)
+  const brand = brandFor(((officeRows ?? [])[0] as { office?: string | null } | undefined)?.office ?? null)
 
   const { data: cpvRows } = await (sys.schema("billing_audit").from("v_customer_month_cpv") as never as {
     select(c: string): { eq(k: string, v: unknown): { limit(n: number): PromiseLike<{ data: unknown[] | null }> } }
@@ -213,7 +240,7 @@ export async function buildExplainer(
 <section class="page">
   <header style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid ${INK};padding-bottom:8px">
     <div style="display:flex;flex-direction:column;gap:2px">
-      <div style="font-size:19px;font-weight:700;letter-spacing:-0.01em">Jeff's Pool &amp; Spa Service</div>
+      <div style="font-size:19px;font-weight:700;letter-spacing:-0.01em">${brand.name}</div>
       <div style="font-family:${MONO};font-size:10.5px;letter-spacing:0.09em;text-transform:uppercase;color:${DIM}">Water Chemistry &amp; Billing Review</div>
     </div>
     <div style="text-align:right;display:flex;flex-direction:column;gap:2px;font-family:${MONO};font-size:11px;color:${DIM}">
@@ -296,8 +323,8 @@ export async function buildExplainer(
   })() : ""}
 
   <footer style="margin-top:auto;border-top:1px solid ${LINE};padding-top:8px;display:flex;justify-content:space-between;font-family:${MONO};font-size:10px;color:${FAINT}">
-    <div>Jeff's Pool &amp; Spa Service · Brunswick, GA</div>
-    <div>Questions? Reply to your invoice email or call the office.</div>
+    <div>${brand.name} · ${brand.city}</div>
+    <div>Questions? Call ${brand.phone} or reply to your invoice email.</div>
   </footer>
 </section>
 </body></html>`
