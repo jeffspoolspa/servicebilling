@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import Link from "next/link"
+import { useRouter } from "next/navigation"
 import type { ColumnDef } from "@tanstack/react-table"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { Pill } from "@/components/ui/pill"
@@ -27,6 +27,7 @@ const STATUS_TONE: Record<MonthDisplayStatus, "neutral" | "cyan" | "teal" | "sun
 }
 
 export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
+  const router = useRouter()
   const [statusFilter, setStatusFilter] = useState<MonthDisplayStatus | null>(null)
 
   const withStatus = useMemo(() => rows.map((r) => ({ ...r, display: displayStatus(r) })), [rows])
@@ -51,6 +52,29 @@ export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
       cell: ({ row }) => <Pill tone={STATUS_TONE[row.original.display]}>{row.original.display}</Pill>,
     },
     {
+      id: "invoices",
+      header: () => <span>Invoices</span>,
+      cell: ({ row }) => {
+        const inv = row.original.issued_invoices ?? []
+        if (inv.length === 0) return <Pill tone="neutral">draft</Pill>
+        return (
+          <div className="flex flex-wrap gap-1">
+            {inv.map((i) => {
+              // grey draft · blue built-not-sent · orange open balance · green paid
+              const tone = i.email_status !== "EmailSent" ? "cyan" : (i.balance ?? 0) > 0 ? "sun" : "grass"
+              const state = i.email_status !== "EmailSent" ? "not sent" : (i.balance ?? 0) > 0 ? `owes ${formatCurrency(Number(i.balance))}` : "paid"
+              return (
+                <Pill key={i.qbo_invoice_id} tone={tone} title={`${i.doc_number} — ${state}`}>
+                  <span className="font-mono">{i.doc_number}</span>
+                </Pill>
+              )
+            })}
+          </div>
+        )
+      },
+      enableSorting: false,
+    },
+    {
       id: "flags",
       accessorFn: (r) => r.open_findings,
       header: ({ column }) => <DataTableColumnHeader column={column} title="Flags" />,
@@ -64,19 +88,6 @@ export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
       header: ({ column }) => <DataTableColumnHeader column={column} title="Subtotal" />,
       cell: ({ row }) => <span className="font-mono num">{formatCurrency(row.original.subtotal_cents / 100)}</span>,
       meta: { align: "right" },
-    },
-    {
-      id: "actions",
-      header: () => <span>Detail</span>,
-      cell: ({ row }) => (
-        <Link
-          href={`/maintenance/billing/months/${row.original.id}` as never}
-          className="text-[11px] px-2.5 py-1 rounded border border-cyan/30 text-cyan hover:bg-cyan/10 whitespace-nowrap"
-        >
-          Open
-        </Link>
-      ),
-      enableSorting: false,
     },
   ]
 
@@ -110,8 +121,9 @@ export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
         data={shown}
         searchAccessor={(r) => `${r.customer_name ?? ""} ${r.customer_id}`}
         searchPlaceholder="Search customer…"
-        pageSize={50}
+        pageSize={25}
         initialSorting={[{ id: "subtotal", desc: true }]}
+        onRowClick={(r) => router.push(`/maintenance/billing/months/${r.id}` as never)}
         emptyText="No billing months match."
       />
     </div>
