@@ -54,5 +54,27 @@ export function isHeld(m: Pick<MonthOverviewRow, "status" | "gate_held_for">): b
   return m.status === "gated" && (m.gate_held_for?.length ?? 0) > 0
 }
 
+/**
+ * The DISPLAY status (RULED 2026-08-07) — how the list reads a month:
+ * pre-invoice it is in-progress, held (by the gate, for any reason — flags
+ * are their own column), or unreconciled (totals disagree); post-invoice
+ * the DOCUMENTS say it: issued = built not sent, open = sent not paid,
+ * closed = sent and paid.
+ */
+export type MonthDisplayStatus = "in-progress" | "held" | "unreconciled" | "issued" | "open" | "closed"
+
+export const MONTH_DISPLAY_STATUSES: MonthDisplayStatus[] = ["in-progress", "held", "unreconciled", "issued", "open", "closed"]
+
+export function displayStatus(m: MonthOverviewRow): MonthDisplayStatus {
+  const inv = m.issued_invoices ?? []
+  if (inv.length > 0) {
+    if (!inv.every((i) => i.email_status === "EmailSent")) return "issued"
+    return inv.every((i) => (i.balance ?? 0) <= 0) ? "closed" : "open"
+  }
+  if (m.status === "disputed") return "unreconciled"
+  if (isHeld(m)) return "held"
+  return "in-progress"
+}
+
 export const MONTHS_SELECT =
   "id, customer_id, customer_name, month, status, subtotal_cents, item_count, open_findings, reconciled_at, disputed_at, disputes, gated_at, gate_held_for, invoiced_at, issued_invoices"

@@ -1,23 +1,43 @@
 "use client"
 
+import { useMemo, useState } from "react"
 import Link from "next/link"
 import type { ColumnDef } from "@tanstack/react-table"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { Pill } from "@/components/ui/pill"
-import { StatusStepper } from "@/components/ui/status-stepper"
+import { cn } from "@/lib/utils/cn"
 import { formatCurrency } from "@/lib/utils/format"
-import { MONTH_STAGES, stepperStage, isHeld, type MonthOverviewRow } from "../_lib/months"
+import { displayStatus, MONTH_DISPLAY_STATUSES, type MonthDisplayStatus, type MonthOverviewRow } from "../_lib/months"
 
 /**
- * One table, every journey: the progression stepper shows where each
- * customer-month sits; pauses (disputed, held) show as pills on their
- * stage. Filter by status, click through to the stage detail.
+ * One table, every journey — one row per customer for the picked month
+ * (the month filter lives on the page, so no month column here). The
+ * STATUS pill is the whole story: pre-invoice in-progress / held /
+ * unreconciled, post-invoice the documents speak (issued / open / closed).
+ * The status filter is a visible button row, never a dropdown.
  */
 
-const PAUSE_TONE: Record<string, "coral" | "sun"> = { disputed: "coral", held: "sun" }
+const STATUS_TONE: Record<MonthDisplayStatus, "neutral" | "cyan" | "teal" | "sun" | "coral" | "grass"> = {
+  "in-progress": "neutral",
+  held: "sun",
+  unreconciled: "coral",
+  issued: "cyan",
+  open: "teal",
+  closed: "grass",
+}
 
 export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
-  const columns: ColumnDef<MonthOverviewRow>[] = [
+  const [statusFilter, setStatusFilter] = useState<MonthDisplayStatus | null>(null)
+
+  const withStatus = useMemo(() => rows.map((r) => ({ ...r, display: displayStatus(r) })), [rows])
+  const counts = useMemo(() => {
+    const c = new Map<MonthDisplayStatus, number>()
+    for (const r of withStatus) c.set(r.display, (c.get(r.display) ?? 0) + 1)
+    return c
+  }, [withStatus])
+  const shown = statusFilter ? withStatus.filter((r) => r.display === statusFilter) : withStatus
+
+  const columns: ColumnDef<MonthOverviewRow & { display: MonthDisplayStatus }>[] = [
     {
       id: "customer",
       accessorFn: (r) => r.customer_name ?? String(r.customer_id),
@@ -25,29 +45,10 @@ export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
       cell: ({ row }) => <span className="text-ink">{row.original.customer_name ?? row.original.customer_id}</span>,
     },
     {
-      id: "month",
-      accessorFn: (r) => r.month.slice(0, 7),
-      header: ({ column }) => <DataTableColumnHeader column={column} title="Month" />,
-      cell: ({ row }) => <span className="font-mono text-xs text-ink-dim">{row.original.month.slice(0, 7)}</span>,
-    },
-    {
-      id: "progress",
-      accessorFn: (r) => r.status,
-      header: () => <span>Progression</span>,
-      cell: ({ row }) => (
-        <div className="flex items-center gap-2">
-          <StatusStepper stages={[...MONTH_STAGES]} current={stepperStage(row.original.status)} className="max-w-[420px]" />
-          {row.original.status === "disputed" && <Pill tone={PAUSE_TONE.disputed}>disputed</Pill>}
-          {isHeld(row.original) && <Pill tone={PAUSE_TONE.held}>held</Pill>}
-        </div>
-      ),
-      enableSorting: false,
-    },
-    {
       id: "status",
-      accessorFn: (r) => r.status,
+      accessorFn: (r) => r.display,
       header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
-      cell: ({ row }) => <span className="font-mono text-xs text-ink-dim">{row.original.status}</span>,
+      cell: ({ row }) => <Pill tone={STATUS_TONE[row.original.display]}>{row.original.display}</Pill>,
     },
     {
       id: "flags",
@@ -79,28 +80,40 @@ export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
     },
   ]
 
-  const monthOptions = [...new Set(rows.map((r) => r.month.slice(0, 7)))]
-    .sort()
-    .reverse()
-    .map((v) => ({ value: v, label: v }))
-  const statusOptions = ["accruing", "disputed", "gated", "invoiced", "closed"].map((v) => ({
-    value: v,
-    label: v,
-  }))
-
   return (
-    <DataTable
-      columns={columns}
-      data={rows}
-      searchAccessor={(r) => `${r.customer_name ?? ""} ${r.customer_id}`}
-      searchPlaceholder="Search customer…"
-      facetFilters={[
-        { columnId: "month", label: "Month", options: monthOptions },
-        { columnId: "status", label: "Status", options: statusOptions },
-      ]}
-      pageSize={50}
-      initialSorting={[{ id: "subtotal", desc: true }]}
-      emptyText="No billing months yet."
-    />
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          onClick={() => setStatusFilter(null)}
+          className={cn(
+            "h-7 px-3 rounded-lg border text-[12px]",
+            statusFilter === null ? "border-cyan/50 text-cyan bg-cyan/10" : "border-line text-ink-dim hover:text-ink hover:border-line-soft",
+          )}
+        >
+          All ({withStatus.length})
+        </button>
+        {MONTH_DISPLAY_STATUSES.map((s) => (
+          <button
+            key={s}
+            onClick={() => setStatusFilter(statusFilter === s ? null : s)}
+            className={cn(
+              "h-7 px-3 rounded-lg border text-[12px]",
+              statusFilter === s ? "border-cyan/50 text-cyan bg-cyan/10" : "border-line text-ink-dim hover:text-ink hover:border-line-soft",
+            )}
+          >
+            {s} ({counts.get(s) ?? 0})
+          </button>
+        ))}
+      </div>
+      <DataTable
+        columns={columns}
+        data={shown}
+        searchAccessor={(r) => `${r.customer_name ?? ""} ${r.customer_id}`}
+        searchPlaceholder="Search customer…"
+        pageSize={50}
+        initialSorting={[{ id: "subtotal", desc: true }]}
+        emptyText="No billing months match."
+      />
+    </div>
   )
 }
