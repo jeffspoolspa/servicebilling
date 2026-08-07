@@ -1037,14 +1037,21 @@ export function MonthWorkbench({
               // ITEMIZED reads like the invoice will: grouped by VISIT,
               // labor first, then the consumables that went in that day.
               (() => {
-                const shown = [...laborItems, ...chemItems]
+                // ALL claimed items — including $0 labor (quality control):
+                // the line documents the visit even when it bills nothing.
+                const shown = ledgerItems.filter((i) => i.kind === "labor" || i.kind === "consumable")
+                // A FLAT-RATE labor line belongs to the month, not a visit —
+                // it gets its own group instead of hiding inside a date.
+                const flatLines = shown.filter((i) => i.kind === "labor" && i.visit_id === null)
+                const visitLines = shown.filter((i) => !(i.kind === "labor" && i.visit_id === null))
                 const byDate = new Map<string, LedgerItem[]>()
-                for (const it of shown) {
+                for (const it of visitLines) {
                   const d = (it.service_date ?? "").slice(0, 10) || "no date"
                   byDate.set(d, [...(byDate.get(d) ?? []), it])
                 }
                 const dates = [...byDate.keys()].sort()
-                return dates.map((d) => {
+                const monthTotal = shown.reduce((s2, i) => s2 + i.amount_cents, 0)
+                const dateGroups = dates.map((d) => {
                   const items = (byDate.get(d) ?? []).sort((a, b) =>
                     a.kind === b.kind ? (a.item_name ?? "").localeCompare(b.item_name ?? "") : a.kind === "labor" ? -1 : 1,
                   )
@@ -1085,6 +1092,35 @@ export function MonthWorkbench({
                     </div>
                   )
                 })
+                return (
+                  <>
+                    {flatLines.length > 0 && (
+                      <div className="border-t border-line-soft first:border-t-0">
+                        <div className="flex items-center gap-2 px-5 py-1.5 bg-white/[0.015]">
+                          <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-mute">Monthly flat rate</span>
+                          <span className="ml-auto font-mono num text-[11px] text-ink-dim">
+                            {formatCurrency(flatLines.reduce((s2, i) => s2 + i.amount_cents, 0) / 100)}
+                          </span>
+                        </div>
+                        {flatLines.map((it, i) => (
+                          <div key={i} className="flex items-center gap-2.5 px-5 py-1 border-t border-line-soft/50">
+                            <span className="w-[10px] flex-none rounded-full h-[5px] bg-cyan/50" title="flat-rate labor" />
+                            <span className="text-[11.5px] text-ink flex-1 min-w-0 truncate">{it.item_name ?? "—"}</span>
+                            <span className="font-mono text-[10px] text-ink-mute flex-none">
+                              {it.qty} × {formatCurrency(it.unit_price_cents / 100)}
+                            </span>
+                            <span className="font-mono num text-[11.5px] text-ink w-[70px] text-right flex-none">{formatCurrency(it.amount_cents / 100)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {dateGroups}
+                    <div className="flex items-baseline justify-between border-t border-line px-5 py-2.5">
+                      <span className="text-[12px] font-medium text-ink">Total</span>
+                      <span className="font-display text-[17px] text-ink">{formatCurrency(monthTotal / 100)}</span>
+                    </div>
+                  </>
+                )
               })()
             )}
             {ledgerTab === "items" && (lockedPresentation !== "itemized" || ledgerItems.length === 0) && (ledgerItems.length === 0 ? (
