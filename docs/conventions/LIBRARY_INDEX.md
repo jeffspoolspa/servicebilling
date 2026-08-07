@@ -182,7 +182,7 @@ billing.processing_attempts
 |---|---|
 | `json_default(o)` | json.dumps default for DB-row types (Decimal / date / datetime / UUID) |
 | `dumps(obj)` | json.dumps that handles billing.* row values |
-| `latest_attempt(conn, qbo_invoice_id, stage)` | Most recent NON-dry-run attempt for this invoice at this stage |
+| `latest_attempt(conn, qbo_invoice_id, stage)` | Most recent NON-dry-run CHARGE attempt for this invoice at this stage (excludes `channel='email'` — sends are not charges) |
 | `create_attempt(conn, qbo_invoice_id, stage, invoice_number, channel, charge_amount, dry_run, cpm_id, wo_number, payment_method, status)` | WRITE-AHEAD: insert + COMMIT the attempt with a fresh idempotency_key BEFORE any external call |
 | `update_attempt(conn, attempt_id, **fields)` | Set columns on one attempt row + commit |
 | `insert_webhook_expectation(conn, entity_type, entity_id)` | Record that QBO should send a webhook for this entity within the grace window |
