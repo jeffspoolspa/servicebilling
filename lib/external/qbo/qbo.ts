@@ -229,6 +229,19 @@ export class QboInvoices extends Qbo {
    * is treated as failed even though QBO said 200.
    */
   async createInvoice(inv: QboInvoiceInput): Promise<CreatedInvoice> {
+    // QBO doc numbers are unique ACROSS transaction types (error 6140) — a
+    // credit memo squatting on the number blocks the create, and the
+    // invoice-only check would call it free. Seen live: an office credit
+    // memo AUTO-NUMBERED into the ION range took Smiley's 7989377.
+    const cmPre = await this.query<{ QueryResponse: { CreditMemo?: { Id: string; DocNumber: string }[] } }>(
+      `select Id, DocNumber from CreditMemo where DocNumber = '${inv.docNumber.replace(/'/g, "")}'`,
+    )
+    const squatter = cmPre.QueryResponse.CreditMemo?.[0]
+    if (squatter) {
+      throw new Error(
+        `doc number ${inv.docNumber} is taken by CREDIT MEMO ${squatter.Id} — rename that credit memo (e.g. CM-${squatter.Id}) and re-run; auto-numbered office documents land in the ION range`,
+      )
+    }
     const existing = await this.query<{ QueryResponse: { Invoice?: QboInvoiceEntity[] } }>(
       `select Id, DocNumber, TotalAmt, CustomerRef from Invoice where DocNumber = '${inv.docNumber.replace(/'/g, "")}'`,
     )
