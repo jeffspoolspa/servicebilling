@@ -416,43 +416,53 @@ function FacetSelect<TData>({
   )
 }
 
-/** Pagination controls: selected count, page size, page nav. */
+/** Pagination footer, dashboard-01 shape: row count · rows-per-page ·
+ *  "Page X of Y" · first/prev/next/last. */
 export function DataTablePagination<TData>({ table }: { table: TanTable<TData> }) {
   const selected = table.getFilteredSelectedRowModel().rows.length
   const total = table.getFilteredRowModel().rows.length
   const { pageIndex, pageSize } = table.getState().pagination
   const pageCount = table.getPageCount()
   if (total === 0) return null
+  const navBtn =
+    "inline-flex h-7 w-7 items-center justify-center rounded border border-line text-ink-dim hover:text-ink hover:border-line/80 disabled:opacity-35 disabled:cursor-not-allowed"
   return (
-    <div className="flex items-center justify-between gap-4 text-[11px] text-ink-mute">
+    <div className="flex items-center justify-between gap-4 text-[11.5px] text-ink-mute">
       <div>
         {selected > 0 && <span className="text-ink">{selected} selected · </span>}
         {total.toLocaleString()} row{total === 1 ? "" : "s"}
       </div>
-      {pageCount > 1 && (
-        <div className="flex items-center gap-3">
-          <span>
-            {pageIndex * pageSize + 1}–{Math.min((pageIndex + 1) * pageSize, total)} of{" "}
-            {total.toLocaleString()}
-          </span>
-          <div className="flex gap-1">
-            <button
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
-              className="px-2.5 py-1 rounded border border-line text-ink-dim hover:text-ink hover:border-line/80 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Previous
-            </button>
-            <button
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
-              className="px-2.5 py-1 rounded border border-line text-ink-dim hover:text-ink hover:border-line/80 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Next
-            </button>
-          </div>
+      <div className="flex items-center gap-5">
+        <label className="hidden sm:flex items-center gap-2">
+          Rows per page
+          <select
+            value={pageSize}
+            onChange={(e) => table.setPageSize(Number(e.target.value))}
+            className="h-7 rounded border border-line bg-bg-elev px-1.5 text-[11.5px] text-ink"
+          >
+            {[10, 25, 50, 100].map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        </label>
+        <span className="text-ink-dim">
+          Page {pageIndex + 1} of {Math.max(1, pageCount)}
+        </span>
+        <div className="flex gap-1">
+          <button onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()} className={navBtn} aria-label="First page">
+            «
+          </button>
+          <button onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()} className={navBtn} aria-label="Previous page">
+            ‹
+          </button>
+          <button onClick={() => table.nextPage()} disabled={!table.getCanNextPage()} className={navBtn} aria-label="Next page">
+            ›
+          </button>
+          <button onClick={() => table.setPageIndex(pageCount - 1)} disabled={!table.getCanNextPage()} className={navBtn} aria-label="Last page">
+            »
+          </button>
         </div>
-      )}
+      </div>
     </div>
   )
 }
