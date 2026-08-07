@@ -91,40 +91,42 @@ export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
     },
   ]
 
-  return (
-    <div className="space-y-3">
-      {/* dashboard-01's tabs-style segmented filter, with count badges */}
-      <div className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-line bg-white/[0.04] p-0.5">
-        {[null, ...MONTH_DISPLAY_STATUSES].map((s) => {
-          const active = statusFilter === s
-          const count = s === null ? withStatus.length : (counts.get(s) ?? 0)
-          return (
-            <button
-              key={s ?? "all"}
-              onClick={() => setStatusFilter(active ? null : s)}
-              className={cn(
-                "inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-[12px] transition-colors",
-                active ? "bg-bg-elev text-ink border border-line shadow-sm" : "text-ink-dim hover:text-ink",
-              )}
-            >
-              {s ?? "All"}
-              <span className={cn("rounded-full border px-1.5 py-px text-[10px] font-mono", active ? "border-line text-ink-dim" : "border-line/60 text-ink-mute")}>
-                {count}
-              </span>
-            </button>
-          )
-        })}
-      </div>
-      <DataTable
-        columns={columns}
-        data={shown}
-        searchAccessor={(r) => `${r.customer_name ?? ""} ${r.customer_id}`}
-        searchPlaceholder="Search customer…"
-        pageSize={25}
-        initialSorting={[{ id: "subtotal", desc: true }]}
-        onRowClick={(r) => router.push(`/maintenance/billing/months/${r.id}` as never)}
-        emptyText="No billing months match."
-      />
+  // dashboard-01's tabs-style segmented filter, inline with the search box
+  const filterTabs = (
+    <div className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-line bg-white/[0.04] p-0.5">
+      {[null, ...MONTH_DISPLAY_STATUSES].map((s) => {
+        const active = statusFilter === s
+        const count = s === null ? withStatus.length : (counts.get(s) ?? 0)
+        return (
+          <button
+            key={s ?? "all"}
+            onClick={() => setStatusFilter(active ? null : s)}
+            className={cn(
+              "inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-[12px] transition-colors",
+              active ? "bg-bg-elev text-ink border border-line shadow-sm" : "text-ink-dim hover:text-ink",
+            )}
+          >
+            {s ?? "All"}
+            <span className={cn("rounded-full border px-1.5 py-px text-[10px] font-mono", active ? "border-line text-ink-dim" : "border-line/60 text-ink-mute")}>
+              {count}
+            </span>
+          </button>
+        )
+      })}
     </div>
+  )
+
+  return (
+    <DataTable
+      columns={columns}
+      data={shown}
+      searchAccessor={(r) => `${r.customer_name ?? ""} ${r.customer_id}`}
+      searchPlaceholder="Search customer…"
+      toolbarExtra={filterTabs}
+      pageSize={25}
+      initialSorting={[{ id: "subtotal", desc: true }]}
+      onRowClick={(r) => router.push(`/maintenance/billing/months/${r.id}` as never)}
+      emptyText="No billing months match."
+    />
   )
 }

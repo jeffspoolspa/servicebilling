@@ -84,7 +84,7 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
   return (
     <td
       data-slot="table-cell"
-      className={cn("px-3 py-1.5 align-middle whitespace-nowrap", className)}
+      className={cn("px-3 py-2.5 align-middle whitespace-nowrap", className)}
       {...props}
     />
   )
