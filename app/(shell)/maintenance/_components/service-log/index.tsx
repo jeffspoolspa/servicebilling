@@ -380,7 +380,9 @@ export function ServiceLog({
               ))}
             </div>
             <span className="flex-1 min-w-0 pl-4">Notes</span>
+            <span className="w-[30px] flex-none" />
             <span className="w-[64px] text-right flex-none">Total</span>
+            {rowAction && <span className="w-[96px] flex-none" />}
           </div>
         )}
         {shownVisits.map((v) => {
@@ -440,25 +442,29 @@ export function ServiceLog({
                   {v.notes ? (
                     <span className="text-[11.5px] text-ink-dim block truncate" title={v.notes}>{v.notes}</span>
                   ) : (
-                    <span className="text-[10px] text-ink-mute">no notes</span>
+                    <span className="text-[10px] text-ink-mute block truncate">no notes</span>
                   )}
                 </div>
-                {v.photos.length > 0 && (
-                  <span className="inline-flex items-center gap-1 font-mono text-[10px] text-ink-mute flex-none">
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-                      <circle cx="12" cy="13" r="3" />
-                    </svg>
-                    {v.photos.length}
-                  </span>
-                )}
+                {/* FIXED SLOTS from here right — every row the same widths,
+                    so columns stay aligned even when the table overflows. */}
+                <span className="w-[30px] flex-none inline-flex items-center gap-1 font-mono text-[10px] text-ink-mute">
+                  {v.photos.length > 0 && (
+                    <>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+                        <circle cx="12" cy="13" r="3" />
+                      </svg>
+                      {v.photos.length}
+                    </>
+                  )}
+                </span>
                 <span
                   className="font-mono text-[12px] text-ink w-[64px] text-right flex-none"
                   title={totalCents > 0 ? `labor ${formatCurrency(Number(v.labor_cents ?? 0) / 100)} + chems ${formatCurrency(chemCents / 100)}` : undefined}
                 >
                   {totalCents > 0 ? formatCurrency(totalCents / 100) : "—"}
                 </span>
-                {rowAction && <span className="flex-none" onClick={(e) => e.stopPropagation()}>{rowAction(v)}</span>}
+                {rowAction && <span className="w-[96px] flex-none flex justify-end" onClick={(e) => e.stopPropagation()}>{rowAction(v)}</span>}
               </div>
               {open && (
                 <div className="px-4 pt-1 pb-4 pl-9 flex items-start gap-5">

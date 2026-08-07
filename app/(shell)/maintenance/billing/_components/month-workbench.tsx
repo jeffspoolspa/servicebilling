@@ -307,28 +307,42 @@ export function MonthWorkbench({
   const [notes, setNotes] = useState(explainer.notes)
   const [letterFull, setLetterFull] = useState(false)
   const [thumbH, setThumbH] = useState<number | null>(null)
-  const [reviewing, setReviewing] = useState<number | "all" | null>(null)
+  // WRITE-AHEAD reviews: ids the user has marked, applied to the view
+  // immediately — the POST and the server refresh catch up behind the click.
+  const [aheadReviewed, setAheadReviewed] = useState<Set<number>>(new Set())
+  const [reviewErr, setReviewErr] = useState<string | null>(null)
   void summaryNote
 
   // Flagged visits: the finding's message leads with the visit date.
   const dateOf = (f: MonthFinding) => f.message?.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null
-  const openFindings = findings.filter((f) => !f.resolved_at)
-  const reviewedFindings = findings.filter((f) => f.resolved_at)
+  const openFindings = findings.filter((f) => !f.resolved_at && !aheadReviewed.has(f.id))
+  const reviewedFindings = findings.filter((f) => f.resolved_at || aheadReviewed.has(f.id))
   const flaggedOpenDates = [...new Set(openFindings.map(dateOf).filter(Boolean))] as string[]
   const flaggedReviewedDates = [...new Set(reviewedFindings.map(dateOf).filter(Boolean))] as string[]
 
-  const review = async (ids: number[] | "all") => {
-    setReviewing(ids === "all" ? "all" : ids[0])
-    try {
-      const r = await fetch(`/api/billing/months/${m.id}/findings-review`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(ids === "all" ? { all: true } : { finding_ids: ids }),
+  const review = (ids: number[] | "all") => {
+    const targets = ids === "all" ? openFindings.map((f) => f.id) : ids
+    if (targets.length === 0) return
+    setReviewErr(null)
+    setAheadReviewed((prev) => new Set([...prev, ...targets]))
+    fetch(`/api/billing/months/${m.id}/findings-review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(ids === "all" ? { all: true } : { finding_ids: ids }),
+    })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(String((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`))
+        router.refresh()
       })
-      if (r.ok) router.refresh()
-    } finally {
-      setReviewing(null)
-    }
+      .catch((e) => {
+        // The write-ahead was wrong — put the rows back and say why.
+        setAheadReviewed((prev) => {
+          const next = new Set(prev)
+          for (const id of targets) next.delete(id)
+          return next
+        })
+        setReviewErr(`review failed: ${String(e instanceof Error ? e.message : e).slice(0, 140)}`)
+      })
   }
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const [draft, setDraft] = useState<Draft | "loading" | "error" | null>(null)
@@ -624,12 +638,13 @@ export function MonthWorkbench({
                 <div className="space-y-0">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-display text-[15px]">Flagged visits</span>
-                    {openFindings.length > 1 && (
-                      <button disabled={reviewing !== null} onClick={() => review("all")} className={actionBtn}>
-                        {reviewing === "all" ? "Reviewing…" : "Mark all reviewed"}
+                    {openFindings.length > 0 && (
+                      <button onClick={() => review("all")} className={actionBtn}>
+                        Mark all reviewed ({openFindings.length})
                       </button>
                     )}
                   </div>
+                  {reviewErr && <div className="text-[11px] text-coral mb-2">{reviewErr}</div>}
                   {flaggedOpenDates.length + flaggedReviewedDates.length === 0 ? (
                     <Card><CardBody><span className="text-[12.5px] text-ink-mute">No flagged visits this month.</span></CardBody></Card>
                   ) : (
@@ -648,11 +663,10 @@ export function MonthWorkbench({
                         }
                         return (
                           <button
-                            disabled={reviewing !== null}
                             onClick={() => review(ids)}
-                            className="h-6 px-2 rounded-md border border-line bg-bg-elev text-[10.5px] text-ink-dim hover:border-sun hover:text-sun disabled:opacity-50"
+                            className="h-6 px-2 rounded-md border border-line bg-bg-elev text-[10.5px] text-ink-dim hover:border-sun hover:text-sun whitespace-nowrap"
                           >
-                            {reviewing === ids[0] ? "…" : "Mark reviewed"}
+                            Mark reviewed
                           </button>
                         )
                       }}
