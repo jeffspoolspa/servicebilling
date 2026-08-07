@@ -223,7 +223,7 @@ export function VisitCalendar({ customerId, month, highlightDates, itemCompare }
         <TableBody>
           {readingRows.length > 0 && (
             <TableRow className="hover:bg-white/[0.04] bg-white/[0.04]">
-              <TableCell className="sticky left-0 py-1">
+              <TableCell className="sticky left-0 py-1 bg-bg-elev z-10">
                 <button
                   onClick={() => setShowReadings((s) => !s)}
                   className="text-[9px] uppercase tracking-[0.14em] text-ink-mute hover:text-ink"
@@ -312,7 +312,7 @@ export function VisitCalendar({ customerId, month, highlightDates, itemCompare }
             <TableRow className="hover:bg-white/[0.04] bg-white/[0.04]">
               <TableCell
                 colSpan={showChems ? (collapsed ? 0 : days.length) + 1 : 1}
-                className="sticky left-0 py-1"
+                className="sticky left-0 py-1 bg-bg-elev z-10"
               >
                 <span className="inline-flex items-center gap-1.5">
                   <button
