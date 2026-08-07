@@ -1033,7 +1033,61 @@ export function MonthWorkbench({
                 </TableBody>
               </Table>
             ))}
-            {ledgerTab === "items" && (ledgerItems.length === 0 ? (
+            {ledgerTab === "items" && lockedPresentation === "itemized" && ledgerItems.length > 0 && (
+              // ITEMIZED reads like the invoice will: grouped by VISIT,
+              // labor first, then the consumables that went in that day.
+              (() => {
+                const shown = [...laborItems, ...chemItems]
+                const byDate = new Map<string, LedgerItem[]>()
+                for (const it of shown) {
+                  const d = (it.service_date ?? "").slice(0, 10) || "no date"
+                  byDate.set(d, [...(byDate.get(d) ?? []), it])
+                }
+                const dates = [...byDate.keys()].sort()
+                return dates.map((d) => {
+                  const items = (byDate.get(d) ?? []).sort((a, b) =>
+                    a.kind === b.kind ? (a.item_name ?? "").localeCompare(b.item_name ?? "") : a.kind === "labor" ? -1 : 1,
+                  )
+                  const daySubtotal = items.reduce((s2, i) => s2 + i.amount_cents, 0)
+                  return (
+                    <div key={d} className="border-t border-line-soft first:border-t-0">
+                      <div className="flex items-center gap-2 px-5 py-1.5 bg-white/[0.015]">
+                        <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-mute">
+                          {d === "no date" ? "No visit date" : visitBreakLabel(d)}
+                        </span>
+                        <span className="ml-auto font-mono num text-[11px] text-ink-dim">{formatCurrency(daySubtotal / 100)}</span>
+                      </div>
+                      {items.map((it, i) => {
+                        const invDoc = it.qbo_invoice_id ? invoices.find((iv) => iv.qbo_invoice_id === it.qbo_invoice_id) : null
+                        return (
+                          <div key={i} className="flex items-center gap-2.5 px-5 py-1 border-t border-line-soft/50">
+                            <span className={cn("w-[10px] flex-none rounded-full h-[5px]", it.kind === "labor" ? "bg-cyan/50" : "bg-sun/50")} title={it.kind} />
+                            <span className="text-[11.5px] text-ink flex-1 min-w-0 truncate">{it.item_name ?? "—"}</span>
+                            <span className="font-mono text-[10px] text-ink-mute flex-none">
+                              {it.qty} × {formatCurrency(it.unit_price_cents / 100)}
+                            </span>
+                            <span className="w-[70px] flex-none text-right">
+                              {it.qbo_invoice_id ? (
+                                <button
+                                  onClick={() => setOpenInvoice(it.qbo_invoice_id!)}
+                                  className="font-mono text-[9.5px] text-ink-mute hover:text-cyan underline underline-offset-2"
+                                >
+                                  {invDoc?.doc_number ?? it.qbo_invoice_id}
+                                </button>
+                              ) : (
+                                <span className="font-mono text-[9.5px] text-ink-mute/50">draft</span>
+                              )}
+                            </span>
+                            <span className="font-mono num text-[11.5px] text-ink w-[70px] text-right flex-none">{formatCurrency(it.amount_cents / 100)}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })
+              })()
+            )}
+            {ledgerTab === "items" && (lockedPresentation !== "itemized" || ledgerItems.length === 0) && (ledgerItems.length === 0 ? (
               <CardBody><span className="text-[12.5px] text-ink-mute">Nothing claimed yet.</span></CardBody>
             ) : (
               [
