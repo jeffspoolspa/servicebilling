@@ -83,6 +83,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ monthId: strin
    - "monitor" — a fix was recently made and needs time to prove out, or this looks like a one-time spike worth watching.
 
 Keep every claim tied to the numbers given. Do not invent readings or amounts.
+Style: plain sentences with commas and periods. NEVER use an em dash or en dash (— or –) anywhere in the output.
 
 FACTS
 Customer: ${c.customerName}, month: ${c.monthLabel}
@@ -102,6 +103,15 @@ Reply with ONLY a JSON object:
   let narrative: ExplainerNarrative
   try {
     narrative = parseJsonReply<ExplainerNarrative>(await generateText(prompt))
+    // The model is told no em/en dashes; scrub any that slip through.
+    const scrub = (t: string | undefined) => t?.replace(/\s*[\u2014\u2013]\s*/g, ", ").replace(/,\s*,/g, ",")
+    narrative = {
+      ...narrative,
+      intro: scrub(narrative.intro),
+      readings_note: scrub(narrative.readings_note),
+      recommendation: scrub(narrative.recommendation),
+      drivers: narrative.drivers?.map((d) => ({ ...d, note: scrub(d.note) ?? d.note })),
+    }
   } catch (e) {
     return NextResponse.json({ error: `generation failed: ${String(e instanceof Error ? e.message : e).slice(0, 300)}` }, { status: 502 })
   }
