@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { createSupabaseServer } from "@/lib/supabase/server"
 import { MonthSelect } from "./_components/month-select"
+import { MonthsDashboard } from "./_components/months-dashboard"
 import { MonthsTable } from "./_components/months-table"
 import { MONTHS_SELECT, type MonthOverviewRow } from "./_lib/months"
 
@@ -56,6 +57,10 @@ export default async function BillingMonthsPage({
           </Link>
         </span>
       </div>
+      <MonthsDashboard
+        rows={(data ?? []) as MonthOverviewRow[]}
+        monthLabel={selected ? new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${selected}-15T12:00:00Z`)) : ""}
+      />
       <MonthsTable rows={(data ?? []) as MonthOverviewRow[]} />
     </div>
   )
