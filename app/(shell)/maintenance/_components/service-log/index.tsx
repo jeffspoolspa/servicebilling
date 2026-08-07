@@ -79,12 +79,17 @@ const CORE_COLS: [name: string, short: string][] = [
 ]
 const CORE_NAMES = new Set(CORE_COLS.map(([n]) => n))
 
+// Target ranges (Carter, 2026-08-07) — same numbers the explainer letter
+// judges by. A 0 on anything but FC/pH is an unrecorded ION field.
 function readingWarn(name: string, value: string): boolean {
   const v = parseFloat(value)
   if (!isFinite(v)) return false
-  if (name === "Free Chlorine") return v < 1.5
-  if (name === "pH") return v > 7.8 || v < 7.0
-  if (name === "Total Alkalinity") return v < 70 || v > 120
+  if (v === 0 && name !== "Free Chlorine" && name !== "pH") return false
+  if (name === "Free Chlorine") return v < 2 || v > 10
+  if (name === "pH") return v < 7.2 || v > 7.8
+  if (name === "Total Alkalinity") return v < 60 || v > 120
+  if (name === "Cyanuric Acid") return v < 30 || v > 80
+  if (name === "Salinity") return v < 2800 || v > 3500
   return false
 }
 
@@ -430,7 +435,8 @@ export function ServiceLog({
                 <div className="flex-none flex">
                   {presentCols.map(([name]) => {
                     const val = v.readings[name]
-                    const has = val != null && val !== ""
+                    // 0 on anything but FC/pH is an UNRECORDED ION field.
+                    const has = val != null && val !== "" && (parseFloat(val) !== 0 || name === "Free Chlorine" || name === "pH")
                     const w = has && readingWarn(name, val)
                     return (
                       <span key={name}

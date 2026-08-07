@@ -24,37 +24,47 @@ const LINE = "#DDD8D1"
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
+// Target ranges (Carter, 2026-08-07). A CYA of 0 is an UNRECORDED
+// reading, never a real zero — callers null it before judging.
 function warn(name: string, v: number): boolean {
-  if (name === "Free Chlorine") return v < 1 || v > 4
-  if (name === "pH") return v < 7.4 || v > 7.8
-  if (name === "Total Alkalinity") return v < 80 || v > 120
+  if (name === "Free Chlorine") return v < 2 || v > 10
+  if (name === "pH") return v < 7.2 || v > 7.8
+  if (name === "Total Alkalinity") return v < 60 || v > 120
   if (name === "Calcium Hardness") return v < 200 || v > 400
-  if (name === "Cyanuric Acid") return v < 30 || v > 50
-  if (name === "Salinity") return v < 3000 || v > 3600
+  if (name === "Cyanuric Acid") return v < 30 || v > 80
+  if (name === "Salinity") return v < 2800 || v > 3500
   return false
 }
 
-const BRANDS = {
-  perfect_pools: {
-    name: "Perfect Pools",
-    phone: "(912) 459-2486",
-    email: "info@perfectpoolscleaning.com",
-    city: "Richmond Hill, GA",
-  },
-  jeffs: {
-    name: "Jeff's Pool &amp; Spa Service",
-    phone: "(912) 554-0636",
-    email: "jpsbilling@jeffspoolspa.com",
-    city: "Brunswick, GA",
-  },
-} as const
+interface BranchBrand {
+  name: string
+  phone: string
+  city: string
+}
 
-/** RULED 2026-08-07: Perfect Pools branding for Savannah + Richmond Hill
- *  customers; Jeff's for Brunswick + St. Marys (and when the office is
- *  unknown — the parent brand is the safe default). */
-function brandFor(office: string | null): (typeof BRANDS)[keyof typeof BRANDS] {
-  const o = (office ?? "").toLowerCase()
-  return o.includes("richmond") || o.includes("savannah") ? BRANDS.perfect_pools : BRANDS.jeffs
+/** RULED 2026-08-07: public.branches is the branding source of truth —
+ *  brand + phone per branch. Savannah-area customers (their own branch,
+ *  SAV) are detected by city since the maintenance office assignment
+ *  only knows three offices; Brunswick/Jeff's is the fallback. */
+async function brandFor(sys: Db, office: string | null, custCity: string | null): Promise<BranchBrand> {
+  const { data } = await (sys.schema("public").from("branches") as never as {
+    select(c: string): { eq(k: string, v: boolean): PromiseLike<{ data: unknown[] | null }> }
+  }).select("branch_code, name, brand, phone, city, state").eq("active", true)
+  const rows = ((data ?? []) as { branch_code: string; name: string; brand: string | null; phone: string | null; city: string; state: string }[])
+  const byCode = new Map(rows.map((r) => [r.branch_code, r]))
+  const cityL = (custCity ?? "").toLowerCase()
+  const officeL = (office ?? "").toLowerCase()
+  const pick =
+    /savannah|garden city|pooler/.test(cityL) ? byCode.get("SAV")
+    : officeL.includes("richmond") ? byCode.get("RH")
+    : officeL.includes("marys") ? byCode.get("C")
+    : byCode.get("B")
+  const b = pick ?? byCode.get("B")
+  return {
+    name: esc(b?.brand ?? "Jeff's Pool & Spa Service"),
+    phone: b?.phone ?? "(912) 554-0636",
+    city: b ? `${b.city}, ${b.state}` : "Brunswick, GA",
+  }
 }
 
 export interface ExplainerNarrative {
@@ -109,7 +119,7 @@ export async function buildExplainer(
   const { data: officeRows } = await (sys.schema("maintenance").from("v_task_schedules_with_context") as never as {
     select(c: string): { eq(k: string, v: unknown): { not(k2: string, op: string, v2: null): { limit(n: number): PromiseLike<{ data: unknown[] | null }> } } }
   }).select("office").eq("customer_id", bm.customer_id).not("office", "is", null).limit(1)
-  const brand = brandFor(((officeRows ?? [])[0] as { office?: string | null } | undefined)?.office ?? null)
+  const brand = await brandFor(sys, ((officeRows ?? [])[0] as { office?: string | null } | undefined)?.office ?? null, cust.city ?? null)
 
   const { data: cpvRows } = await (sys.schema("billing_audit").from("v_customer_month_cpv") as never as {
     select(c: string): { eq(k: string, v: unknown): { limit(n: number): PromiseLike<{ data: unknown[] | null }> } }
@@ -282,7 +292,7 @@ export async function buildExplainer(
   <div style="display:flex;flex-direction:column;gap:6px">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:14px;border-bottom:1px solid ${INK};padding-bottom:4px">
       <h2 style="font-size:16px;font-weight:700;letter-spacing:-0.01em">The readings behind it</h2>
-      <div style="font-size:10.5px;color:${DIM};line-height:1.3;text-align:right">Targets — Free Cl 1–4 · pH 7.4–7.8 · TA 80–120 · CH 200–400 · CYA 30–50 · Salt 3,000–3,600 ppm. Amber = out of range.</div>
+      <div style="font-size:10.5px;color:${DIM};line-height:1.3;text-align:right">Targets — Free Cl 2–10 · pH 7.2–7.8 · TA 60–120 · CH 200–400 · CYA 30–80 · Salt 2,800–3,500 ppm. Amber = out of range.</div>
     </div>
     ${narrative?.readings_note ? `<p style="font-size:13px;line-height:1.45;color:#33393D;max-width:78ch">${esc(narrative.readings_note)}</p>` : ""}
     <table>

@@ -94,7 +94,7 @@ ${notes.length ? notes.map((n) => `[${n.at.slice(0, 10)} ${n.by}] ${n.note}`).jo
 Top items this month: ${c.drivers.map((d) => `${d.name}: ${d.qty} used, $${(d.cents / 100).toFixed(2)}`).join("; ")}
 Per-item comparison (qty this month / own median / peer median / own pctl / peer pctl): ${itemCmp.slice(0, 10).map((r) => `${r.item_name}: ${r.this_qty ?? "?"} / ${r.self_med_qty ?? 0} / ${r.peer_med_qty ?? 0} / p${Math.round(Number(r.self_pctl ?? 0))} / p${Math.round(Number(r.peer_pctl ?? 0))}`).join("; ")}
 Flagged visits (audit): ${flags.length ? flags.map((f) => `${f.message}${f.resolved_at ? " (reviewed)" : ""}`).join(" | ") : "(none)"}
-Readings by visit: ${c.visits.map((v) => `${v.visit_date}: ${Object.entries(v.readings ?? {}).map(([k, v2]) => `${k}=${v2}`).join(", ")}`).join(" | ")}
+Readings by visit (a missing value means not recorded that day): ${c.visits.map((v) => `${v.visit_date}: ${Object.entries(v.readings ?? {}).filter(([k, v2]) => Number(v2) !== 0 || k === "Free Chlorine" || k === "pH").map(([k, v2]) => `${k}=${v2}`).join(", ")}`).join(" | ")}
 Service follow-ups this month: ${followUps.length ? followUps.map((f) => `${f.created_at.slice(0, 10)} ${f.issue ?? ""}: ${f.description ?? ""}${f.equipment_off ? " (equipment off)" : ""} [${f.status ?? "open"}]${f.next_steps ? ` next: ${f.next_steps}` : ""}`).join(" | ") : "(none)"}
 
 Reply with ONLY a JSON object:
