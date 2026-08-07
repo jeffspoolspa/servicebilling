@@ -44,6 +44,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
         consumables: t?.consumables ?? "included",
         ionInvoiceType: t?.ionInvoiceType ?? null,
         green: t?.category === "green_pool",
+        labor: t?.labor ?? "per_visit",
       }
     }),
     settingsOverride,
@@ -52,7 +53,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
     const t = meta.get(id)
     return {
       taskId: id,
-      labor: t?.labor ?? "per_visit",
+      // The MONTH's labor setting groups every non-green task's labor;
+      // green keeps its own document and its own terms.
+      labor: t?.category === "green_pool" ? (t?.labor ?? "per_visit") : settings.labor,
       consumables: t?.category === "green_pool" ? (t?.consumables ?? "included") : settings.consumables,
       qc: t?.category === "quality_control",
       green: t?.category === "green_pool",
@@ -66,7 +69,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
   // issue step refuses on, so the preview IS the document.
   const laborCatalog = await repo.laborItems()
   const taskCategory = new Map([...meta.entries()].map(([id, t]) => [id, t.category]))
-  const flatTasks = new Set([...meta.entries()].filter(([, t]) => t.labor === "flat_rate").map(([id]) => id))
+  const flatTasks = new Set(terms.filter((t) => t.labor === "flat_rate").map((t) => t.taskId))
   const { documents: resolved, unmapped: unmappedLabor } = resolveLaborDocuments(
     documentsOf(month, terms, presentation),
     taskCategory,
@@ -104,7 +107,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
     unmappedLabor,
     missingDescriptions: [...new Set(missingDescriptions)],
     ionInvoiceNumbers: ionNumbers,
-    settings: { consumables: settings.consumables, presentation: settings.presentation },
+    settings: { consumables: settings.consumables, presentation: settings.presentation, labor: settings.labor },
     settingsConflicts: settings.conflicts,
   })
 }

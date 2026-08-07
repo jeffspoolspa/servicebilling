@@ -120,7 +120,7 @@ interface Draft {
   claimedAtZero: number
   presentation: "itemized" | "summary"
   documents: { kind: string; docNumber?: string | null; lines: DocLine[]; subtotalCents: number }[]
-  settings?: { consumables: "included" | "separate"; presentation: "itemized" | "summary" }
+  settings?: { consumables: "included" | "separate"; presentation: "itemized" | "summary"; labor?: "per_visit" | "flat_rate" }
   settingsConflicts?: string[]
 }
 
@@ -479,7 +479,7 @@ export function MonthWorkbench({
 
   // RULED 2026-08-07: the billing type is SET here (defaults to ION's
   // majority); whatever is selected when the invoice issues is what is used.
-  const chooseDocSetting = async (dim: "consumables" | "presentation", value: string) => {
+  const chooseDocSetting = async (dim: "consumables" | "presentation" | "labor", value: string) => {
     setActing(`docset:${dim}`)
     setActErr(null)
     try {
@@ -1011,6 +1011,18 @@ export function MonthWorkbench({
                     ))}
                   </span>
                   <span className={`flex border border-line rounded-lg overflow-hidden ${hasInvoices ? "opacity-70" : ""}`}>
+                    {(["per_visit", "flat_rate"] as const).map((l2, i2) => (
+                      <button
+                        key={l2}
+                        disabled={hasInvoices || acting !== null}
+                        onClick={() => chooseDocSetting("labor", l2)}
+                        className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] ${i2 === 1 ? "border-l border-line" : ""} ${(draftSettings?.labor ?? "per_visit") === l2 ? "bg-cyan text-bg" : "text-ink-dim hover:text-ink"} disabled:cursor-default`}
+                      >
+                        {l2 === "per_visit" ? "Per visit" : "Flat rate"}
+                      </button>
+                    ))}
+                  </span>
+                  <span className={`flex border border-line rounded-lg overflow-hidden ${hasInvoices ? "opacity-70" : ""}`}>
                     {(["included", "separate"] as const).map((c2, i2) => (
                       <button
                         key={c2}
@@ -1099,7 +1111,12 @@ export function MonthWorkbench({
                 const shown = activeItems.filter((i) => i.kind === "labor" || i.kind === "consumable")
                 // A FLAT-RATE labor line belongs to the month, not a visit —
                 // it gets its own group instead of hiding inside a date.
-                const flatTaskIds = new Set(monthTasks.filter((t) => t.billing_method === "flat_rate").map((t) => t.task_id))
+                // The MONTH's labor setting decides the grouping (ION default).
+                const flatTaskIds = new Set(
+                  (draftSettings?.labor ?? "per_visit") === "flat_rate"
+                    ? monthTasks.filter((t) => t.category !== "green_pool").map((t) => t.task_id)
+                    : monthTasks.filter((t) => t.billing_method === "flat_rate").map((t) => t.task_id),
+                )
                 const flatLabor = shown.filter((i) => i.kind === "labor" && ((i.task_id && flatTaskIds.has(i.task_id)) || i.visit_id === null))
                 const inFlat = new Set(flatLabor.map((i) => i.id))
                 const visitLines = shown.filter((i) => !inFlat.has(i.id))

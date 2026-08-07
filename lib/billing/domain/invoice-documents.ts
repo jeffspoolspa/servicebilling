@@ -41,6 +41,10 @@ export type InvoicePresentation = "itemized" | "summary"
 export interface MonthDocSettings {
   readonly consumables: "included" | "separate"
   readonly presentation: InvoicePresentation
+  /** RULED 2026-08-07: labor terms are the THIRD month-level dimension —
+   *  purely how labor GROUPS into line items (per-visit lines vs one
+   *  monthly line); each task's amounts still come from its own contract. */
+  readonly labor: "per_visit" | "flat_rate"
   /** Disagreements a person has not yet decided; non-empty = held. */
   readonly conflicts: string[]
 }
@@ -48,14 +52,28 @@ export interface MonthDocSettings {
 export interface DocSettingsOverride {
   readonly consumables?: "included" | "separate"
   readonly presentation?: InvoicePresentation
+  readonly labor?: "per_visit" | "flat_rate"
 }
 
 export function monthDocSettings(
-  tasks: readonly { taskId: string; consumables: "included" | "separate"; ionInvoiceType: string | null; green: boolean }[],
+  tasks: readonly { taskId: string; consumables: "included" | "separate"; ionInvoiceType: string | null; green: boolean; labor?: "per_visit" | "flat_rate" }[],
   override?: DocSettingsOverride | null,
 ): MonthDocSettings {
   const live = tasks.filter((t) => !t.green)
   const conflicts: string[] = []
+
+  const laborModes = new Set(live.map((t) => t.labor ?? "per_visit"))
+  let labor: "per_visit" | "flat_rate" =
+    laborModes.size === 1
+      ? [...laborModes][0]
+      : live.filter((t) => (t.labor ?? "per_visit") === "flat_rate").length >= live.length / 2
+        ? "flat_rate"
+        : "per_visit"
+  if (override?.labor) {
+    labor = override.labor
+  } else if (laborModes.size > 1) {
+    conflicts.push(`tasks disagree on labor terms (per visit vs flat rate)`)
+  }
 
   const modes = new Set(live.map((t) => t.consumables))
   let consumables: "included" | "separate" =
@@ -80,7 +98,7 @@ export function monthDocSettings(
     conflicts.push(`tasks disagree on presentation (itemized vs summary): ${types.join(" | ")}`)
   }
 
-  return { consumables, presentation, conflicts }
+  return { consumables, presentation, labor, conflicts }
 }
 
 /**

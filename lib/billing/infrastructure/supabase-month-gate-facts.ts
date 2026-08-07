@@ -45,27 +45,30 @@ export class SupabaseMonthGateFacts {
 
   /** The tasks' doc config — same current-terms-over-task resolution the
    *  issue path uses (repository.taskDocMeta), scoped to what gate needs. */
-  private async taskDocMeta(taskIds: readonly string[]): Promise<Map<string, { consumables: "included" | "separate"; ionInvoiceType: string | null; category: string | null }>> {
-    const out = new Map<string, { consumables: "included" | "separate"; ionInvoiceType: string | null; category: string | null }>()
+  private async taskDocMeta(taskIds: readonly string[]): Promise<Map<string, { consumables: "included" | "separate"; ionInvoiceType: string | null; category: string | null; labor: "per_visit" | "flat_rate" }>> {
+    const out = new Map<string, { consumables: "included" | "separate"; ionInvoiceType: string | null; category: string | null; labor: "per_visit" | "flat_rate" }>()
     const [tasks, terms] = await Promise.all([
       this.chunked(taskIds, async (c) => {
-        const { data, error } = await this.q("maintenance", "tasks").select("id, consumables_mode, ion_invoice_type, category").in("id", c).range(0, 999)
+        const { data, error } = await this.q("maintenance", "tasks").select("id, billing_method, consumables_mode, ion_invoice_type, category").in("id", c).range(0, 999)
         if (error) throw new Error(`gate task meta failed: ${JSON.stringify(error).slice(0, 200)}`)
-        return (data ?? []) as { id: string; consumables_mode: string | null; ion_invoice_type: string | null; category: string | null }[]
+        return (data ?? []) as { id: string; billing_method: string | null; consumables_mode: string | null; ion_invoice_type: string | null; category: string | null }[]
       }),
       this.chunked(taskIds, async (c) => {
-        const { data, error } = await this.q("maintenance", "task_terms").select("task_id, consumables_mode").in("task_id", c).is("valid_to", null).range(0, 999)
+        const { data, error } = await this.q("maintenance", "task_terms").select("task_id, billing_method, consumables_mode").in("task_id", c).is("valid_to", null).range(0, 999)
         if (error) throw new Error(`gate task terms failed: ${JSON.stringify(error).slice(0, 200)}`)
-        return (data ?? []) as { task_id: string; consumables_mode: string | null }[]
+        return (data ?? []) as { task_id: string; billing_method: string | null; consumables_mode: string | null }[]
       }),
     ])
-    const termOf = new Map(terms.map((t) => [t.task_id, t.consumables_mode]))
+    const termOf = new Map(terms.map((t) => [t.task_id, t]))
     for (const t of tasks) {
-      const mode = termOf.get(t.id) ?? t.consumables_mode
+      const term = termOf.get(t.id)
+      const mode = term?.consumables_mode ?? t.consumables_mode
+      const method = term?.billing_method ?? t.billing_method
       out.set(t.id, {
         consumables: mode === "separate" ? "separate" : "included",
         ionInvoiceType: t.ion_invoice_type,
         category: t.category,
+        labor: method != null && method.startsWith("flat") ? "flat_rate" : "per_visit",
       })
     }
     return out
@@ -145,7 +148,7 @@ export class SupabaseMonthGateFacts {
     for (const [mid, ids] of taskIdsOf) {
       const tasks = [...ids].map((id) => {
         const t = meta.get(id)
-        return { taskId: id, consumables: t?.consumables ?? ("included" as const), ionInvoiceType: t?.ionInvoiceType ?? null, green: t?.category === "green_pool" }
+        return { taskId: id, consumables: t?.consumables ?? ("included" as const), ionInvoiceType: t?.ionInvoiceType ?? null, green: t?.category === "green_pool", labor: t?.labor ?? ("per_visit" as const) }
       })
       conflictsOf.set(mid, monthDocSettings(tasks, overrideOf.get(mid) ?? null).conflicts)
     }

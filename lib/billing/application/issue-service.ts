@@ -94,6 +94,7 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
         consumables: t?.consumables ?? "included",
         ionInvoiceType: t?.ionInvoiceType ?? null,
         green: t?.category === "green_pool",
+        labor: t?.labor ?? "per_visit",
       }
     }),
     settingsOverride,
@@ -105,7 +106,9 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
     const t = meta.get(id)
     return {
       taskId: id,
-      labor: t?.labor ?? "per_visit",
+      // The MONTH's labor setting groups every non-green task's labor;
+      // green keeps its own document and its own terms.
+      labor: t?.category === "green_pool" ? (t?.labor ?? "per_visit") : settings.labor,
       consumables: t?.category === "green_pool" ? (t?.consumables ?? "included") : settings.consumables,
       qc: t?.category === "quality_control",
       green: t?.category === "green_pool",
@@ -113,7 +116,7 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
   })
   const presentation = settings.presentation
   const taskCategory = new Map([...meta.entries()].map(([id, t]) => [id, t.category]))
-  const flatTasks = new Set([...meta.entries()].filter(([, t]) => t.labor === "flat_rate").map(([id]) => id))
+  const flatTasks = new Set(terms.filter((t) => t.labor === "flat_rate").map((t) => t.taskId))
   // Labor resolves through the SAME ladder the draft preview showed
   // (exact -> category -> rate); consumables by catalog name. Everything
   // resolves, or the issue refuses — with the full list of gaps.

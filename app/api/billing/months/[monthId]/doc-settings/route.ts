@@ -13,7 +13,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ monthId: strin
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { monthId } = await ctx.params
-  const body = (await req.json().catch(() => ({}))) as { consumables?: string; presentation?: string }
+  const body = (await req.json().catch(() => ({}))) as { consumables?: string; presentation?: string; labor?: string }
   const choice: Record<string, string> = {}
   if (body.consumables !== undefined) {
     if (!["included", "separate"].includes(body.consumables)) return NextResponse.json({ error: "consumables must be included|separate" }, { status: 400 })
@@ -22,6 +22,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ monthId: strin
   if (body.presentation !== undefined) {
     if (!["itemized", "summary"].includes(body.presentation)) return NextResponse.json({ error: "presentation must be itemized|summary" }, { status: 400 })
     choice.presentation = body.presentation
+  }
+  if (body.labor !== undefined) {
+    if (!["per_visit", "flat_rate"].includes(body.labor)) return NextResponse.json({ error: "labor must be per_visit|flat_rate" }, { status: 400 })
+    choice.labor = body.labor
   }
   if (Object.keys(choice).length === 0) return NextResponse.json({ error: "nothing chosen" }, { status: 400 })
 
