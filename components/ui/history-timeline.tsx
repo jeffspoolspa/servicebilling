@@ -21,6 +21,9 @@ export interface HistoryRow {
   note?: string | null
   changes?: [string, { from: string | null; to: string | null }][]
   checks?: [string, boolean][]
+  /** A collapsed set — one row for many like events, expandable to the list. */
+  items?: { label: React.ReactNode; note?: string | null }[]
+  itemsSummary?: string
 }
 
 export function HistoryTimeline({
@@ -113,6 +116,21 @@ export function HistoryTimeline({
                         <li key={rule} className="text-[11px]">
                           <span className={ok ? "text-grass" : "text-coral"}>{ok ? "✓" : "✗"}</span>{" "}
                           <span className="text-ink-dim">{rule.replace(/_/g, " ")}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+                {r.items && r.items.length > 0 && (
+                  <details className="mt-1">
+                    <summary className="text-[11px] text-ink-mute cursor-pointer select-none hover:text-ink-dim">
+                      {r.itemsSummary ?? `${r.items.length} item${r.items.length === 1 ? "" : "s"}`}
+                    </summary>
+                    <ul className="mt-1 space-y-1 pl-4 list-none">
+                      {r.items.map((it, i) => (
+                        <li key={i} className="text-[11px]">
+                          <span className="text-ink-dim">{it.label}</span>
+                          {it.note && <div className="text-ink-mute">{it.note}</div>}
                         </li>
                       ))}
                     </ul>

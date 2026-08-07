@@ -131,6 +131,8 @@ interface Draft {
 function monthHistoryRows(history: HistoryEvent[]): HistoryRow[] {
   const rows: HistoryRow[] = []
   const bursts = new Map<string, { count: number; cents: number; at: string; seq: number; type: string; reason: string | null }>()
+  const flagRaises: { at: string; seq: number; cents: number; message: string }[] = []
+  const flagRetracts: { at: string; seq: number; reason: string }[] = []
 
   // GATE DEDUPE: the gate re-computes until invoiced, so an unchanged
   // outcome repeats nightly — only a CHANGED outcome is a fact worth a row.
@@ -224,22 +226,60 @@ function monthHistoryRows(history: HistoryEvent[]): HistoryRow[] {
       case "credit_applied":
         rows.push({ ...base, action: "Credit applied" })
         break
-      // ── the audit's flags — the facts a reviewer acts on
+      // ── the audit's flags — collapsed below into one row per kind
       case "VisitFlagRaised":
-        rows.push({
-          ...base,
-          action: <>Visit flagged<span className="text-ink-dim"> · {formatCurrency(Number(p.cents ?? 0) / 100)}</span></>,
-          note: typeof p.message === "string" ? p.message : null,
-        })
+        flagRaises.push({ at: e.occurred_at, seq: e.seq, cents: Number(p.cents ?? 0), message: typeof p.message === "string" ? p.message : "" })
         break
       case "VisitFlagRetracted":
-        rows.push({ ...base, action: "Flag retracted", note: typeof p.reason === "string" ? p.reason : null })
+        flagRetracts.push({ at: e.occurred_at, seq: e.seq, reason: typeof p.reason === "string" ? p.reason : "" })
         break
       default:
         // Outside the month's lens (observation echoes, credit-check passes,
         // schedule/task churn) — those live on their own surfaces.
         break
     }
+  }
+
+  // ALL flag raises fold into ONE row — the total up front, each visit and
+  // its dollars behind the dropdown. Same for retractions.
+  if (flagRaises.length > 0) {
+    const latest = flagRaises.reduce((a, b) => (a.at > b.at ? a : b))
+    const total = flagRaises.reduce((s, f) => s + f.cents, 0)
+    rows.push({
+      key: "flags-raised",
+      at: latest.at,
+      seq: latest.seq,
+      tag: "pipeline",
+      action: (
+        <>
+          {flagRaises.length === 1 ? "Visit flagged" : `${flagRaises.length} visits flagged`}
+          <span className="text-ink-dim"> · {formatCurrency(total / 100)}</span>
+        </>
+      ),
+      itemsSummary: "the visits",
+      items: [...flagRaises]
+        .sort((a, b) => (a.message < b.message ? -1 : 1))
+        .map((f) => ({
+          label: (
+            <>
+              <span className="font-mono">{f.message.slice(0, 10)}</span> · {formatCurrency(f.cents / 100)}
+            </>
+          ),
+          note: f.message.slice(12) || null,
+        })),
+    })
+  }
+  if (flagRetracts.length > 0) {
+    const latest = flagRetracts.reduce((a, b) => (a.at > b.at ? a : b))
+    rows.push({
+      key: "flags-retracted",
+      at: latest.at,
+      seq: latest.seq,
+      tag: "pipeline",
+      action: flagRetracts.length === 1 ? "Flag retracted" : `${flagRetracts.length} flags retracted`,
+      itemsSummary: "why",
+      items: flagRetracts.map((f) => ({ label: f.reason.replace(/_/g, " ") || "retracted" })),
+    })
   }
 
   for (const b of bursts.values()) {
