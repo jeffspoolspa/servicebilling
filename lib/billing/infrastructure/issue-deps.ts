@@ -26,6 +26,7 @@ export function buildIssueDeps(sys: Db, months: SupabaseBillingMonthRepository):
     itemDescriptions: () => months.itemDescriptions(),
     saveIssued: (rows) => months.saveIssued(rows),
     skipOpenFindings: (monthId, at) => months.skipOpenFindings(monthId, at),
+    docSettingsOverride: (monthId) => months.docSettingsOverride(monthId),
     enqueueInvoices: async (ids) => {
       await new SupabaseInvoiceQueue(sys as never).enqueue(ids, 2)
     },

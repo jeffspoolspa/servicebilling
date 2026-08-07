@@ -20,6 +20,14 @@ export interface BillingMonthRepository {
   save(month: BillingMonth): Promise<void>
   /** Customers with delivery in this month — what a run enqueues. */
   customersWithDelivery(month: string): Promise<number[]>
+  /**
+   * RULED 2026-08-07: an ION billing-type disagreement never holds or
+   * refuses — the majority is picked and the disagreement is ONE blocking
+   * finding (rule billing_type_conflict) a person reviews or settles by
+   * choosing. Sync = raise when conflicted, retract when decided/agreeing;
+   * returns whether an open flag remains.
+   */
+  syncBillingTypeConflict(monthId: string, customerId: number, conflicts: readonly string[], at: string): Promise<boolean>
 }
 
 /** What happened at the pool, as facts. Delivery's published language. */

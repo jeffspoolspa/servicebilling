@@ -170,7 +170,20 @@ export class AdvanceMonthService {
           return { monthId, from, step, to: from, detail: "gate context not wired for this caller", again: false }
         }
         const ctx = await this.gateFacts.forCustomers([month.customerId], new Map([[month.customerId, month.id]]), now)
-        const g = gate(month, ctx.get(month.customerId)!)
+        const ctxFacts = ctx.get(month.customerId)!
+        // RULED 2026-08-07: a billing-type disagreement never holds or
+        // refuses — ION's majority is PICKED and the disagreement becomes a
+        // blocking FINDING. Synced BEFORE the gate judges, so a fresh flag
+        // blocks this same pass (never issue-then-flag).
+        const conflictOpen = await this.months.syncBillingTypeConflict(month.id, month.customerId, ctxFacts.docSettingsConflicts, at)
+        const others = ctxFacts.blockingFindings.filter((f) => f.rule !== "billing_type_conflict")
+        const facts = {
+          ...ctxFacts,
+          blockingFindings: conflictOpen
+            ? [...others, { rule: "billing_type_conflict", message: ctxFacts.docSettingsConflicts[0] ?? "" }]
+            : others,
+        }
+        const g = gate(month, facts)
         month.markGated(g.heldFor, at)
         detail = g.cleared
           ? "cleared the gate"

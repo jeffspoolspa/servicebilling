@@ -1,5 +1,5 @@
 import type { BillingMonth } from "@/lib/billing/domain"
-import { documentDocNumber, documentsOf, monthDocSettings, visitBreakLabel, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
+import { documentDocNumber, documentsOf, monthDocSettings, visitBreakLabel, type DocSettingsOverride, type DocTerms, type InvoicePresentation } from "@/lib/billing/domain"
 import { resolveLaborDocuments } from "./labor-resolution"
 import type { QboInvoices, CreatedInvoice } from "@/lib/external/qbo/qbo"
 import type { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
@@ -48,6 +48,8 @@ export interface IssueDeps {
   /** Issuing IS the decision about any still-open flags: they resolve as
    *  SKIPPED — the general resolution for "the invoice went out anyway". */
   skipOpenFindings(monthId: string, at: string): Promise<{ id: string; message: string }[]>
+  /** The month's recorded billing-type choice (null = ION's config rules). */
+  docSettingsOverride(monthId: string): Promise<DocSettingsOverride | null>
   /** THE HANDOFF: each created invoice enters its own machine — one
    *  AdvanceInvoice command per document, the drainer takes it from there. */
   enqueueInvoices(qboInvoiceIds: string[]): Promise<void>
@@ -80,9 +82,10 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
   if (ionNumbers.length === 0) throw new IssueRefused("no ION invoice numbers for this month — nothing to consolidate a doc number from")
 
   // The document settings live ON THE MONTH (RULED): consumables mode and
-  // presentation are month-level value objects the invoices inherit. Tasks
-  // disagreeing is an ION config mistake — REFUSE, with the disagreement
-  // spelled out, so it is fixed before any document exists.
+  // presentation are month-level value objects the invoices inherit. ION's
+  // config is the DEFAULT; a recorded choice on the month overrides it.
+  // An UNDECIDED disagreement refuses — a person picks, not a coin flip.
+  const settingsOverride = await deps.docSettingsOverride(m.id)
   const settings = monthDocSettings(
     taskIds.map((id) => {
       const t = meta.get(id)
@@ -93,10 +96,11 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
         green: t?.category === "green_pool",
       }
     }),
+    settingsOverride,
   )
-  if (settings.conflicts.length > 0) {
-    throw new IssueRefused(`billing settings disagree across tasks — fix in ION first: ${settings.conflicts.join("; ")}`)
-  }
+  // RULED 2026-08-07: a disagreement never refuses — the pick (the
+  // recorded choice, else ION's majority) is the setting; the conflict is
+  // a blocking FINDING the reviewer already dispositioned to get here.
   const terms: DocTerms[] = taskIds.map((id) => {
     const t = meta.get(id)
     return {

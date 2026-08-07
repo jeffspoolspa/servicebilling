@@ -12,6 +12,7 @@ import { reconcile, RECONCILE_TOLERANCE_CENTS } from "./reconciler"
 import { gate, type MonthGateFacts } from "./gate"
 import { auditConsumables } from "./consumables-audit"
 import { draftInvoice } from "./invoice-draft"
+import { monthDocSettings } from "./invoice-documents"
 import { documentsOf, presentationOf } from "./invoice-documents"
 import { invoiceNextStep } from "./invoice-lifecycle"
 
@@ -460,6 +461,7 @@ const facts = (over: Partial<MonthGateFacts> = {}): MonthGateFacts => ({
   qboCustomerId: "6532",
   paymentRoute: "autopay",
   activeHold: null,
+  docSettingsConflicts: [],
   blockingFindings: [],
   ...over,
 })
@@ -481,6 +483,24 @@ check("the gate names every criterion, and says WHY it failed", () => {
   assert.deepStrictEqual(held.heldFor, ["billing_identity", "route_resolved"])
   assert.match(held.criteria.find((c) => c.name === "route_resolved")!.detail!, /a bill could not reach them/)
   assert.match(held.criteria.find((c) => c.name === "billing_identity")!.detail!, /nobody to address an invoice to/)
+})
+
+check("billing type: ION is the default; a disagreement is a person's pick", () => {
+  const tasks = [
+    { taskId: "a", consumables: "included" as const, ionInvoiceType: "Standard", green: false },
+    { taskId: "b", consumables: "separate" as const, ionInvoiceType: "Standard", green: false },
+  ]
+  // Undecided disagreement: the majority is PICKED (never a refusal) and
+  // the disagreement is reported — it becomes a blocking FINDING, so the
+  // month reaches a person through the normal flag-review flow.
+  const undecided = monthDocSettings(tasks)
+  assert.strictEqual(undecided.conflicts.length, 1)
+  assert.strictEqual(undecided.consumables, "separate", "tie picks separate — the safer split")
+  assert.strictEqual(gate(gateable(), facts({ docSettingsConflicts: undecided.conflicts })).cleared, true, "not a gate criterion")
+  // The recorded choice IS the setting; the conflict is decided, not hidden.
+  const chosen = monthDocSettings(tasks, { consumables: "included" })
+  assert.strictEqual(chosen.conflicts.length, 0)
+  assert.strictEqual(chosen.consumables, "included")
 })
 
 check("the buried SQL rules become sentences a person can read", () => {

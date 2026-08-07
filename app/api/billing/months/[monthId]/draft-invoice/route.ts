@@ -31,8 +31,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
   // default; the draft flip is a parameter, never state.
   const taskIds = [...new Set(month.billableItems.map((i) => i.taskId).filter(Boolean))]
   const meta = await repo.taskDocMeta(taskIds)
-  // Month-level settings, inherited by every document; a disagreement
-  // renders (majority wins for display) but is REPORTED — issue refuses it.
+  // Month-level settings, inherited by every document. ION's config is the
+  // default; the month's recorded choice overrides. An undecided
+  // disagreement renders (majority for display) but is REPORTED — the gate
+  // holds and issue refuses until a person picks.
+  const settingsOverride = await repo.docSettingsOverride(monthId)
   const settings = monthDocSettings(
     taskIds.map((id) => {
       const t = meta.get(id)
@@ -43,6 +46,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
         green: t?.category === "green_pool",
       }
     }),
+    settingsOverride,
   )
   const terms: DocTerms[] = taskIds.map((id) => {
     const t = meta.get(id)

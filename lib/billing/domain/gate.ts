@@ -46,6 +46,13 @@ export interface MonthGateFacts {
   /** An unreleased hold naming this customer. Somebody said hands off. */
   readonly activeHold: string | null
   /**
+   * ION tasks disagreeing on the billing type (consumables / presentation)
+   * with no recorded choice for the month. Not a gate criterion — the
+   * advance service turns it into a blocking FINDING (review = accept the
+   * ION-majority pick; or choose explicitly on the month).
+   */
+  readonly docSettingsConflicts: readonly string[]
+  /**
    * Open maintenance credits (unapplied, recent, maintenance-marked memo)
    * with no decision. Billing more before deciding them is how a customer
    * pays twice.
@@ -76,6 +83,9 @@ export function gate(month: BillingMonth, facts: MonthGateFacts): GateResult {
     "no payment route — not enrolled in autopay and no email on file, so a bill could not reach them",
   )
   check("not_on_hold", facts.activeHold === null, facts.activeHold ? `held: ${facts.activeHold}` : undefined)
+  // Billing-type disagreement is NOT a criterion (RULED 2026-08-07): the
+  // system picks ION's majority and FLAGS it — a blocking finding a person
+  // reviews (accepting the pick) or settles by choosing on the month.
   // No credits criterion (RULED: maint in the memo IS the decision — the
   // invoice machine's credit_check applies it before collect/send; holding
   // the month for an "undecided" credit contradicts the documented rule).

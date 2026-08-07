@@ -31,42 +31,52 @@ export type InvoicePresentation = "itemized" | "summary"
 
 /**
  * The month's DOCUMENT SETTINGS — value objects set ON THE BILLING MONTH
- * (RULED, Carter 2026-08-04): consumables included/separate and the
- * presentation are month-level; invoices INHERIT them. Two tasks
- * disagreeing is almost always an ION config mistake — derive the
- * majority for display, and report the CONFLICT so it is fixed BEFORE
- * invoice creation (the issue step refuses on it). Green tasks are
- * excluded: the green document is its own thing regardless.
+ * (RULED, Carter 2026-08-04; choice RULED 2026-08-07): ION's task config
+ * is the DEFAULT. Two tasks disagreeing HOLDS the month at the gate
+ * (billing_type) until a person CHOOSES which setting the month uses —
+ * the override. A chosen dimension has no conflict; an unchosen
+ * disagreement keeps the hold and the issue step refuses. Green tasks
+ * are excluded: the green document is its own thing regardless.
  */
 export interface MonthDocSettings {
   readonly consumables: "included" | "separate"
   readonly presentation: InvoicePresentation
-  /** Human-readable disagreements; non-empty = fix in ION before issue. */
+  /** Disagreements a person has not yet decided; non-empty = held. */
   readonly conflicts: string[]
+}
+
+export interface DocSettingsOverride {
+  readonly consumables?: "included" | "separate"
+  readonly presentation?: InvoicePresentation
 }
 
 export function monthDocSettings(
   tasks: readonly { taskId: string; consumables: "included" | "separate"; ionInvoiceType: string | null; green: boolean }[],
+  override?: DocSettingsOverride | null,
 ): MonthDocSettings {
   const live = tasks.filter((t) => !t.green)
   const conflicts: string[] = []
 
   const modes = new Set(live.map((t) => t.consumables))
-  const consumables: "included" | "separate" =
+  let consumables: "included" | "separate" =
     modes.size === 1
       ? [...modes][0]
       : live.filter((t) => t.consumables === "separate").length >= live.length / 2
         ? "separate"
         : "included"
-  if (modes.size > 1) {
+  if (override?.consumables) {
+    consumables = override.consumables
+  } else if (modes.size > 1) {
     const minority = live.filter((t) => t.consumables !== consumables).map((t) => t.taskId)
     conflicts.push(`tasks disagree on consumables (included vs separate) — minority: ${minority.join(", ")}`)
   }
 
   const types = [...new Set(live.map((t) => t.ionInvoiceType).filter((x): x is string => !!x))]
   const presentations = [...new Set(types.map((t) => presentationOf(t)))]
-  const presentation = presentations[0] ?? "itemized"
-  if (presentations.length > 1) {
+  let presentation = presentations[0] ?? "itemized"
+  if (override?.presentation) {
+    presentation = override.presentation
+  } else if (presentations.length > 1) {
     conflicts.push(`tasks disagree on presentation (itemized vs summary): ${types.join(" | ")}`)
   }
 

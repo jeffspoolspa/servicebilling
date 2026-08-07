@@ -196,6 +196,20 @@ function monthHistoryRows(history: HistoryEvent[]): HistoryRow[] {
       case "ChemProvisionChanged":
         rows.push({ ...base, action: <>Peer group reassigned<span className="text-ink-dim"> · {String(p.provision ?? "")}</span></> })
         break
+      case "MonthDocSettingsChosen":
+        rows.push({
+          ...base,
+          action: (
+            <>
+              Billing type chosen
+              <span className="text-ink-dim">
+                {" · "}
+                {Object.entries((p.chosen ?? {}) as Record<string, string>).map(([k, v]) => `${k}: ${v}`).join(", ")}
+              </span>
+            </>
+          ),
+        })
+        break
       // ── the invoice half of the story, as it names this month
       case "invoice_created":
         rows.push({
@@ -411,6 +425,7 @@ export function MonthWorkbench({
   const [draft, setDraft] = useState<Draft | "loading" | "error" | null>(null)
   const [presentation, setPresentation] = useState<"itemized" | "summary" | null>(null)
   const [acting, setActing] = useState<string | null>(null)
+  const [draftEpoch, setDraftEpoch] = useState(0)
   const [actErr, setActErr] = useState<string | null>(null)
 
   const hasInvoices = invoices.length > 0
@@ -428,7 +443,29 @@ export function MonthWorkbench({
     return () => {
       alive = false
     }
-  }, [presentation, m.id, hasInvoices])
+  }, [presentation, m.id, hasInvoices, draftEpoch])
+
+  // RULED 2026-08-07: the billing type is SET here (defaults to ION's
+  // majority); whatever is selected when the invoice issues is what is used.
+  const chooseDocSetting = async (dim: "consumables" | "presentation", value: string) => {
+    setActing(`docset:${dim}`)
+    setActErr(null)
+    try {
+      const r = await fetch(`/api/billing/months/${m.id}/doc-settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [dim]: value }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(String(j.error ?? `HTTP ${r.status}`))
+      setDraftEpoch((e) => e + 1)
+      router.refresh()
+    } catch (e) {
+      setActErr(String(e instanceof Error ? e.message : e).slice(0, 140))
+    } finally {
+      setActing(null)
+    }
+  }
 
   const act = async (name: string, method: string, path: string) => {
     setActing(name)
@@ -609,7 +646,7 @@ export function MonthWorkbench({
                     <span key={i} className="text-[11px] text-coral">{d}</span>
                   ))}
                   {settingsConflicts.map((c, i) => (
-                    <span key={`sc${i}`} className="text-[11px] text-coral" title="Fix the task's billing settings in ION — issue refuses while tasks disagree">
+                    <span key={`sc${i}`} className="text-[11px] text-coral" title="ION's majority is picked for the draft — review the flag to accept it, or set the billing type on the Billable items tab">
                       {c}
                     </span>
                   ))}
@@ -930,16 +967,33 @@ export function MonthWorkbench({
                 <CardTitle>Billable items</CardTitle>
                 <span
                   className="ml-auto flex items-center gap-1.5"
-                  title="From the task agreement in ION — locked. Changing it regenerates any draft invoices on next read."
+                  title={hasInvoices ? "The documents inherited these settings — locked" : "Defaults to ION's task config; click to set the month's billing type (RULED: the selection here is what the issue uses)"}
                 >
-                  <span className="flex border border-line rounded-lg overflow-hidden opacity-70">
-                    <span className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] ${lockedPresentation === "itemized" ? "bg-cyan text-bg" : "text-ink-dim"}`}>Itemized</span>
-                    <span className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] border-l border-line ${lockedPresentation === "summary" ? "bg-cyan text-bg" : "text-ink-dim"}`}>Summary</span>
+                  <span className={`flex border border-line rounded-lg overflow-hidden ${hasInvoices ? "opacity-70" : ""}`}>
+                    {(["itemized", "summary"] as const).map((p2, i2) => (
+                      <button
+                        key={p2}
+                        disabled={hasInvoices || acting !== null}
+                        onClick={() => chooseDocSetting("presentation", p2)}
+                        className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] ${i2 === 1 ? "border-l border-line" : ""} ${lockedPresentation === p2 ? "bg-cyan text-bg" : "text-ink-dim hover:text-ink"} disabled:cursor-default`}
+                      >
+                        {p2 === "itemized" ? "Itemized" : "Summary"}
+                      </button>
+                    ))}
                   </span>
-                  <Pill tone={separateConsumables ? "cyan" : "neutral"}>
-                    {separateConsumables ? "separate consumables" : "consumables included"}
-                  </Pill>
-                  {settingsConflicts.length > 0 && <Pill tone="coral">mixed — fix in ION</Pill>}
+                  <span className={`flex border border-line rounded-lg overflow-hidden ${hasInvoices ? "opacity-70" : ""}`}>
+                    {(["included", "separate"] as const).map((c2, i2) => (
+                      <button
+                        key={c2}
+                        disabled={hasInvoices || acting !== null}
+                        onClick={() => chooseDocSetting("consumables", c2)}
+                        className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] ${i2 === 1 ? "border-l border-line" : ""} ${(separateConsumables ? "separate" : "included") === c2 ? "bg-cyan text-bg" : "text-ink-dim hover:text-ink"} disabled:cursor-default`}
+                      >
+                        {c2 === "included" ? "Chems included" : "Chems separate"}
+                      </button>
+                    ))}
+                  </span>
+                  {settingsConflicts.length > 0 && <Pill tone="coral">ION tasks disagree — flagged</Pill>}
                 </span>
               </CardHeader>
             )}

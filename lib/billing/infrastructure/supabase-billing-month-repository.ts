@@ -861,6 +861,61 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     return { recorded: fresh.length, alreadyOpen, suppressed, retracted: stale.length }
   }
 
+  /** The month's recorded billing-type choice (null = ION's config rules). */
+  async docSettingsOverride(monthId: string): Promise<{ consumables?: "included" | "separate"; presentation?: "itemized" | "summary" } | null> {
+    const q = this.q("billing_months") as unknown as {
+      select(c: string): { eq(k: string, v: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+    }
+    const { data, error } = await q.select("doc_settings_override").eq("id", monthId)
+    if (error) throw new Error(`override read failed: ${JSON.stringify(error).slice(0, 200)}`)
+    return ((data ?? [])[0] as { doc_settings_override: { consumables?: "included" | "separate"; presentation?: "itemized" | "summary" } | null } | undefined)?.doc_settings_override ?? null
+  }
+
+  /**
+   * The billing-type disagreement FLAG (RULED 2026-08-07): conflicts raise
+   * one blocking finding per month (review = accept ION's majority pick);
+   * a decided or vanished disagreement retracts it. Returns whether an
+   * open flag remains after the sync.
+   */
+  async syncBillingTypeConflict(monthId: string, customerId: number, conflicts: readonly string[], at: string): Promise<boolean> {
+    const sel = this.q("findings") as unknown as {
+      select(c: string): { eq(k: string, v: string): { eq(k2: string, v2: string): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
+    }
+    const { data, error } = await sel.select("id, message, resolved_at").eq("billing_month_id", monthId).eq("rule", "billing_type_conflict")
+    if (error) throw new Error(`billing-type flag read failed: ${JSON.stringify(error).slice(0, 200)}`)
+    const rows = (data ?? []) as { id: string; message: string | null; resolved_at: string | null }[]
+    const open = rows.find((r) => r.resolved_at === null)
+    const message = conflicts.join("; ")
+
+    if (conflicts.length === 0) {
+      // Decided (or ION now agrees) — the observation is gone.
+      if (open) {
+        const del = this.q("findings") as unknown as { delete(): { eq(k: string, v: string): PromiseLike<{ error: unknown }> } }
+        const { error: e2 } = await del.delete().eq("id", open.id)
+        if (e2) throw new Error(`billing-type flag retract failed: ${JSON.stringify(e2).slice(0, 200)}`)
+      }
+      return false
+    }
+    if (open) {
+      if (open.message !== message) {
+        const upd = this.q("findings") as unknown as { update(v: Record<string, unknown>): { eq(k: string, v2: string): PromiseLike<{ error: unknown }> } }
+        await upd.update({ message }).eq("id", open.id)
+      }
+      return true
+    }
+    // Reviewed with the SAME observation = accepted; don't nag again.
+    if (rows.some((r) => r.resolved_at !== null && r.message === message)) return false
+    const ins = this.client.schema("billing").from("findings") as unknown as {
+      insert(v: unknown[]): PromiseLike<{ error: unknown }>
+    }
+    const { error: e3 } = await ins.insert([{
+      billing_month_id: monthId, phase: "audit", rule: "billing_type_conflict", severity: "high",
+      customer_id: customerId, message, source_key: "billing_type",
+    }])
+    if (e3) throw new Error(`billing-type flag raise failed: ${JSON.stringify(e3).slice(0, 200)}`)
+    return true
+  }
+
   /** Issuing IS the decision on any open flag: resolve them as SKIPPED.
    *  Returns what was skipped so the caller can emit the facts. */
   async skipOpenFindings(monthId: string, at: string): Promise<{ id: string; message: string }[]> {

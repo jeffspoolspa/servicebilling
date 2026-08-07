@@ -11,7 +11,7 @@
  *  - findings: unresolved rows on the month at blocking severity
  */
 
-import type { MonthGateFacts } from "@/lib/billing/domain"
+import { monthDocSettings, type DocSettingsOverride, type MonthGateFacts } from "@/lib/billing/domain"
 
 interface Db {
   schema(s: string): { from(t: string): Record<string, (...a: never[]) => unknown> }
@@ -43,6 +43,34 @@ export class SupabaseMonthGateFacts {
     return out
   }
 
+  /** The tasks' doc config — same current-terms-over-task resolution the
+   *  issue path uses (repository.taskDocMeta), scoped to what gate needs. */
+  private async taskDocMeta(taskIds: readonly string[]): Promise<Map<string, { consumables: "included" | "separate"; ionInvoiceType: string | null; category: string | null }>> {
+    const out = new Map<string, { consumables: "included" | "separate"; ionInvoiceType: string | null; category: string | null }>()
+    const [tasks, terms] = await Promise.all([
+      this.chunked(taskIds, async (c) => {
+        const { data, error } = await this.q("maintenance", "tasks").select("id, consumables_mode, ion_invoice_type, category").in("id", c).range(0, 999)
+        if (error) throw new Error(`gate task meta failed: ${JSON.stringify(error).slice(0, 200)}`)
+        return (data ?? []) as { id: string; consumables_mode: string | null; ion_invoice_type: string | null; category: string | null }[]
+      }),
+      this.chunked(taskIds, async (c) => {
+        const { data, error } = await this.q("maintenance", "task_terms").select("task_id, consumables_mode").in("task_id", c).is("valid_to", null).range(0, 999)
+        if (error) throw new Error(`gate task terms failed: ${JSON.stringify(error).slice(0, 200)}`)
+        return (data ?? []) as { task_id: string; consumables_mode: string | null }[]
+      }),
+    ])
+    const termOf = new Map(terms.map((t) => [t.task_id, t.consumables_mode]))
+    for (const t of tasks) {
+      const mode = termOf.get(t.id) ?? t.consumables_mode
+      out.set(t.id, {
+        consumables: mode === "separate" ? "separate" : "included",
+        ionInvoiceType: t.ion_invoice_type,
+        category: t.category,
+      })
+    }
+    return out
+  }
+
   /**
    * One MonthGateFacts per customer, for a whole run in ~6 chunked reads.
    * monthIdOf maps customerId -> billing_month_id for the findings lookup.
@@ -57,7 +85,8 @@ export class SupabaseMonthGateFacts {
     const emailOf = new Map(custRows.map((r) => [r.id, r.email]))
     const qboIds = custRows.map((r) => r.qbo_customer_id).filter((x): x is string => x !== null)
 
-    const [autopay, methods, holds, findings] = await Promise.all([
+    const monthIds = [...monthIdOf.values()]
+    const [autopay, methods, holds, findings, claimedTasks, overrides] = await Promise.all([
       this.chunked(qboIds, async (c) => {
         const { data, error } = await this.q("billing", "autopay_customers").select("qbo_customer_id, is_active").in("qbo_customer_id", c).eq("is_active", true).range(0, 999)
         if (error) throw new Error(`autopay read failed: ${JSON.stringify(error).slice(0, 200)}`)
@@ -80,12 +109,46 @@ export class SupabaseMonthGateFacts {
         if (error) throw new Error(`findings read failed: ${JSON.stringify(error).slice(0, 200)}`)
         return (data ?? []) as { billing_month_id: string; rule: string; message: string | null; severity: string | null }[]
       }),
+      // The month's CLAIMED task set — what its documents will cover.
+      this.chunked(monthIds, async (c) => {
+        const { data, error } = await this.q("billing", "billable_items")
+          .select("billing_month_id, task_id").in("billing_month_id", c).range(0, 9999)
+        if (error) throw new Error(`billable items read failed: ${JSON.stringify(error).slice(0, 200)}`)
+        return (data ?? []) as { billing_month_id: string; task_id: string | null }[]
+      }),
+      this.chunked(monthIds, async (c) => {
+        const { data, error } = await this.q("billing", "billing_months")
+          .select("id, doc_settings_override").in("id", c).range(0, 999)
+        if (error) throw new Error(`override read failed: ${JSON.stringify(error).slice(0, 200)}`)
+        return (data ?? []) as { id: string; doc_settings_override: DocSettingsOverride | null }[]
+      }),
     ])
 
     const autopaySet = new Set(autopay.map((r) => r.qbo_customer_id))
     const methodSet = new Set(methods.map((r) => r.qbo_customer_id))
     const holdOf = new Map(holds.map((r) => [Number(r.subject_id), r.reason ?? "no reason recorded"]))
     const monthOfId = new Map([...monthIdOf].map(([cid, mid]) => [mid, cid]))
+
+    // Conflicts via the ONE domain rule (monthDocSettings) over the claimed
+    // task set, with the month's recorded choice applied.
+    const overrideOf = new Map(overrides.map((r) => [r.id, r.doc_settings_override]))
+    const taskIdsOf = new Map<string, Set<string>>()
+    for (const r of claimedTasks) {
+      if (!r.task_id) continue
+      const set = taskIdsOf.get(r.billing_month_id) ?? new Set<string>()
+      set.add(r.task_id)
+      taskIdsOf.set(r.billing_month_id, set)
+    }
+    const allTaskIds = [...new Set([...taskIdsOf.values()].flatMap((s) => [...s]))]
+    const meta = await this.taskDocMeta(allTaskIds)
+    const conflictsOf = new Map<string, string[]>()
+    for (const [mid, ids] of taskIdsOf) {
+      const tasks = [...ids].map((id) => {
+        const t = meta.get(id)
+        return { taskId: id, consumables: t?.consumables ?? ("included" as const), ionInvoiceType: t?.ionInvoiceType ?? null, green: t?.category === "green_pool" }
+      })
+      conflictsOf.set(mid, monthDocSettings(tasks, overrideOf.get(mid) ?? null).conflicts)
+    }
 
     const findingsOf = new Map<number, { rule: string; message: string }[]>()
     for (const r of findings) {
@@ -107,6 +170,7 @@ export class SupabaseMonthGateFacts {
         qboCustomerId: qbo,
         paymentRoute: route,
         activeHold: holdOf.get(cid) ?? null,
+        docSettingsConflicts: conflictsOf.get(monthIdOf.get(cid) ?? "") ?? [],
         blockingFindings: findingsOf.get(cid) ?? [],
       })
     }
@@ -125,5 +189,5 @@ export class SupabaseMonthGateFacts {
  * group, not a rule).
  */
 export function findingBlocks(rule: string, _severity: string | null): boolean {
-  return rule === "cpv_outlier"
+  return rule === "cpv_outlier" || rule === "billing_type_conflict"
 }
