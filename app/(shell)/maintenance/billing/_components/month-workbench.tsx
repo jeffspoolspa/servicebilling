@@ -849,10 +849,7 @@ export function MonthWorkbench({
                         </div>
                       </div>
                     ) : (
-                      <div className="text-[12px] text-ink-mute">
-                        No letter yet — add a note and hit Generate explainer.{" "}
-                        <a href={`/api/billing/months/${m.id}/explainer`} target="_blank" rel="noreferrer" className="text-cyan underline underline-offset-2">Print view (facts only)</a>
-                      </div>
+                      <div className="text-[12px] text-ink-mute">No letter yet</div>
                     )}
 
                     {notes.length > 0 && (
