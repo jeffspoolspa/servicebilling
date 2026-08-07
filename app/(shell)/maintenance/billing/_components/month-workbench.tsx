@@ -409,6 +409,7 @@ export function MonthWorkbench({
       const r = await fetch(`/api/billing/visits/${v.visit_id}/refresh-ion`, { method: "POST" })
       const j = await r.json()
       if (!r.ok) throw new Error(j.error ?? String(r.status))
+      setDraftEpoch((e) => e + 1)
       router.refresh()
     } catch (e) {
       setRefreshErr(String(e instanceof Error ? e.message : e).slice(0, 160))
@@ -540,6 +541,7 @@ export function MonthWorkbench({
       const r = await fetch(path, { method })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(String(j.error ?? `${r.status}`))
+      setDraftEpoch((e) => e + 1)
       router.refresh()
     } catch (e) {
       setActErr(`${name} failed: ${String(e instanceof Error ? e.message : e).slice(0, 200)}`)
