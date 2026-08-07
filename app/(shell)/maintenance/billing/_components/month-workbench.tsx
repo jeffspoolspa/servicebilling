@@ -883,7 +883,7 @@ export function MonthWorkbench({
                         className={primaryBtn}
                         title="Save the note, send the log + the current letter to the model, replace the letter at its link"
                       >
-                        {genState === "working" ? "Generating…" : genAt ? "Regenerate" : "Generate explainer"}
+                        {genState === "working" ? "Generating…" : genAt ? "Regenerate" : "Generate"}
                       </button>
                     </span>
                   </CardHeader>
