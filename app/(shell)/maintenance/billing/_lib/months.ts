@@ -32,6 +32,7 @@ export interface MonthOverviewRow {
   gated_at: string | null
   gate_held_for: string[] | null
   invoiced_at: string | null
+  service_ended_at: string | null
   issued_invoices: IssuedInvoiceRow[] | null
 }
 
@@ -77,4 +78,4 @@ export function displayStatus(m: MonthOverviewRow): MonthDisplayStatus {
 }
 
 export const MONTHS_SELECT =
-  "id, customer_id, customer_name, month, status, subtotal_cents, item_count, open_findings, reconciled_at, disputed_at, disputes, gated_at, gate_held_for, invoiced_at, issued_invoices"
+  "id, customer_id, customer_name, month, status, subtotal_cents, item_count, open_findings, reconciled_at, disputed_at, disputes, gated_at, gate_held_for, invoiced_at, service_ended_at, issued_invoices"

@@ -694,21 +694,35 @@ export function MonthWorkbench({
                       only authority beyond that. Release hold retired —
                       reviewing the flags IS the release. */}
                   {!hasInvoices && m.status !== "disputed" && (() => {
-                    const periodOpen = monthEndIso >= new Date().toISOString().slice(0, 10)
+                    // Service ended early (cancellation) = the period is
+                    // CLOSED — the one way issuance passes the date check.
+                    const periodOpen = !m.service_ended_at && monthEndIso >= new Date().toISOString().slice(0, 10)
                     const blocked = openFindings.length > 0
                       ? `${openFindings.length} flagged visit${openFindings.length === 1 ? "" : "s"} await review`
                       : periodOpen
                         ? `the month isn't over until ${monthEndIso}`
                         : null
                     return (
-                      <button
-                        disabled={acting !== null || blocked !== null}
-                        title={blocked ?? "advance this month: gate, issue, run the invoice machine"}
-                        onClick={() => act("Issue invoices", "POST", `/api/billing/months/${m.id}/advance`)}
-                        className={cn(primaryBtn, blocked && "opacity-50 cursor-not-allowed")}
-                      >
-                        {acting === "Issue invoices" ? "Issuing…" : "Issue invoices"}
-                      </button>
+                      <>
+                        {periodOpen && openFindings.length === 0 && (
+                          <button
+                            disabled={acting !== null}
+                            title="Service ended (cancellation): close the period now and issue — reconcile still runs on fresh ION data first"
+                            onClick={() => act("Issue early", "POST", `/api/billing/months/${m.id}/end-service`)}
+                            className={actionBtn}
+                          >
+                            {acting === "Issue early" ? "Issuing…" : "Issue early"}
+                          </button>
+                        )}
+                        <button
+                          disabled={acting !== null || blocked !== null}
+                          title={blocked ?? "advance this month: gate, issue, run the invoice machine"}
+                          onClick={() => act("Issue invoices", "POST", `/api/billing/months/${m.id}/advance`)}
+                          className={cn(primaryBtn, blocked && "opacity-50 cursor-not-allowed")}
+                        >
+                          {acting === "Issue invoices" ? "Issuing…" : "Issue invoices"}
+                        </button>
+                      </>
                     )
                   })()}
                   {hasInvoices && m.status !== "closed" && (() => {
@@ -819,6 +833,7 @@ export function MonthWorkbench({
                   month={monthLabel}
                   highlightDates={[...flaggedOpenDates, ...flaggedReviewedDates]}
                   itemCompare={chemItemSummary}
+                  epoch={draftEpoch}
                 />
               </Card>
 

@@ -176,6 +176,24 @@ check("a held month re-asks the gate — the hold is a snapshot, not a verdict",
   assert.strictEqual(m.nextStep(delivered, AUG), "issue")
 })
 
+check("service ended early — the period follows the service, not the calendar", () => {
+  // RULED 2026-08-07: a cancellation closes the period NOW — the one way
+  // issuance passes the date check. It is a FACT, not a bypass: reconcile
+  // and the gate still run (endService un-reconciles so verdicts refresh).
+  const JUL15 = new Date("2026-07-15T12:00:00Z")
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  assert.strictEqual(m.nextStep([src()], JUL15), null, "open period: accrual only, nothing else owed")
+  assert.match(m.issueBlockers(JUL15).join(" "), /is not over/)
+
+  m.endService("2026-07-15T12:00:00Z", "cancellation")
+  assert.ok(m.pullFacts().some((f) => f.type === "MonthServiceEnded"))
+  assert.strictEqual(m.nextStep([src()], JUL15), "reconcile", "period closed: the ladder is owed in full")
+  assert.ok(!m.issueBlockers(JUL15).join(" ").includes("is not over"), "the date check passes on the fact")
+  m.endService("2026-07-16T12:00:00Z", "again")
+  assert.strictEqual(m.serviceEnded, "2026-07-15T12:00:00Z", "idempotent — the first fact stands")
+})
+
 check("completeness outranks the hold — a stale ledger re-accrues before any gate re-ask", () => {
   // RULED 2026-08-07: a re-ingested log carries NEW source ids, so a
   // refreshed visit leaves the held month's ledger incomplete. A gate

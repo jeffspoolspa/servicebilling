@@ -84,6 +84,7 @@ export interface BillingMonthFact {
     | "MonthPreprocessed"
     | "VarianceRecorded"
     | "MonthSent"
+    | "MonthServiceEnded"
   readonly monthId: string
   readonly at: string
   readonly payload: Record<string, unknown>
@@ -115,13 +116,14 @@ export class BillingMonth {
     private gateHeldFor: string[],
     private invoicedAt: string | null,
     private readonly variances: Variance[],
+    private serviceEndedAt: string | null,
   ) {}
 
   static open(id: string, customerId: number, month: string): BillingMonth {
     if (!/^\d{4}-\d{2}-01$/.test(month)) {
       throw new BillingRuleError(`a billing month is the first of a month, got "${month}"`)
     }
-    return new BillingMonth(id, customerId, month, new Map(), null, null, [], null, null, [], null, [])
+    return new BillingMonth(id, customerId, month, new Map(), null, null, [], null, null, [], null, [], null)
   }
 
   static reconstitute(args: {
@@ -137,6 +139,7 @@ export class BillingMonth {
     gateHeldFor?: readonly string[]
     invoicedAt?: string | null
     variances?: readonly Variance[]
+    serviceEndedAt?: string | null
   }): BillingMonth {
     return new BillingMonth(
       args.id,
@@ -151,6 +154,7 @@ export class BillingMonth {
       [...(args.gateHeldFor ?? [])],
       args.invoicedAt ?? null,
       [...(args.variances ?? [])],
+      args.serviceEndedAt ?? null,
     )
   }
 
@@ -274,7 +278,27 @@ export class BillingMonth {
   }
 
   monthIsOver(now: Date): boolean {
+    // RULED 2026-08-07: the period follows the SERVICE — a cancellation
+    // ends it early, and the month is billable from that moment. The
+    // calendar month-end is just the default close. Reconcile freshness is
+    // untouched: issuance still rides the same ladder.
+    if (this.serviceEndedAt) return true
     return now.toISOString().slice(0, 10) >= this.billableFrom
+  }
+
+  get serviceEnded(): string | null {
+    return this.serviceEndedAt
+  }
+
+  /** Service ended mid-month (cancellation) — close the period NOW. The
+   *  sums moved out from under any prior verdicts, so reconcile and the
+   *  gate re-run; issuance then passes the date check on this fact. */
+  endService(at: string, reason: string): void {
+    if (this.isInvoiced) throw new BillingRuleError(`${this.month} is already invoiced`)
+    if (this.serviceEndedAt) return // idempotent — replay-safe
+    this.serviceEndedAt = at
+    this.unreconcile()
+    this.facts.push({ type: "MonthServiceEnded", monthId: this.id, at, payload: { reason, endedAt: at } })
   }
 
   /**

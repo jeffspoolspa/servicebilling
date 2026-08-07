@@ -103,7 +103,7 @@ function CompareCells({ medQty, medUsd, pctl }: { medQty: number | null | undefi
   )
 }
 
-export function VisitCalendar({ customerId, month, highlightDates, itemCompare }: { customerId: number; month: string; highlightDates?: string[]; itemCompare?: ChemItemCompareRow[] }) {
+export function VisitCalendar({ customerId, month, highlightDates, itemCompare, epoch }: { customerId: number; month: string; highlightDates?: string[]; itemCompare?: ChemItemCompareRow[]; epoch?: number }) {
   const hl = new Set((highlightDates ?? []).map((d) => d.slice(0, 10)))
   const [days, setDays] = useState<VisitDay[] | "loading" | "error">("loading")
   const [collapsed, setCollapsed] = useState(false)
@@ -122,7 +122,7 @@ export function VisitCalendar({ customerId, month, highlightDates, itemCompare }
     return () => {
       alive = false
     }
-  }, [customerId, month])
+  }, [customerId, month, epoch])
 
   if (days === "loading") {
     return <div className="text-[11px] text-ink-mute">Loading visits…</div>

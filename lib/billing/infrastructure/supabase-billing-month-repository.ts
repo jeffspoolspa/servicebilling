@@ -43,12 +43,13 @@ interface MonthRow {
   gated_at: string | null
   gate_held_for: string[] | null
   invoiced_at: string | null
+  service_ended_at: string | null
 }
 
 const data_of = (r: { data: unknown[] | null }) => r.data
 
 const MONTH_COLS =
-  "id, customer_id, month, reconciled_at, disputed_at, disputes, delivery_refreshed_at, gated_at, gate_held_for, invoiced_at"
+  "id, customer_id, month, reconciled_at, disputed_at, disputes, delivery_refreshed_at, gated_at, gate_held_for, invoiced_at, service_ended_at"
 
 export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   constructor(private readonly client: Db) {}
@@ -117,6 +118,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       gateHeldFor: row.gate_held_for ?? [],
       invoicedAt: row.invoiced_at,
       variances,
+      serviceEndedAt: row.service_ended_at,
     })
   }
 
@@ -172,7 +174,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   private statePatch(month: BillingMonth): Record<string, unknown> {
     const s = month as unknown as {
       reconciledAt: string | null; disputedAt: string | null; deliveryRefreshedAt: string | null
-      gatedAt: string | null; invoicedAt: string | null
+      gatedAt: string | null; invoicedAt: string | null; serviceEndedAt: string | null
     }
     return {
       reconciled_at: s.reconciledAt,
@@ -182,6 +184,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       gated_at: s.gatedAt,
       gate_held_for: month.heldFor,
       invoiced_at: s.invoicedAt,
+      service_ended_at: s.serviceEndedAt,
     }
   }
 
