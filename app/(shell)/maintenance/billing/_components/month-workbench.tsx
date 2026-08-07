@@ -443,7 +443,9 @@ export function MonthWorkbench({
   useEffect(() => {
     if (hasInvoices) return
     let alive = true
-    setDraft("loading")
+    // Only the FIRST load shows a spinner — refetches keep the current
+    // draft on screen until the new one lands (no reload flash).
+    setDraft((d) => (d && d !== "loading" && d !== "error" ? d : "loading"))
     const q = presentation ? `?presentation=${presentation}` : ""
     fetch(`/api/billing/months/${m.id}/draft-invoice${q}`)
       .then((r) => r.json().then((j) => (r.ok ? j : Promise.reject(new Error(j.error)))))
@@ -457,24 +459,26 @@ export function MonthWorkbench({
   // RULED 2026-08-07: any billable item can be marked NON-BILLABLE — it
   // stays on the ledger but never reaches the invoice; task_id marks the
   // task's whole month.
-  const toggleExclude = async (payload: { item_ids?: string[]; task_id?: string }, exclude: boolean) => {
-    setActing("exclude")
+  const toggleExclude = (payload: { item_ids?: string[]; task_id?: string }, exclude: boolean) => {
     setActErr(null)
-    try {
-      const r = await fetch(`/api/billing/months/${m.id}/exclude-items`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, exclude }),
+    const hit = (i: LedgerItem) =>
+      payload.task_id ? i.task_id === payload.task_id : (payload.item_ids ?? []).includes(i.id)
+    // WRITE-AHEAD: the row moves now; failure puts it back with the reason.
+    setLocalItems((items) => items.map((i) => (hit(i) && !i.qbo_invoice_id ? { ...i, excluded_at: exclude ? new Date().toISOString() : null } : i)))
+    fetch(`/api/billing/months/${m.id}/exclude-items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, exclude }),
+    })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(String((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`))
+        setDraftEpoch((e) => e + 1)
+        router.refresh()
       })
-      const j = await r.json()
-      if (!r.ok) throw new Error(String(j.error ?? `HTTP ${r.status}`))
-      setDraftEpoch((e) => e + 1)
-      router.refresh()
-    } catch (e) {
-      setActErr(String(e instanceof Error ? e.message : e).slice(0, 140))
-    } finally {
-      setActing(null)
-    }
+      .catch((e) => {
+        setLocalItems(ledgerItems)
+        setActErr(`non-billable change failed: ${String(e instanceof Error ? e.message : e).slice(0, 140)}`)
+      })
   }
 
   // RULED 2026-08-07: the billing type is SET here (defaults to ION's
@@ -591,8 +595,12 @@ export function MonthWorkbench({
       members: [it],
     }))
   }
-  const excludedItems = ledgerItems.filter((i) => i.excluded_at)
-  const activeItems = ledgerItems.filter((i) => !i.excluded_at)
+  // WRITE-AHEAD ledger: exclusion toggles flip locally the moment they're
+  // clicked; the POST and the server refresh catch up behind the click.
+  const [localItems, setLocalItems] = useState(ledgerItems)
+  useEffect(() => setLocalItems(ledgerItems), [ledgerItems])
+  const excludedItems = localItems.filter((i) => i.excluded_at)
+  const activeItems = localItems.filter((i) => !i.excluded_at)
   const laborItems = activeItems.filter((i) => i.kind === "labor" && i.amount_cents !== 0)
   const chemItems = activeItems.filter((i) => i.kind === "consumable")
 
