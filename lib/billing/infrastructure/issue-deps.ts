@@ -25,13 +25,17 @@ export function buildIssueDeps(sys: Db, months: SupabaseBillingMonthRepository):
     customerEmail: (id) => months.customerEmail(id),
     itemDescriptions: () => months.itemDescriptions(),
     saveIssued: (rows) => months.saveIssued(rows),
+    skipOpenFindings: (monthId, at) => months.skipOpenFindings(monthId, at),
     enqueueInvoices: async (ids) => {
       await new SupabaseInvoiceQueue(sys as never).enqueue(ids, 2)
     },
     emit: async (type, payload, participants, at) => {
+      // Facts about a document home on the invoice; facts with no document
+      // (e.g. VisitFlagSkipped) home on the month itself.
+      const onInvoice = typeof payload.qbo_invoice_id === "string" && payload.qbo_invoice_id !== ""
       const { error: factErr } = await sys.schema("maintenance").rpc("append_event", {
-        p_aggregate: "invoice",
-        p_aggregate_id: String(payload.qbo_invoice_id ?? ""),
+        p_aggregate: onInvoice ? "invoice" : "billing_month",
+        p_aggregate_id: onInvoice ? String(payload.qbo_invoice_id) : (participants[0] ?? ""),
         p_type: type,
         p_payload: payload,
         p_actor: "billing_pipeline",

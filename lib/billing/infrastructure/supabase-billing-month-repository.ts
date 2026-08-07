@@ -763,6 +763,19 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
     const at = new Date().toISOString()
     const facts: { type: string; monthId: string; at: string; payload: Record<string, unknown> }[] = []
 
+    // A flag arriving AFTER the month issued is born SKIPPED — the invoice
+    // already went out, so there is nothing for it to hold. Same resolution
+    // the issue step records; no special case downstream.
+    const invoicedMonths = new Set<string>()
+    for (let i = 0; i < monthIds.length; i += 40) {
+      const c = monthIds.slice(i, i + 40)
+      const rows = await this.pageAll<{ id: string; invoiced_at: string | null }>(
+        () => this.q("billing_months").select("id, invoiced_at").in("id", c) as never,
+        "billing_months",
+      )
+      for (const r of rows) if (r.invoiced_at) invoicedMonths.add(r.id)
+    }
+
     const computedKeys = new Set<string>()
     const fresh: typeof findings[number][] = []
     let alreadyOpen = 0
@@ -785,6 +798,9 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       } else {
         fresh.push(f)
         facts.push({ type: "VisitFlagRaised", monthId: f.monthId, at, payload: { customer_id: f.customerId, rule: f.rule, source_key: f.sourceKey, cents: f.cents, message: f.message } })
+        if (invoicedMonths.has(f.monthId)) {
+          facts.push({ type: "VisitFlagSkipped", monthId: f.monthId, at, payload: { rule: f.rule, source_key: f.sourceKey, message: f.message, reason: "raised_after_issue" } })
+        }
       }
     }
 
@@ -827,6 +843,9 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
         customer_id: f.customerId, message: f.message, cents: f.cents,
         source_key: f.sourceKey,
         task_id: f.sourceKey.includes(":") ? f.sourceKey.slice(0, f.sourceKey.lastIndexOf(":")) : null,
+        ...(invoicedMonths.has(f.monthId)
+          ? { resolved_at: at, resolved_by: "billing_pipeline", resolution: "skipped" }
+          : {}),
       }))).select("id")
       if (error) throw new Error(`findings insert failed: ${JSON.stringify(error).slice(0, 240)}`)
       if (!data || data.length !== fresh.length) throw new Error(`findings insert wrote ${data?.length ?? 0} of ${fresh.length}`)
@@ -840,6 +859,25 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       if (error) console.error(`flag fact batch not appended: ${JSON.stringify(error).slice(0, 200)}`)
     }
     return { recorded: fresh.length, alreadyOpen, suppressed, retracted: stale.length }
+  }
+
+  /** Issuing IS the decision on any open flag: resolve them as SKIPPED.
+   *  Returns what was skipped so the caller can emit the facts. */
+  async skipOpenFindings(monthId: string, at: string): Promise<{ id: string; message: string }[]> {
+    const upd = this.q("findings") as unknown as {
+      update(v: Record<string, unknown>): {
+        eq(k: string, v2: string): {
+          is(k2: string, v3: null): { select(c: string): PromiseLike<{ data: unknown[] | null; error: unknown }> }
+        }
+      }
+    }
+    const { data, error } = await upd
+      .update({ resolved_at: at, resolved_by: "billing_pipeline", resolution: "skipped" })
+      .eq("billing_month_id", monthId)
+      .is("resolved_at", null)
+      .select("id, message")
+    if (error) throw new Error(`skip findings failed: ${JSON.stringify(error).slice(0, 200)}`)
+    return (data ?? []) as { id: string; message: string }[]
   }
 
   async customersWithDelivery(month: string): Promise<number[]> {

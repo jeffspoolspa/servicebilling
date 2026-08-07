@@ -119,6 +119,7 @@ export function ServiceLog({
   flags,
   rowAction,
   onOpenInvoice,
+  compact,
 }: {
   visits: ServiceLogVisit[]
   period: ServiceLogPeriod
@@ -131,6 +132,9 @@ export function ServiceLog({
   rowAction?: (v: ServiceLogVisit) => React.ReactNode
   /** When provided, a visit's invoice doc renders as a link opening its detail. */
   onOpenInvoice?: (qboInvoiceId: string) => void
+  /** Narrow surfaces: cap the reading columns so the log FITS — no
+   *  horizontal scrolling. The expanded row still shows every reading. */
+  compact?: boolean
 }) {
   const highlighted = new Set((highlightDates ?? []).map((d) => d.slice(0, 10)))
   const flagOpen = new Set((flags?.open ?? []).map((d) => d.slice(0, 10)))
@@ -149,9 +153,10 @@ export function ServiceLog({
   const effectiveBody = bodies.length > 1 ? (activeBody ?? bodies[0]) : null
   const shownVisits = effectiveBody ? visits.filter((v) => v.body === effectiveBody) : visits
 
-  const presentCols = CORE_COLS.filter(([name]) =>
+  const presentColsAll = CORE_COLS.filter(([name]) =>
     shownVisits.some((v) => v.readings[name] != null && v.readings[name] !== ""),
   )
+  const presentCols = compact ? presentColsAll.slice(0, 5) : presentColsAll
   // grid shows numbers only — ION values sometimes carry units ("500ppb")
   const displayReading = (val: unknown) => {
     const s = String(val ?? "")
@@ -447,7 +452,7 @@ export function ServiceLog({
                 </div>
                 {/* FIXED SLOTS from here right — every row the same widths,
                     so columns stay aligned even when the table overflows. */}
-                <span className="w-[30px] flex-none inline-flex items-center gap-1 font-mono text-[10px] text-ink-mute">
+                {!compact && <span className="w-[30px] flex-none inline-flex items-center gap-1 font-mono text-[10px] text-ink-mute">
                   {v.photos.length > 0 && (
                     <>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -457,7 +462,7 @@ export function ServiceLog({
                       {v.photos.length}
                     </>
                   )}
-                </span>
+                </span>}
                 <span
                   className="font-mono text-[12px] text-ink w-[64px] text-right flex-none"
                   title={totalCents > 0 ? `labor ${formatCurrency(Number(v.labor_cents ?? 0) / 100)} + chems ${formatCurrency(chemCents / 100)}` : undefined}

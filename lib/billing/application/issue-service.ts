@@ -45,6 +45,9 @@ export interface IssueDeps {
   /** Customer-facing sales description per QBO item — never ship a blank line. */
   itemDescriptions(): Promise<Map<string, string>>
   saveIssued(rows: { billingMonthId: string; kind: string; qboInvoiceId: string; docNumber: string; subtotalCents: number; presentation: string; ionInvoiceNumbers: string[] }[]): Promise<void>
+  /** Issuing IS the decision about any still-open flags: they resolve as
+   *  SKIPPED — the general resolution for "the invoice went out anyway". */
+  skipOpenFindings(monthId: string, at: string): Promise<{ id: string; message: string }[]>
   /** THE HANDOFF: each created invoice enters its own machine — one
    *  AdvanceInvoice command per document, the drainer takes it from there. */
   enqueueInvoices(qboInvoiceIds: string[]): Promise<void>
@@ -178,6 +181,12 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
   )
   m.markInvoiced(delivered, now, at)
   await deps.months.save(m)
+  // Once the document exists there is nothing left for a flag to hold —
+  // whatever is still open resolves as skipped, as a recorded fact.
+  const skippedFlags = await deps.skipOpenFindings(m.id, at)
+  for (const f of skippedFlags) {
+    await deps.emit("VisitFlagSkipped", { finding_id: f.id, message: f.message, reason: "issued_with_flags_open" }, [m.id], at)
+  }
   // The item stamps come LAST: save rewrites unlocked rows, so the lock
   // (invoice link) lands only after the ledger's final write.
   await deps.months.linkItemsToInvoices(m.id)

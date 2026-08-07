@@ -133,6 +133,7 @@ function monthHistoryRows(history: HistoryEvent[]): HistoryRow[] {
   const bursts = new Map<string, { count: number; cents: number; at: string; seq: number; type: string; reason: string | null }>()
   const flagRaises: { at: string; seq: number; cents: number; message: string }[] = []
   const flagRetracts: { at: string; seq: number; reason: string }[] = []
+  const flagSkips: { at: string; seq: number; message: string; reason: string }[] = []
 
   // GATE DEDUPE: the gate re-computes until invoiced, so an unchanged
   // outcome repeats nightly — only a CHANGED outcome is a fact worth a row.
@@ -233,6 +234,9 @@ function monthHistoryRows(history: HistoryEvent[]): HistoryRow[] {
       case "VisitFlagRetracted":
         flagRetracts.push({ at: e.occurred_at, seq: e.seq, reason: typeof p.reason === "string" ? p.reason : "" })
         break
+      case "VisitFlagSkipped":
+        flagSkips.push({ at: e.occurred_at, seq: e.seq, message: typeof p.message === "string" ? p.message : "", reason: typeof p.reason === "string" ? p.reason : "" })
+        break
       default:
         // Outside the month's lens (observation echoes, credit-check passes,
         // schedule/task churn) — those live on their own surfaces.
@@ -267,6 +271,25 @@ function monthHistoryRows(history: HistoryEvent[]): HistoryRow[] {
           ),
           note: f.message.slice(12) || null,
         })),
+    })
+  }
+  if (flagSkips.length > 0) {
+    const latest = flagSkips.reduce((a, b) => (a.at > b.at ? a : b))
+    rows.push({
+      key: "flags-skipped",
+      at: latest.at,
+      seq: latest.seq,
+      tag: "pipeline",
+      action: (
+        <>
+          {flagSkips.length === 1 ? "Flag skipped" : `${flagSkips.length} flags skipped`}
+          <span className="text-ink-dim"> · {flagSkips[0].reason === "raised_after_issue" ? "raised after issue" : "issued with flags open"}</span>
+        </>
+      ),
+      itemsSummary: "the visits",
+      items: [...flagSkips]
+        .sort((a, b) => (a.message < b.message ? -1 : 1))
+        .map((f) => ({ label: <span className="font-mono">{f.message.slice(0, 10)}</span>, note: f.message.slice(12) || null })),
     })
   }
   if (flagRetracts.length > 0) {
@@ -353,9 +376,6 @@ export function MonthWorkbench({
   const [reviewErr, setReviewErr] = useState<string | null>(null)
   void summaryNote
 
-  // Once any invoice exists, the month is issued — flags become
-  // observations (nothing left for them to hold).
-  const monthIssued = (m.issued_invoices ?? []).length > 0
   // Flagged visits: the finding's message leads with the visit date.
   const dateOf = (f: MonthFinding) => f.message?.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null
   const openFindings = findings.filter((f) => !f.resolved_at && !aheadReviewed.has(f.id))
@@ -681,20 +701,10 @@ export function MonthWorkbench({
                 <div className="space-y-0">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-display text-[15px]">Flagged visits</span>
-                    {/* Once issued, a flag is an OBSERVATION, not a to-do —
-                        review buttons only exist while they can hold the gate. */}
-                    {monthIssued ? (
-                      openFindings.length > 0 && (
-                        <span className="text-[10.5px] text-ink-mute" title="these flags were raised after the invoice went out — informational only">
-                          raised after issue — informational
-                        </span>
-                      )
-                    ) : (
-                      openFindings.length > 0 && (
-                        <button onClick={() => review("all")} className={actionBtn}>
-                          Mark all reviewed ({openFindings.length})
-                        </button>
-                      )
+                    {openFindings.length > 0 && (
+                      <button onClick={() => review("all")} className={actionBtn}>
+                        Mark all reviewed ({openFindings.length})
+                      </button>
                     )}
                   </div>
                   {reviewErr && <div className="text-[11px] text-coral mb-2">{reviewErr}</div>}
@@ -708,13 +718,18 @@ export function MonthWorkbench({
                       })}
                       flags={{ open: flaggedOpenDates, reviewed: flaggedReviewedDates }}
                       period={{ label: monthLabel, start: `${monthLabel}-01`, end: monthEndIso }}
+                      compact
                       rowAction={(v) => {
                         const d = v.visit_date.slice(0, 10)
                         const ids = openFindings.filter((f) => dateOf(f) === d).map((f) => f.id)
                         if (ids.length === 0) {
-                          return flaggedReviewedDates.includes(d) ? <Pill tone="sun">reviewed</Pill> : null
+                          // Resolved — the pill IS the resolution, whatever it was.
+                          const res = reviewedFindings.find((f) => dateOf(f) === d)
+                          if (!res) return null
+                          return res.resolution === "skipped"
+                            ? <Pill tone="neutral">skipped</Pill>
+                            : <Pill tone="sun">{res.resolution ?? "reviewed"}</Pill>
                         }
-                        if (monthIssued) return <Pill tone="neutral">post-issue</Pill>
                         return (
                           <button
                             onClick={() => review(ids)}
