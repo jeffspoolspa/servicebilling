@@ -223,27 +223,47 @@ export function VisitCalendar({ customerId, month, highlightDates, itemCompare }
         <TableBody>
           {readingRows.length > 0 && (
             <TableRow className="hover:bg-white/[0.04] bg-white/[0.04]">
-              <TableCell
-                colSpan={(collapsed ? 0 : days.length) + 1}
-                className="sticky left-0 py-1"
-              >
+              <TableCell className="sticky left-0 py-1">
                 <button
                   onClick={() => setShowReadings((s) => !s)}
                   className="text-[9px] uppercase tracking-[0.14em] text-ink-mute hover:text-ink"
-                  title={showReadings ? "Collapse the readings" : "Show the readings"}
+                  title={showReadings ? "Collapse to FC in this row" : "Show every reading"}
                 >
                   <span className="inline-block w-2.5">{showReadings ? "▾" : "▸"}</span>
-                  Readings
+                  Readings{!showReadings && <span className="ml-1 normal-case tracking-normal text-ink-dim">FC</span>}
                 </button>
               </TableCell>
-              <TableCell className="text-right pl-4 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-                Avg
-              </TableCell>
+              {/* COLLAPSED: the FC values ride the header row itself. */}
+              {!collapsed && !showReadings &&
+                days.map((d) => (
+                  <TableCell
+                    key={d.visit_date}
+                    className={cn(
+                      "text-right px-2 py-1 font-mono num text-ink-dim",
+                      hl.has(d.visit_date.slice(0, 10)) && "bg-coral/[0.07]",
+                    )}
+                  >
+                    {d.readings?.["Free Chlorine"] ?? ""}
+                  </TableCell>
+                ))}
+              {!collapsed && showReadings && <TableCell colSpan={days.length} />}
+              {!showReadings ? (
+                (() => {
+                  const vals = days.map((d) => Number(d.readings?.["Free Chlorine"])).filter((x) => isFinite(x) && x > 0)
+                  const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null
+                  return (
+                    <TableCell className="text-right pl-4 py-1 font-mono num text-ink border-l border-line-soft/30" title="FC average">
+                      {avg ?? ""}
+                    </TableCell>
+                  )
+                })()
+              ) : (
+                <TableCell className="text-right pl-4 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">Avg</TableCell>
+              )}
               <TableCell colSpan={1 + extraCols} />
             </TableRow>
           )}
-          {/* Collapsed readings keep FC — the one-row summary; expand for the rest. */}
-          {readingRows.filter(([name]) => showReadings || name === "Free Chlorine").map(([name, label]) => (
+          {showReadings && readingRows.map(([name, label]) => (
             <TableRow key={name} className="text-ink-dim">
               <TableCell className="sticky left-0 bg-bg-elev z-10">{label}</TableCell>
               {!collapsed && days.map((d) => {
@@ -291,7 +311,7 @@ export function VisitCalendar({ customerId, month, highlightDates, itemCompare }
           {items.length > 0 && (
             <TableRow className="hover:bg-white/[0.04] bg-white/[0.04]">
               <TableCell
-                colSpan={(collapsed ? 0 : days.length) + 1}
+                colSpan={showChems ? (collapsed ? 0 : days.length) + 1 : 1}
                 className="sticky left-0 py-1"
               >
                 <span className="inline-flex items-center gap-1.5">
@@ -314,12 +334,39 @@ export function VisitCalendar({ customerId, month, highlightDates, itemCompare }
                   )}
                 </span>
               </TableCell>
-              <TableCell className="text-right pl-4 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-                Qty
-              </TableCell>
-              <TableCell className="text-right py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-                Total $
-              </TableCell>
+              {/* COLLAPSED: the per-day $ totals ride the header row itself. */}
+              {!collapsed && !showChems &&
+                days.map((d) => {
+                  const amt = Number(d.chem_total_cents)
+                  return (
+                    <TableCell
+                      key={d.visit_date}
+                      className={cn(
+                        "text-right px-2 py-1 font-mono num text-ink-dim",
+                        hl.has(d.visit_date.slice(0, 10)) && "bg-coral/[0.07]",
+                      )}
+                    >
+                      {amt > 0 ? formatCurrency(amt / 100) : ""}
+                    </TableCell>
+                  )
+                })}
+              {!showChems ? (
+                <>
+                  <TableCell className="py-1" />
+                  <TableCell className="text-right py-1 font-mono num font-semibold text-ink border-l border-line-soft/30">
+                    {formatCurrency(grandTotal / 100)}
+                  </TableCell>
+                </>
+              ) : (
+                <>
+                  <TableCell className="text-right pl-4 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                    Qty
+                  </TableCell>
+                  <TableCell className="text-right py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+                    Total $
+                  </TableCell>
+                </>
+              )}
               {cmpOn && (
                 <>
                   <TableCell className="text-right px-2 py-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
@@ -428,41 +475,7 @@ export function VisitCalendar({ customerId, month, highlightDates, itemCompare }
             )
           })}
         </TableBody>
-        {items.length > 0 && !showChems && (
-          <TableFooter>
-            <TableRow className="text-ink hover:bg-transparent">
-              <TableCell className="sticky left-0 bg-bg-elev z-10">Chemicals $ / visit</TableCell>
-              {!collapsed && days.map((d) => {
-                const amt = Number(d.chem_total_cents)
-                return (
-                  <TableCell
-                    key={d.visit_date}
-                    className={cn(
-                      "text-right px-2 font-mono num",
-                      amt > 0 && "border-l border-line-soft/30",
-                      hl.has(d.visit_date.slice(0, 10)) && "bg-coral/[0.07]",
-                    )}
-                  >
-                    {amt > 0 ? formatCurrency(amt / 100) : ""}
-                  </TableCell>
-                )
-              })}
-              <TableCell />
-              <TableCell className="text-right font-mono num font-semibold border-l border-line-soft/30">
-                {formatCurrency(grandTotal / 100)}
-              </TableCell>
-              {cmpOn &&
-                (totalCmp ? (
-                  <>
-                    <CompareCells medQty={null} medUsd={totalCmp.self_med_usd} pctl={totalCmp.self_pctl} />
-                    <CompareCells medQty={null} medUsd={totalCmp.peer_med_usd} pctl={totalCmp.peer_pctl} />
-                  </>
-                ) : (
-                  <TableCell colSpan={6} />
-                ))}
-            </TableRow>
-          </TableFooter>
-        )}
+
       </Table>
     </div>
   )
