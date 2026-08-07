@@ -479,6 +479,7 @@ const facts = (over: Partial<MonthGateFacts> = {}): MonthGateFacts => ({
   paymentRoute: "autopay",
   activeHold: null,
   docSettingsConflicts: [],
+  hasGreenPool: false,
   blockingFindings: [],
   ...over,
 })
@@ -494,7 +495,7 @@ const gateable = () => {
 check("the gate names every criterion, and says WHY it failed", () => {
   const ok = gate(gateable(), facts())
   assert.strictEqual(ok.cleared, true)
-  assert.strictEqual(ok.criteria.length, 7, "all seven are reported, not just failures")
+  assert.strictEqual(ok.criteria.length, 8, "all eight are reported, not just failures")
 
   const held = gate(gateable(), facts({ qboCustomerId: null, paymentRoute: null }))
   assert.deepStrictEqual(held.heldFor, ["billing_identity", "route_resolved"])
@@ -514,6 +515,12 @@ check("non-billable: the ledger keeps it, the invoice never sees it", () => {
   const v2 = m.billableItems.find((i) => i.sourceId === "v2")!
   assert.strictEqual(v2.amountCents, 7000, "the re-priced amount lands")
   assert.strictEqual(v2.excludedAt, AT, "the non-billable mark survives re-pricing")
+})
+
+check("green pool months hold — they run their own process", () => {
+  const held = gate(gateable(), facts({ hasGreenPool: true }))
+  assert.deepStrictEqual(held.heldFor, ["green_pool"])
+  assert.match(held.criteria.find((c) => c.name === "green_pool")!.detail!, /own process/)
 })
 
 check("a green-only month has nothing to choose — its settings default", () => {

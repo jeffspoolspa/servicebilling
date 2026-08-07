@@ -115,9 +115,9 @@ export class SupabaseMonthGateFacts {
       // The month's CLAIMED task set — what its documents will cover.
       this.chunked(monthIds, async (c) => {
         const { data, error } = await this.q("billing", "billable_items")
-          .select("billing_month_id, task_id").in("billing_month_id", c).range(0, 9999)
+          .select("billing_month_id, task_id, excluded_at").in("billing_month_id", c).range(0, 9999)
         if (error) throw new Error(`billable items read failed: ${JSON.stringify(error).slice(0, 200)}`)
-        return (data ?? []) as { billing_month_id: string; task_id: string | null }[]
+        return (data ?? []) as { billing_month_id: string; task_id: string | null; excluded_at: string | null }[]
       }),
       this.chunked(monthIds, async (c) => {
         const { data, error } = await this.q("billing", "billing_months")
@@ -144,6 +144,12 @@ export class SupabaseMonthGateFacts {
     }
     const allTaskIds = [...new Set([...taskIdsOf.values()].flatMap((s) => [...s]))]
     const meta = await this.taskDocMeta(allTaskIds)
+    // Green hold: any NON-EXCLUDED claimed item on a green_pool task.
+    const greenOf = new Set<string>()
+    for (const r of claimedTasks) {
+      if (r.excluded_at || !r.task_id) continue
+      if (meta.get(r.task_id)?.category === "green_pool") greenOf.add(r.billing_month_id)
+    }
     const conflictsOf = new Map<string, string[]>()
     for (const [mid, ids] of taskIdsOf) {
       const tasks = [...ids].map((id) => {
@@ -174,6 +180,7 @@ export class SupabaseMonthGateFacts {
         paymentRoute: route,
         activeHold: holdOf.get(cid) ?? null,
         docSettingsConflicts: conflictsOf.get(monthIdOf.get(cid) ?? "") ?? [],
+        hasGreenPool: greenOf.has(monthIdOf.get(cid) ?? ""),
         blockingFindings: findingsOf.get(cid) ?? [],
       })
     }

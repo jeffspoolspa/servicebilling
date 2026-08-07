@@ -53,6 +53,11 @@ export interface MonthGateFacts {
    * the month and survives re-accrual.
    */
   readonly docSettingsConflicts: readonly string[]
+  /** RULED 2026-08-07: green-pool months are issued through their OWN
+   *  process — any month still carrying billable (non-excluded) green
+   *  items holds here. Marking the green task's month non-billable
+   *  releases the hold to bill the rest. */
+  readonly hasGreenPool: boolean
   /**
    * Open maintenance credits (unapplied, recent, maintenance-marked memo)
    * with no decision. Billing more before deciding them is how a customer
@@ -84,6 +89,11 @@ export function gate(month: BillingMonth, facts: MonthGateFacts): GateResult {
     "no payment route — not enrolled in autopay and no email on file, so a bill could not reach them",
   )
   check("not_on_hold", facts.activeHold === null, facts.activeHold ? `held: ${facts.activeHold}` : undefined)
+  check(
+    "green_pool",
+    !facts.hasGreenPool,
+    facts.hasGreenPool ? "green pool months run their own process — held from the standard issue" : undefined,
+  )
   check(
     "billing_type",
     facts.docSettingsConflicts.length === 0,
