@@ -99,22 +99,27 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
     }),
     settingsOverride,
   )
-  // RULED 2026-08-07: a disagreement never refuses — the pick (the
-  // recorded choice, else ION's majority) is the setting; the conflict is
-  // a blocking FINDING the reviewer already dispositioned to get here.
+  // RULED 2026-08-07 (final): an UNSET dimension refuses — the month does
+  // not know what to resolve the billing type to, and it never guesses.
+  // The gate holds these months (billing_type); setting the value in the
+  // UI persists on the month and passes both, re-accruals included.
+  if (settings.consumables === null || settings.presentation === null || settings.labor === null) {
+    throw new IssueRefused(`billing type unresolved — set it on the month: ${settings.conflicts.join("; ")}`)
+  }
+  const resolved = settings as { consumables: "included" | "separate"; presentation: InvoicePresentation; labor: "per_visit" | "flat_rate" }
   const terms: DocTerms[] = taskIds.map((id) => {
     const t = meta.get(id)
     return {
       taskId: id,
       // The MONTH's labor setting groups every non-green task's labor;
       // green keeps its own document and its own terms.
-      labor: t?.category === "green_pool" ? (t?.labor ?? "per_visit") : settings.labor,
-      consumables: t?.category === "green_pool" ? (t?.consumables ?? "included") : settings.consumables,
+      labor: t?.category === "green_pool" ? (t?.labor ?? "per_visit") : resolved.labor,
+      consumables: t?.category === "green_pool" ? (t?.consumables ?? "included") : resolved.consumables,
       qc: t?.category === "quality_control",
       green: t?.category === "green_pool",
     }
   })
-  const presentation = settings.presentation
+  const presentation = resolved.presentation
   const taskCategory = new Map([...meta.entries()].map(([id, t]) => [id, t.category]))
   const flatTasks = new Set(terms.filter((t) => t.labor === "flat_rate").map((t) => t.taskId))
   // Labor resolves through the SAME ladder the draft preview showed

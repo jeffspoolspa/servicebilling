@@ -120,7 +120,7 @@ interface Draft {
   claimedAtZero: number
   presentation: "itemized" | "summary"
   documents: { kind: string; docNumber?: string | null; lines: DocLine[]; subtotalCents: number }[]
-  settings?: { consumables: "included" | "separate"; presentation: "itemized" | "summary"; labor?: "per_visit" | "flat_rate" }
+  settings?: { consumables: "included" | "separate" | null; presentation: "itemized" | "summary" | null; labor?: "per_visit" | "flat_rate" | null }
   settingsConflicts?: string[]
 }
 
@@ -1012,7 +1012,7 @@ export function MonthWorkbench({
                         key={p2}
                         disabled={hasInvoices || acting !== null}
                         onClick={() => chooseDocSetting("presentation", p2)}
-                        className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] ${i2 === 1 ? "border-l border-line" : ""} ${lockedPresentation === p2 ? "bg-cyan text-bg" : "text-ink-dim hover:text-ink"} disabled:cursor-default`}
+                        className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] ${i2 === 1 ? "border-l border-line" : ""} ${(draftSettings ? draftSettings.presentation : lockedPresentation) === p2 ? "bg-cyan text-bg" : "text-ink-dim hover:text-ink"} disabled:cursor-default`}
                       >
                         {p2 === "itemized" ? "Itemized" : "Summary"}
                       </button>
@@ -1024,7 +1024,7 @@ export function MonthWorkbench({
                         key={l2}
                         disabled={hasInvoices || acting !== null}
                         onClick={() => chooseDocSetting("labor", l2)}
-                        className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] ${i2 === 1 ? "border-l border-line" : ""} ${(draftSettings?.labor ?? "per_visit") === l2 ? "bg-cyan text-bg" : "text-ink-dim hover:text-ink"} disabled:cursor-default`}
+                        className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] ${i2 === 1 ? "border-l border-line" : ""} ${(draftSettings?.labor ?? null) === l2 ? "bg-cyan text-bg" : "text-ink-dim hover:text-ink"} disabled:cursor-default`}
                       >
                         {l2 === "per_visit" ? "Per visit" : "Flat rate"}
                       </button>
@@ -1036,13 +1036,13 @@ export function MonthWorkbench({
                         key={c2}
                         disabled={hasInvoices || acting !== null}
                         onClick={() => chooseDocSetting("consumables", c2)}
-                        className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] ${i2 === 1 ? "border-l border-line" : ""} ${(separateConsumables ? "separate" : "included") === c2 ? "bg-cyan text-bg" : "text-ink-dim hover:text-ink"} disabled:cursor-default`}
+                        className={`h-[22px] px-2 text-[10.5px] font-semibold leading-[22px] ${i2 === 1 ? "border-l border-line" : ""} ${(draftSettings ? draftSettings.consumables : (separateConsumables ? "separate" : "included")) === c2 ? "bg-cyan text-bg" : "text-ink-dim hover:text-ink"} disabled:cursor-default`}
                       >
                         {c2 === "included" ? "Chems included" : "Chems separate"}
                       </button>
                     ))}
                   </span>
-                  {settingsConflicts.length > 0 && <Pill tone="coral">ION tasks disagree — flagged</Pill>}
+                  {settingsConflicts.length > 0 && <Pill tone="coral">unresolved — choose</Pill>}
                 </span>
               </CardHeader>
             )}

@@ -46,10 +46,11 @@ export interface MonthGateFacts {
   /** An unreleased hold naming this customer. Somebody said hands off. */
   readonly activeHold: string | null
   /**
-   * ION tasks disagreeing on the billing type (consumables / presentation)
-   * with no recorded choice for the month. Not a gate criterion — the
-   * advance service turns it into a blocking FINDING (review = accept the
-   * ION-majority pick; or choose explicitly on the month).
+   * RULED 2026-08-07 (final): ION tasks disagreeing on the billing type
+   * (labor / consumables / presentation) with no recorded choice leaves
+   * the month's setting NULL — it does not know what to resolve to and
+   * never guesses. Unresolved = the gate holds; the UI choice persists on
+   * the month and survives re-accrual.
    */
   readonly docSettingsConflicts: readonly string[]
   /**
@@ -83,9 +84,13 @@ export function gate(month: BillingMonth, facts: MonthGateFacts): GateResult {
     "no payment route — not enrolled in autopay and no email on file, so a bill could not reach them",
   )
   check("not_on_hold", facts.activeHold === null, facts.activeHold ? `held: ${facts.activeHold}` : undefined)
-  // Billing-type disagreement is NOT a criterion (RULED 2026-08-07): the
-  // system picks ION's majority and FLAGS it — a blocking finding a person
-  // reviews (accepting the pick) or settles by choosing on the month.
+  check(
+    "billing_type",
+    facts.docSettingsConflicts.length === 0,
+    facts.docSettingsConflicts.length > 0
+      ? `billing type unresolved — set it on the month: ${facts.docSettingsConflicts[0]}`
+      : undefined,
+  )
   // No credits criterion (RULED: maint in the memo IS the decision — the
   // invoice machine's credit_check applies it before collect/send; holding
   // the month for an "undecided" credit contradicts the documented rule).

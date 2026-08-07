@@ -49,19 +49,20 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
     }),
     settingsOverride,
   )
+  // PREVIEW fallbacks only — an unset dimension renders per the task's own
+  // config so the draft is still viewable, but the issue refuses and the
+  // gate holds until the person sets it.
   const terms: DocTerms[] = taskIds.map((id) => {
     const t = meta.get(id)
     return {
       taskId: id,
-      // The MONTH's labor setting groups every non-green task's labor;
-      // green keeps its own document and its own terms.
-      labor: t?.category === "green_pool" ? (t?.labor ?? "per_visit") : settings.labor,
-      consumables: t?.category === "green_pool" ? (t?.consumables ?? "included") : settings.consumables,
+      labor: t?.category === "green_pool" ? (t?.labor ?? "per_visit") : (settings.labor ?? t?.labor ?? "per_visit"),
+      consumables: t?.category === "green_pool" ? (t?.consumables ?? "included") : (settings.consumables ?? t?.consumables ?? "included"),
       qc: t?.category === "quality_control",
       green: t?.category === "green_pool",
     }
   })
-  const defaultPresentation = settings.presentation
+  const defaultPresentation = settings.presentation ?? "itemized"
   const presentation: InvoicePresentation = asked === "summary" || asked === "itemized" ? asked : defaultPresentation
 
   // Resolve every labor line to its REAL QBO SKU — exact name, then the

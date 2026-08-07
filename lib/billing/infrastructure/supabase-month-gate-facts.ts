@@ -192,5 +192,5 @@ export class SupabaseMonthGateFacts {
  * group, not a rule).
  */
 export function findingBlocks(rule: string, _severity: string | null): boolean {
-  return rule === "cpv_outlier" || rule === "billing_type_conflict"
+  return rule === "cpv_outlier"
 }

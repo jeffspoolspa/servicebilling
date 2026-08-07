@@ -39,13 +39,17 @@ export type InvoicePresentation = "itemized" | "summary"
  * are excluded: the green document is its own thing regardless.
  */
 export interface MonthDocSettings {
-  readonly consumables: "included" | "separate"
-  readonly presentation: InvoicePresentation
-  /** RULED 2026-08-07: labor terms are the THIRD month-level dimension —
-   *  purely how labor GROUPS into line items (per-visit lines vs one
-   *  monthly line); each task's amounts still come from its own contract. */
-  readonly labor: "per_visit" | "flat_rate"
-  /** Disagreements a person has not yet decided; non-empty = held. */
+  /** RULED 2026-08-07 (final): a dimension is its unanimous ION value, the
+   *  recorded choice — or NULL when the tasks disagree and nobody has
+   *  chosen. Null never guesses: the month cannot pass the issue gate
+   *  until a person sets it, and the choice persists on the month so
+   *  re-accrual changes nothing. */
+  readonly consumables: "included" | "separate" | null
+  readonly presentation: InvoicePresentation | null
+  /** Labor terms: purely how labor GROUPS into line items (per-visit lines
+   *  vs one monthly line); each task's amounts come from its own contract. */
+  readonly labor: "per_visit" | "flat_rate" | null
+  /** What disagrees, for display; non-empty = an unset dimension. */
   readonly conflicts: string[]
 }
 
@@ -63,12 +67,7 @@ export function monthDocSettings(
   const conflicts: string[] = []
 
   const laborModes = new Set(live.map((t) => t.labor ?? "per_visit"))
-  let labor: "per_visit" | "flat_rate" =
-    laborModes.size === 1
-      ? [...laborModes][0]
-      : live.filter((t) => (t.labor ?? "per_visit") === "flat_rate").length >= live.length / 2
-        ? "flat_rate"
-        : "per_visit"
+  let labor: "per_visit" | "flat_rate" | null = laborModes.size === 1 ? [...laborModes][0] : null
   if (override?.labor) {
     labor = override.labor
   } else if (laborModes.size > 1) {
@@ -76,22 +75,16 @@ export function monthDocSettings(
   }
 
   const modes = new Set(live.map((t) => t.consumables))
-  let consumables: "included" | "separate" =
-    modes.size === 1
-      ? [...modes][0]
-      : live.filter((t) => t.consumables === "separate").length >= live.length / 2
-        ? "separate"
-        : "included"
+  let consumables: "included" | "separate" | null = modes.size === 1 ? [...modes][0] : null
   if (override?.consumables) {
     consumables = override.consumables
   } else if (modes.size > 1) {
-    const minority = live.filter((t) => t.consumables !== consumables).map((t) => t.taskId)
-    conflicts.push(`tasks disagree on consumables (included vs separate) — minority: ${minority.join(", ")}`)
+    conflicts.push(`tasks disagree on consumables (included vs separate)`)
   }
 
   const types = [...new Set(live.map((t) => t.ionInvoiceType).filter((x): x is string => !!x))]
   const presentations = [...new Set(types.map((t) => presentationOf(t)))]
-  let presentation = presentations[0] ?? "itemized"
+  let presentation: InvoicePresentation | null = presentations.length <= 1 ? (presentations[0] ?? "itemized") : null
   if (override?.presentation) {
     presentation = override.presentation
   } else if (presentations.length > 1) {

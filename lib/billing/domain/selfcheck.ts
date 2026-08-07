@@ -494,7 +494,7 @@ const gateable = () => {
 check("the gate names every criterion, and says WHY it failed", () => {
   const ok = gate(gateable(), facts())
   assert.strictEqual(ok.cleared, true)
-  assert.strictEqual(ok.criteria.length, 6, "all six are reported, not just failures")
+  assert.strictEqual(ok.criteria.length, 7, "all seven are reported, not just failures")
 
   const held = gate(gateable(), facts({ qboCustomerId: null, paymentRoute: null }))
   assert.deepStrictEqual(held.heldFor, ["billing_identity", "route_resolved"])
@@ -521,17 +521,21 @@ check("billing type: ION is the default; a disagreement is a person's pick", () 
     { taskId: "a", consumables: "included" as const, ionInvoiceType: "Standard", green: false },
     { taskId: "b", consumables: "separate" as const, ionInvoiceType: "Standard", green: false },
   ]
-  // Undecided disagreement: the majority is PICKED (never a refusal) and
-  // the disagreement is reported — it becomes a blocking FINDING, so the
-  // month reaches a person through the normal flag-review flow.
+  // RULED (final): an undecided disagreement resolves to NULL — the month
+  // does not know what to bill as, and it never guesses. Null fails the
+  // gate until a person sets the value; the choice persists on the month,
+  // so re-accrual (which touches only the ledger) cannot unset it.
   const undecided = monthDocSettings(tasks)
   assert.strictEqual(undecided.conflicts.length, 1)
-  assert.strictEqual(undecided.consumables, "separate", "tie picks separate — the safer split")
-  assert.strictEqual(gate(gateable(), facts({ docSettingsConflicts: undecided.conflicts })).cleared, true, "not a gate criterion")
-  // The recorded choice IS the setting; the conflict is decided, not hidden.
+  assert.strictEqual(undecided.consumables, null, "no guess — unresolved is unresolved")
+  const held = gate(gateable(), facts({ docSettingsConflicts: undecided.conflicts }))
+  assert.deepStrictEqual(held.heldFor, ["billing_type"])
+  assert.match(held.criteria.find((c) => c.name === "billing_type")!.detail!, /set it on the month/)
+  // The recorded choice IS the setting; the gate passes.
   const chosen = monthDocSettings(tasks, { consumables: "included" })
   assert.strictEqual(chosen.conflicts.length, 0)
   assert.strictEqual(chosen.consumables, "included")
+  assert.strictEqual(gate(gateable(), facts({ docSettingsConflicts: chosen.conflicts })).cleared, true)
 })
 
 check("the buried SQL rules become sentences a person can read", () => {
