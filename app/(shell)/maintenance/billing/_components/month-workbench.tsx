@@ -1099,11 +1099,21 @@ export function MonthWorkbench({
                 const shown = activeItems.filter((i) => i.kind === "labor" || i.kind === "consumable")
                 // A FLAT-RATE labor line belongs to the month, not a visit —
                 // it gets its own group instead of hiding inside a date.
-                const flatLines = shown.filter((i) => i.kind === "labor" && i.visit_id === null)
-                const flatTaskIds = new Set(flatLines.map((i) => i.task_id).filter(Boolean))
-                const flatVisitLabor = shown.filter((i) => i.kind === "labor" && i.visit_id !== null && i.amount_cents === 0 && i.task_id && flatTaskIds.has(i.task_id))
-                const inDropdown = new Set(flatVisitLabor.map((i) => i.id))
-                const visitLines = shown.filter((i) => !(i.kind === "labor" && i.visit_id === null) && !inDropdown.has(i.id))
+                const flatTaskIds = new Set(monthTasks.filter((t) => t.billing_method === "flat_rate").map((t) => t.task_id))
+                const flatLabor = shown.filter((i) => i.kind === "labor" && ((i.task_id && flatTaskIds.has(i.task_id)) || i.visit_id === null))
+                const inFlat = new Set(flatLabor.map((i) => i.id))
+                const visitLines = shown.filter((i) => !inFlat.has(i.id))
+                const flatGroups = [...new Set(flatLabor.map((i) => i.task_id ?? "unknown"))].map((tid) => {
+                  const members = flatLabor.filter((i) => (i.task_id ?? "unknown") === tid)
+                  const base = members.find((mm) => !(mm.item_name ?? "").endsWith("— monthly"))?.item_name ?? members[0].item_name ?? "—"
+                  return {
+                    taskId: tid,
+                    name: base.endsWith("— monthly") ? base : `${base} — monthly`,
+                    total: members.reduce((s2, i) => s2 + i.amount_cents, 0),
+                    members: members.filter((mm) => mm.visit_id !== null),
+                    ids: members.map((mm) => mm.id),
+                  }
+                })
                 const byDate = new Map<string, LedgerItem[]>()
                 for (const it of visitLines) {
                   const d = (it.service_date ?? "").slice(0, 10) || "no date"
@@ -1164,17 +1174,17 @@ export function MonthWorkbench({
                 })
                 return (
                   <>
-                    {flatLines.length > 0 && (
+                    {flatGroups.length > 0 && (
                       <div className="border-t border-line-soft first:border-t-0">
                         <div className="flex items-center gap-2 px-5 py-1.5 bg-white/[0.015]">
                           <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-mute">Monthly flat rate</span>
                           <span className="ml-auto font-mono num text-[11px] text-ink-dim">
-                            {formatCurrency(flatLines.reduce((s2, i) => s2 + i.amount_cents, 0) / 100)}
+                            {formatCurrency(flatGroups.reduce((s2, g) => s2 + g.total, 0) / 100)}
                           </span>
                         </div>
-                        {flatLines.map((it, i) => {
-                          const visitsIn = flatVisitLabor.filter((v) => v.task_id === it.task_id)
-                          const gk = `flat|${it.task_id}`
+                        {flatGroups.map((g, i) => {
+                          const visitsIn = g.members
+                          const gk = `flat|${g.taskId}`
                           const open = openGroups.has(gk)
                           return (
                             <div key={i} className="border-t border-line-soft/50">
@@ -1189,15 +1199,13 @@ export function MonthWorkbench({
                                 className={cn("flex items-center gap-2.5 px-5 py-1", visitsIn.length > 0 && "cursor-pointer hover:bg-white/[0.02]")}
                               >
                                 <span className="w-[10px] flex-none font-mono text-[9px] text-ink-mute">{visitsIn.length > 0 ? (open ? "▾" : "▸") : ""}</span>
-                                <span className="text-[11.5px] text-ink flex-1 min-w-0 truncate">{it.item_name ?? "—"}</span>
+                                <span className="text-[11.5px] text-ink flex-1 min-w-0 truncate">{g.name}</span>
                                 <span className="font-mono text-[9.5px] text-ink-mute flex-none">{visitsIn.length > 0 ? `${visitsIn.length} visit${visitsIn.length === 1 ? "" : "s"}` : ""}</span>
-                                <span className="font-mono text-[10px] text-ink-mute flex-none">
-                                  {it.qty} × {formatCurrency(it.unit_price_cents / 100)}
-                                </span>
-                                <span className="font-mono num text-[11.5px] text-ink w-[70px] text-right flex-none">{formatCurrency(it.amount_cents / 100)}</span>
+                                <span className="font-mono text-[10px] text-ink-mute flex-none">1 × {formatCurrency(g.total / 100)}</span>
+                                <span className="font-mono num text-[11.5px] text-ink w-[70px] text-right flex-none">{formatCurrency(g.total / 100)}</span>
                                 {!hasInvoices && (
                                   <button
-                                    onClick={(e) => { e.stopPropagation(); toggleExclude({ item_ids: [it.id] }, true) }}
+                                    onClick={(e) => { e.stopPropagation(); toggleExclude({ item_ids: g.ids }, true) }}
                                     disabled={acting !== null}
                                     title="mark non-billable — stays on the ledger, never reaches the invoice"
                                     className="flex-none font-mono text-[11px] text-ink-mute hover:text-coral disabled:opacity-40"
@@ -1214,7 +1222,7 @@ export function MonthWorkbench({
                                     <div key={vi} className="flex items-center gap-2.5 pl-10 pr-5 py-[3px] bg-white/[0.012]">
                                       <span className="font-mono text-[9.5px] text-ink-mute flex-none w-[64px]">{(v.service_date ?? "").slice(0, 10)}</span>
                                       <span className="text-[10.5px] text-ink-dim flex-1 min-w-0 truncate">{v.item_name ?? "—"}</span>
-                                      <span className="font-mono text-[10px] text-ink-mute flex-none">folds into the monthly line</span>
+                                      <span className="font-mono text-[10px] text-ink-mute flex-none">{formatCurrency(v.amount_cents / 100)} — folds into the monthly line</span>
                                     </div>
                                   ))}
                             </div>
@@ -1337,7 +1345,7 @@ export function MonthWorkbench({
               <div className="border-t border-line">
                 <div className="flex items-center gap-2 px-5 py-1.5 bg-coral/[0.04]">
                   <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-coral/80">Non-billable</span>
-                  <span className="text-[10px] text-ink-mute">on the ledger, never on the invoice</span>
+                  <span className="text-[10px] text-ink-mute">excluded from the draft — the bridge between the ledger and the QBO document</span>
                   <span className="ml-auto font-mono num text-[11px] text-ink-mute line-through">
                     {formatCurrency(excludedItems.reduce((s2, i) => s2 + i.amount_cents, 0) / 100)}
                   </span>

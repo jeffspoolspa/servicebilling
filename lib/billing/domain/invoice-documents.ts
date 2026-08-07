@@ -226,8 +226,39 @@ export function documentsOf(
     return marker ? { ...i, itemName: marker } : i
   })
 
+  // FLAT-RATE grouping (RULED 2026-08-07): the task's per-visit labor
+  // items — the spread of the monthly rate — fold into ONE monthly line
+  // entity, serviceDate null so labor resolution and itemize lead with it.
+  // Legacy locked months still carry a `flat` source row; those tasks are
+  // not re-grouped.
+  const flatTaskIds = new Set(terms.filter((t) => t.labor === "flat_rate").map((t) => t.taskId))
+  const legacyFlat = new Set(named.filter((i) => i.sourceKind === "flat").map((i) => i.taskId))
+  const grouped: BillableItem[] = []
+  const monthly = new Map<string, BillableItem>()
+  for (const i of named) {
+    if (i.kind === "labor" && flatTaskIds.has(i.taskId) && !legacyFlat.has(i.taskId) && !qcTasks.has(i.taskId)) {
+      const g = monthly.get(i.taskId)
+      if (g) {
+        monthly.set(i.taskId, { ...g, unitPriceCents: g.unitPriceCents + i.amountCents, amountCents: g.amountCents + i.amountCents })
+      } else {
+        monthly.set(i.taskId, {
+          ...i,
+          sourceKind: "flat",
+          sourceId: `${i.taskId}:monthly`,
+          itemName: `${i.itemName} — monthly`,
+          qty: 1,
+          unitPriceCents: i.amountCents,
+          amountCents: i.amountCents,
+        })
+      }
+      continue
+    }
+    grouped.push(i)
+  }
+  grouped.push(...monthly.values())
+
   // $0 items are claims, not lines — except QC labor, which prints at $0.
-  const billable = named.filter(
+  const billable = grouped.filter(
     (i) => i.amountCents !== 0 || i.sourceKind === "flat" || (i.kind === "labor" && qcTasks.has(i.taskId)),
   )
 

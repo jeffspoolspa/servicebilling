@@ -130,26 +130,23 @@ export function priceMonth(args: {
       })
     }
   } else {
-    // FLAT RATE: the month bills once, as its OWN source (`flat`) keyed on
-    // the task-month — matching the live table. It deliberately does not
-    // consume a visit: a visit claimed for a flat charge could not also be
-    // claimed for its own labour, and I-B1 would then hide a real conflict.
+    // FLAT RATE (RULED 2026-08-07, superseding the separate `flat` row):
+    // ONE labor item per visit, always — the monthly amount SPREADS across
+    // the month's billable visits (remainder cents ride the last visit so
+    // the sum is exact). The ledger sums to the contract per task, so
+    // reconcile against ION is unchanged; the DOCUMENT is what groups
+    // these into one monthly line item. Every delivered visit is owned
+    // (I-B2) by its own item — no companion rows, no second labor item.
     //
-    // RULED (Carter, 2026-08-03): a flat rate bills the FULL month even when
-    // service covered only part of it. Proration is real, but it is applied
-    // to the INVOICE as a Variance — so the ledger states what the contract
-    // says, and the reduction is an explicit act with a reason attached to
-    // it, rather than arithmetic nobody can find later.
-    if (billableVisits.length === 0) {
-      // Nothing delivered: no charge — an untouched month.
-    } else {
-      const anchor = billableVisits[billableVisits.length - 1]
-      // The visits are CLAIMED at zero: the flat charge is what bills, but
-      // every delivered visit must still be owned by a month or I-B2 can
-      // never be satisfied and a real visit sits unbilled and invisible.
-      for (const v of billableVisits) {
+    // RULED (Carter, 2026-08-03, still in force): the FULL month's rate,
+    // however much of the month was served — proration is applied to the
+    // INVOICE as a Variance, an explicit act with a reason.
+    if (billableVisits.length > 0) {
+      const per = Math.floor(laborRateCents / billableVisits.length)
+      billableVisits.forEach((v, idx) => {
+        const amount = idx === billableVisits.length - 1 ? laborRateCents - per * (billableVisits.length - 1) : per
         items.push({
-        termsVersionId: terms.termsVersionId ?? null,
+          termsVersionId: terms.termsVersionId ?? null,
           sourceKind: "visit",
           sourceId: v.sourceId,
           taskId: v.taskId,
@@ -157,23 +154,10 @@ export function priceMonth(args: {
           serviceDate: v.serviceDate,
           itemName: v.itemName,
           qty: 1,
-          unitPriceCents: 0,
-          amountCents: 0,
+          unitPriceCents: amount,
+          amountCents: money(amount),
           claimedAt: at,
         })
-      }
-      items.push({
-        termsVersionId: terms.termsVersionId ?? null,
-        sourceKind: "flat",
-        sourceId: `${terms.taskId}:${month.slice(0, 7)}`,
-        taskId: anchor.taskId,
-        kind: "labor",
-        serviceDate: anchor.serviceDate,
-        itemName: `${anchor.itemName} — monthly`,
-        qty: 1,
-        unitPriceCents: laborRateCents,
-        amountCents: money(laborRateCents),
-        claimedAt: at,
       })
     }
   }

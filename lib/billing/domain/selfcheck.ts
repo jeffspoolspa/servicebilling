@@ -295,22 +295,39 @@ check("both consumable modes CHARGE — they differ in where it appears", () => 
   }
 })
 
-check("flat rate bills the MONTH once, not each visit", () => {
+check("flat rate: ONE labor item per visit, the rate spread exactly", () => {
+  // RULED 2026-08-07 (superseding the separate `flat` row): a visit
+  // generates billable items for labor and consumables — every visit,
+  // exactly once. The monthly amount spreads across the billable visits;
+  // the DOCUMENT groups them into one monthly line item.
   const sources = [src(), src({ sourceId: "v2", serviceDate: "2026-07-22" })]
   const { items } = priceMonth({
     month: "2026-07-01",
     terms: terms({ labor: "flat_rate", amountCents: 26000 }),
     sources, catalog: [], at: AT,
   })
-  // The flat charge bills; the visits are claimed at ZERO so none is left
-  // unowned — an unclaimed visit can never satisfy I-B2.
-  assert.strictEqual(items.length, 3, "two visits claimed + one monthly charge")
-  const flat = items.find((i) => i.sourceKind === "flat")!
-  assert.strictEqual(flat.amountCents, 26000)
-  assert.deepStrictEqual(items.filter((i) => i.sourceKind === "visit").map((i) => i.amountCents), [0, 0])
-  assert.strictEqual(items.reduce((s2, i) => s2 + i.amountCents, 0), 26000, "the month bills the rate once")
-  assert.strictEqual(flat.sourceId, "t1:2026-07", "keyed on the task-month, the thing charged once")
-  assert.strictEqual(flat.serviceDate, "2026-07-22", "dated by the last visit so the charge has a date")
+  assert.strictEqual(items.length, 2, "one labor item per visit — nothing else")
+  assert.ok(items.every((i) => i.sourceKind === "visit"))
+  assert.deepStrictEqual(items.map((i) => i.amountCents), [13000, 13000])
+
+  // An odd spread stays exact: the remainder cents ride the last visit.
+  const odd = priceMonth({
+    month: "2026-07-01",
+    terms: terms({ labor: "flat_rate", amountCents: 10000 }),
+    sources: [src(), src({ sourceId: "v2", serviceDate: "2026-07-15" }), src({ sourceId: "v3", serviceDate: "2026-07-22" })],
+    catalog: [], at: AT,
+  })
+  assert.deepStrictEqual(odd.items.map((i) => i.amountCents), [3333, 3333, 3334])
+  assert.strictEqual(odd.items.reduce((s2, i) => s2 + i.amountCents, 0), 10000, "the month bills the rate once")
+
+  // The document folds the spread into ONE monthly line entity.
+  const m = BillingMonth.open("mf", 1016400, "2026-07-01")
+  for (const i of items) m.claim(i, { claimedByMonthId: null }, AT)
+  const docs = documentsOf(m, [{ taskId: "t1", labor: "flat_rate", consumables: "included" }], "itemized")
+  const laborLines = docs[0].lines.filter((l): l is Extract<typeof l, { itemName: string }> => l.kind === "labor")
+  assert.strictEqual(laborLines.length, 1, "one monthly line item")
+  assert.strictEqual(laborLines[0].amountCents, 26000)
+  assert.match(laborLines[0].itemName, /— monthly$/)
 })
 
 check("a deleted visit bills nothing — its chemicals included", () => {
@@ -368,7 +385,7 @@ check("a flat rate bills the FULL month, however much of it was served", () => {
     catalog: [], at: AT,
   })
   assert.deepStrictEqual(started.refused, [])
-  assert.strictEqual(started.items.find((i) => i.sourceKind === "flat")!.amountCents, 145000)
+  assert.strictEqual(started.items.reduce((s2, i) => s2 + i.amountCents, 0), 145000)
 
   const ended = priceMonth({
     month: "2026-07-01",
@@ -376,7 +393,7 @@ check("a flat rate bills the FULL month, however much of it was served", () => {
     sources: [src({ serviceDate: "2026-07-08" })],
     catalog: [], at: AT,
   })
-  assert.strictEqual(ended.items.find((i) => i.sourceKind === "flat")!.amountCents, 30000)
+  assert.strictEqual(ended.items.reduce((s2, i) => s2 + i.amountCents, 0), 30000)
 })
 
 check("a proration is a NAMED variance, not a quietly smaller number", () => {
