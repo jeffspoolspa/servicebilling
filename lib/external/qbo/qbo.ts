@@ -166,6 +166,10 @@ export interface QboInvoiceInput {
   /** The document number — RULED: one of the month's ION invoice numbers. */
   readonly docNumber: string
   readonly txnDate: string
+  /** Explicit due date — set when the term-derived date would be wrong
+   *  (RULED 2026-08-07: TxnDate = month end for revenue recognition, but
+   *  due stays 15 days from CREATION, so the term must not recompute it). */
+  readonly dueDate?: string
   readonly memo: string
   /** The document carries its own destination — OUR Customers.email is
    *  authoritative (user edits beat QBO), set as BillEmail at create. */
@@ -257,6 +261,7 @@ export class QboInvoices extends Qbo {
     const body = {
       DocNumber: inv.docNumber,
       TxnDate: inv.txnDate,
+      ...(inv.dueDate ? { DueDate: inv.dueDate } : {}),
       CustomerRef: { value: inv.qboCustomerId },
       CustomerMemo: { value: inv.memo },
       PrivateNote: inv.memo,

@@ -143,6 +143,14 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
   const baseDoc = [...ionNumbers].sort()[0]
   const memo = `${MONTH_NAME(m.month)} Pool Maintenance`
   const at = now.toISOString()
+  // RULED 2026-08-07: the DOCUMENT DATE is the LAST DAY of the billing
+  // month — QBO recognizes the revenue in the month the service happened,
+  // not the month the machine ran. The DUE date stays 15 days after
+  // CREATION (set explicitly, or the Net 15 term would recompute it from
+  // the backdated TxnDate).
+  const [yy, mm] = m.month.split("-").map(Number)
+  const monthEnd = new Date(Date.UTC(mm === 12 ? yy + 1 : yy, mm === 12 ? 0 : mm, 0)).toISOString().slice(0, 10)
+  const dueDate = new Date(now.getTime() + 15 * 86400000).toISOString().slice(0, 10)
   const issued: (CreatedInvoice & { kind: string })[] = []
   for (const [i, d] of documents.entries()) {
     const created = await deps.qbo.createInvoice({
@@ -151,7 +159,8 @@ export async function issueMonth(m: BillingMonth, deps: IssueDeps, now: Date, de
       classId: MAINTENANCE_CLASS_ID,
       salesTermId: NET_15_TERM_ID,
       docNumber: documentDocNumber(baseDoc, d.kind, i),
-      txnDate: at.slice(0, 10),
+      txnDate: monthEnd,
+      dueDate,
       memo: d.kind === "green" ? `${MONTH_NAME(m.month)} Green Pool Treatment` : memo,
       lines: d.lines.map((l) => {
         if (l.kind === "visit_break") {
