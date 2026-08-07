@@ -310,6 +310,12 @@ export class BillingMonth {
     // CLOSED when every linked invoice is sent and paid — a fold the read
     // model derives, never a command the month is owed.
     if (this.isInvoiced) return null
+    // COMPLETENESS OUTRANKS THE HOLD (RULED 2026-08-07): a gate verdict on
+    // a ledger that no longer reflects delivery is worthless — an unclaimed
+    // source (e.g. a re-ingested log with new source ids) re-accrues FIRST;
+    // the claim un-reconciles and clears the hold, and the ladder then
+    // re-runs reconcile and a FRESH gate.
+    if (this.completenessBlockers(delivered).length > 0) return "accrue"
     // A hold is a SNAPSHOT of gate facts — a person changes those facts by
     // resolving findings, so a held month's step is to RE-ASK the gate
     // (RULED: the gate re-computes until invoiced). The advance service
@@ -318,7 +324,6 @@ export class BillingMonth {
     // A dispute buys ONE trip back to the system of record; a second one is
     // a real issue for a person, not something to retry forever.
     if (this.disputedAt) return this.deliveryRefreshedAt ? null : "refresh_delivery"
-    if (this.completenessBlockers(delivered).length > 0) return "accrue"
     // While the period is OPEN, accrual is the only step owed: ION's
     // invoices for the month do not exist yet, so a reconcile would dispute
     // against nothing and burn a delivery refresh per night. The nightly

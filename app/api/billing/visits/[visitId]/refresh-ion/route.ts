@@ -2,8 +2,9 @@ import { NextResponse } from "next/server"
 import { createSupabaseServer } from "@/lib/supabase/server"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { triggerScriptSync } from "@/lib/windmill"
+import { buildAdvanceMonth, drainMonthQueue } from "@/lib/billing/infrastructure/drain-month-queue"
 
-export const maxDuration = 120
+export const maxDuration = 180
 
 /**
  * TARGETED VISIT REFRESH (RULED 2026-08-07): re-scrape ONE visit from ION
@@ -23,8 +24,8 @@ export async function POST(_req: Request, ctx: { params: Promise<{ visitId: stri
   const sys = createSupabaseAdmin()
   const { data: rows } = await (sys.schema("maintenance").from("visits") as never as {
     select(c: string): { eq(k: string, v: string): PromiseLike<{ data: unknown[] | null }> }
-  }).select("id, ion_log_id, visit_date").eq("id", visitId)
-  const v = ((rows ?? [])[0] ?? null) as { ion_log_id: string | null; visit_date: string } | null
+  }).select("id, ion_log_id, visit_date, customer_id").eq("id", visitId)
+  const v = ((rows ?? [])[0] ?? null) as { ion_log_id: string | null; visit_date: string; customer_id: number } | null
   if (!v) return NextResponse.json({ error: "visit not found" }, { status: 404 })
   if (!v.ion_log_id) return NextResponse.json({ error: "visit has no ION log id — it did not come from the log ingester" }, { status: 409 })
 
@@ -36,10 +37,30 @@ export async function POST(_req: Request, ctx: { params: Promise<{ visitId: stri
       { start_date: mdy, end_date: mdy, dry_run: false, only_log_id: v.ion_log_id },
       { timeoutMs: 110000 },
     )
+
+    // The fresh log means the month's ledger is a stale statement — run the
+    // SAME safe-mode ladder the tick runs (accrue -> reconcile -> gate,
+    // never issue) so billable items and the draft update in the same
+    // click. Re-ingested logs carry NEW source ids, so completeness sends
+    // the month back to accrue (which outranks a hold). An invoiced
+    // month's nextStep is null — its ledger is frozen; the drain is a no-op
+    // and edits go through the variance path.
+    let advance: unknown = null
+    const { data: bmRows } = await (sys.schema("billing").from("billing_months") as never as {
+      select(c: string): { eq(k: string, v2: unknown): { eq(k2: string, v3: string): PromiseLike<{ data: unknown[] | null }> } }
+    }).select("id").eq("customer_id", v.customer_id).eq("month", `${y}-${m}-01`)
+    const monthId = ((bmRows ?? [])[0] as { id: string } | undefined)?.id ?? null
+    if (monthId) {
+      const { queue } = buildAdvanceMonth(sys as never, { issue: false })
+      await queue.enqueue([monthId], 1)
+      advance = await drainMonthQueue(sys as never, 60_000, { issue: false })
+    }
+
     return NextResponse.json({
       refreshed: (result.logs_built ?? 0) > 0,
       retracted: (result.retracted_logs ?? []).includes(String(v.ion_log_id)),
       result,
+      advance,
     })
   } catch (e) {
     return NextResponse.json({ error: String(e instanceof Error ? e.message : e).slice(0, 300) }, { status: 502 })

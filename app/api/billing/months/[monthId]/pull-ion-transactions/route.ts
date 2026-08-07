@@ -2,8 +2,9 @@ import { NextResponse } from "next/server"
 import { createSupabaseServer } from "@/lib/supabase/server"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { triggerScriptSync } from "@/lib/windmill"
+import { buildAdvanceMonth, drainMonthQueue } from "@/lib/billing/infrastructure/drain-month-queue"
 
-export const maxDuration = 120
+export const maxDuration = 180
 
 /**
  * PULL THE MONTH'S ION TRANSACTION BASIS (RULED 2026-08-07): reconcile
@@ -31,10 +32,17 @@ export async function POST(_req: Request, ctx: { params: Promise<{ monthId: stri
   try {
     const result = await triggerScriptSync<Record<string, unknown>>(
       "f/ION/transactions_report",
-      { month, dry_run: false, load: true },
+      // transaction_type "" = ALL types (a "Tasks" pull omits
+      // separate-consumables invoices — same shape Ion.pullTaskTransactions uses).
+      { month, dry_run: false, load: true, transaction_type: "" },
       { timeoutMs: 110000 },
     )
-    return NextResponse.json({ month, result })
+    // Fresh basis in hand — run the safe-mode ladder (never issue) so
+    // reconcile judges against it and the gate re-asks in the same click.
+    const { queue } = buildAdvanceMonth(sys as never, { issue: false })
+    await queue.enqueue([monthId], 1)
+    const advance = await drainMonthQueue(sys as never, 60_000, { issue: false })
+    return NextResponse.json({ month, result, advance })
   } catch (e) {
     return NextResponse.json({ error: String(e instanceof Error ? e.message : e).slice(0, 300) }, { status: 502 })
   }

@@ -176,6 +176,23 @@ check("a held month re-asks the gate — the hold is a snapshot, not a verdict",
   assert.strictEqual(m.nextStep(delivered, AUG), "issue")
 })
 
+check("completeness outranks the hold — a stale ledger re-accrues before any gate re-ask", () => {
+  // RULED 2026-08-07: a re-ingested log carries NEW source ids, so a
+  // refreshed visit leaves the held month's ledger incomplete. A gate
+  // verdict on that ledger is worthless — accrue first; the claim
+  // un-reconciles, clears the hold, and the ladder re-runs reconcile and
+  // a FRESH gate.
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  m.markReconciled(AT)
+  m.markGated(["cpv_outlier"], AT)
+  assert.strictEqual(m.status, "held")
+  const refreshed = [src(), src({ sourceId: "v1-reread", serviceDate: "2026-07-15" })]
+  assert.strictEqual(m.nextStep(refreshed, AUG), "accrue", "unclaimed source = re-accrue, hold or not")
+  // With nothing new delivered, the held month still just re-asks the gate.
+  assert.strictEqual(m.nextStep([src()], AUG), "gate")
+})
+
 check("gating before reconciling is refused — order is a rule", () => {
   const m = BillingMonth.open("m1", 1016400, "2026-07-01")
   m.claim(item(), { claimedByMonthId: null }, AT)
