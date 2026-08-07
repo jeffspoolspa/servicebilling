@@ -29,6 +29,36 @@ const STATUS_TONE: Record<MonthDisplayStatus, "neutral" | "cyan" | "teal" | "sun
 export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
   const router = useRouter()
   const [statusFilter, setStatusFilter] = useState<MonthDisplayStatus | null>(null)
+  const [selected, setSelected] = useState<(MonthOverviewRow & { display: MonthDisplayStatus })[]>([])
+  const [tableEpoch, setTableEpoch] = useState(0)
+  const [bulkBusy, setBulkBusy] = useState<string | null>(null)
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null)
+
+  const bulk = async (action: "review" | "advance") => {
+    setBulkBusy(action)
+    setBulkMsg(null)
+    try {
+      const r = await fetch("/api/billing/months/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, month_ids: selected.map((m) => m.id) }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(String(j.error ?? `HTTP ${r.status}`))
+      setBulkMsg(
+        action === "review"
+          ? `${j.reviewed} flag${j.reviewed === 1 ? "" : "s"} reviewed across ${j.months} months`
+          : `advanced ${j.months?.claimed ?? 0} month command${(j.months?.claimed ?? 0) === 1 ? "" : "s"}, ${j.invoices?.advanced ?? 0} invoice step${(j.invoices?.advanced ?? 0) === 1 ? "" : "s"}`,
+      )
+      setSelected([])
+      setTableEpoch((e) => e + 1) // remount clears the checkbox state
+      router.refresh()
+    } catch (e) {
+      setBulkMsg(`failed: ${String(e instanceof Error ? e.message : e).slice(0, 140)}`)
+    } finally {
+      setBulkBusy(null)
+    }
+  }
 
   const withStatus = useMemo(() => rows.map((r) => ({ ...r, display: displayStatus(r) })), [rows])
   const counts = useMemo(() => {
@@ -39,6 +69,32 @@ export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
   const shown = statusFilter ? withStatus.filter((r) => r.display === statusFilter) : withStatus
 
   const columns: ColumnDef<MonthOverviewRow & { display: MonthDisplayStatus }>[] = [
+    {
+      id: "select",
+      header: ({ table }) => (
+        <input
+          type="checkbox"
+          checked={table.getIsAllPageRowsSelected()}
+          ref={(el) => { if (el) el.indeterminate = table.getIsSomePageRowsSelected() && !table.getIsAllPageRowsSelected() }}
+          onChange={(e) => table.toggleAllPageRowsSelected(e.target.checked)}
+          onClick={(e) => e.stopPropagation()}
+          className="h-3.5 w-3.5 accent-cyan-500 cursor-pointer"
+          aria-label="Select page"
+        />
+      ),
+      cell: ({ row }) => (
+        <input
+          type="checkbox"
+          checked={row.getIsSelected()}
+          onChange={row.getToggleSelectedHandler()}
+          onClick={(e) => e.stopPropagation()}
+          className="h-3.5 w-3.5 accent-cyan-500 cursor-pointer"
+          aria-label="Select row"
+        />
+      ),
+      enableSorting: false,
+      meta: { widthClass: "w-8" },
+    },
     {
       id: "customer",
       accessorFn: (r) => r.customer_name ?? String(r.customer_id),
@@ -114,17 +170,49 @@ export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
     </div>
   )
 
+  const parkedDeclines = selected.filter((m) => m.display === "issued").length
   return (
-    <DataTable
-      columns={columns}
-      data={shown}
-      searchAccessor={(r) => `${r.customer_name ?? ""} ${r.customer_id}`}
-      searchPlaceholder="Search customer…"
-      toolbarExtra={filterTabs}
-      pageSize={25}
-      initialSorting={[{ id: "subtotal", desc: true }]}
-      onRowClick={(r) => router.push(`/maintenance/billing/months/${r.id}` as never)}
-      emptyText="No billing months match."
-    />
+    <div className="space-y-2">
+      {selected.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-cyan/30 bg-cyan/[0.06] px-3 py-1.5 text-[12px]">
+          <span className="text-ink">{selected.length} selected</span>
+          <button
+            onClick={() => bulk("review")}
+            disabled={bulkBusy !== null}
+            className="h-7 px-3 rounded-md border border-line bg-bg-elev text-ink-dim hover:border-sun hover:text-sun disabled:opacity-50"
+          >
+            {bulkBusy === "review" ? "Reviewing…" : "Mark flags reviewed"}
+          </button>
+          <button
+            onClick={() => bulk("advance")}
+            disabled={bulkBusy !== null}
+            className="h-7 px-3 rounded-md border border-line bg-bg-elev text-ink-dim hover:border-cyan hover:text-cyan disabled:opacity-50"
+          >
+            {bulkBusy === "advance" ? "Running…" : "Issue"}
+          </button>
+          <button
+            disabled
+            title="the decline-email sender still reads the legacy autopay table — being adapted to the machine's declines"
+            className="h-7 px-3 rounded-md border border-line text-ink-mute opacity-50 cursor-not-allowed"
+          >
+            Send decline emails{parkedDeclines > 0 ? ` (${parkedDeclines})` : ""}
+          </button>
+        </div>
+      )}
+      {bulkMsg && <div className="text-[11.5px] text-ink-dim">{bulkMsg}</div>}
+      <DataTable
+        key={tableEpoch}
+        columns={columns}
+        data={shown}
+        searchAccessor={(r) => `${r.customer_name ?? ""} ${r.customer_id}`}
+        searchPlaceholder="Search customer…"
+        toolbarExtra={filterTabs}
+        pageSize={25}
+        initialSorting={[{ id: "subtotal", desc: true }]}
+        onRowClick={(r) => router.push(`/maintenance/billing/months/${r.id}` as never)}
+        onSelectionChange={setSelected}
+        emptyText="No billing months match."
+      />
+    </div>
   )
 }
