@@ -218,15 +218,16 @@ export function DataTable<TData, TValue>({
             widths and long content truncates — the table can never grow
             wider than its container, so no horizontal scrollbar. */}
         <Table className={embedded ? "table-fixed" : undefined}>
-          <TableHeader>
+          {/* dashboard-01's header BAND: a filled muted strip, not bare text */}
+          <TableHeader className={embedded ? undefined : "bg-white/[0.04]"}>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="hover:bg-transparent">
                 {headerGroup.headers.map((header) => (
                   <TableHead
                     key={header.id}
                     className={cn(
-                      embedded ? "px-2 py-2" : "px-4 py-2",
-                      "text-ink-mute font-medium",
+                      embedded ? "px-2 py-2" : "px-4 h-11",
+                      "text-ink-dim font-medium",
                       (header.column.columnDef.meta as ColumnMeta | undefined)?.align ===
                         "right" && "text-right",
                       (header.column.columnDef.meta as ColumnMeta | undefined)?.widthClass,
@@ -266,7 +267,7 @@ export function DataTable<TData, TValue>({
                       <TableCell
                         key={cell.id}
                         className={cn(
-                          embedded ? "px-2 py-2.5 overflow-hidden text-ellipsis" : "px-4 py-2.5",
+                          embedded ? "px-2 py-2.5 overflow-hidden text-ellipsis" : "px-4 py-3",
                           (cell.column.columnDef.meta as ColumnMeta | undefined)?.align ===
                             "right" && "text-right",
                         )}

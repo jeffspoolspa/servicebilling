@@ -1,7 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { TrendingDown, TrendingUp } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { ChevronDown, ChevronUp, TrendingDown, TrendingUp } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis } from "recharts"
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils/cn"
@@ -124,6 +124,16 @@ export function MonthsDashboard({
   monthLabel: string
 }) {
   const [mode, setMode] = useState<"daily" | "cumulative">("cumulative")
+  // Collapsed = just the table in view; the choice sticks across visits.
+  const [collapsed, setCollapsed] = useState(false)
+  useEffect(() => {
+    setCollapsed(localStorage.getItem("billing-dashboard-collapsed") === "1")
+  }, [])
+  const toggleCollapsed = () => {
+    const next = !collapsed
+    setCollapsed(next)
+    localStorage.setItem("billing-dashboard-collapsed", next ? "1" : "0")
+  }
   const s = useMemo(() => sumsOf(rows), [rows])
   const p = useMemo(() => sumsOf(prevRows), [prevRows])
 
@@ -146,8 +156,40 @@ export function MonthsDashboard({
   const chemTotal = revenueByDay.reduce((a, d) => a + d.chem_cents, 0) / 100
   const pct = (n: number) => (s.billed > 0 ? `${Math.round((n / s.billed) * 100)}% of billed` : "")
 
+  if (collapsed) {
+    // The whole dashboard folds to one summary line; the table gets the room.
+    return (
+      <button
+        onClick={toggleCollapsed}
+        className="w-full flex items-center gap-x-4 gap-y-1 flex-wrap rounded-xl border border-line bg-white/[0.02] px-4 py-2 text-[12px] hover:bg-white/[0.04]"
+      >
+        {(
+          [
+            ["Billed", s.billed],
+            ["Collected", s.collected],
+            ["Outstanding", s.outstanding],
+            ["Not sent", s.unsent + s.accruing],
+          ] as const
+        ).map(([label, v]) => (
+          <span key={label} className="inline-flex items-baseline gap-1.5">
+            <span className="text-ink-mute">{label}</span>
+            <span className="font-mono text-ink tabular-nums">{formatCurrency(v)}</span>
+          </span>
+        ))}
+        <span className="ml-auto inline-flex items-center gap-1 text-ink-mute">
+          dashboard <ChevronDown className="h-3.5 w-3.5" />
+        </span>
+      </button>
+    )
+  }
+
   return (
     <div className="space-y-4">
+      <div className="flex justify-end -mb-2">
+        <button onClick={toggleCollapsed} className="inline-flex items-center gap-1 text-[11px] text-ink-mute hover:text-ink">
+          hide dashboard <ChevronUp className="h-3.5 w-3.5" />
+        </button>
+      </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <SectionCard
           label="Billed"

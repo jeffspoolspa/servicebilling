@@ -107,9 +107,7 @@ export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
             )}
           >
             {s ?? "All"}
-            <span className={cn("rounded-full border px-1.5 py-px text-[10px] font-mono", active ? "border-line text-ink-dim" : "border-line/60 text-ink-mute")}>
-              {count}
-            </span>
+            <span className={cn("text-[10.5px] font-mono tabular-nums", active ? "text-ink-dim" : "text-ink-mute")}>{count}</span>
           </button>
         )
       })}
