@@ -637,18 +637,13 @@ export function MonthWorkbench({
                 </span>
               </div>
               <StatusStepper stages={[...MONTH_STAGES]} current={stepperStage(m.status)} />
-              {((m.gate_held_for?.length ?? 0) > 0 || (m.disputes?.length ?? 0) > 0 || m.open_findings > 0 || settingsConflicts.length > 0 || actErr) && (
+              {((m.gate_held_for?.length ?? 0) > 0 || (m.disputes?.length ?? 0) > 0 || m.open_findings > 0 || actErr) && (
                 <div className="flex flex-wrap items-center gap-1.5">
                   {(m.gate_held_for ?? []).map((h) => (
                     <Pill key={h} tone="sun">{h}</Pill>
                   ))}
                   {(m.disputes ?? []).map((d, i) => (
                     <span key={i} className="text-[11px] text-coral">{d}</span>
-                  ))}
-                  {settingsConflicts.map((c, i) => (
-                    <span key={`sc${i}`} className="text-[11px] text-coral" title="ION's majority is picked for the draft — review the flag to accept it, or set the billing type on the Billable items tab">
-                      {c}
-                    </span>
                   ))}
                   {m.open_findings > 0 && (
                     <Link
