@@ -443,9 +443,9 @@ export function ServiceLog({
                     )
                   })}
                 </div>
-                <div className="flex-1 min-w-0 pl-4 overflow-hidden">
+                <div className="flex-1 min-w-[48px] pl-4 overflow-hidden" title={v.notes ?? undefined}>
                   {v.notes ? (
-                    <span className="text-[11.5px] text-ink-dim block truncate" title={v.notes}>{v.notes}</span>
+                    <span className="text-[11.5px] text-ink-dim block truncate">{v.notes}</span>
                   ) : (
                     <span className="text-[10px] text-ink-mute block truncate">no notes</span>
                   )}

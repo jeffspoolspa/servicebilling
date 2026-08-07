@@ -696,9 +696,10 @@ export function MonthWorkbench({
                 />
               </Card>
 
-              {/* side by side: the flagged-visit review queue | the narrative + explainer */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-                <div className="space-y-0">
+              {/* side by side: the flagged-visit review queue (the wider half —
+                  it carries the readings grid) | the narrative + explainer */}
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
+                <div className="space-y-0 lg:col-span-3">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-display text-[15px]">Flagged visits</span>
                     {openFindings.length > 0 && (
@@ -743,7 +744,7 @@ export function MonthWorkbench({
                   )}
                 </div>
 
-                <Card>
+                <Card className="lg:col-span-2">
                   <CardHeader>
                     <CardTitle>Explainer</CardTitle>
                     <span className="ml-auto flex items-center gap-3">
