@@ -38,7 +38,11 @@ export interface ExplainerNarrative {
   intro?: string
   drivers?: { item: string; note: string }[]
   readings_note?: string
+  /** NOTE-DRIVEN (RULED 2026-08-07): what actually went on, written from
+   *  the operator's note log — never generic advice. */
   recommendation?: string
+  /** Which of the three next steps the note points to. */
+  next_step?: "service_call" | "consultation" | "monitor"
 }
 
 export interface ExplainerContext {
@@ -264,11 +268,32 @@ export async function buildExplainer(
     </table>
   </div>
 
-  ${narrative?.recommendation ? `
-  <div style="display:flex;flex-direction:column;gap:5px;border:1px solid ${LINE};border-left:4px solid #0F3E51;background:#fff;padding:10px 14px">
-    <div style="font-family:${MONO};font-size:9.5px;letter-spacing:0.09em;text-transform:uppercase;color:${DIM}">What we recommend</div>
-    <p style="font-size:13.5px;line-height:1.45;color:#33393D;max-width:80ch">${esc(narrative.recommendation)}</p>
-  </div>` : ""}
+  ${narrative?.recommendation ? (() => {
+    const OPTIONS: { key: string; label: string; sub: string }[] = [
+      { key: "service_call", label: "Service Call ($135)", sub: "Diagnose suspected equipment issues" },
+      { key: "consultation", label: "Consultation", sub: "Review pool chemistry and outside factors driving chlorine use — shade trees, fill-water minerals, animals reaching the pool" },
+      { key: "monitor", label: "Monitor", sub: "A fix was recently made, or this may be a one-time spike — we watch how it develops" },
+    ]
+    const chosen = narrative.next_step ?? "monitor"
+    return `
+  <div style="display:flex;gap:10px;align-items:stretch">
+    <div style="flex:3;display:flex;flex-direction:column;gap:5px;border:1px solid ${LINE};border-left:4px solid #0F3E51;background:#fff;padding:10px 14px">
+      <div style="font-family:${MONO};font-size:9.5px;letter-spacing:0.09em;text-transform:uppercase;color:${DIM}">What we recommend</div>
+      <p style="font-size:13.5px;line-height:1.45;color:#33393D;max-width:80ch">${esc(narrative.recommendation)}</p>
+    </div>
+    <div style="flex:2;display:flex;flex-direction:column;gap:6px;border:1px solid ${LINE};background:#fff;padding:10px 12px">
+      <div style="font-family:${MONO};font-size:9.5px;letter-spacing:0.09em;text-transform:uppercase;color:${DIM}">Next steps</div>
+      ${OPTIONS.map((o) => {
+        const on = o.key === chosen
+        return `
+      <div style="border:1px solid ${on ? "#0F3E51" : LINE};${on ? "background:#EFF6F9;border-left:4px solid #0F3E51;" : "opacity:0.65;"}padding:6px 9px">
+        <div style="font-size:11.5px;font-weight:${on ? "700" : "600"};color:#20262B">${o.label}${on ? ` <span style="font-family:${MONO};font-size:8.5px;letter-spacing:0.08em;color:#0F3E51;text-transform:uppercase">· recommended</span>` : ""}</div>
+        <div style="font-size:10px;line-height:1.4;color:${DIM};margin-top:1px">${o.sub}</div>
+      </div>`
+      }).join("")}
+    </div>
+  </div>`
+  })() : ""}
 
   <footer style="margin-top:auto;border-top:1px solid ${LINE};padding-top:8px;display:flex;justify-content:space-between;font-family:${MONO};font-size:10px;color:${FAINT}">
     <div>Jeff's Pool &amp; Spa Service · Brunswick, GA</div>

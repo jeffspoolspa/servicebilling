@@ -76,9 +76,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ monthId: strin
 1. The bill was higher than normal for this customer. Labor is flat per visit, so the difference is chemicals.
 2. Identify WHICH chemicals drove it, comparing this month's quantities to this pool's own usual amounts and to similar pools (the data below has medians and percentile ranks — p95+ means unusually high).
 3. Explain WHY those chemicals were added by pointing at the readings (out-of-range values are the pool asking for treatment).
-4. Close generally: heavy chemical use is us responding to the pool, and a pool that keeps demanding this much often has an underlying cause — a leak, or equipment running inefficiently or broken. Recommend scheduling a service visit to diagnose, or a consultation on a chemical treatment plan. The goal is to bring it to their attention and offer help, not to alarm.
+4. The RECOMMENDATION section is driven ENTIRELY by the operator notes below — they are the technician's actual account of what went on (a found leak, a repair made, an equipment suspicion). Rewrite the notes' story in customer-friendly words as "what went on and what we recommend"; do NOT fall back to generic could-be language when notes exist. Only when there are NO notes, close generally (heavy use often has an underlying cause — offer to help find it).
+5. Choose next_step from exactly these three, driven by the notes:
+   - "service_call" — equipment issues are suspected and a visit should diagnose them.
+   - "consultation" — chemistry/external factors should be reviewed (shade trees, fill water minerals, animals, usage).
+   - "monitor" — a fix was recently made and needs time to prove out, or this looks like a one-time spike worth watching.
 
-Keep every claim tied to the numbers given. Do not invent readings or amounts. Stay general about causes — "could be" language.
+Keep every claim tied to the numbers given. Do not invent readings or amounts.
 
 FACTS
 Customer: ${c.customerName}, month: ${c.monthLabel}
@@ -93,7 +97,7 @@ Readings by visit: ${c.visits.map((v) => `${v.visit_date}: ${Object.entries(v.re
 Service follow-ups this month: ${followUps.length ? followUps.map((f) => `${f.created_at.slice(0, 10)} ${f.issue ?? ""}: ${f.description ?? ""}${f.equipment_off ? " (equipment off)" : ""} [${f.status ?? "open"}]${f.next_steps ? ` next: ${f.next_steps}` : ""}`).join(" | ") : "(none)"}
 
 Reply with ONLY a JSON object:
-{"intro": "2-3 sentence opening paragraph", "drivers": [{"item": "<exact item name from the top items>", "note": "1-2 sentences on why this item ran high, tied to its comparison numbers"}], "readings_note": "1-2 sentences summarizing what the readings showed", "recommendation": "2-3 sentences: the general underlying-cause point and the service visit / treatment plan consultation offer"}`
+{"intro": "2-3 sentence opening paragraph", "drivers": [{"item": "<exact item name from the top items>", "note": "1-2 sentences on why this item ran high, tied to its comparison numbers"}], "readings_note": "1-2 sentences summarizing what the readings showed", "recommendation": "2-4 sentences written FROM THE OPERATOR NOTES: what actually went on with this pool and what we recommend (customer-friendly, no internal jargon)", "next_step": "service_call" | "consultation" | "monitor"}`
 
   let narrative: ExplainerNarrative
   try {
