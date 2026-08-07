@@ -33,12 +33,16 @@ export default async function BillingMonthsPage({
   }))
   const selected = month && /^\d{4}-\d{2}$/.test(month) ? month : months[0]?.value
 
-  const { data, error } = await sb
-    .schema("billing")
-    .from("v_months_overview")
-    .select(MONTHS_SELECT)
-    .eq("month", `${selected}-01`)
-    .limit(3000)
+  const prevMonth = selected
+    ? new Date(Date.UTC(+selected.slice(0, 4), +selected.slice(5, 7) - 2, 1)).toISOString().slice(0, 7)
+    : null
+  const [{ data, error }, { data: prevData }, { data: revData }] = await Promise.all([
+    sb.schema("billing").from("v_months_overview").select(MONTHS_SELECT).eq("month", `${selected}-01`).limit(3000),
+    prevMonth
+      ? sb.schema("billing").from("v_months_overview").select(MONTHS_SELECT).eq("month", `${prevMonth}-01`).limit(3000)
+      : Promise.resolve({ data: [] as unknown[] }),
+    sb.schema("billing").from("v_month_revenue_by_day").select("service_date, labor_cents, chem_cents").eq("month", `${selected}-01`).order("service_date").limit(100),
+  ])
   if (error) {
     return <div className="p-7 text-sm text-coral">months read failed: {String(error.message ?? error)}</div>
   }
@@ -59,6 +63,8 @@ export default async function BillingMonthsPage({
       </div>
       <MonthsDashboard
         rows={(data ?? []) as MonthOverviewRow[]}
+        prevRows={(prevData ?? []) as MonthOverviewRow[]}
+        revenueByDay={(revData ?? []) as never}
         monthLabel={selected ? new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${selected}-15T12:00:00Z`)) : ""}
       />
       <MonthsTable rows={(data ?? []) as MonthOverviewRow[]} />
