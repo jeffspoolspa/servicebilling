@@ -211,13 +211,16 @@ export function documentsOf(
   // named $0 marker lines per pool plus ONE unnamed line carrying the
   // visit's rate. The unnamed line adopts its visit's named marker — the
   // SKU comes from the marker, the rate stays custom.
+  // NON-BILLABLE items (RULED 2026-08-07) never reach a document — the
+  // ledger keeps them; the invoice does not.
+  const billed = m.billableItems.filter((i) => !i.excludedAt)
   const markerOf = new Map<string, string>()
-  for (const i of m.billableItems) {
+  for (const i of billed) {
     if (i.kind === "labor" && i.amountCents === 0 && i.itemName && i.serviceDate) {
       markerOf.set(`${i.taskId}|${i.serviceDate}`, i.itemName)
     }
   }
-  const named = m.billableItems.map((i) => {
+  const named = billed.map((i) => {
     if (i.kind !== "labor" || i.itemName || !i.serviceDate || i.amountCents === 0) return i
     const marker = markerOf.get(`${i.taskId}|${i.serviceDate}`)
     return marker ? { ...i, itemName: marker } : i

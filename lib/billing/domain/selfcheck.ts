@@ -485,6 +485,20 @@ check("the gate names every criterion, and says WHY it failed", () => {
   assert.match(held.criteria.find((c) => c.name === "billing_identity")!.detail!, /nobody to address an invoice to/)
 })
 
+check("non-billable: the ledger keeps it, the invoice never sees it", () => {
+  const m = BillingMonth.open("m1", 1016400, "2026-07-01")
+  m.claim(item(), { claimedByMonthId: null }, AT)
+  m.claim(item({ sourceId: "v2", serviceDate: "2026-07-15", excludedAt: AT, excludedBy: "carter" }), { claimedByMonthId: null }, AT)
+  // The document skips the excluded item entirely.
+  const docs = documentsOf(m, [{ taskId: "t1", labor: "per_visit", consumables: "included" }], "itemized")
+  assert.strictEqual(docs.reduce((s2, d) => s2 + d.subtotalCents, 0), 6500, "only the billable item reaches paper")
+  // Re-pricing restates the OBSERVATION but preserves the DECISION.
+  m.claim(item({ sourceId: "v2", serviceDate: "2026-07-15", amountCents: 7000, unitPriceCents: 7000 }), { claimedByMonthId: null }, AT)
+  const v2 = m.billableItems.find((i) => i.sourceId === "v2")!
+  assert.strictEqual(v2.amountCents, 7000, "the re-priced amount lands")
+  assert.strictEqual(v2.excludedAt, AT, "the non-billable mark survives re-pricing")
+})
+
 check("billing type: ION is the default; a disagreement is a person's pick", () => {
   const tasks = [
     { taskId: "a", consumables: "included" as const, ionInvoiceType: "Standard", green: false },

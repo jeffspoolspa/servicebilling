@@ -64,7 +64,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
   private async hydrate(row: MonthRow): Promise<BillingMonth> {
     const [{ data: itemRows, error }, { data: varRows, error: vErr }] = await Promise.all([
       this.q("billable_items")
-        .select("source_kind, source_id, task_id, kind, service_date, item_name, qty, unit_price_cents, amount_cents, created_at, task_terms_id, qbo_invoice_id, qbo_line_id")
+        .select("source_kind, source_id, task_id, kind, service_date, item_name, qty, unit_price_cents, amount_cents, created_at, task_terms_id, qbo_invoice_id, qbo_line_id, excluded_at, excluded_by")
         .eq("billing_month_id", row.id)
         .range(0, 4999),
       this.q("variances")
@@ -89,6 +89,8 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
       termsVersionId: r.task_terms_id == null ? null : String(r.task_terms_id),
       qboInvoiceId: r.qbo_invoice_id == null ? null : String(r.qbo_invoice_id),
       qboLineId: r.qbo_line_id == null ? null : String(r.qbo_line_id),
+      excludedAt: r.excluded_at == null ? null : String(r.excluded_at),
+      excludedBy: r.excluded_by == null ? null : String(r.excluded_by),
     }))
 
     const variances: Variance[] = ((varRows ?? []) as Record<string, unknown>[]).map((r) => ({
@@ -205,6 +207,8 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
         unit_price_cents: i.unitPriceCents,
         amount_cents: i.amountCents,
         task_terms_id: i.termsVersionId ?? null,
+        excluded_at: i.excludedAt ?? null,
+        excluded_by: i.excludedBy ?? null,
       })),
     ).select("id") as unknown as PromiseLike<{ error: unknown }>)
     if (error) throw new Error(`billable_items write failed: ${JSON.stringify(error).slice(0, 240)}`)
@@ -393,6 +397,7 @@ export class SupabaseBillingMonthRepository implements BillingMonthRepository {
         task_id: i.taskId, kind: i.kind, service_date: i.serviceDate, item_name: i.itemName,
         qty: i.qty, unit_price_cents: i.unitPriceCents, amount_cents: i.amountCents,
         task_terms_id: i.termsVersionId ?? null,
+        excluded_at: i.excludedAt ?? null, excluded_by: i.excludedBy ?? null,
       })))
       for (let i = 0; i < rows.length; i += 500) {
         const ins = this.client.schema("billing").from("billable_items") as unknown as {

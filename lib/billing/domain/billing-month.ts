@@ -210,7 +210,9 @@ export class BillingMonth {
     const existing = this.items.get(key)
     if (existing && existing.amountCents === item.amountCents && existing.qty === item.qty) return
 
-    this.items.set(key, item)
+    // A person's non-billable mark SURVIVES re-pricing — accrual restates
+    // the observation, never the decision.
+    this.items.set(key, existing?.excludedAt ? { ...item, excludedAt: existing.excludedAt, excludedBy: existing.excludedBy ?? null } : item)
     this.itemsDirty = true
     // The sums moved, so any agreement we had with the system of record is
     // stale — a month cannot stay "reconciled" through a change.

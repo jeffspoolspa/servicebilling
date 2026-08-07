@@ -61,6 +61,13 @@ export interface BillableItem {
   readonly qboInvoiceId?: string | null
   /** The exact QBO line the item rode into, when unambiguous. */
   readonly qboLineId?: string | null
+  /**
+   * RULED 2026-08-07: marked NON-BILLABLE by a person — stays on the
+   * ledger (the work happened; reconcile still counts it against ION),
+   * but documents skip it: it never reaches an invoice.
+   */
+  readonly excludedAt?: string | null
+  readonly excludedBy?: string | null
 }
 
 /** The one place the key is formed, so the ledger and the index agree. */
