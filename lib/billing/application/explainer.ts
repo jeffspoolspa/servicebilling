@@ -280,8 +280,8 @@ export async function buildExplainer(
   ${narrative?.recommendation ? (() => {
     const OPTIONS: { key: string; label: string; sub: string }[] = [
       { key: "service_call", label: "Service Call ($135)", sub: "Diagnose suspected equipment issues" },
-      { key: "consultation", label: "Consultation", sub: "Review pool chemistry and outside factors driving chlorine use: shade trees, fill-water minerals, animals reaching the pool" },
-      { key: "monitor", label: "Monitor", sub: "A fix was recently made, or this may be a one-time spike. We watch how it develops" },
+      { key: "consultation", label: "Consultation", sub: "Review chemistry and outside factors: shade, fill water, animals" },
+      { key: "monitor", label: "Monitor", sub: "A fix was made or this looks one-time. We watch how it develops" },
     ]
     const chosen = narrative.next_step ?? "monitor"
     return `
@@ -295,9 +295,9 @@ export async function buildExplainer(
       ${OPTIONS.map((o) => {
         const on = o.key === chosen
         return `
-      <div style="border:1px solid ${on ? "#0F3E51" : LINE};${on ? "background:#EFF6F9;border-left:4px solid #0F3E51;" : "opacity:0.65;"}padding:6px 9px">
+      <div style="border:1px solid ${on ? "#0F3E51" : LINE};${on ? "background:#EFF6F9;border-left:4px solid #0F3E51;" : "opacity:0.65;"}padding:4px 9px">
         <div style="font-size:11.5px;font-weight:${on ? "700" : "600"};color:#20262B">${o.label}${on ? ` <span style="font-family:${MONO};font-size:8.5px;letter-spacing:0.08em;color:#0F3E51;text-transform:uppercase">· recommended</span>` : ""}</div>
-        <div style="font-size:10px;line-height:1.4;color:${DIM};margin-top:1px">${o.sub}</div>
+        <div style="font-size:9.5px;line-height:1.35;color:${DIM};margin-top:1px">${o.sub}</div>
       </div>`
       }).join("")}
     </div>
