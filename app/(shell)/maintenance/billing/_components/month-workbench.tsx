@@ -447,7 +447,7 @@ export function MonthWorkbench({
     // draft on screen until the new one lands (no reload flash).
     setDraft((d) => (d && d !== "loading" && d !== "error" ? d : "loading"))
     const q = presentation ? `?presentation=${presentation}` : ""
-    fetch(`/api/billing/months/${m.id}/draft-invoice${q}`)
+    fetch(`/api/billing/months/${m.id}/draft-invoice${q}`, { cache: "no-store" })
       .then((r) => r.json().then((j) => (r.ok ? j : Promise.reject(new Error(j.error)))))
       .then((j) => alive && setDraft(j as Draft))
       .catch(() => alive && setDraft("error"))

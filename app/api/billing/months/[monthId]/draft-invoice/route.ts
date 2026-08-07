@@ -12,6 +12,8 @@ import { resolveLaborDocuments } from "@/lib/billing/application/labor-resolutio
  * is what guarantees the preview obeys the same rules the real document
  * will. Nothing is stored; edit the ledger and the next read is the truth.
  */
+export const dynamic = "force-dynamic"
+
 export async function GET(req: Request, ctx: { params: Promise<{ monthId: string }> }) {
   const sb = await createSupabaseServer()
   const { data: { user } } = await sb.auth.getUser()
@@ -100,15 +102,18 @@ export async function GET(req: Request, ctx: { params: Promise<{ monthId: string
     }),
   }))
 
-  return NextResponse.json({
-    ...draftInvoice(month),
-    presentation,
-    defaultPresentation,
-    documents,
-    unmappedLabor,
-    missingDescriptions: [...new Set(missingDescriptions)],
-    ionInvoiceNumbers: ionNumbers,
-    settings: { consumables: settings.consumables, presentation: settings.presentation, labor: settings.labor },
-    settingsConflicts: settings.conflicts,
-  })
+  return NextResponse.json(
+    {
+      ...draftInvoice(month),
+      presentation,
+      defaultPresentation,
+      documents,
+      unmappedLabor,
+      missingDescriptions: [...new Set(missingDescriptions)],
+      ionInvoiceNumbers: ionNumbers,
+      settings: { consumables: settings.consumables, presentation: settings.presentation, labor: settings.labor },
+      settingsConflicts: settings.conflicts,
+    },
+    { headers: { "Cache-Control": "no-store" } },
+  )
 }
