@@ -353,6 +353,9 @@ export function MonthWorkbench({
   const [reviewErr, setReviewErr] = useState<string | null>(null)
   void summaryNote
 
+  // Once any invoice exists, the month is issued — flags become
+  // observations (nothing left for them to hold).
+  const monthIssued = (m.issued_invoices ?? []).length > 0
   // Flagged visits: the finding's message leads with the visit date.
   const dateOf = (f: MonthFinding) => f.message?.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null
   const openFindings = findings.filter((f) => !f.resolved_at && !aheadReviewed.has(f.id))
@@ -678,10 +681,20 @@ export function MonthWorkbench({
                 <div className="space-y-0">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-display text-[15px]">Flagged visits</span>
-                    {openFindings.length > 0 && (
-                      <button onClick={() => review("all")} className={actionBtn}>
-                        Mark all reviewed ({openFindings.length})
-                      </button>
+                    {/* Once issued, a flag is an OBSERVATION, not a to-do —
+                        review buttons only exist while they can hold the gate. */}
+                    {monthIssued ? (
+                      openFindings.length > 0 && (
+                        <span className="text-[10.5px] text-ink-mute" title="these flags were raised after the invoice went out — informational only">
+                          raised after issue — informational
+                        </span>
+                      )
+                    ) : (
+                      openFindings.length > 0 && (
+                        <button onClick={() => review("all")} className={actionBtn}>
+                          Mark all reviewed ({openFindings.length})
+                        </button>
+                      )
                     )}
                   </div>
                   {reviewErr && <div className="text-[11px] text-coral mb-2">{reviewErr}</div>}
@@ -701,6 +714,7 @@ export function MonthWorkbench({
                         if (ids.length === 0) {
                           return flaggedReviewedDates.includes(d) ? <Pill tone="sun">reviewed</Pill> : null
                         }
+                        if (monthIssued) return <Pill tone="neutral">post-issue</Pill>
                         return (
                           <button
                             onClick={() => review(ids)}
