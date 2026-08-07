@@ -36,36 +36,7 @@ function warn(name: string, v: number): boolean {
   return false
 }
 
-interface BranchBrand {
-  name: string
-  phone: string
-  city: string
-}
-
-/** RULED 2026-08-07: public.branches is the branding source of truth —
- *  brand + phone per branch. Savannah-area customers (their own branch,
- *  SAV) are detected by city since the maintenance office assignment
- *  only knows three offices; Brunswick/Jeff's is the fallback. */
-async function brandFor(sys: Db, office: string | null, custCity: string | null): Promise<BranchBrand> {
-  const { data } = await (sys.schema("public").from("branches") as never as {
-    select(c: string): { eq(k: string, v: boolean): PromiseLike<{ data: unknown[] | null }> }
-  }).select("branch_code, name, brand, phone, city, state").eq("active", true)
-  const rows = ((data ?? []) as { branch_code: string; name: string; brand: string | null; phone: string | null; city: string; state: string }[])
-  const byCode = new Map(rows.map((r) => [r.branch_code, r]))
-  const cityL = (custCity ?? "").toLowerCase()
-  const officeL = (office ?? "").toLowerCase()
-  const pick =
-    /savannah|garden city|pooler/.test(cityL) ? byCode.get("SAV")
-    : officeL.includes("richmond") ? byCode.get("RH")
-    : officeL.includes("marys") ? byCode.get("C")
-    : byCode.get("B")
-  const b = pick ?? byCode.get("B")
-  return {
-    name: esc(b?.brand ?? "Jeff's Pool & Spa Service"),
-    phone: b?.phone ?? "(912) 554-0636",
-    city: b ? `${b.city}, ${b.state}` : "Brunswick, GA",
-  }
-}
+import { OfficeResolver } from "@/lib/comms/office-resolver"
 
 export interface ExplainerNarrative {
   intro?: string
@@ -116,10 +87,11 @@ export async function buildExplainer(
     select(c: string): { eq(k: string, v: unknown): { limit(n: number): PromiseLike<{ data: unknown[] | null }> } }
   }).select("display_name, qbo_customer_id, city").eq("id", bm.customer_id).limit(1)
   const cust = ((custRows ?? [])[0] ?? {}) as { display_name?: string; qbo_customer_id?: string; city?: string | null }
-  const { data: officeRows } = await (sys.schema("maintenance").from("v_task_schedules_with_context") as never as {
-    select(c: string): { eq(k: string, v: unknown): { not(k2: string, op: string, v2: null): { limit(n: number): PromiseLike<{ data: unknown[] | null }> } } }
-  }).select("office").eq("customer_id", bm.customer_id).not("office", "is", null).limit(1)
-  const brand = await brandFor(sys, ((officeRows ?? [])[0] as { office?: string | null } | undefined)?.office ?? null, cust.city ?? null)
+  // RULED 2026-08-07: the LETTER speaks as the office whose techs did the
+  // pool the most this month (OfficeResolver.forServiceMonth), geography
+  // as the fallback.
+  const resolvedBranch = await new OfficeResolver(sys as never).forServiceMonth(bm.customer_id, bm.month, { city: cust.city ?? null })
+  const brand = { name: esc(resolvedBranch.brand), phone: resolvedBranch.phone, city: resolvedBranch.city }
 
   const { data: cpvRows } = await (sys.schema("billing_audit").from("v_customer_month_cpv") as never as {
     select(c: string): { eq(k: string, v: unknown): { limit(n: number): PromiseLike<{ data: unknown[] | null }> } }
@@ -190,7 +162,7 @@ export async function buildExplainer(
   const intro =
     narrative?.intro?.trim() ||
     bm.summary_note?.trim() ||
-    `This is not a price change — your service rate is unchanged. The difference is the volume of chemicals your pool consumed. Here is what was added and what the readings showed.`
+    `This is not a price change. Your service rate is unchanged. The difference is the volume of chemicals your pool consumed. Here is what was added and what the readings showed.`
 
   const card = (label: string, value: string, sub: string, accent = false) => `
     <div style="border:1px solid ${LINE};background:#fff;padding:9px 12px;display:flex;flex-direction:column;gap:2px;${accent ? `border-left:4px solid ${AMBER}` : ""}">
@@ -254,7 +226,7 @@ export async function buildExplainer(
       <div style="font-family:${MONO};font-size:10.5px;letter-spacing:0.09em;text-transform:uppercase;color:${DIM}">Water Chemistry &amp; Billing Review</div>
     </div>
     <div style="text-align:right;display:flex;flex-direction:column;gap:2px;font-family:${MONO};font-size:11px;color:${DIM}">
-      <div>ACCT ${esc(cust.qbo_customer_id ?? "—")} · ${monthLabel}</div>
+      <div>ACCT ${esc(cust.qbo_customer_id ?? "")} · ${monthLabel}</div>
       <div>${esc(cust.display_name ?? "")}${cust.city ? ` · ${esc(cust.city)}` : ""}</div>
     </div>
   </header>
@@ -266,14 +238,14 @@ export async function buildExplainer(
 
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
     ${card("This month", usd(thisMonthCents), pctOfNormal ? `${pctOfNormal}% of your normal` : `${visits.length} visits`, true)}
-    ${card("Your 12-month average", avgCents ? usd(avgCents) : "—", `${priorVals.length} billed month${priorVals.length === 1 ? "" : "s"}`)}
-    ${card("Similar pools nearby", peerMedian != null ? usd(peerMedian) : "—", peerLine || "peer group forming")}
+    ${card("Your 12-month average", avgCents ? usd(avgCents) : "n/a", `${priorVals.length} billed month${priorVals.length === 1 ? "" : "s"}`)}
+    ${card("Similar pools nearby", peerMedian != null ? usd(peerMedian) : "n/a", peerLine || "peer group forming")}
   </div>
 
   <div style="display:flex;flex-direction:column;gap:6px">
     <div style="display:flex;justify-content:space-between;align-items:baseline">
       <div style="font-family:${MONO};font-size:9.5px;letter-spacing:0.09em;text-transform:uppercase;color:${DIM}">Chemical charges, last 12 months</div>
-      <div style="font-family:${MONO};font-size:10px;color:${FAINT}">${months[0]} – ${months[11]}</div>
+      <div style="font-family:${MONO};font-size:10px;color:${FAINT}">${months[0]} to ${months[11]}</div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:6px;align-items:end;height:34px">
       ${bars.map((b, i2) => `<div style="height:${Math.max(4, Math.round((b / maxBar) * 100))}%;background:${i2 === 11 ? AMBER : b > avgCents ? "#6FC0EA" : "#CDE8F8"};border-radius:3px 3px 0 0"></div>`).join("")}
@@ -292,7 +264,7 @@ export async function buildExplainer(
   <div style="display:flex;flex-direction:column;gap:6px">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:14px;border-bottom:1px solid ${INK};padding-bottom:4px">
       <h2 style="font-size:16px;font-weight:700;letter-spacing:-0.01em">The readings behind it</h2>
-      <div style="font-size:10.5px;color:${DIM};line-height:1.3;text-align:right">Targets — Free Cl 2–10 · pH 7.2–7.8 · TA 60–120 · CH 200–400 · CYA 30–80 · Salt 2,800–3,500 ppm. Amber = out of range.</div>
+      <div style="font-size:10.5px;color:${DIM};line-height:1.3;text-align:right">Targets: Free Cl 2-10 · pH 7.2-7.8 · TA 60-120 · CH 200-400 · CYA 30-80 · Salt 2,800-3,500 ppm. Amber = out of range.</div>
     </div>
     ${narrative?.readings_note ? `<p style="font-size:13px;line-height:1.45;color:#33393D;max-width:78ch">${esc(narrative.readings_note)}</p>` : ""}
     <table>
@@ -308,8 +280,8 @@ export async function buildExplainer(
   ${narrative?.recommendation ? (() => {
     const OPTIONS: { key: string; label: string; sub: string }[] = [
       { key: "service_call", label: "Service Call ($135)", sub: "Diagnose suspected equipment issues" },
-      { key: "consultation", label: "Consultation", sub: "Review pool chemistry and outside factors driving chlorine use — shade trees, fill-water minerals, animals reaching the pool" },
-      { key: "monitor", label: "Monitor", sub: "A fix was recently made, or this may be a one-time spike — we watch how it develops" },
+      { key: "consultation", label: "Consultation", sub: "Review pool chemistry and outside factors driving chlorine use: shade trees, fill-water minerals, animals reaching the pool" },
+      { key: "monitor", label: "Monitor", sub: "A fix was recently made, or this may be a one-time spike. We watch how it develops" },
     ]
     const chosen = narrative.next_step ?? "monitor"
     return `
