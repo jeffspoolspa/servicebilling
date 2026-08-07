@@ -180,7 +180,15 @@ function summarize(items: readonly BillableItem[]): DocLine[] {
   }
   return [...groups.values()]
     .sort((a, b) => (a.kind === b.kind ? b.amountCents - a.amountCents : a.kind === "labor" ? -1 : 1))
-    .map((g) => ({ ...g, serviceDate: null, detail: null }))
+    // A consumable group re-rounds ONCE at the grouped line: summing the
+    // per-visit roundings of fractional quantities breaks qty x rate =
+    // amount, and QBO then drops the rate off the printed invoice.
+    .map((g) => ({
+      ...g,
+      amountCents: g.kind === "consumable" ? Math.round(g.qty * g.unitPriceCents) : g.amountCents,
+      serviceDate: null,
+      detail: null,
+    }))
 }
 
 function itemize(items: readonly BillableItem[], qcTasks: ReadonlySet<string> = new Set()): DocLine[] {

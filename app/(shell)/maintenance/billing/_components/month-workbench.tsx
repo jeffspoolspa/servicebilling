@@ -392,6 +392,7 @@ export function MonthWorkbench({
   const [noteDraft, setNoteDraft] = useState("")
   const [notes, setNotes] = useState(explainer.notes)
   const [letterFull, setLetterFull] = useState(false)
+  const [letterHidden, setLetterHidden] = useState(false)
   const [thumbH, setThumbH] = useState<number | null>(null)
   // WRITE-AHEAD reviews: ids the user has marked, applied to the view
   // immediately — the POST and the server refresh catch up behind the click.
@@ -888,9 +889,22 @@ export function MonthWorkbench({
                     </span>
                   </CardHeader>
                   <CardBody className="space-y-3">
-                    {genAt ? (
+                    {genAt && letterHidden ? (
+                      <div className="flex items-center justify-between border border-line-soft rounded-lg px-3 py-2">
+                        <span className="text-[12px] text-ink-mute">Letter preview hidden</span>
+                        <button
+                          onClick={() => setLetterHidden(false)}
+                          className="text-[12px] text-ink-dim hover:text-ink underline underline-offset-2"
+                        >Show</button>
+                      </div>
+                    ) : genAt ? (
                       <div className="relative border border-line-soft rounded-lg overflow-hidden">
                         <div className="absolute top-2 right-2 z-10 flex gap-1.5">
+                          <button
+                            onClick={() => setLetterHidden(true)}
+                            title="hide preview"
+                            className="h-7 w-7 rounded border border-line bg-bg-elev/90 text-ink-dim hover:text-ink text-[13px]"
+                          >—</button>
                           <button
                             onClick={() => setLetterFull(true)}
                             title="fullscreen"

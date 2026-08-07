@@ -752,6 +752,20 @@ check("documents: itemized groups by visit, summary collapses, separate splits i
     "flat leads at qty 1; the $0-claimed visit is a claim, not a line",
   )
 
+  // SUMMARY re-rounds the grouped consumable line at qty x rate. Fractional
+  // visit quantities round per visit on the ledger (1.5 gal x $9.75 = $14.63
+  // twice = $29.26), but the GROUPED line must satisfy qty x rate = amount
+  // or QBO drops the rate from the printed invoice (the O'Brien cal hypo).
+  const fr = BillingMonth.open("m3", 77, "2026-07-01")
+  fr.claim(item({ sourceId: "v1", serviceDate: "2026-07-08" }), { claimedByMonthId: null }, AT)
+  fr.claim(item({ sourceKind: "usage", sourceId: "f1", kind: "consumable", serviceDate: "2026-07-08", itemName: "LIQUID CHLORINE", qty: 1.5, unitPriceCents: 975, amountCents: 1463 }), { claimedByMonthId: null }, AT)
+  fr.claim(item({ sourceKind: "usage", sourceId: "f2", kind: "consumable", serviceDate: "2026-07-15", itemName: "LIQUID CHLORINE", qty: 1.5, unitPriceCents: 975, amountCents: 1463 }), { claimedByMonthId: null }, AT)
+  const [frDoc] = documentsOf(fr, [{ taskId: "t1", labor: "per_visit", consumables: "included" }], "summary")
+  const frLine = frDoc.lines.find((l) => l.kind === "consumable" && l.itemName === "LIQUID CHLORINE")
+  assert.ok(frLine && frLine.kind === "consumable")
+  assert.strictEqual(frLine.amountCents, Math.round(frLine.qty * frLine.unitPriceCents), "grouped consumable satisfies qty x rate = amount")
+  assert.strictEqual(frLine.amountCents, 2925, "3 x $9.75, not the $29.26 sum of per-visit roundings")
+
   // The ACL translates ION's vocabulary; null defaults to itemized.
   assert.strictEqual(presentationOf("Per Visit Summary (list consumables)"), "summary")
   assert.strictEqual(presentationOf("Per Visit Itemized (separate consumables)"), "itemized")
