@@ -213,7 +213,8 @@ export async function buildExplainer(
   .printbar { position:fixed; top:12px; right:16px; }
   @media print {
     body { background:#FCFBF9; }
-    .page { margin:0; box-shadow:none; width:auto; min-height:auto; }
+    /* Print reclaims ~40px of chrome so the footer stays on page 1. */
+    .page { margin:0; box-shadow:none; width:auto; min-height:auto; padding:24px 44px 16px; gap:8px; }
     .printbar { display:none; }
     @page { size: letter; margin: 0; }
   }
