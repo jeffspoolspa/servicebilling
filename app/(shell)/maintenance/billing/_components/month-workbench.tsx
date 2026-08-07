@@ -398,6 +398,35 @@ export function MonthWorkbench({
   // immediately — the POST and the server refresh catch up behind the click.
   const [aheadReviewed, setAheadReviewed] = useState<Set<number>>(new Set())
   const [reviewErr, setReviewErr] = useState<string | null>(null)
+  // TARGETED ION REFRESH (RULED 2026-08-07): re-pull ONE log from ION by
+  // its id — after Carter edits a log there — instead of a window re-scrape.
+  const [refreshingVisit, setRefreshingVisit] = useState<string | null>(null)
+  const [refreshErr, setRefreshErr] = useState<string | null>(null)
+  const refreshVisit = async (v: ServiceLogVisit) => {
+    setRefreshingVisit(v.visit_id)
+    setRefreshErr(null)
+    try {
+      const r = await fetch(`/api/billing/visits/${v.visit_id}/refresh-ion`, { method: "POST" })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error ?? String(r.status))
+      router.refresh()
+    } catch (e) {
+      setRefreshErr(String(e instanceof Error ? e.message : e).slice(0, 160))
+    } finally {
+      setRefreshingVisit(null)
+    }
+  }
+  const ionRefreshBtn = (v: ServiceLogVisit) =>
+    v.ion_log_id ? (
+      <button
+        onClick={() => refreshVisit(v)}
+        disabled={refreshingVisit === v.visit_id}
+        title="Re-pull this log from ION"
+        className="h-6 w-6 flex-none rounded-md border border-line bg-bg-elev text-[11px] text-ink-mute hover:text-ink hover:border-ink-dim disabled:opacity-50"
+      >
+        {refreshingVisit === v.visit_id ? "…" : "↻"}
+      </button>
+    ) : null
   void summaryNote
 
   // Flagged visits: the finding's message leads with the visit date.
@@ -643,6 +672,19 @@ export function MonthWorkbench({
                   )}
                 </span>
                 <span className="flex items-center gap-2 flex-none">
+                  {/* Reconcile basis re-pull — ordering stays HUMAN: ION's
+                      transactions reflect its BUILT invoices, so this runs
+                      after Carter rebuilds the invoice in ION. */}
+                  {!hasInvoices && m.status !== "disputed" && (
+                    <button
+                      disabled={acting !== null}
+                      title="Replace this month's ION transaction basis — run after rebuilding the invoice in ION"
+                      onClick={() => act("Pull ION", "POST", `/api/billing/months/${m.id}/pull-ion-transactions`)}
+                      className={actionBtn}
+                    >
+                      {acting === "Pull ION" ? "Pulling…" : "Pull ION"}
+                    </button>
+                  )}
                   {/* THE one action (RULED 2026-08-05): a nudge onto the
                       advance queue — same depth-first path as the tick
                       (fresh gate verdict -> issue -> invoice machine).
@@ -791,6 +833,7 @@ export function MonthWorkbench({
                     )}
                   </div>
                   {reviewErr && <div className="text-[11px] text-coral mb-2">{reviewErr}</div>}
+                  {refreshErr && <div className="text-[11px] text-coral mb-2">{refreshErr}</div>}
                   {flaggedOpenDates.length + flaggedReviewedDates.length === 0 ? (
                     <Card><CardBody><span className="text-[12.5px] text-ink-mute">No flagged visits this month.</span></CardBody></Card>
                   ) : (
@@ -808,18 +851,26 @@ export function MonthWorkbench({
                         if (ids.length === 0) {
                           // Resolved — the pill IS the resolution, whatever it was.
                           const res = reviewedFindings.find((f) => dateOf(f) === d)
-                          if (!res) return null
-                          return res.resolution === "skipped"
-                            ? <Pill tone="neutral">skipped</Pill>
-                            : <Pill tone="sun">{res.resolution ?? "reviewed"}</Pill>
+                          if (!res) return ionRefreshBtn(v)
+                          return (
+                            <span className="inline-flex items-center gap-1.5">
+                              {ionRefreshBtn(v)}
+                              {res.resolution === "skipped"
+                                ? <Pill tone="neutral">skipped</Pill>
+                                : <Pill tone="sun">{res.resolution ?? "reviewed"}</Pill>}
+                            </span>
+                          )
                         }
                         return (
-                          <button
-                            onClick={() => review(ids)}
-                            className="h-6 px-2 rounded-md border border-line bg-bg-elev text-[10.5px] text-ink-dim hover:border-sun hover:text-sun whitespace-nowrap"
-                          >
-                            Mark reviewed
-                          </button>
+                          <span className="inline-flex items-center gap-1.5">
+                            {ionRefreshBtn(v)}
+                            <button
+                              onClick={() => review(ids)}
+                              className="h-6 px-2 rounded-md border border-line bg-bg-elev text-[10.5px] text-ink-dim hover:border-sun hover:text-sun whitespace-nowrap"
+                            >
+                              Mark reviewed
+                            </button>
+                          </span>
                         )
                       }}
                     />
@@ -1424,15 +1475,19 @@ export function MonthWorkbench({
 
           {/* the LOGS — the Visits tab */}
           {ledgerTab === "visits" && (
-            <ServiceLog
-              visits={visits}
-              flags={{ open: flaggedOpenDates, reviewed: flaggedReviewedDates }}
-              period={{
-                label: monthLabel,
-                start: `${monthLabel}-01`,
-                end: new Date(Date.UTC(+monthLabel.slice(0, 4), +monthLabel.slice(5, 7), 0)).toISOString().slice(0, 10),
-              }}
-            />
+            <>
+              {refreshErr && <div className="text-[11px] text-coral mb-2">{refreshErr}</div>}
+              <ServiceLog
+                visits={visits}
+                flags={{ open: flaggedOpenDates, reviewed: flaggedReviewedDates }}
+                period={{
+                  label: monthLabel,
+                  start: `${monthLabel}-01`,
+                  end: new Date(Date.UTC(+monthLabel.slice(0, 4), +monthLabel.slice(5, 7), 0)).toISOString().slice(0, 10),
+                }}
+                rowAction={(v) => ionRefreshBtn(v)}
+              />
+            </>
           )}
         </div>
 
