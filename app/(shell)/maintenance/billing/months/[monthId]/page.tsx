@@ -6,6 +6,9 @@ import { getCustomerCard } from "@/lib/queries/dashboard"
 import type { ServiceLogVisit } from "../../../_components/service-log"
 import { MONTHS_SELECT, type MonthOverviewRow } from "../../_lib/months"
 import { MonthWorkbench, type HistoryEvent, type InvoiceDetail } from "../../_components/month-workbench"
+import { createSupabaseAdmin } from "@/lib/supabase/admin"
+import { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
+import { resolveLaborSku } from "@/lib/billing/application/labor-resolution"
 
 /**
  * One billing month's detail: the workbench with the month tab (history +
@@ -55,7 +58,21 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
   const invoicePayments: Record<string, unknown[]> = {}
   const invoiceHistory: Record<string, unknown[]> = {}
   const invoiceMethods: Record<string, unknown> = {}
-  const ledgerItems = (itemsRes.data ?? []) as never[]
+  // Blank labor names resolve against the CONFIRMED QBO catalog — the same
+  // exact -> category -> rate ladder the issue refuses on, so a name shown
+  // here is a name that will map.
+  let ledgerItems = (itemsRes.data ?? []) as { kind: string; item_name: string | null; task_id: string | null; unit_price_cents: number; service_date: string | null }[]
+  if (ledgerItems.some((i) => i.kind === "labor" && !i.item_name)) {
+    const repo = new SupabaseBillingMonthRepository(createSupabaseAdmin() as never)
+    const taskIds = [...new Set(ledgerItems.map((i) => i.task_id).filter((x): x is string => !!x))]
+    const [laborCatalog, metaMap] = await Promise.all([repo.laborItems(), repo.taskDocMeta(taskIds)])
+    const categories = new Map([...metaMap.entries()].map(([id, t]) => [id, t.category]))
+    ledgerItems = ledgerItems.map((i) => {
+      if (i.kind !== "labor" || i.item_name) return i
+      const r = resolveLaborSku({ itemName: "", taskId: i.task_id, unitPriceCents: i.unit_price_cents, serviceDate: i.service_date }, categories, laborCatalog)
+      return r ? { ...i, item_name: r.name } : i
+    })
+  }
   const monthTasks = (tasksRes.data ?? []) as never[]
   const findings = (findingsRes.data ?? []) as never[]
   const noteRow = ((noteRes.data ?? [])[0] as { summary_note?: string | null; explainer_generated_at?: string | null; explainer_attach_requested_at?: string | null; explainer_notes?: unknown[] } | undefined)

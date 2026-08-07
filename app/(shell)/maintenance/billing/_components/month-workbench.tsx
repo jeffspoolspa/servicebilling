@@ -569,7 +569,7 @@ export function MonthWorkbench({
         // the group key includes the item's OWN invoice — items on different
         // documents never merge, so the linkage stays exact under grouping
         const key = `${it.item_name}|${it.unit_price_cents}|${it.qbo_invoice_id ?? "draft"}`
-        const row = g.get(key) ?? { name: it.item_name ?? "—", qty: 0, rate: it.unit_price_cents / 100, amount: 0, date: null, visitSet: new Set<string>(), invoice: it.qbo_invoice_id, members: [] }
+        const row = g.get(key) ?? { name: displayName(it), qty: 0, rate: it.unit_price_cents / 100, amount: 0, date: null, visitSet: new Set<string>(), invoice: it.qbo_invoice_id, members: [] }
         row.qty += it.kind === "labor" ? 1 : Number(it.qty)
         row.amount += it.amount_cents / 100
         if (it.visit_id) row.visitSet.add(it.visit_id)
@@ -595,6 +595,13 @@ export function MonthWorkbench({
       members: [it],
     }))
   }
+  // Blank labor names (ION's custom-price pattern: the rate rides an
+  // unnamed line) display as the task's service name — the same name the
+  // document factory resolves at issue.
+  const taskNameOf = new Map(monthTasks.map((t) => [t.task_id, t.service_name]))
+  const displayName = (it: LedgerItem) =>
+    it.item_name || (it.kind === "labor" && it.task_id ? taskNameOf.get(it.task_id) ?? null : null) || "—"
+
   // WRITE-AHEAD ledger: exclusion toggles flip locally the moment they're
   // clicked; the POST and the server refresh catch up behind the click.
   const [localItems, setLocalItems] = useState(ledgerItems)
@@ -1130,7 +1137,8 @@ export function MonthWorkbench({
                 const visitLines = shown.filter((i) => !inFlat.has(i.id))
                 const flatGroups = [...new Set(flatLabor.map((i) => i.task_id ?? "unknown"))].map((tid) => {
                   const members = flatLabor.filter((i) => (i.task_id ?? "unknown") === tid)
-                  const base = members.find((mm) => !(mm.item_name ?? "").endsWith("— monthly"))?.item_name ?? members[0].item_name ?? "—"
+                  const named = members.find((mm) => mm.item_name && !mm.item_name.endsWith("— monthly"))
+                  const base = named?.item_name ?? (members[0].task_id ? taskNameOf.get(members[0].task_id) ?? null : null) ?? members[0].item_name ?? "—"
                   return {
                     taskId: tid,
                     name: base.endsWith("— monthly") ? base : `${base} — monthly`,
@@ -1164,7 +1172,7 @@ export function MonthWorkbench({
                         return (
                           <div key={i} className="flex items-center gap-2.5 px-5 py-1 border-t border-line-soft/50">
                             <span className={cn("w-[10px] flex-none rounded-full h-[5px]", it.kind === "labor" ? "bg-cyan/50" : "bg-sun/50")} title={it.kind} />
-                            <span className="text-[11.5px] text-ink flex-1 min-w-0 truncate">{it.item_name ?? "—"}</span>
+                            <span className="text-[11.5px] text-ink flex-1 min-w-0 truncate">{displayName(it)}</span>
                             <span className="font-mono text-[10px] text-ink-mute flex-none">
                               {it.qty} × {formatCurrency(it.unit_price_cents / 100)}
                             </span>
@@ -1378,7 +1386,7 @@ export function MonthWorkbench({
                 {excludedItems.map((it, i) => (
                   <div key={i} className="flex items-center gap-2.5 px-5 py-1 border-t border-line-soft/50 opacity-60">
                     <span className={cn("w-[10px] flex-none rounded-full h-[5px]", it.kind === "labor" ? "bg-cyan/40" : "bg-sun/40")} />
-                    <span className="text-[11.5px] text-ink-dim flex-1 min-w-0 truncate">{it.item_name ?? "—"}</span>
+                    <span className="text-[11.5px] text-ink-dim flex-1 min-w-0 truncate">{displayName(it)}</span>
                     <span className="font-mono text-[9.5px] text-ink-mute flex-none w-[64px]">{(it.service_date ?? "").slice(0, 10) || "—"}</span>
                     <span className="font-mono text-[10px] text-ink-mute flex-none">
                       {it.qty} × {formatCurrency(it.unit_price_cents / 100)}

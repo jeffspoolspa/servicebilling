@@ -516,6 +516,12 @@ check("non-billable: the ledger keeps it, the invoice never sees it", () => {
   assert.strictEqual(v2.excludedAt, AT, "the non-billable mark survives re-pricing")
 })
 
+check("a green-only month has nothing to choose — its settings default", () => {
+  const greenOnly = monthDocSettings([{ taskId: "g1", consumables: "separate" as const, ionInvoiceType: "Flat Rate", green: true }])
+  assert.deepStrictEqual([greenOnly.consumables, greenOnly.presentation, greenOnly.labor], ["included", "itemized", "per_visit"])
+  assert.strictEqual(greenOnly.conflicts.length, 0, "never unresolvable — green docs carry their own terms")
+})
+
 check("billing type: ION is the default; a disagreement is a person's pick", () => {
   const tasks = [
     { taskId: "a", consumables: "included" as const, ionInvoiceType: "Standard", green: false },

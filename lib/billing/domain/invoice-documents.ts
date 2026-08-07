@@ -66,6 +66,18 @@ export function monthDocSettings(
   const live = tasks.filter((t) => !t.green)
   const conflicts: string[] = []
 
+  // A GREEN-ONLY month has nothing to choose: every document is a green
+  // task's own invoice with its own terms — the month-level dimensions
+  // default rather than sit unresolvable forever.
+  if (live.length === 0) {
+    return {
+      consumables: override?.consumables ?? "included",
+      presentation: override?.presentation ?? "itemized",
+      labor: override?.labor ?? "per_visit",
+      conflicts,
+    }
+  }
+
   const laborModes = new Set(live.map((t) => t.labor ?? "per_visit"))
   let labor: "per_visit" | "flat_rate" | null = laborModes.size === 1 ? [...laborModes][0] : null
   if (override?.labor) {
