@@ -242,7 +242,8 @@ export function VisitCalendar({ customerId, month, highlightDates, itemCompare }
               <TableCell colSpan={1 + extraCols} />
             </TableRow>
           )}
-          {showReadings && readingRows.map(([name, label]) => (
+          {/* Collapsed readings keep FC — the one-row summary; expand for the rest. */}
+          {readingRows.filter(([name]) => showReadings || name === "Free Chlorine").map(([name, label]) => (
             <TableRow key={name} className="text-ink-dim">
               <TableCell className="sticky left-0 bg-bg-elev z-10">{label}</TableCell>
               {!collapsed && days.map((d) => {
@@ -427,7 +428,7 @@ export function VisitCalendar({ customerId, month, highlightDates, itemCompare }
             )
           })}
         </TableBody>
-        {items.length > 0 && (
+        {items.length > 0 && !showChems && (
           <TableFooter>
             <TableRow className="text-ink hover:bg-transparent">
               <TableCell className="sticky left-0 bg-bg-elev z-10">Chemicals $ / visit</TableCell>

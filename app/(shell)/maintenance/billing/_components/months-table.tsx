@@ -209,7 +209,7 @@ export function MonthsTable({ rows }: { rows: MonthOverviewRow[] }) {
         toolbarExtra={filterTabs}
         pageSize={25}
         initialSorting={[{ id: "subtotal", desc: true }]}
-        onRowClick={(r) => router.push(`/maintenance/billing/months/${r.id}` as never)}
+        onRowClick={(r) => router.push(`/maintenance/billing/months/${r.id}?nav=${statusFilter ?? "all"}` as never)}
         onSelectionChange={setSelected}
         emptyText="No billing months match."
       />

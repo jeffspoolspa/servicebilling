@@ -9,6 +9,8 @@ import { MonthWorkbench, type HistoryEvent, type InvoiceDetail } from "../../_co
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
 import { SupabaseBillingMonthRepository } from "@/lib/billing/infrastructure/supabase-billing-month-repository"
 import { resolveLaborSku } from "@/lib/billing/application/labor-resolution"
+import { MonthNav } from "../../_components/month-nav"
+import { displayStatus, MONTH_DISPLAY_STATUSES, type MonthDisplayStatus } from "../../_lib/months"
 
 /**
  * One billing month's detail: the workbench with the month tab (history +
@@ -17,8 +19,15 @@ import { resolveLaborSku } from "@/lib/billing/application/labor-resolution"
  * billing_month_history (aggregate OR participant), the review-visits RPC,
  * and the invoice-detail RPC per issued document.
  */
-export default async function MonthDetailPage({ params }: { params: Promise<{ monthId: string }> }) {
+export default async function MonthDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ monthId: string }>
+  searchParams: Promise<{ nav?: string }>
+}) {
   const { monthId } = await params
+  const { nav } = await searchParams
   const sb = await createSupabaseServer()
 
   const { data, error } = await sb.schema("billing").from("v_months_overview").select(MONTHS_SELECT).eq("id", monthId).limit(1)
@@ -88,9 +97,46 @@ export default async function MonthDetailPage({ params }: { params: Promise<{ mo
     invoiceMethods[inv.qbo_invoice_id] = ((perInvoice[i * 4 + 3].data ?? []) as unknown[])[0] ?? null
   })
 
+  // PREV/NEXT walk the SAME filtered, sorted list the table showed (the
+  // `nav` param carries the status filter) — flag to flag when it's held.
+  const navStatus = nav && (MONTH_DISPLAY_STATUSES as string[]).includes(nav) ? (nav as MonthDisplayStatus) : null
+  let monthNav: { prevHref: string | null; nextHref: string | null; label: string } | null = null
+  if (nav) {
+    const { data: siblings } = await sb
+      .schema("billing")
+      .from("v_months_overview")
+      .select(MONTHS_SELECT)
+      .eq("month", m.month)
+      .limit(3000)
+    const ordered = ((siblings ?? []) as MonthOverviewRow[])
+      .filter((r) => (navStatus ? displayStatus(r) === navStatus : true))
+      .sort((a, b) => b.subtotal_cents - a.subtotal_cents)
+    const idx = ordered.findIndex((r) => r.id === m.id)
+    const q = `?nav=${nav}`
+    if (idx >= 0) {
+      monthNav = {
+        prevHref: idx > 0 ? `/maintenance/billing/months/${ordered[idx - 1].id}${q}` : null,
+        nextHref: idx < ordered.length - 1 ? `/maintenance/billing/months/${ordered[idx + 1].id}${q}` : null,
+        label: `${idx + 1} of ${ordered.length}${navStatus ? ` ${navStatus}` : ""}`,
+      }
+    } else if (ordered.length > 0) {
+      // The month LEFT the filtered list (just issued a held one, say) —
+      // keep walking: neighbors come from its sort position.
+      const at = ordered.findIndex((r) => r.subtotal_cents < m.subtotal_cents)
+      const nextIdx = at === -1 ? null : at
+      const prevIdx = at === -1 ? ordered.length - 1 : at - 1 >= 0 ? at - 1 : null
+      monthNav = {
+        prevHref: prevIdx !== null ? `/maintenance/billing/months/${ordered[prevIdx].id}${q}` : null,
+        nextHref: nextIdx !== null ? `/maintenance/billing/months/${ordered[nextIdx].id}${q}` : null,
+        label: `${ordered.length} ${navStatus ?? ""} left`.trim(),
+      }
+    }
+  }
+
   return (
     <div className="px-7 pt-6 pb-10 space-y-4">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-4">
+        {monthNav && <MonthNav prevHref={monthNav.prevHref} nextHref={monthNav.nextHref} label={monthNav.label} />}
         <Link href={`/maintenance/billing?month=${m.month.slice(0, 7)}` as never} className="text-[12px] text-ink-mute hover:text-ink underline underline-offset-2">
           Back to months
         </Link>
