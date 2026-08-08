@@ -189,6 +189,7 @@ async function main() {
       const billing: Record<string, object> = {}
       for (const type of ["clean", "chem_check"] as const) {
         const ofType = act.filter((t) => t.stopType === type)
+          .sort((a, b) => a.ionTaskId.localeCompare(b.ionTaskId))
         if (!ofType.length) continue
         const nonWeekly = ofType.find((t) => t.frequency.kind !== "weekly")
         if (ofType.length === 1 && nonWeekly) pattern[type] = nonWeekly.frequency

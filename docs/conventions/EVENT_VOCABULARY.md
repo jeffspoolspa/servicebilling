@@ -293,6 +293,10 @@ fact carries `agreement:{id}`, `customer:{id}`, `ion_task:{id}` (and the host
 |---|---|---|---|
 | `agreement_opened` | AgreementOpened | authored — backfill / open sentence | agreement minted with terms v1 + open ION incarnation. payload `{basis, terms, provenance}` — `provenance: "reflection"` marks bootstrap-from-ION, not a commercial signing |
 | `agreement_basis_set` | AgreementBasisSet | authored — classify/reclassify | the WHY reclassified (program + standalone-vs-rider). payload `{before, after}` full-change |
+| `agreement_terms_changed` | AgreementTermsChanged | authored — RefreshAgreement (reflection) / changeTerms (intent) | a new terms version: pattern, billing MEANING, or period moved. payload `{before, after, provenance}` — representation churn (jsonb key order, evidence fields like serviceTypeLabel) must NEVER emit this (bitten twice 2026-08-08) |
+| `agreement_ended` | AgreementEnded | authored — end() | lifecycle close; all open incarnations close with it. payload `{ended_on, basis, provenance}` |
+| `agreement_ion_task_superseded` | AgreementIonTaskSuperseded | authored — recordIncarnation (echo) | the external id churned for ONE slice (covers-matched). payload `{from_ion_task_id, to_ion_task_id, cause}` |
+| `ion_prediction_missed` | IonPredictionMissed | authored — recordIncarnation | our write predicted amend/supersede and ION did the other — the model of ION drifted; every future prediction suspect until reviewed |
 
 ---
 

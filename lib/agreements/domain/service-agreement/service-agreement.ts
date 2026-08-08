@@ -1,7 +1,7 @@
 import { AggregateRoot, type DomainEvent } from "@/lib/domain/kernel"
 import { AgreementRuleError } from "./agreement-rule-error"
 import type { Basis } from "./basis"
-import type { TypedBilling } from "./billing-shape"
+import { sameBilling, type TypedBilling } from "./billing-shape"
 import type { IonIncarnation } from "./ion-incarnation"
 import { samePattern, type RequiredPattern } from "./required-pattern"
 import type { TermsVersion } from "./terms-version"
@@ -143,10 +143,14 @@ export class ServiceAgreement extends AggregateRoot<string> {
   ): void {
     if (this._status === "ended") return // history does not reopen from a stale scrape
     const cur = this.currentTerms()
+    // field compares only — JSON.stringify equality is a representation
+    // trap (jsonb reorders keys; evidence fields churn) and re-versioned an
+    // unchanged agreement twice on 2026-08-08 before this lesson stuck
     const changed =
       !samePattern(cur.pattern, t.pattern) ||
-      JSON.stringify(cur.billing) !== JSON.stringify(t.billing) ||
-      JSON.stringify(cur.period) !== JSON.stringify(t.period)
+      !sameBilling(cur.billing, t.billing) ||
+      cur.period.startsOn !== t.period.startsOn ||
+      cur.period.endsOn !== t.period.endsOn
     if (!changed) return
 
     const next: TermsVersion = {
