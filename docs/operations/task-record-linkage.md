@@ -78,7 +78,13 @@ a past end date). Two scheduled scripts implement closure, split by where the en
   ION's "Active Only" report is upserted active under the new data model (its own row keyed 1:1 by
   `ion_task_id`; `customer_id` from `ion_cust_id` → `Customers.ion_cust_id`, not the location owner).
   It closes a task only when its `task_end` is past AND no visit falls after it; it **never** closes a
-  task merely for being absent from the report.
+  task merely for being absent from the report. On `task_schedules` it owns task-level lifecycle only:
+  it may stand a task's slots down (expiry) but **never sets `active=true` on a day-slot** — day-level
+  activation belongs to `upsert_schedules` (taskList truth) alone. Fixed 2026-08-08: the previous
+  blanket `active=true` per `ion_task_id` resurrected days ION had dropped and flip-warred daily
+  against `upsert_schedules`' stand-down (Deen, Defibaugh, Rodriguez, Granstaff each held a ghost
+  second day). The companion fix: `schedule_target_custids` now also targets customers whose active
+  task has zero active slots, so a task returning from expiry gets its days re-derived.
 - **Dropped tasks** — `f/ION/close_dropped_tasks` (daily 4:30am ET). The catch: ION removes a task
   from the "Active Only" report the moment it is given an end date, so an ended task never appears
   there carrying its date. For each task active in our DB but absent from the report, this script
