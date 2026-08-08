@@ -243,4 +243,30 @@ check("sweep: unknown task -> match-or-mint ticket; vanished task -> ended ticke
   assert.deepStrictEqual(d.map((x) => x.reason).sort(), ["missing_from_sweep", "unknown_to_mirror"])
 })
 
+/* ------------------------- task list (tier 1/2) ---------------------------- */
+
+import { ionTaskListFrom, mirrorDisagreements } from "./task-list"
+
+// Deen's LIVE payload, 2026-08-08 — the row that adjudicated the flip-war
+const DEEN_PAYLOAD = { ionCustId: "2545480", count: 1, tasks: [{
+  expired: false, ionTaskId: "5764017", activeDays: [5], assignedTo: "MNT-RH LC, LEE",
+  recurrence: "Weekly", taskStarts: "02/02/2026", weekParity: 1,
+  description: "POOL MAINTENANCE 75", nextService: "Aug 14, 2026",
+  taskCreated: "02/01/2026", taskExpires: "Perpetual", nextServiceWeekday: 5 }] }
+
+check("tier-1/2 factory: Deen's live payload parses; stranger fields tolerated, missing refuse", () => {
+  const r = ionTaskListFrom(DEEN_PAYLOAD)
+  assert.ok(r.ok && r.rows[0].ionTaskId === "5764017" && r.rows[0].activeDays.length === 1)
+  const broken = ionTaskListFrom({ tasks: [{ ionTaskId: "x" }] })
+  assert.ok(!broken.ok && broken.failed.includes("missing"))
+})
+
+check("the Deen invariant: ION cannot disagree with itself — a mismatch means OUR mirror lies", () => {
+  const r = ionTaskListFrom(DEEN_PAYLOAD)
+  assert.ok(r.ok)
+  const findings = mirrorDisagreements(r.rows[0], { activeDayCount: 2, frequency: "multi_week" })
+  assert.ok(findings[0].includes("ION says 1"))
+  assert.deepStrictEqual(mirrorDisagreements(r.rows[0], { activeDayCount: 1, frequency: "weekly" }), [])
+})
+
 console.log(`translation selfcheck: ${n} checks passed`)
