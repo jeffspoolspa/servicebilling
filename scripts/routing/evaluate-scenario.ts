@@ -23,6 +23,7 @@ type Change = {
 
 async function main() {
   const [scenarioId, verbose] = [process.argv[2], process.argv.includes("--verbose")]
+  const conservative = process.argv.includes("--conservative")
   if (!scenarioId) throw new Error("usage: evaluate-scenario.ts <scenarioId>")
 
   const { data: scen, error } = await sb.from("scenarios").select("name, changes").eq("id", scenarioId).single()
@@ -100,7 +101,10 @@ async function main() {
   }
 
   const today = new Date().toISOString().slice(0, 10)
-  const verdicts = new TransitionPlanner().plan(moves, { today, routeLoad, maxPoolsPerRoute: 10 })
+  const verdicts = new TransitionPlanner().plan(moves, {
+    today, routeLoad, maxPoolsPerRoute: 10,
+    schedulingPolicy: conservative ? "conservative" : "derived",
+  })
 
   // ── report ──
   const byValidity = new Map<string, number>()
@@ -113,7 +117,7 @@ async function main() {
   }
   const clusters = new Set(verdicts.map((v) => v.clusterId)).size
 
-  console.log(`scenario "${scen.name}" — ${changes.length} changes → ${moves.length} whole-config moves`)
+  console.log(`scenario "${scen.name}" — ${changes.length} changes → ${moves.length} whole-config moves${conservative ? "  [CONSERVATIVE: everything next Monday]" : ""}`)
   console.log(`validity: ${[...byValidity].map(([k, n]) => `${k}=${n}`).join("  ")}`)
   console.log(`clusters: ${clusters}`)
   console.log(`effective dates: ${[...byDate].sort().map(([d, n]) => `${d}×${n}`).join("  ")}`)

@@ -41,6 +41,10 @@ export interface WeekContext {
   /** current active pool count per surface "techId·weekday" */
   readonly routeLoad: ReadonlyMap<string, number>
   readonly maxPoolsPerRoute: number
+  /** "conservative" = the blanket rule AS A POLICY on this machinery:
+   *  everything effective next Monday; all verification unchanged.
+   *  "derived" (default) = earliest legal date per move. */
+  readonly schedulingPolicy?: "derived" | "conservative"
 }
 
 export interface MoveVerdict {
@@ -56,6 +60,9 @@ export interface MoveVerdict {
   readonly violations: GapViolation[]
   readonly warnings: string[]
 }
+
+const daySetOf = (stops: readonly { weekday: number }[]): string =>
+  [...stops.map((s) => s.weekday)].sort().join(",")
 
 const surfaceKeysOf = (m: MoveInput): string[] => [
   ...m.from.map((s) => `${s.techId}·${s.weekday}`),
@@ -127,6 +134,7 @@ export class TransitionPlanner {
 
   /** STEP 2 — earliest date this ONE move may begin (backward law only). */
   private earliestMoveDate(m: MoveInput, ctx: WeekContext): string {
+    if (ctx.schedulingPolicy === "conservative") return nextMonday(ctx.today)
     for (let offset = 0; offset < 14; offset++) {
       const candidate = addDays(ctx.today, offset)
       if (this.backwardLegal(m, candidate, ctx)) return candidate
@@ -196,7 +204,16 @@ export class TransitionPlanner {
   private seam(m: MoveInput, effective: string): { anchorDate: string | null; timeline: string[]; violations: GapViolation[] } {
     const bounds = gapBoundsFor(m.cadence)
     const weekdays = m.to.map((s) => s.weekday)
-    const horizon = addDays(effective, m.cadence.kind === "monthly" ? 70 : 42)
+    // SERVICE CONTINUITY: a move that changes WHO but not WHEN (same day-set,
+    // techs differ) never interrupts service — the pool is visited on its
+    // days throughout, whichever tech drives. Its timeline runs from the
+    // last served visit, ignoring the write's effective date. Only moves
+    // that change WHEN (day set, or a pure anchor shift) have a seam.
+    const sameDays = daySetOf(m.from) === daySetOf(m.to)
+    const identical = sameDays && m.to.every((s) => m.from.some((f) => f.weekday === s.weekday && f.techId === s.techId))
+    const continuous = sameDays && !identical && m.lastServed !== null
+    const base = continuous ? addDays(m.lastServed!, 1) : effective
+    const horizon = addDays(base, m.cadence.kind === "monthly" ? 70 : 42)
 
     let anchorDate: string | null = null
     if (m.cadence.kind !== "weekly") {
@@ -204,23 +221,29 @@ export class TransitionPlanner {
       // the last served visit — parity is an output, not a choice
       let best: { anchor: string; score: number } | null = null
       for (let offset = 0; offset < (m.cadence.kind === "biweekly" ? 14 : 28); offset++) {
-        const candidate = addDays(effective, offset)
+        const candidate = addDays(base, offset)
         if (!weekdays.includes(new Date(`${candidate}T00:00:00Z`).getUTCDay())) continue
         const gap = m.lastServed ? daysBetween(m.lastServed, candidate) : bounds.idealDays
         if (gap < bounds.loDays || gap > bounds.hiDays) continue
         const score = Math.abs(gap - bounds.idealDays)
         if (!best || score < best.score) best = { anchor: candidate, score }
       }
-      anchorDate = best?.anchor ?? addDays(effective, 0)
+      anchorDate = best?.anchor ?? base
     }
 
-    const startFrom = m.lastServed && m.lastServed >= effective ? addDays(m.lastServed, 1) : effective
+    const startFrom = m.lastServed && m.lastServed >= base ? addDays(m.lastServed, 1) : base
     const firings = projectFirings(
       { cadence: m.cadence, weekdays, anchorDate }, startFrom, horizon,
     ).slice(0, 5)
     const timeline = [...(m.lastServed ? [m.lastServed] : []), ...firings]
     return { anchorDate, timeline, violations: checkCadenceLaw(timeline, bounds) }
   }
+}
+
+const nextMonday = (isoDate: string): string => {
+  const d = new Date(`${isoDate}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + ((8 - d.getUTCDay()) % 7 || 7))
+  return d.toISOString().slice(0, 10)
 }
 
 const addDays = (isoDate: string, n: number): string => {

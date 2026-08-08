@@ -158,4 +158,11 @@ check("A/B flip is VALID with a derived date — verdict and date are separate",
   assert.strictEqual(v.violations.length, 0)
 })
 
+check("conservative policy: the blanket rule rides ON the machinery — Monday, verified", () => {
+  const [v] = planner.plan([weekly({ to: [{ weekday: 4, techId: "elaina" }] })],
+    ctx({ schedulingPolicy: "conservative" })) // tech-only, Wed cursor
+  assert.strictEqual(v.effectiveDate, "2026-08-17") // next Monday, not today
+  assert.strictEqual(v.violations.length, 0) // law still proves the seam
+})
+
 console.log(`transition selfcheck: ${n} checks passed`)
