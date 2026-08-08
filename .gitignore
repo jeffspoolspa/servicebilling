@@ -40,8 +40,10 @@ preview/
 # windmill (mirror; secrets are filtered but be safe)
 windmill/**/secret-*
 
-# claude code local state
-.claude/
+# claude code local state (worktrees, local settings) — but the skills are
+# versioned team conventions, the executable form of the architecture docs
+.claude/*
+!.claude/skills/
 
 # supabase CLI temp/auth files
 supabase/.temp/
