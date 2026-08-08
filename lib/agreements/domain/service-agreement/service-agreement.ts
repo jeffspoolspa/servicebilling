@@ -1,8 +1,12 @@
 import { AggregateRoot, type DomainEvent } from "@/lib/domain/kernel"
-import {
-  AgreementRuleError, samePattern,
-  type Basis, type BillingShape, type IonIncarnation, type RequiredPattern, type TermsVersion,
-} from "./values"
+import { AgreementRuleError } from "./agreement-rule-error"
+import type { Basis } from "./basis"
+import type { BillingShape } from "./billing-shape"
+import type { DesiredWeek } from "./desired-week"
+import type { IonIncarnation } from "./ion-incarnation"
+import { samePattern, type RequiredPattern } from "./required-pattern"
+import type { Revision } from "./revision"
+import type { TermsVersion } from "./terms-version"
 
 /**
  * ServiceAgreement — the standing service contract, OUR identity, with two
@@ -29,6 +33,9 @@ import {
  * riders — a CROSS-aggregate reaction, so it travels as an event handler
  * consuming agreement_ended, each rider its own transaction. The invariant
  * here is only that a rider knows its parent.
+ *
+ * EXIT TEST: delete ION tomorrow and this class must remain coherent — ION
+ * appears only as opaque reference ids inside the incarnation ledger.
  */
 export class ServiceAgreement extends AggregateRoot<string> {
   private constructor(
@@ -167,6 +174,33 @@ export class ServiceAgreement extends AggregateRoot<string> {
     this.record(fact("agreement_terms_changed", at, {
       before: cur, after: next, provenance: "intent",
     }, this.participants()))
+  }
+
+  /**
+   * I-T8: the shape of a revision is decided by WHAT MOVED, never by the
+   * caller — a caller that could choose would eventually choose to rewrite
+   * an anchor. Pure decision: records nothing (the sentence records terms
+   * via changeTerms when commercial fields moved, and the ledger appends
+   * from the ECHO after the write lands).
+   *
+   *   commercial moved (pattern/billing/period) → supersede
+   *   day-set moved (which weekdays)            → supersede (anchor must move)
+   *   only tech VALUES moved                    → amend (same id predicted)
+   *   nothing moved                             → none (no write)
+   */
+  revise(desired: DesiredWeek, observed: readonly { weekday: number; techId: string }[], effectiveWeekOf: string): Revision {
+    if (this._status === "ended") throw new AgreementRuleError("an ended agreement cannot be revised")
+    const cur = this.currentTerms()
+    const commercialMoved =
+      !samePattern(cur.pattern, desired.pattern) ||
+      JSON.stringify(cur.billing) !== JSON.stringify(desired.billing) ||
+      JSON.stringify(cur.period) !== JSON.stringify(desired.period)
+    const daySet = (s: readonly { weekday: number }[]) => [...s.map((x) => x.weekday)].sort().join(",")
+    const daysMoved = daySet(desired.stops) !== daySet(observed)
+    if (commercialMoved || daysMoved) return { kind: "supersede", week: desired, effectiveWeekOf }
+    const byDay = new Map(observed.map((s) => [s.weekday, s.techId]))
+    const techsMoved = desired.stops.some((s) => byDay.get(s.weekday) !== s.techId)
+    return techsMoved ? { kind: "amend", week: desired } : { kind: "none" }
   }
 
   /** I7: placements end when the agreement ends — after the last owed
