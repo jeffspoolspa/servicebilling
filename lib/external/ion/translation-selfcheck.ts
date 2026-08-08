@@ -175,4 +175,43 @@ check("an irrelevant raw change (stopPayFixed) is INVISIBLE here — tier-1 only
   assert.ok(!d.requirement && !d.placements && !d.billing)
 })
 
+/* ------------------------ planWrite (I-T8 at the border) ------------------- */
+
+import { planWrite } from "./ion-write-plan"
+
+const arrangementOf = (t: ReturnType<typeof tx>, over: Partial<{ stops: { weekday: number; techId: string }[]; billing: typeof t.billing }> = {}) => ({
+  pattern: t.schedule.frequency, billing: over.billing ?? t.billing,
+  period: t.schedule.period, stops: over.stops ?? [...t.schedule.stops], note: "",
+})
+
+check("planWrite: only tech values moved -> amend (same id predicted)", () => {
+  const cur = tx(form())
+  const p = planWrite(cur, arrangementOf(cur, { stops: [{ weekday: 2, techId: "dana" }] }), "2026-08-10")
+  assert.strictEqual(p.kind, "amend")
+})
+
+check("planWrite: day-set moved -> supersede (the anchor's weekday must move)", () => {
+  const cur = tx(form())
+  const p = planWrite(cur, arrangementOf(cur, { stops: [{ weekday: 3, techId: "korey" }] }), "2026-08-10")
+  assert.ok(p.kind === "supersede" && p.effectiveWeekOf === "2026-08-10")
+})
+
+check("planWrite: commercial moved -> supersede even with identical stops", () => {
+  const cur = tx(form())
+  const p = planWrite(cur, arrangementOf(cur, { billing: { ...cur.billing, priceCents: 21000 } }), "2026-08-10")
+  assert.strictEqual(p.kind, "supersede")
+})
+
+check("planWrite: nothing moved -> none (no write leaves the building)", () => {
+  const cur = tx(form())
+  assert.strictEqual(planWrite(cur, arrangementOf(cur), "2026-08-10").kind, "none")
+})
+
+check("planWrite: compares against ION reality (the fresh translation), never our record", () => {
+  // the input IS the translation — there is no way to hand it an agreement.
+  // The type system is the fixture here; this check documents the intent.
+  const cur = tx(form())
+  assert.ok(planWrite(cur, arrangementOf(cur), "2026-08-10"))
+})
+
 console.log(`translation selfcheck: ${n} checks passed`)

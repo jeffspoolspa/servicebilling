@@ -151,39 +151,4 @@ check("ActiveAgreement: one home, three clauses, explains itself", () => {
   assert.ok(!new ActiveAgreement("2026-08-08").isSatisfiedBy(b))
 })
 
-/* ------------------------- revise (I-T8, pure) ----------------------------- */
-
-check("revise: only tech values moved -> amend (same id predicted)", () => {
-  const a = open()
-  const week = { pattern: weekly1, billing: billing(), period: { startsOn: "2026-03-01", endsOn: null }, stops: [{ weekday: 2, techId: "dana" }], note: "" }
-  const r = a.revise(week, [{ weekday: 2, techId: "korey" }], "2026-08-10")
-  assert.strictEqual(r.kind, "amend")
-})
-
-check("revise: day-set moved -> supersede (the anchor must move)", () => {
-  const a = open()
-  const week = { pattern: weekly1, billing: billing(), period: { startsOn: "2026-03-01", endsOn: null }, stops: [{ weekday: 3, techId: "korey" }], note: "" }
-  const r = a.revise(week, [{ weekday: 2, techId: "korey" }], "2026-08-10")
-  assert.ok(r.kind === "supersede" && r.effectiveWeekOf === "2026-08-10")
-})
-
-check("revise: commercial moved -> supersede even with identical stops", () => {
-  const a = open()
-  const week = { pattern: weekly1, billing: billing({ priceCents: 21000, priceInputs: { itemCostCents: 21000, serviceTypeId: "st" } }), period: { startsOn: "2026-03-01", endsOn: null }, stops: [{ weekday: 2, techId: "korey" }], note: "" }
-  assert.strictEqual(a.revise(week, [{ weekday: 2, techId: "korey" }], "2026-08-10").kind, "supersede")
-})
-
-check("revise: nothing moved -> none (no write leaves the building)", () => {
-  const a = open()
-  const week = { pattern: weekly1, billing: billing(), period: { startsOn: "2026-03-01", endsOn: null }, stops: [{ weekday: 2, techId: "korey" }], note: "" }
-  assert.strictEqual(a.revise(week, [{ weekday: 2, techId: "korey" }], "2026-08-10").kind, "none")
-})
-
-check("revise: pure — decides, records NOTHING", () => {
-  const a = open()
-  a.pullEvents()
-  a.revise({ pattern: weekly1, billing: billing(), period: { startsOn: "2026-03-01", endsOn: null }, stops: [{ weekday: 5, techId: "x" }], note: "" }, [{ weekday: 2, techId: "korey" }], "2026-08-10")
-  assert.strictEqual(a.pullEvents().length, 0)
-})
-
 console.log(`agreements selfcheck: ${n} checks passed`)
