@@ -5,7 +5,7 @@
 
 import assert from "node:assert"
 import {
-  ionTaskFormFrom, translateTask, diffTranslations, normalizeIonDate,
+  ionTaskFormFrom, translateTask, diffTranslations, normalizeIonDate, programOf,
   type IonTaskForm, type TaskTranslation,
 } from "./task-translation"
 
@@ -20,7 +20,7 @@ const catalog = (id: string) => (id === "st-clean" ? 15000 : null)
 const form = (over: Partial<IonTaskForm> = {}): IonTaskForm => ({
   eventId: "4471",
   customerId: "9655",
-  serviceType: { id: "st-clean", label: "Weekly Cleaning" },
+  serviceType: { id: "st-clean", label: "POOL MAINTENANCE 50" },
   profile: { id: "p1", label: "Residential" },
   serviceRepeat: { id: "1", label: "Weekly" },
   invoiceType: { id: "4", label: "Per Visit Summary (list consumables)" },
@@ -90,7 +90,7 @@ check("price is ONE answer: itemcost wins; else catalog; inputs recorded either 
   assert.strictEqual(explicit.billing.priceCents, 18500)
   const fromCatalog = tx(form({ itemCostCents: null }))
   assert.strictEqual(fromCatalog.billing.priceCents, 15000)
-  assert.deepStrictEqual(fromCatalog.billing.inputs, { itemCostCents: null, serviceTypeId: "st-clean" })
+  assert.deepStrictEqual(fromCatalog.billing.inputs, { itemCostCents: null, serviceTypeId: "st-clean", serviceTypeLabel: "POOL MAINTENANCE 50" })
 })
 
 /* ---------------------- failure is a stored state ------------------------- */
@@ -116,7 +116,7 @@ const parsed = (fields: Record<string, string>, over: Record<string, unknown> = 
   fields,
   detail: {
     ionTaskId: fields["EventID"] ?? "", customerId: fields["CustomerID"] ?? "",
-    serviceType: { value: "st", text: "Weekly Cleaning" }, profile: { value: "p", text: "Res" },
+    serviceType: { value: "st", text: "POOL MAINTENANCE 50" }, profile: { value: "p", text: "Res" },
     serviceRepeat: { value: "1", text: "Weekly" }, invoiceType: { value: "4", text: "Per Visit Summary (list consumables)" },
     startsOn: "8/3/26", endsOn: "", itemCost: "$185.00", taskNote: "",
     perDayTech: [{ dow: 2, techId: "korey", techName: "Korey" }], flags: {},
@@ -267,6 +267,19 @@ check("the Deen invariant: ION cannot disagree with itself — a mismatch means 
   const findings = mirrorDisagreements(r.rows[0], { activeDayCount: 2, frequency: "multi_week" })
   assert.ok(findings[0].includes("ION says 1"))
   assert.deepStrictEqual(mirrorDisagreements(r.rows[0], { activeDayCount: 1, frequency: "weekly" }), [])
+})
+
+check("programOf: the closed service-type decode — known labels classify, strangers refuse", () => {
+  assert.strictEqual(programOf("POOL MAINTENANCE 50 - LABOR TO CLEAN"), "maintenance")
+  assert.strictEqual(programOf("FLAT RATE"), "maintenance")
+  assert.strictEqual(programOf("GREEN POOL - LABOR TO CLEAN THE GREEN POOL @ $85.00"), "green_to_clean")
+  assert.strictEqual(programOf("QUALITY CONTROL @ $0.00"), "quality_control")
+  assert.strictEqual(programOf("NO CHARGE VISIT"), "quality_control")
+  assert.strictEqual(programOf("ONE TIME CLEAN - LABOR"), "one_time_clean")
+  assert.strictEqual(programOf("BRAND NEW SERVICE TYPE 2027"), null)
+  // and an unknown label refuses the whole translation (tripwire, not default)
+  const stranger = translateTask(form({ serviceType: { id: "st", label: "MYSTERY TYPE" } }), () => null)
+  assert.ok(!stranger.ok && stranger.failed.includes("MYSTERY TYPE"))
 })
 
 console.log(`translation selfcheck: ${n} checks passed`)

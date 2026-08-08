@@ -22,6 +22,7 @@
 import { randomUUID } from "node:crypto"
 import { createClient } from "@supabase/supabase-js"
 import { ionTaskFormFrom, translateTask, type TaskTranslation } from "../../lib/external/ion/task-translation"
+import { classifyBasis } from "../../lib/agreements/application/classify-basis"
 
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -161,11 +162,21 @@ async function main() {
         disagreements.push(`${t.ionTaskId}: ION says ${obsDays} day(s), mirror holds ${target.mirrorSlots} active slot(s) [mirror freq: ${target.mirrorFreq}]`)
       }
 
-      // mint the clean agreement (provenance reflection)
+      // mint the clean agreement (provenance reflection). Basis from the
+      // translation's program; a rider whose host is minted LATER in this
+      // same run classifies standalone — reclassify-basis.ts converges it.
       const agreementId = randomUUID()
+      const basis = await classifyBasis(t.program, target.customerId || target.taskId, {
+        async activeMaintenanceAgreement(customerId) {
+          const { data } = await agr.from("service_agreements")
+            .select("id, basis").eq("customer_id", customerId).eq("status", "active")
+          const host = (data ?? []).find((a) => (a.basis as { program?: string }).program === "maintenance")
+          return host ? { id: host.id } : null
+        },
+      })
       const { error: e1 } = await agr.from("service_agreements").insert({
         id: agreementId, customer_id: target.customerId || target.taskId,
-        basis: { kind: "customer_contract" }, status: "active",
+        basis: basis as object, status: "active",
       })
       if (e1) { console.error(`agreement insert ${t.ionTaskId}: ${e1.message}`); continue }
       await agr.from("terms_versions").insert({
@@ -180,7 +191,7 @@ async function main() {
         aggregate: "agreement", aggregate_id: agreementId, type: "agreement_opened",
         actor: "system", occurred_at: observedAt,
         participants: [`agreement:${agreementId}`, `customer:${target.customerId}`, `ion_task:${t.ionTaskId}`],
-        payload: { basis: { kind: "customer_contract" }, terms: { pattern: t.schedule.frequency, billing: t.billing, period: t.schedule.period }, provenance: "reflection", source: "backfill_refresh" },
+        payload: { basis, terms: { pattern: t.schedule.frequency, billing: t.billing, period: t.schedule.period }, provenance: "reflection", source: "backfill_refresh" },
       })
       stats.opened++
     }

@@ -25,7 +25,7 @@ const weekly1: RequiredPattern = { kind: "weekly", timesPerWeek: 1 }
 
 const open = (over: Partial<Parameters<typeof ServiceAgreement.open>[0]> = {}) =>
   ServiceAgreement.open({
-    id: "agr-1", customerId: "9655", basis: { kind: "customer_contract" },
+    id: "agr-1", customerId: "9655", basis: { kind: "customer_contract", program: "maintenance" },
     pattern: weekly1, billing: billing(),
     period: { startsOn: "2026-03-01", endsOn: null },
     ionTaskId: "4471", at: "2026-03-01T00:00:00Z", provenance: "intent",
@@ -127,10 +127,10 @@ check("every fact carries the correlation ids (agreement, customer, ion_task)", 
 
 check("a QC rider knows its parent; billability is NOT decided by basis", () => {
   const qc = open({
-    id: "agr-qc", basis: { kind: "internal_program", program: "qc", riderOf: "agr-1" },
+    id: "agr-qc", basis: { kind: "rider", program: "quality_control", riderOf: "agr-1" },
     billing: billing({ billingType: "do_not_invoice", priceCents: null, priceInputs: { itemCostCents: null, serviceTypeId: "st-qc" } }),
   })
-  assert.deepStrictEqual(qc.basis, { kind: "internal_program", program: "qc", riderOf: "agr-1" })
+  assert.deepStrictEqual(qc.basis, { kind: "rider", program: "quality_control", riderOf: "agr-1" })
   // terms still exist — accrual policy composes them; nothing here hard-codes "never bills"
   assert.strictEqual(qc.currentTerms().billing.billingType, "do_not_invoice")
 })

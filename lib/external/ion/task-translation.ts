@@ -164,9 +164,14 @@ export type Frequency =
   | { kind: "biweekly" } // parity NOT tagged here — routing interprets StartsOn (D6)
   | { kind: "monthly" }
 
+/** Our program vocabulary — WHY the work exists, translated from ION's
+ *  ServiceType label. Feeds Basis classification (standalone vs rider). */
+export type Program = "maintenance" | "green_to_clean" | "one_time_clean" | "plaster_start_up" | "quality_control"
+
 export interface TaskTranslation {
   ionTaskId: string
   ionCustomerId: string
+  program: Program
   schedule: {
     period: { startsOn: string | null; endsOn: string | null }
     frequency: Frequency
@@ -178,7 +183,7 @@ export interface TaskTranslation {
     /** ONE answer: itemcost wins when populated, else the catalog governs. */
     priceCents: number | null
     /** The rule's inputs, kept so the answer is re-derivable forever. */
-    inputs: { itemCostCents: number | null; serviceTypeId: string }
+    inputs: { itemCostCents: number | null; serviceTypeId: string; serviceTypeLabel: string }
     billingType: "flat_rate" | "per_visit"
     invoiceStyle: "itemized" | "summary"
     consumables: "included" | "separate"
@@ -202,6 +207,21 @@ const INVOICE_TYPE_DECODE: Record<
   "Per Visit Itemized (separate consumables)": { billingType: "per_visit", invoiceStyle: "itemized", consumables: "separate" },
   "Flat Rate (list consumables)": { billingType: "flat_rate", invoiceStyle: "summary", consumables: "included" },
   "Flat Rate (separate consumables)": { billingType: "flat_rate", invoiceStyle: "summary", consumables: "separate" },
+}
+
+/** ServiceType label → program. Data-grounded 2026-08-08 (18 live service
+ *  types across the 528-agreement book); the same rule set as the DB's
+ *  maintenance.task_category, translated to OUR vocabulary. CLOSED — an
+ *  unknown label refuses (a new ION service type must be classified on
+ *  purpose, never defaulted into "maintenance"). */
+export function programOf(serviceTypeLabel: string): Program | null {
+  const l = serviceTypeLabel.trim()
+  if (/^(QUALITY CONTROL|NO CHARGE)/i.test(l)) return "quality_control"
+  if (/^GREEN POOL/i.test(l)) return "green_to_clean"
+  if (/^ONE TIME CLEAN/i.test(l)) return "one_time_clean"
+  if (/^PLASTER START UP/i.test(l)) return "plaster_start_up"
+  if (/^(POOL MAINTENANCE|FLAT RATE|SPA CLEAN|FOUNTAIN CLEAN|CHEMICAL TESTING)/i.test(l)) return "maintenance"
+  return null
 }
 
 const weekdayOfIso = (iso: string): IonWeekday =>
@@ -251,11 +271,15 @@ export function translateTask(
   const decoded = INVOICE_TYPE_DECODE[form.invoiceType.label.trim()]
   if (!decoded) return refuse(`unknown InvoiceType "${form.invoiceType.label}"`)
 
+  const program = programOf(form.serviceType.label)
+  if (!program) return refuse(`unknown ServiceType "${form.serviceType.label}" — classify it in programOf`)
+
   return {
     ok: true,
     value: {
       ionTaskId: form.eventId,
       ionCustomerId: form.customerId,
+      program,
       schedule: {
         period: { startsOn: form.startsOn, endsOn: form.endsOn },
         frequency,
@@ -263,7 +287,7 @@ export function translateTask(
       },
       billing: {
         priceCents: form.itemCostCents ?? catalogPriceCents(form.serviceType.id),
-        inputs: { itemCostCents: form.itemCostCents, serviceTypeId: form.serviceType.id },
+        inputs: { itemCostCents: form.itemCostCents, serviceTypeId: form.serviceType.id, serviceTypeLabel: form.serviceType.label },
         ...decoded,
         sendConsumables: form.flags.sendConsumables,
       },
