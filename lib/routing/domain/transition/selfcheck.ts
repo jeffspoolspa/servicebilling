@@ -96,7 +96,7 @@ check("capacity NEVER schedules (RULED): over-cap arrival keeps its date, carrie
   const arriving = weekly({ quotaId: "in", to: [{ weekday: 5, techId: "elaina" }] })
   const [alone] = planner.plan([arriving], ctx({ routeLoad: load }))
   assert.ok(alone.effectiveDate! <= "2026-08-14") // this week — date untouched by capacity
-  assert.ok(alone.warnings[0]?.includes("over cap"))
+  assert.ok(alone.warnings[0]?.includes("transient overload elaina·5"))
   // net composite: a vacating move on the same surface clears the warning
   const vacating = weekly({
     quotaId: "out", from: [{ weekday: 5, techId: "elaina" }], to: [{ weekday: 5, techId: "dana" }],
@@ -112,6 +112,24 @@ check("independent moves stagger freely — no false coupling", () => {
   const b = weekly({ quotaId: "b", from: [{ weekday: 1, techId: "x" }], to: [{ weekday: 2, techId: "x" }], lastServed: "2026-08-10" })
   const [va, vb] = planner.plan([a, b], ctx())
   assert.notStrictEqual(va.clusterId, vb.clusterId)
+})
+
+check("Carter's Friday case: staggered dates create a TRANSIENT overload — dated warning", () => {
+  // today Thursday 8/13. A: X's Friday pools -> Y (tech-only, lands tomorrow).
+  // B: Y's own Friday pools -> Wednesday (already passed -> next week).
+  // End-state nets fine; THIS Friday Y carries both cohorts.
+  const load = new Map([["y·5", 10]]) // includes B's three pools, still on Friday today
+  const a = weekly({ quotaId: "a", from: [{ weekday: 5, techId: "x" }], to: [{ weekday: 5, techId: "y" }] })
+  const b3 = [0, 1, 2].map((k) => weekly({
+    quotaId: `b${k}`, from: [{ weekday: 5, techId: "y" }], to: [{ weekday: 3, techId: "y" }],
+    lastServed: "2026-08-07",
+  }))
+  const verdicts = planner.plan([a, ...b3], ctx({ today: "2026-08-13", routeLoad: load }))
+  const va = verdicts.find((v) => v.quotaId === "a")!
+  assert.strictEqual(va.effectiveDate, "2026-08-13") // capacity never schedules
+  assert.ok(verdicts.filter((v) => v.quotaId.startsWith("b")).every((v) => v.effectiveDate! >= "2026-08-17"))
+  assert.ok(va.warnings[0]?.includes("transient overload y·5"))
+  assert.ok(va.warnings[0]?.includes("2026-08-13→2026-08-17")) // dated: until B vacates
 })
 
 /* ------------------- parity derived at the seam --------------------------- */

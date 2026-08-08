@@ -80,7 +80,16 @@ export class TransitionPlanner {
     })
 
     /* ---- STEP 2: per-MOVE earliest date (capacity never schedules) ---- */
-    const warnings = this.capacityWarnings(moves.filter((_, i) => validity[i].ok), ctx)
+    const dated = moves.map((m, i) =>
+      validity[i].ok ? { m, effective: this.earliestMoveDate(m, ctx) } : null)
+
+    /* ---- capacity: INTERVAL-AWARE warnings over the staggered dates.
+       Staggered effective dates create TRANSIENT composite states (a
+       tech-only arrival landing today while the vacating day-move waits
+       out NoBackwardPlacement) — the end-state nets out, the window
+       between the dates does not. Evaluate load per interval. ---- */
+    const warnings = this.transientCapacityWarnings(
+      dated.filter((d): d is { m: MoveInput; effective: string } => d !== null), ctx)
 
     return moves.map((m, i) => {
       const v = validity[i]
@@ -90,7 +99,7 @@ export class TransitionPlanner {
                  clusterId: root, effectiveDate: null, anchorDate: null, timeline: [], violations: [],
                  warnings: [] }
       }
-      const effective = this.earliestMoveDate(m, ctx)
+      const effective = dated[i]!.effective
       const { anchorDate, timeline, violations } = this.seam(m, effective)
       return { quotaId: m.quotaId, validity: "valid", reasons: v.reasons,
                clusterId: root, effectiveDate: effective, anchorDate, timeline, violations,
@@ -140,28 +149,43 @@ export class TransitionPlanner {
     return true
   }
 
-  /** Capacity — a WARNING, never a scheduler (RULED 2026-08-08). Net
-   *  composite per surface across the whole scenario; arriving moves onto
-   *  an over-cap surface carry the warning. */
-  private capacityWarnings(moves: readonly MoveInput[], ctx: WeekContext): Map<string, string[]> {
-    const delta = new Map<string, number>()
-    for (const m of moves) {
-      for (const s of m.from) delta.set(`${s.techId}·${s.weekday}`, (delta.get(`${s.techId}·${s.weekday}`) ?? 0) - 1)
-      for (const s of m.to) delta.set(`${s.techId}·${s.weekday}`, (delta.get(`${s.techId}·${s.weekday}`) ?? 0) + 1)
+  /** Capacity — a WARNING, never a scheduler (RULED 2026-08-08), evaluated
+   *  PER INTERVAL between effective dates: transient overloads from
+   *  staggered moves are the whole point. An arriving move overlapping an
+   *  over-cap interval on its target surface carries a DATED warning. */
+  private transientCapacityWarnings(
+    dated: readonly { m: MoveInput; effective: string }[],
+    ctx: WeekContext,
+  ): Map<string, string[]> {
+    type Ev = { date: string; surface: string; delta: number }
+    const events: Ev[] = []
+    for (const { m, effective } of dated) {
+      for (const s of m.from) events.push({ date: effective, surface: `${s.techId}·${s.weekday}`, delta: -1 })
+      for (const s of m.to) events.push({ date: effective, surface: `${s.techId}·${s.weekday}`, delta: +1 })
     }
-    const over = new Map<string, number>()
-    for (const [surface, d] of delta) {
-      const after = (ctx.routeLoad.get(surface) ?? 0) + d
-      if (after > ctx.maxPoolsPerRoute) over.set(surface, after)
-    }
+    const dates = [...new Set(events.map((e) => e.date))].sort()
     const out = new Map<string, string[]>()
-    for (const m of moves) {
-      for (const s of m.to) {
-        const k = `${s.techId}·${s.weekday}`
-        if (over.has(k) && !m.from.some((f) => `${f.techId}·${f.weekday}` === k)) {
-          const list = out.get(m.quotaId) ?? []
-          list.push(`route over cap after scenario: ${k} → ${over.get(k)} pools (max ${ctx.maxPoolsPerRoute})`)
-          out.set(m.quotaId, list)
+    const surfaces = new Set(events.map((e) => e.surface))
+    for (const surface of surfaces) {
+      // stepwise load from the first effective date; each interval runs to
+      // the next breakpoint (or open-ended after the last)
+      for (let i = 0; i < dates.length; i++) {
+        const at = dates[i]
+        const load = (ctx.routeLoad.get(surface) ?? 0) +
+          events.filter((e) => e.surface === surface && e.date <= at)
+                .reduce((sum, e) => sum + e.delta, 0)
+        if (load <= ctx.maxPoolsPerRoute) continue
+        const until = i + 1 < dates.length ? dates[i + 1] : null
+        const when = until && until > at ? `${at}→${until}` : `from ${at}`
+        for (const { m, effective } of dated) {
+          const arrivesHere = m.to.some((t) => `${t.techId}·${t.weekday}` === surface)
+            && !m.from.some((f) => `${f.techId}·${f.weekday}` === surface)
+          if (arrivesHere && effective <= at) {
+            const list = out.get(m.quotaId) ?? []
+            const msg = `transient overload ${surface}: ${load} pools (max ${ctx.maxPoolsPerRoute}) ${when}`
+            if (!list.includes(msg)) list.push(msg)
+            out.set(m.quotaId, list)
+          }
         }
       }
     }

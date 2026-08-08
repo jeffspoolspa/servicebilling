@@ -82,6 +82,13 @@ async function main() {
   }
 
   // route loads (net-composite baseline): count per tech·day across ALL active
+  const { data: emps } = await createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    .from("employees").select("id, first_name, last_name")
+  const techName = new Map((emps ?? []).map((e) => [String(e.id), `${e.first_name ?? ""} ${e.last_name ?? ""}`.trim()]))
+  const { data: names } = await sb.from("v_task_schedules_with_context")
+    .select("task_id, customer_name").in("task_id", quotaIds)
+  const custName = new Map((names ?? []).map((r) => [r.task_id, r.customer_name]))
+
   const { data: allLoads } = await sb
     .from("v_task_schedules_with_context")
     .select("tech_employee_id, day_of_week")
@@ -111,13 +118,19 @@ async function main() {
   console.log(`clusters: ${clusters}`)
   console.log(`effective dates: ${[...byDate].sort().map(([d, n]) => `${d}×${n}`).join("  ")}`)
   console.log(`cadence-law violations: ${violations}`)
+  const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+  const fmt = (stops: readonly { weekday: number; techId: string }[]) =>
+    stops.map((s) => `${techName.get(s.techId) ?? s.techId.slice(0, 8)}·${DAY[s.weekday]}`).join(" + ")
   for (const v of verdicts) {
-    if (v.validity === "never_valid" || v.violations.length > 0 || verbose) {
-      console.log(`\n  quota ${v.quotaId.slice(0, 8)} [${v.validity}] effective=${v.effectiveDate ?? "—"} anchor=${v.anchorDate ?? "—"}`)
-      if (v.reasons.length) console.log(`    reasons: ${v.reasons.join("; ")}`)
-      if (v.timeline.length) console.log(`    timeline: ${v.timeline.join(" → ")}`)
-      for (const g of v.violations) console.log(`    ✗ ${g.bound}: ${g.fromDate} → ${g.toDate} = ${g.gapDays}d`)
-    }
+    const m = moves.find((x) => x.quotaId === v.quotaId)!
+    const flag = v.validity === "never_valid" ? " ✗" : v.violations.length ? " ⚠law" : v.warnings.length ? " ⚠cap" : ""
+    console.log(`\n${custName.get(v.quotaId) ?? v.quotaId.slice(0, 8)}  (${m.cadence.kind}${m.cadence.kind === "weekly" ? " " + m.cadence.timesPerWeek + "x" : ""})${flag}`)
+    console.log(`  ${fmt(m.from)}  →  ${fmt(m.to)}`)
+    if (v.validity === "never_valid") { console.log(`  BLOCKED: ${v.reasons.join("; ")}`); continue }
+    const [last, ...next] = v.timeline.length && m.lastServed ? v.timeline : [null, ...v.timeline]
+    console.log(`  last visit ${last ?? "(never served)"} │ starts ${v.effectiveDate} │ next: ${next.slice(0, 4).join(", ")}`)
+    for (const g of v.violations) console.log(`  ✗ cadence law (${g.bound}): ${g.fromDate} → ${g.toDate} = ${g.gapDays}d`)
+    for (const w of v.warnings) console.log(`  ⚠ ${w}`)
   }
 }
 
