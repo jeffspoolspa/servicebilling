@@ -61,19 +61,34 @@ async function main() {
   const observedAt = new Date().toISOString()
 
   // roster: active-ish tasks with ION identity + customer for form priming
-  const { data: roster, error: rosterErr } = await maint
-    .from("v_task_schedules_with_context")
-    .select("task_id, ion_task_id, qbo_customer_id, customer_id, frequency")
-    .eq("active", true)
-  if (rosterErr) throw rosterErr
-  const { data: custs } = await pub.from("Customers").select("id, ion_cust_id, qbo_customer_id")
-  const ionCustOf = new Map((custs ?? []).map((c) => [c.id, c.ion_cust_id]))
+  const roster: { task_id: string; ion_task_id: string; qbo_customer_id: string; customer_id: string; frequency: string }[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error: rosterErr } = await maint
+      .from("v_task_schedules_with_context")
+      .select("task_id, ion_task_id, qbo_customer_id, customer_id, frequency")
+      .eq("active", true)
+      .range(from, from + 999)
+    if (rosterErr) throw rosterErr
+    roster.push(...(data ?? []))
+    if ((data ?? []).length < 1000) break
+  }
+  // targeted fetch — Customers is 9k+ rows and supabase-js silently caps at
+  // 1000 (the first run lost 305 tasks to that cap; drops must be LOUD)
+  const custIds = [...new Set((roster ?? []).map((r) => r.customer_id).filter(Boolean))]
+  const ionCustOf = new Map<string, string | null>()
+  for (let i = 0; i < custIds.length; i += 500) {
+    const { data: custs, error: eCust } = await pub
+      .from("Customers").select("id, ion_cust_id").in("id", custIds.slice(i, i + 500))
+    if (eCust) throw eCust
+    for (const c of custs ?? []) ionCustOf.set(c.id, c.ion_cust_id)
+  }
 
   // one entry per ION task; skip tasks already holding an OPEN incarnation
   const { data: openInc } = await agr.from("ion_incarnations").select("ion_task_id").is("to_at", null)
   const already = new Set((openInc ?? []).map((r) => r.ion_task_id))
 
   const seen = new Set<string>()
+  const unresolvedCust: string[] = []
   const targets: { ionTaskId: string; ionCustId: string; taskId: string; customerId: string; mirrorSlots: number; mirrorFreq: string }[] = []
   for (const r of roster ?? []) {
     if (!r.ion_task_id || seen.has(r.ion_task_id) || already.has(r.ion_task_id)) {
@@ -86,7 +101,7 @@ async function main() {
     }
     seen.add(r.ion_task_id)
     const ionCust = ionCustOf.get(r.customer_id)
-    if (!ionCust) continue
+    if (!ionCust) { unresolvedCust.push(r.ion_task_id); continue }
     targets.push({
       ionTaskId: String(r.ion_task_id), ionCustId: String(ionCust), taskId: r.task_id,
       customerId: String(r.qbo_customer_id ?? ""), mirrorSlots: 1, mirrorFreq: r.frequency ?? "",
@@ -94,6 +109,10 @@ async function main() {
   }
   const work = targets.slice(0, limit)
   console.log(`roster: ${targets.length} tasks to refresh (open incarnations skipped: ${already.size}) — running ${work.length}`)
+  if (unresolvedCust.length) {
+    console.log(`DROPPED (no ion_cust_id on customer — cannot prime the form): ${unresolvedCust.length}`)
+    console.log(`  ${unresolvedCust.join(", ")}`)
+  }
 
   const stats = { translated: 0, opened: 0, quarantined: 0, disagreements: 0 }
   const disagreements: string[] = []
