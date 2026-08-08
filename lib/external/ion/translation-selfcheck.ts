@@ -214,4 +214,33 @@ check("planWrite: compares against ION reality (the fresh translation), never ou
   assert.ok(planWrite(cur, arrangementOf(cur), "2026-08-10"))
 })
 
+/* --------------------------- schedule sweep -------------------------------- */
+
+import { signaturesOf, diffSweep } from "./schedule-sweep"
+
+check("sweep signatures: 4-week window makes parity observable", () => {
+  const sigs = signaturesOf([
+    { ionTaskId: "t1", ionCustId: "c", date: "2026-08-11", techName: "Korey" }, // Tue wk0
+    { ionTaskId: "t1", ionCustId: "c", date: "2026-08-25", techName: "Korey" }, // Tue wk2
+  ], "2026-08-10")
+  assert.deepStrictEqual(sigs[0].firingWeeks, "0,2") // biweekly evidence, not inference
+  assert.strictEqual(sigs[0].daySet, "2")
+})
+
+check("sweep detects the flip-war class: two mirror slots cannot both match one reality", () => {
+  const observed = signaturesOf(
+    [{ ionTaskId: "deen", ionCustId: "c", date: "2026-08-14", techName: "Dana" }], "2026-08-10")
+  const mirrored = [{ ionTaskId: "deen", daySet: "4,5", techSet: "Dana", firingWeeks: "0", eventCount: 2 }]
+  const d = diffSweep(observed, mirrored)
+  assert.strictEqual(d.length, 1)
+  assert.strictEqual(d[0].reason, "signature_moved") // -> form-fetch ticket, never a write
+})
+
+check("sweep: unknown task -> match-or-mint ticket; vanished task -> ended ticket", () => {
+  const d = diffSweep(
+    [{ ionTaskId: "new", daySet: "1", techSet: "A", firingWeeks: "0,1,2,3", eventCount: 4 }],
+    [{ ionTaskId: "gone", daySet: "1", techSet: "A", firingWeeks: "0,1,2,3", eventCount: 4 }])
+  assert.deepStrictEqual(d.map((x) => x.reason).sort(), ["missing_from_sweep", "unknown_to_mirror"])
+})
+
 console.log(`translation selfcheck: ${n} checks passed`)
