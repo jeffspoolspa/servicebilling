@@ -7,8 +7,8 @@
 import assert from "node:assert"
 import { ActiveAgreement } from "./service-agreement/active-agreement"
 import { ServiceAgreement } from "./service-agreement/service-agreement"
-import type { BillingShape } from "./service-agreement/billing-shape"
-import type { RequiredPattern } from "./service-agreement/required-pattern"
+import type { BillingShape, TypedBilling } from "./service-agreement/billing-shape"
+import type { Cadence, RequiredPattern } from "./service-agreement/required-pattern"
 
 let n = 0
 const check = (_name: string, fn: () => void) => {
@@ -16,19 +16,22 @@ const check = (_name: string, fn: () => void) => {
   n++
 }
 
-const billing = (over: Partial<BillingShape> = {}): BillingShape => ({
+const shape = (over: Partial<BillingShape> = {}): BillingShape => ({
   billingType: "per_visit", invoiceStyle: "summary", consumables: "included",
   priceCents: 18500, priceInputs: { itemCostCents: 18500, serviceTypeId: "st" },
   sendConsumables: true, ...over,
 })
-const weekly1: RequiredPattern = { kind: "weekly", timesPerWeek: 1 }
+const billing = (over: Partial<BillingShape> = {}): TypedBilling => ({ clean: shape(over) })
+const weekly1cad: Cadence = { kind: "weekly", timesPerWeek: 1 }
+const weekly1: RequiredPattern = { clean: weekly1cad }
 
 const open = (over: Partial<Parameters<typeof ServiceAgreement.open>[0]> = {}) =>
   ServiceAgreement.open({
     id: "agr-1", customerId: "9655", basis: { kind: "customer_contract", program: "maintenance" },
     pattern: weekly1, billing: billing(),
     period: { startsOn: "2026-03-01", endsOn: null },
-    ionTaskId: "4471", at: "2026-03-01T00:00:00Z", provenance: "intent",
+    incarnations: [{ ionTaskId: "4471", covers: { stopType: "clean", ionProfileId: "p1" } }],
+    at: "2026-03-01T00:00:00Z", provenance: "intent",
     ...over,
   })
 
@@ -37,12 +40,28 @@ const open = (over: Partial<Parameters<typeof ServiceAgreement.open>[0]> = {}) =
 check("a day-move churns the incarnation, NEVER the terms (placement_change)", () => {
   const a = open()
   a.pullEvents()
-  a.recordIncarnation({ ionTaskId: "5090", cause: "placement_change" }, "2026-08-07T00:00:00Z")
+  a.recordIncarnation({ ionTaskId: "5090", cause: "placement_change", covers: { stopType: "clean", ionProfileId: "p1" } }, "2026-08-07T00:00:00Z")
   assert.strictEqual(a.termsHistory().length, 1) // no version
   assert.strictEqual(a.currentIonTaskId(), "5090")
   assert.deepStrictEqual(a.lineage().map((i) => [i.ionTaskId, i.to === null]), [["4471", false], ["5090", true]])
   const types = a.pullEvents().map((e) => e.type)
   assert.deepStrictEqual(types, ["agreement_ion_task_superseded"])
+})
+
+check("supersession is per SLICE: the clean task churns, the chem task survives (Winding River shape)", () => {
+  const a = open({
+    pattern: { clean: weekly1cad, chem_check: { kind: "weekly", timesPerWeek: 2 } },
+    billing: { clean: shape(), chem_check: shape({ priceCents: null, priceInputs: { itemCostCents: null, serviceTypeId: "st-chem" } }) },
+    incarnations: [
+      { ionTaskId: "4471", covers: { stopType: "clean", ionProfileId: "p1" } },
+      { ionTaskId: "4472", covers: { stopType: "chem_check", ionProfileId: "p1" } },
+    ],
+  })
+  a.pullEvents()
+  a.recordIncarnation({ ionTaskId: "9001", cause: "placement_change", covers: { stopType: "clean", ionProfileId: "p1" } }, "2026-08-08T00:00:00Z")
+  assert.strictEqual(a.currentIonTaskId({ stopType: "clean" }), "9001")
+  assert.strictEqual(a.currentIonTaskId({ stopType: "chem_check" }), "4472") // sibling untouched
+  assert.strictEqual(a.openIncarnations().length, 2)
 })
 
 check("an ION-side price edit versions the terms INSIDE one incarnation", () => {
@@ -71,8 +90,8 @@ check("convergence is level-triggered: identical translation = no version, no fa
 check("termsAsOf answers billing's question from history", () => {
   const a = open()
   a.changeTerms({ pattern: weekly1, billing: billing({ priceCents: 21000, priceInputs: { itemCostCents: 21000, serviceTypeId: "st" } }), period: { startsOn: "2026-03-01", endsOn: null } }, "2026-06-01T00:00:00Z")
-  assert.strictEqual(a.termsAsOf("2026-04-15")!.billing.priceCents, 18500)
-  assert.strictEqual(a.termsAsOf("2026-07-01")!.billing.priceCents, 21000)
+  assert.strictEqual(a.termsAsOf("2026-04-15")!.billing.clean!.priceCents, 18500)
+  assert.strictEqual(a.termsAsOf("2026-07-01")!.billing.clean!.priceCents, 21000)
 })
 
 /* ------------------------ echo over prediction ----------------------------- */
@@ -80,14 +99,14 @@ check("termsAsOf answers billing's question from history", () => {
 check("echo agrees with prediction: lineage appends, no alarm", () => {
   const a = open()
   a.pullEvents()
-  a.recordIncarnation({ ionTaskId: "5090", cause: "terms_change" }, "2026-08-07T00:00:00Z", { newIncarnation: true })
+  a.recordIncarnation({ ionTaskId: "5090", cause: "terms_change", covers: { stopType: "clean", ionProfileId: "p1" } }, "2026-08-07T00:00:00Z", { newIncarnation: true })
   assert.ok(!a.pullEvents().some((e) => e.type === "ion_prediction_missed"))
 })
 
 check("ION keeps the id where we predicted a new one -> reality recorded + prediction_missed", () => {
   const a = open()
   a.pullEvents()
-  a.recordIncarnation({ ionTaskId: "4471", cause: "terms_change" }, "2026-08-07T00:00:00Z", { newIncarnation: true })
+  a.recordIncarnation({ ionTaskId: "4471", cause: "terms_change", covers: { stopType: "clean", ionProfileId: "p1" } }, "2026-08-07T00:00:00Z", { newIncarnation: true })
   assert.strictEqual(a.currentIonTaskId(), "4471") // reality wins
   assert.strictEqual(a.lineage().length, 1) // nothing invented
   const types = a.pullEvents().map((e) => e.type)
@@ -132,7 +151,7 @@ check("a QC rider knows its parent; billability is NOT decided by basis", () => 
   })
   assert.deepStrictEqual(qc.basis, { kind: "rider", program: "quality_control", riderOf: "agr-1" })
   // terms still exist — accrual policy composes them; nothing here hard-codes "never bills"
-  assert.strictEqual(qc.currentTerms().billing.billingType, "do_not_invoice")
+  assert.strictEqual(qc.currentTerms().billing.clean!.billingType, "do_not_invoice")
 })
 
 /* ------------------------------ the spec ----------------------------------- */

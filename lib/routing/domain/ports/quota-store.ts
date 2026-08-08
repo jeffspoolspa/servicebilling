@@ -11,6 +11,9 @@
 export interface PlacementStop {
   readonly weekday: number // 0=Sun..6=Sat, ION's convention carried through
   readonly techId: string
+  /** The KIND of work this stop performs (RULED 2026-08-08) — clean vs
+   *  chem_check. Same-day different-type stops are legal (Winding River). */
+  readonly type: "clean" | "chem_check"
 }
 
 export type PlacementCause = "opened" | "transition" | "ion_side"

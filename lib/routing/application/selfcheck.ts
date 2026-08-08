@@ -43,8 +43,8 @@ async function main() {
   const deen = {
     agreementId: "deen",
     termsVersion: 1,
-    frequency: { kind: "weekly", timesPerWeek: 1 } as const,
-    stops: [{ weekday: 5, techId: "31937" }],
+    pattern: { clean: { kind: "weekly", timesPerWeek: 1 } } as const,
+    stops: [{ weekday: 5, techId: "31937", type: "clean" as const }],
     fromDate: "2026-08-08",
     cause: "opened" as const,
   }
@@ -58,14 +58,14 @@ async function main() {
   check("same stop set converges to unchanged", again.action === "unchanged")
 
   // 3. a moved stop appends v2, never edits v1
-  const moved = await convergePlacement(store, { ...deen, stops: [{ weekday: 3, techId: "31937" }], cause: "ion_side" })
+  const moved = await convergePlacement(store, { ...deen, stops: [{ weekday: 3, techId: "31937", type: "clean" as const }], cause: "ion_side" })
   check("moved stop appends v2", moved.action === "appended" && moved.version === 2)
   check("history intact: v1 still holds Friday", store.placements.get(first.quotaId)![0].stops[0].weekday === 5)
 
   // 4. the Deen invariant: frequency and stop count from ONE form cannot
   //    disagree — a mismatch is a translation bug and must refuse to write
   let refused = false
-  await convergePlacement(store, { ...deen, stops: [{ weekday: 4, techId: "x" }, { weekday: 5, techId: "x" }] }).catch(
+  await convergePlacement(store, { ...deen, stops: [{ weekday: 4, techId: "x", type: "clean" as const }, { weekday: 5, techId: "x", type: "clean" as const }] }).catch(
     (e) => (refused = e instanceof PlacementRuleError),
   )
   check("weekly-1x with 2 stops refuses (Deen invariant)", refused)
@@ -74,10 +74,19 @@ async function main() {
   const bi = await convergePlacement(store, {
     ...deen,
     agreementId: "bi",
-    frequency: { kind: "biweekly" },
-    stops: [{ weekday: 2, techId: "t" }],
+    pattern: { clean: { kind: "biweekly" } },
+    stops: [{ weekday: 2, techId: "t", type: "clean" as const }],
   })
   check("biweekly requires exactly one stop", bi.action === "opened")
+
+  // Winding River shape: cross-type same-day is legal, per-type counts hold
+  const wr = await convergePlacement(store, {
+    ...deen,
+    agreementId: "wr",
+    pattern: { clean: { kind: "weekly", timesPerWeek: 1 }, chem_check: { kind: "weekly", timesPerWeek: 1 } },
+    stops: [{ weekday: 1, techId: "a", type: "clean" as const }, { weekday: 1, techId: "b", type: "chem_check" as const }],
+  })
+  check("typed stops: clean + chem_check on the SAME day converge", wr.action === "opened")
 
   console.log(`\nall ${n} checks passed`)
 }

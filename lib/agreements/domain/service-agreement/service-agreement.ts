@@ -1,7 +1,7 @@
 import { AggregateRoot, type DomainEvent } from "@/lib/domain/kernel"
 import { AgreementRuleError } from "./agreement-rule-error"
 import type { Basis } from "./basis"
-import type { BillingShape } from "./billing-shape"
+import type { TypedBilling } from "./billing-shape"
 import type { IonIncarnation } from "./ion-incarnation"
 import { samePattern, type RequiredPattern } from "./required-pattern"
 import type { TermsVersion } from "./terms-version"
@@ -27,7 +27,7 @@ import type { TermsVersion } from "./terms-version"
  * meaning is silent; real change versions terms with full before→after
  * payloads (the events-sourced standard), provenance reflection.
  *
- * Riders (basis.internal_program.riderOf): ending the parent ends its
+ * Riders (basis.rider.riderOf): ending the parent ends its
  * riders — a CROSS-aggregate reaction, so it travels as an event handler
  * consuming agreement_ended, each rider its own transaction. The invariant
  * here is only that a rider knows its parent.
@@ -58,9 +58,9 @@ export class ServiceAgreement extends AggregateRoot<string> {
     customerId: string
     basis: Basis
     pattern: RequiredPattern
-    billing: BillingShape
+    billing: TypedBilling
     period: { startsOn: string | null; endsOn: string | null }
-    ionTaskId?: string
+    incarnations?: { ionTaskId: string; covers: IonIncarnation["covers"] }[]
     at: string
     provenance: "intent" | "reflection"
   }): ServiceAgreement {
@@ -70,12 +70,12 @@ export class ServiceAgreement extends AggregateRoot<string> {
     }
     const a = new ServiceAgreement(
       args.id, args.customerId, args.basis, [v1],
-      args.ionTaskId ? [{ ionTaskId: args.ionTaskId, from: args.at, to: null, cause: "opened" }] : [],
+      (args.incarnations ?? []).map((i) => ({ ionTaskId: i.ionTaskId, from: args.at, to: null, cause: "opened" as const, covers: i.covers })),
       "active", null,
     )
     a.record(fact("agreement_opened", args.at, {
       customer_id: args.customerId, basis: args.basis, terms: v1,
-      ion_task_id: args.ionTaskId ?? null, provenance: args.provenance,
+      ion_task_ids: (args.incarnations ?? []).map((i) => i.ionTaskId), provenance: args.provenance,
     }, a.participants()))
     return a
   }
@@ -106,8 +106,17 @@ export class ServiceAgreement extends AggregateRoot<string> {
   lineage(): readonly IonIncarnation[] {
     return this.incarnations
   }
-  currentIonTaskId(): string | null {
-    return this.incarnations.find((i) => i.to === null)?.ionTaskId ?? null
+  openIncarnations(): readonly IonIncarnation[] {
+    return this.incarnations.filter((i) => i.to === null)
+  }
+  /** The open task carrying a slice; the singular read for one-task agreements. */
+  currentIonTaskId(covers?: Partial<IonIncarnation["covers"]>): string | null {
+    const open = this.openIncarnations().filter(
+      (i) => !covers ||
+        ((covers.stopType === undefined || i.covers.stopType === covers.stopType) &&
+         (covers.ionProfileId === undefined || i.covers.ionProfileId === covers.ionProfileId)),
+    )
+    return open[0]?.ionTaskId ?? null
   }
   /** Terms as they stood on a date — the billing asOf question. */
   termsAsOf(date: string): TermsVersion | null {
@@ -127,7 +136,7 @@ export class ServiceAgreement extends AggregateRoot<string> {
   applyTranslation(
     t: {
       pattern: RequiredPattern
-      billing: BillingShape
+      billing: TypedBilling
       period: { startsOn: string | null; endsOn: string | null }
     },
     at: string,
@@ -159,7 +168,7 @@ export class ServiceAgreement extends AggregateRoot<string> {
   /** Our commercial change (I-T8's supersede cases land here; tech-only
    *  amends never touch this aggregate at all). */
   changeTerms(
-    t: { pattern: RequiredPattern; billing: BillingShape; period: { startsOn: string | null; endsOn: string | null } },
+    t: { pattern: RequiredPattern; billing: TypedBilling; period: { startsOn: string | null; endsOn: string | null } },
     at: string,
   ): void {
     if (this._status === "ended") throw new AgreementRuleError("an ended agreement cannot be changed")
@@ -181,8 +190,7 @@ export class ServiceAgreement extends AggregateRoot<string> {
     if (this._status === "ended") return
     this._status = "ended"
     this._endedOn = on
-    const open = this.incarnations.find((i) => i.to === null)
-    if (open) this.closeIncarnation(open.ionTaskId, at)
+    for (const open of this.openIncarnations()) this.closeIncarnation(open.ionTaskId, at)
     this.record(fact("agreement_ended", at, {
       ended_on: on, basis: this.basis, provenance,
     }, this.participants()))
@@ -197,11 +205,17 @@ export class ServiceAgreement extends AggregateRoot<string> {
    * ION drifted, and every future prediction is suspect until a human looks.
    */
   recordIncarnation(
-    echo: { ionTaskId: string; cause: IonIncarnation["cause"] },
+    echo: { ionTaskId: string; cause: IonIncarnation["cause"]; covers: IonIncarnation["covers"] },
     at: string,
     predicted?: { newIncarnation: boolean },
   ): void {
-    const open = this.incarnations.find((i) => i.to === null)
+    // supersession is per SLICE: the echo replaces the open incarnation
+    // covering the same (stopType, profile), never its siblings
+    const open = this.incarnations.find(
+      (i) => i.to === null &&
+        i.covers.stopType === echo.covers.stopType &&
+        i.covers.ionProfileId === echo.covers.ionProfileId,
+    )
     const isNew = !open || open.ionTaskId !== echo.ionTaskId
 
     if (predicted !== undefined && predicted.newIncarnation !== isNew) {
@@ -213,7 +227,7 @@ export class ServiceAgreement extends AggregateRoot<string> {
     if (!isNew) return // echo says the id survived — nothing to append
 
     if (open) this.closeIncarnation(open.ionTaskId, at)
-    this.incarnations.push({ ionTaskId: echo.ionTaskId, from: at, to: null, cause: echo.cause })
+    this.incarnations.push({ ionTaskId: echo.ionTaskId, from: at, to: null, cause: echo.cause, covers: echo.covers })
     this.record(fact("agreement_ion_task_superseded", at, {
       from_ion_task_id: open?.ionTaskId ?? null, to_ion_task_id: echo.ionTaskId, cause: echo.cause,
     }, this.participants()))

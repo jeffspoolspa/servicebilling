@@ -166,6 +166,12 @@ async function main() {
       // translation's program; a rider whose host is minted LATER in this
       // same run classifies standalone — reclassify-basis.ts converges it.
       const agreementId = randomUUID()
+      const { data: existing } = await agr.from("service_agreements")
+        .select("id, basis").eq("customer_id", target.customerId || target.taskId).eq("status", "active")
+      if ((existing ?? []).some((a) => (a.basis as { program?: string }).program === t.program)) {
+        console.log(`  SKIP mint ${t.ionTaskId}: customer already holds an active ${t.program} agreement (match-or-mint is refreshTask's road)`)
+        continue
+      }
       const basis = await classifyBasis(t.program, target.customerId || target.taskId, {
         async activeMaintenanceAgreement(customerId) {
           const { data } = await agr.from("service_agreements")
@@ -180,12 +186,15 @@ async function main() {
       })
       if (e1) { console.error(`agreement insert ${t.ionTaskId}: ${e1.message}`); continue }
       await agr.from("terms_versions").insert({
-        agreement_id: agreementId, version: 1, pattern: t.schedule.frequency as object,
-        billing: t.billing as object, period: t.schedule.period as object,
+        agreement_id: agreementId, version: 1,
+        pattern: { [t.stopType]: t.schedule.frequency } as object,
+        billing: { [t.stopType]: t.billing } as object,
+        period: t.schedule.period as object,
         from_at: observedAt, cause: "opened",
       })
       await agr.from("ion_incarnations").insert({
         agreement_id: agreementId, ion_task_id: t.ionTaskId, from_at: observedAt, cause: "opened",
+        covers: { stopType: t.stopType, ionProfileId: t.ionProfileId },
       })
       events.push({
         aggregate: "agreement", aggregate_id: agreementId, type: "agreement_opened",

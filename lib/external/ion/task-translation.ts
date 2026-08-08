@@ -172,6 +172,11 @@ export interface TaskTranslation {
   ionTaskId: string
   ionCustomerId: string
   program: Program
+  /** The stop type this ION task generates — ONE per task (ION's split). */
+  stopType: StopType
+  /** ION-side slice identity for write-back (with stopType): which task
+   *  receives which stops. Profile MEANING lives on the service body. */
+  ionProfileId: string
   schedule: {
     period: { startsOn: string | null; endsOn: string | null }
     frequency: Frequency
@@ -214,6 +219,18 @@ const INVOICE_TYPE_DECODE: Record<
  *  maintenance.task_category, translated to OUR vocabulary. CLOSED — an
  *  unknown label refuses (a new ION service type must be classified on
  *  purpose, never defaulted into "maintenance"). */
+/** ServiceType label → the STOP TYPE it generates (RULED 2026-08-08): the
+ *  work has kinds; ION's one-type-per-task split is ACL noise. SPA/FOUNTAIN
+ *  are cleans of a different service BODY — body identity is the log
+ *  module's concern, never the stop's. CLOSED; unknown refuses. */
+export type StopType = "clean" | "chem_check"
+
+export function stopTypeOf(serviceTypeLabel: string): StopType | null {
+  const l = serviceTypeLabel.trim()
+  if (/^CHEMICAL TESTING/i.test(l)) return "chem_check"
+  return programOf(l) === null ? null : "clean"
+}
+
 export function programOf(serviceTypeLabel: string): Program | null {
   const l = serviceTypeLabel.trim()
   if (/^(QUALITY CONTROL|NO CHARGE)/i.test(l)) return "quality_control"
@@ -273,6 +290,8 @@ export function translateTask(
 
   const program = programOf(form.serviceType.label)
   if (!program) return refuse(`unknown ServiceType "${form.serviceType.label}" — classify it in programOf`)
+  const stopType = stopTypeOf(form.serviceType.label)
+  if (!stopType) return refuse(`unknown ServiceType "${form.serviceType.label}" — classify it in stopTypeOf`)
 
   return {
     ok: true,
@@ -280,6 +299,8 @@ export function translateTask(
       ionTaskId: form.eventId,
       ionCustomerId: form.customerId,
       program,
+      stopType,
+      ionProfileId: form.profile.id,
       schedule: {
         period: { startsOn: form.startsOn, endsOn: form.endsOn },
         frequency,
