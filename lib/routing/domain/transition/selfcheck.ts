@@ -72,6 +72,13 @@ check("tech-only move is effective TODAY — the 66 need no deferral", () => {
   assert.strictEqual(v.effectiveDate, "2026-08-12")
 })
 
+check("tech swap is never backward: Monday's tech changed on a SATURDAY -> today", () => {
+  const [v] = planner.plan([weekly({
+    from: [{ weekday: 1, techId: "matthew" }], to: [{ weekday: 1, techId: "elaina" }],
+  })], ctx({ today: "2026-08-15" })) // Saturday
+  assert.strictEqual(v.effectiveDate, "2026-08-15")
+})
+
 check("NoBackwardPlacement: Thursday→Monday on a Wednesday waits for next week", () => {
   const [v] = planner.plan([weekly({ to: [{ weekday: 1, techId: "matthew" }] })], ctx())
   // Monday of the current week is behind the cursor; earliest legal = next week
@@ -84,22 +91,20 @@ check("Thursday→Friday on a Wednesday is legal THIS week — forward within th
   assert.strictEqual(v.violations.length, 0)
 })
 
-check("CapacityHolds is NET composite: full route blocks arrivals until vacated", () => {
+check("capacity NEVER schedules (RULED): over-cap arrival keeps its date, carries a WARNING", () => {
   const load = new Map([["elaina·5", 10]])
   const arriving = weekly({ quotaId: "in", to: [{ weekday: 5, techId: "elaina" }] })
-  // alone: elaina·5 is full -> next candidate date never fixes capacity (still full)…
   const [alone] = planner.plan([arriving], ctx({ routeLoad: load }))
-  assert.ok(alone.effectiveDate! > "2026-09-01") // pathological tail — capacity never clears
-  // …but WITH a vacating move on the same surface, the NET is legal today
+  assert.ok(alone.effectiveDate! <= "2026-08-14") // this week — date untouched by capacity
+  assert.ok(alone.warnings[0]?.includes("over cap"))
+  // net composite: a vacating move on the same surface clears the warning
   const vacating = weekly({
     quotaId: "out", from: [{ weekday: 5, techId: "elaina" }], to: [{ weekday: 5, techId: "dana" }],
   })
   const both = planner.plan([arriving, vacating], ctx({ routeLoad: load }))
   const inV = both.find((v) => v.quotaId === "in")!
-  const outV = both.find((v) => v.quotaId === "out")!
-  assert.strictEqual(inV.clusterId, outV.clusterId) // shared surface -> one cluster
-  assert.strictEqual(inV.effectiveDate, outV.effectiveDate) // move together
-  assert.strictEqual(inV.violations.length, 0)
+  assert.strictEqual(inV.warnings.length, 0) // net legal -> no warning
+  assert.strictEqual(inV.clusterId, both.find((v) => v.quotaId === "out")!.clusterId) // grouping survives for reporting
 })
 
 check("independent moves stagger freely — no false coupling", () => {
