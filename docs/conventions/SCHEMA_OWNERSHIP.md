@@ -19,6 +19,8 @@ The inverse isn't restricted: a module can own zero, one, or many schemas. For e
 | `billing_audit` | maintenance-billing | [modules/maintenance/billing-autopay.md](../modules/maintenance/billing-autopay.md) |
 | `maintenance` | maintenance-operations | [modules/maintenance/operations.md](../modules/maintenance/operations.md) |
 | `app_checks` | check-buddy (external repo) | [modules/_external/check-buddy.md](../modules/_external/check-buddy.md) |
+| `agreements` | agreements context (`lib/agreements`) | (added 2026-08-08: terms + ION incarnations + intake ledger; single writer = the repository/intake store) |
+| `routing` | routing context (`lib/routing`) | (added 2026-08-08: quotas keyed to agreement terms eras + whole-config placement versions; single writer = the converger) |
 | `email_extraction` | email-extraction | (stub) |
 | `public` | per-table ownership (see below) | various |
 
