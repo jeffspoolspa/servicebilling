@@ -300,10 +300,10 @@ check("renderWrites: supersede = EndsOn old at start-1 + create with StartsOn, E
   const target = { pattern: { kind: "weekly", timesPerWeek: 1 }, billing: {} as never, period: { startsOn: f.startsOn, endsOn: null }, stops: [{ weekday: 3, techId: "T-NEW" }], note: f.note }
   const ops = renderWrites(f, { kind: "supersede", target: target as never, effectiveWeekOf: "2026-08-10" }, "2026-08-12")
   assert.strictEqual(ops.length, 2)
-  assert.deepStrictEqual(ops[0], { ...ops[0], op: "update", changes: { EndsOn: ionDate("2026-08-11") } })
+  assert.deepStrictEqual(ops[0].changes, { EndsOn: "2026-08-11" }) // ISO — the browser's own wire format
   assert.strictEqual(ops[1].op, "create")
   assert.ok(!("EventID" in ops[1].fields!))
-  assert.strictEqual(ops[1].fields!["StartsOn"], ionDate("2026-08-12"))
+  assert.strictEqual(ops[1].fields!["StartsOn"], "2026-08-12")
   assert.strictEqual(ops[1].fields!["day4"], "T-NEW") // Wednesday = day4
   for (let d = 1; d <= 7; d++) if (d !== 4) assert.ok(!(`day${d}` in ops[1].fields!))
 })

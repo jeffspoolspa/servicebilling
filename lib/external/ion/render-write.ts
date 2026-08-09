@@ -34,10 +34,13 @@ export interface WriteOp {
   readonly why: string
 }
 
-/** ION renders dates MM/DD/YYYY. */
+/** Date wire format: ISO. StartsOn/EndsOn are native <input type="date">
+ *  fields — the REAL browser save (captured live 2026-08-08, boundary
+ *  test) posts YYYY-MM-DD. And the form NEVER renders EndsOn back: it is
+ *  write-only; verification reads the TASK LIST (an end-dated task
+ *  leaves active surfaces immediately), never the form field. */
 export function ionDate(iso: string): string {
-  const [y, m, d] = iso.split("-")
-  return `${m}/${d}/${y}`
+  return iso
 }
 
 const isoMinusDays = (iso: string, n: number) => {
