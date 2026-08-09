@@ -4,10 +4,15 @@
  * MM/DD/YYYY strings out. Pure; the executor (Windmill write_task) POSTs.
  *
  * The timing law (RULED 2026-08-08) rendered concrete:
- *   supersede = EndsOn the old task at newStartsOn - 1 day, create the new
- *   task with StartsOn = the first service date. ION deletes scheduled
- *   visits after EndsOn and generates from StartsOn — adjacent, never
- *   overlapping, so no double-generated boundary week.
+ *   supersede = EndsOn the old task, create the new task with StartsOn =
+ *   the first service date. ION deletes scheduled visits after EndsOn and
+ *   generates from StartsOn.
+ *
+ *   EndsOn is NOT blindly newStartsOn-1 (CORRECTED 2026-08-08): the old
+ *   task may still have SCHEDULED visits between the cursor and that date
+ *   — visits the verified plan never counted (the planner reads completed
+ *   visits). The caller computes oldEndsOn to cut every pending old firing
+ *   the plan excluded; newStartsOn-1 is only the ceiling.
  *   amend = tech VALUES only, POSTed onto the existing form (same id
  *   predicted; the echo verifies).
  *
@@ -51,6 +56,9 @@ export function renderWrites(
    *  target weekday on/after the effective date — semantic time resolved
    *  by the caller, never invented here). Supersede only. */
   newStartsOn?: string,
+  /** The old task's last legal service day — computed by the caller to cut
+   *  pending old firings the plan excluded. Defaults to newStartsOn-1. */
+  oldEndsOn?: string,
 ): WriteOp[] {
   if (plan.kind === "none") return []
 
@@ -72,10 +80,11 @@ export function renderWrites(
 
   // supersede: two adjacent ops, never overlapping
   if (!newStartsOn) throw new Error("supersede requires newStartsOn (the planner's first service date)")
+  const ends = oldEndsOn ?? isoMinusDays(newStartsOn, 1)
   const endOld: WriteOp = {
     op: "update", ionTaskId: form.eventId, ionCustId: form.customerId,
-    changes: { EndsOn: ionDate(isoMinusDays(newStartsOn, 1)) },
-    why: `supersede: end old incarnation the day before ${newStartsOn}`,
+    changes: { EndsOn: ionDate(ends) },
+    why: `supersede: old incarnation serves through ${ends}${oldEndsOn ? " (pending old firings cut)" : ""}`,
   }
 
   const fields: Record<string, string> = { ...form.rawFields }

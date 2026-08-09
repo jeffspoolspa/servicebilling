@@ -23,6 +23,7 @@ import { convergePlacement } from "./converge-placement"
 import { ionTaskFormFrom, translateTask, type IonTaskForm } from "../../external/ion/task-translation"
 import { planWrite, type IonWritePlan } from "../../external/ion/ion-write-plan"
 import { renderWrites, type WriteOp } from "../../external/ion/render-write"
+import { projectFirings } from "../domain/transition/project-firings"
 
 export interface WriteEcho {
   op: WriteOp
@@ -60,9 +61,38 @@ export interface ChangeInput {
 export interface ChangeReport {
   plan: IonWritePlan["kind"]
   newStartsOn: string | null
+  /** Pending OLD-task visits the EndsOn cuts — scheduled but not yet
+   *  served, excluded by the verified plan. SEEN, never silent. */
+  cutVisits: string[]
   ops: WriteOp[]
   echoes: WriteEcho[]
   recorded: boolean
+}
+
+/**
+ * The old task's last legal service day. The verified plan counts NO old
+ * firings after the last completed visit, but ION will keep serving every
+ * SCHEDULED visit until EndsOn — so EndsOn must fall before the first
+ * pending old firing. Today's visit is never cut (it may already be on a
+ * truck); the cut starts tomorrow.
+ */
+export function oldTaskEndsOn(
+  oldConfig: { cadence: import("../domain/transition/cadence-law").CadenceKind; weekdays: number[]; anchorDate: string | null },
+  newStartsOn: string,
+  today: string,
+): { endsOn: string; cutVisits: string[] } {
+  const ceiling = addDaysIso(newStartsOn, -1)
+  const from = addDaysIso(today, 1)
+  const pending = from <= ceiling ? projectFirings(oldConfig, from, ceiling) : []
+  return pending.length
+    ? { endsOn: addDaysIso(pending[0], -1), cutVisits: pending }
+    : { endsOn: ceiling, cutVisits: [] }
+}
+
+const addDaysIso = (iso: string, n: number) => {
+  const d = new Date(`${iso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
 }
 
 /** First date on/after `fromDate` whose weekday is in the target day set. */
@@ -100,7 +130,22 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
   const newStartsOn =
     plan.kind !== "supersede" ? null
       : input.targetAnchorDate ?? firstServiceDate(input.effectiveDate, target.stops.map((s) => s.weekday))
-  const ops = renderWrites(form, plan, newStartsOn ?? undefined)
+  let cutVisits: string[] = []
+  let oldEnds: string | undefined
+  if (plan.kind === "supersede" && newStartsOn) {
+    const cut = oldTaskEndsOn(
+      {
+        cadence: current.schedule.frequency,
+        weekdays: current.schedule.stops.map((s) => s.weekday),
+        anchorDate: current.schedule.period.startsOn,
+      },
+      newStartsOn,
+      new Date().toISOString().slice(0, 10),
+    )
+    cutVisits = cut.cutVisits
+    if (cutVisits.length) oldEnds = cut.endsOn // ceiling default otherwise
+  }
+  const ops = renderWrites(form, plan, newStartsOn ?? undefined, oldEnds)
 
   const echoes: WriteEcho[] = []
   for (const op of ops) echoes.push(await deps.execute(op, input.dryRun))
@@ -139,7 +184,7 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
     recorded = true
   }
 
-  return { plan: plan.kind, newStartsOn, ops, echoes, recorded }
+  return { plan: plan.kind, newStartsOn, cutVisits, ops, echoes, recorded }
 }
 
 async function headStops(deps: ChangeDeps, agreementId: string, termsVersion: number): Promise<PlacementStop[] | null> {

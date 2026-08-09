@@ -86,6 +86,9 @@ async function main() {
   })
 
   console.log(`plan: ${report.plan}${report.newStartsOn ? `  newStartsOn: ${report.newStartsOn}` : ""}  recorded: ${report.recorded}`)
+  if (report.cutVisits.length) {
+    console.log(`CUT (pending old-task visits the plan excluded — EndsOn placed before them): ${report.cutVisits.join(", ")}`)
+  }
   for (const e of report.echoes) {
     console.log(`\n── ${e.op.why} ──`)
     console.log(JSON.stringify(e.preview, null, 2).slice(0, 2000))
