@@ -21,14 +21,15 @@ async function main() {
   const missing = (agreements ?? []).filter((a) => !has.has(a.id))
   console.log(`agreements without quotas: ${missing.length}`)
 
-  const stats = { opened: 0, future_era: 0, refused: 0, no_translation: 0 }
+  const stats = { opened: 0, refused: 0, no_translation: 0 }
   const today = new Date().toISOString().slice(0, 10)
   for (const a of missing) {
     const { data: tv } = await agr.from("terms_versions")
       .select("version, pattern, from_at").eq("agreement_id", a.id)
       .order("version", { ascending: false }).limit(1).single()
     if (!tv) continue
-    if (tv.from_at.slice(0, 10) > today) { stats.future_era++; continue } // quota mints when the era arrives
+    // NO FUTURE ERAS (RULED 2026-08-09): terms take effect when decided, so
+    // there is no such thing as a not-yet-started version to skip.
     const { data: incs } = await agr.from("ion_incarnations")
       .select("ion_task_id, covers").eq("agreement_id", a.id).is("to_at", null)
     const stops: { weekday: number; techId: string; type: "clean" | "chem_check" }[] = []

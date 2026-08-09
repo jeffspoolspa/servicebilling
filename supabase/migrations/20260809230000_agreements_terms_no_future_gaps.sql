@@ -1,0 +1,9 @@
+-- Applied via MCP 2026-08-09 as agreements_terms_no_future_gaps.
+-- TERMS HAVE NO GAPS (RULED, Carter): a terms version takes effect the
+-- moment it is DECIDED. The EndsOn->StartsOn gap is an ION artifact the
+-- ACL computes and must never enter the terms timeline. The one-time
+-- remint stamped from_at with the ION era's StartsOn, so 40 agreements
+-- carried terms that had "not started"; the floor's current-terms join
+-- dropped them and 36 correct placements vanished from the board (Josh:
+-- 1 Monday pool shown against 9 in ION). Repaired to the minting moment,
+-- kept monotonic per agreement. Definition of record in git history.
