@@ -163,6 +163,18 @@ async function main() {
   )
   console.log(report.refused ? `REFUSED: ${report.refused}` : "summary:", report.summary)
   console.log(`publication: ${report.publicationId}`)
+
+  // THE REFRESH TAIL (RULED 2026-08-09): a live publish is not finished
+  // until the book witnesses what it made — successor ids reconciled from
+  // the customer task lists, every touched agreement refreshed, update
+  // facts captured. Runs automatically; failures are its own loud output.
+  if (live && !report.refused) {
+    console.log("\n── reconcile + refresh tail ──")
+    const { spawnSync } = await import("node:child_process")
+    const r = spawnSync("npx", ["tsx", "scripts/routing/reconcile-publication.ts", report.publicationId],
+      { stdio: "inherit", cwd: process.cwd() })
+    if (r.status !== 0) console.log("RECONCILE TAIL FAILED — rerun: npx tsx scripts/routing/reconcile-publication.ts " + report.publicationId)
+  }
 }
 
 main().catch((e) => {
