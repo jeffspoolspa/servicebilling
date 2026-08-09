@@ -158,7 +158,7 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
     note: form.note,
   }
   const plan = planWrite(current, target, input.effectiveDate)
-  const newStartsOn =
+  let newStartsOn =
     plan.kind !== "supersede" ? null
       : input.targetAnchorDate ?? firstServiceDate(input.effectiveDate, target.stops.map((s) => s.weekday))
   let cutVisits: string[] = []
@@ -178,7 +178,33 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
     clearedVisits = pc.clearedVisits
     if (pc.endsOn !== addDaysIso(newStartsOn, -1)) oldEnds = pc.endsOn
   }
-  const ops = renderWrites(form, plan, newStartsOn ?? undefined, oldEnds)
+  // THE TIMING LAW (RULED 2026-08-08): a tech swap whose current-period
+  // visit is ALREADY SERVED is an immediate change -> amend in place. One
+  // still PENDING makes it a next-period change -> supersede with dates
+  // (EndsOn = the period's Sunday, the old tech finishes the week they
+  // own; StartsOn = the first firing after). Everything posts NOW — the
+  // dates do the waiting, no write scheduling exists.
+  let effectivePlan = plan
+  if (plan.kind === "amend") {
+    const today = new Date().toISOString().slice(0, 10)
+    const pc = periodClearEndsOn(
+      {
+        cadence: current.schedule.frequency,
+        weekdays: current.schedule.stops.map((s) => s.weekday),
+        anchorDate: current.schedule.period.startsOn,
+      },
+      addDaysIso(today, 28),
+      today,
+    )
+    if (pc.clearedVisits.length) {
+      effectivePlan = { kind: "supersede", target: plan.target, effectiveWeekOf: input.effectiveDate }
+      newStartsOn = firstServiceDate(addDaysIso(pc.endsOn, 1), input.targetStops.map((s) => s.weekday))
+      oldEnds = pc.endsOn
+      clearedVisits = pc.clearedVisits
+      // same day-set: the new task re-covers any later dates itself — no cuts
+    }
+  }
+  const ops = renderWrites(form, effectivePlan, newStartsOn ?? undefined, oldEnds)
 
   const echoes: WriteEcho[] = []
   for (const op of ops) echoes.push(await deps.execute(op, input.dryRun))
@@ -197,7 +223,7 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
     agreement.recordIncarnation(
       { ionTaskId: echoedNewId, cause: "placement_change", covers: slice.covers },
       at,
-      { newIncarnation: plan.kind === "supersede" },
+      { newIncarnation: effectivePlan.kind === "supersede" },
     )
     await deps.repo.save(agreement)
 
@@ -217,7 +243,7 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
     recorded = true
   }
 
-  return { plan: plan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes, recorded }
+  return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes, recorded }
 }
 
 async function headStops(deps: ChangeDeps, agreementId: string, termsVersion: number): Promise<PlacementStop[] | null> {

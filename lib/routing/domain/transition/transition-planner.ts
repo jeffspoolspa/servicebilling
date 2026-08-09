@@ -151,14 +151,46 @@ export class TransitionPlanner {
     return { ok: reasons.length === 0, reasons }
   }
 
-  /** STEP 2 — earliest date this ONE move may begin (backward law only). */
+  /** STEP 2 — earliest date this ONE move may begin (backward law only —
+   *  plus the CURRENT-PERIOD hold for tech-only swaps, RULED 2026-08-08:
+   *  a mid-week amend would override who serves THIS week's already-
+   *  planned visit; the old tech finishes the period they own, the swap
+   *  lands the day after its last pending visit). */
   private earliestMoveDate(m: MoveInput, ctx: WeekContext): string {
-    if (ctx.schedulingPolicy === "conservative") return nextMonday(ctx.today)
+    const techOnly = daySetOf(m.from) === daySetOf(m.to)
+    const hold = techOnly ? this.lastPendingCurrentPeriod(m, ctx.today) : null
+    const floor = hold ? addDays(hold, 1) : ctx.today
+    if (ctx.schedulingPolicy === "conservative") {
+      const mon = nextMonday(ctx.today)
+      return mon >= floor ? mon : floor
+    }
     for (let offset = 0; offset < 14; offset++) {
-      const candidate = addDays(ctx.today, offset)
+      const candidate = addDays(floor, offset)
       if (this.backwardLegal(m, candidate, ctx)) return candidate
     }
-    return addDays(ctx.today, 14)
+    return addDays(floor, 14)
+  }
+
+  /** The old pattern's last still-scheduled visit in the period containing
+   *  today (anchor-aligned cycle) — the visit the current week's plan owns. */
+  private lastPendingCurrentPeriod(m: MoveInput, today: string): string | null {
+    if (!m.lastServed || !m.from.length) return null
+    const oldWeekdays = m.from.map((s) => s.weekday)
+    let oldAnchor = m.lastServed
+    for (let k = 0; k < 7; k++) {
+      const c = addDays(m.lastServed, -k)
+      if (oldWeekdays.includes(new Date(`${c}T00:00:00Z`).getUTCDay())) { oldAnchor = c; break }
+    }
+    const interval = m.cadence.kind === "biweekly" ? 2 : m.cadence.kind === "monthly" ? 4 : 1
+    let periodEnd = sundayOfWeek(today)
+    if (interval > 1) {
+      const off = ((weeksBetween(mondayOf(oldAnchor), mondayOf(today)) % interval) + interval) % interval
+      periodEnd = addDays(sundayOfWeek(today), (interval - 1 - off) * 7)
+    }
+    const pending = projectFirings(
+      { cadence: m.cadence, weekdays: oldWeekdays, anchorDate: oldAnchor }, today, periodEnd,
+    )
+    return pending.length ? pending[pending.length - 1] : null
   }
 
   /** NoBackwardPlacement: no NEW day, in the effective week, falls before
@@ -203,6 +235,15 @@ export class TransitionPlanner {
                 .reduce((sum, e) => sum + e.delta, 0)
         if (load <= ctx.maxPoolsPerRoute) continue
         const until = i + 1 < dates.length ? dates[i + 1] : null
+        // a warning is only real if the surface's WEEKDAY occurs inside the
+        // interval — a Sat->Mon window cannot overload a Friday route
+        const surfaceDow = Number(surface.split("·")[1])
+        const windowEnd = until ?? addDays(at, 7)
+        let occurs = false
+        for (let d = at; d < windowEnd; d = addDays(d, 1)) {
+          if (new Date(`${d}T00:00:00Z`).getUTCDay() === surfaceDow) { occurs = true; break }
+        }
+        if (!occurs) continue
         const when = until && until > at ? `${at}→${until}` : `from ${at}`
         for (const { m, effective } of dated) {
           const arrivesHere = m.to.some((t) => `${t.techId}·${t.weekday}` === surface)

@@ -153,7 +153,8 @@ async function main() {
           || [...new Set(m.from.map((s) => s.weekday))].sort().join() !== [...new Set(m.to.map((s) => s.weekday))].sort().join()
         const flip = m.anchorShiftWeeks !== undefined
         const write = m.lastServed === null && (daySetChanged || flip) ? "amend (never served)"
-          : daySetChanged || flip ? "supersede" : "amend"
+          : daySetChanged || flip ? "supersede"
+          : v.effectiveDate && v.effectiveDate > today ? "supersede (dated — visit pending)" : "amend"
         const [last, ...next] = v.timeline.length && m.lastServed ? v.timeline : [null, ...v.timeline]
         const bridgeSet = new Set(v.bridges.map((b) => b.date))
         const nextCells = next.slice(0, 4).map((d) =>

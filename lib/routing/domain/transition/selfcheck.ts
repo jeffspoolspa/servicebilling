@@ -10,8 +10,13 @@ import { projectFirings } from "./project-firings"
 import { TransitionPlanner, type MoveInput, type WeekContext } from "./transition-planner"
 
 let n = 0
-const check = (_name: string, fn: () => void) => {
-  fn()
+const check = (name: string, fn: () => void) => {
+  try {
+    fn()
+  } catch (e) {
+    console.error(`FAILED: ${name}`)
+    throw e
+  }
   n++
 }
 
@@ -67,10 +72,19 @@ check("Carter's Tue/Wed 2x-week: spacing rejects at staging — no date can save
 
 /* --------------------- step 2: scheduling --------------------------------- */
 
-check("tech-only move is effective TODAY — the 66 need no deferral", () => {
+check("tech-only swap HOLDS out the current period's pending visit (RULED: no mid-week override)", () => {
+  // Thursday pool, last served Thu 08-06, today Wed 08-12: THIS week's
+  // Thu 08-13 is already planned — the old tech serves it; the swap
+  // lands the day after.
   const [v] = planner.plan([weekly({ to: [{ weekday: 4, techId: "elaina" }] })], ctx())
   assert.strictEqual(v.validity, "valid")
-  assert.strictEqual(v.effectiveDate, "2026-08-12")
+  assert.strictEqual(v.effectiveDate, "2026-08-14")
+})
+
+check("tech-only swap with the week's visit already served is effective TODAY", () => {
+  // same pool, but today is Saturday — Thursday came and went
+  const [v] = planner.plan([weekly({ to: [{ weekday: 4, techId: "elaina" }] })], ctx({ today: "2026-08-15" }))
+  assert.strictEqual(v.effectiveDate, "2026-08-15")
 })
 
 check("tech swap is never backward: Monday's tech changed on a SATURDAY -> today", () => {
@@ -92,20 +106,25 @@ check("Thursday→Friday on a Wednesday is legal THIS week — forward within th
   assert.strictEqual(v.violations.length, 0)
 })
 
-check("capacity NEVER schedules (RULED): over-cap arrival keeps its date, carries a WARNING", () => {
+check("capacity NEVER schedules (RULED); a vacating tech-swap lags its period — the one-Friday overlap is TRUE and warned", () => {
   const load = new Map([["elaina·5", 10]])
   const arriving = weekly({ quotaId: "in", to: [{ weekday: 5, techId: "elaina" }] })
   const [alone] = planner.plan([arriving], ctx({ routeLoad: load }))
   assert.ok(alone.effectiveDate! <= "2026-08-14") // this week — date untouched by capacity
   assert.ok(alone.warnings[0]?.includes("transient overload elaina·5"))
-  // net composite: a vacating move on the same surface clears the warning
+  // a vacating TECH-SWAP on the same surface nets out at steady state,
+  // but under the timing law it waits out ITS Friday (old tech owns the
+  // planned week) — so THIS Friday genuinely carries both cohorts: the
+  // warning is truth now, dated to the one overlapping Friday.
   const vacating = weekly({
     quotaId: "out", from: [{ weekday: 5, techId: "elaina" }], to: [{ weekday: 5, techId: "dana" }],
   })
   const both = planner.plan([arriving, vacating], ctx({ routeLoad: load }))
   const inV = both.find((v) => v.quotaId === "in")!
-  assert.strictEqual(inV.warnings.length, 0) // net legal -> no warning
-  assert.strictEqual(inV.clusterId, both.find((v) => v.quotaId === "out")!.clusterId) // grouping survives for reporting
+  const outV = both.find((v) => v.quotaId === "out")!
+  assert.ok(outV.effectiveDate! >= "2026-08-15") // day after the pending Friday
+  assert.ok(inV.warnings[0]?.includes("transient overload elaina·5"))
+  assert.strictEqual(inV.clusterId, outV.clusterId) // grouping survives for reporting
 })
 
 check("independent moves stagger freely — no false coupling", () => {
@@ -115,11 +134,12 @@ check("independent moves stagger freely — no false coupling", () => {
   assert.notStrictEqual(va.clusterId, vb.clusterId)
 })
 
-check("Carter's Friday case: staggered dates create a TRANSIENT overload — dated warning", () => {
-  // today Thursday 8/13. A: X's Friday pools -> Y (tech-only, lands tomorrow).
-  // B: Y's own Friday pools -> Wednesday (already passed -> next week).
-  // End-state nets fine; THIS Friday Y carries both cohorts.
-  const load = new Map([["y·5", 10]]) // includes B's three pools, still on Friday today
+check("Carter's Friday case DISSOLVES under the current-period hold — no mid-week override, no overload", () => {
+  // today Thursday 8/13. A: X's Friday pools -> Y (tech-only). B: Y's own
+  // Friday pools -> Wednesday. Under the hold, A's swap waits out THIS
+  // Friday (X serves it) and lands Saturday; by next Friday B has vacated
+  // to Wednesday — the interference Carter named cannot happen anymore.
+  const load = new Map([["y·5", 10]])
   const a = weekly({ quotaId: "a", from: [{ weekday: 5, techId: "x" }], to: [{ weekday: 5, techId: "y" }] })
   const b3 = [0, 1, 2].map((k) => weekly({
     quotaId: `b${k}`, from: [{ weekday: 5, techId: "y" }], to: [{ weekday: 3, techId: "y" }],
@@ -127,10 +147,9 @@ check("Carter's Friday case: staggered dates create a TRANSIENT overload — dat
   }))
   const verdicts = planner.plan([a, ...b3], ctx({ today: "2026-08-13", routeLoad: load }))
   const va = verdicts.find((v) => v.quotaId === "a")!
-  assert.strictEqual(va.effectiveDate, "2026-08-13") // capacity never schedules
+  assert.strictEqual(va.effectiveDate, "2026-08-15") // day after this week's pending Friday
   assert.ok(verdicts.filter((v) => v.quotaId.startsWith("b")).every((v) => v.effectiveDate! >= "2026-08-17"))
-  assert.ok(va.warnings[0]?.includes("transient overload y·5"))
-  assert.ok(va.warnings[0]?.includes("2026-08-13→2026-08-17")) // dated: until B vacates
+  assert.strictEqual(va.warnings.length, 0) // the overload window contains no Friday — phantom filtered
 })
 
 /* ------------------- parity derived at the seam --------------------------- */
