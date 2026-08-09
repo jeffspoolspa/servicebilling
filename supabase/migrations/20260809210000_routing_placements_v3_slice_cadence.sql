@@ -1,0 +1,5 @@
+-- Applied via MCP 2026-08-09 as routing_current_placements_v3_slice_cadence.
+-- The view now exposes each SLICE's own cadence (from its translation)
+-- alongside the agreement's merged pattern: a two-body customer's pool
+-- slice says 7x while its fountain slice says 2x, which the merged
+-- pattern cannot express. (Definition of record in git history.)

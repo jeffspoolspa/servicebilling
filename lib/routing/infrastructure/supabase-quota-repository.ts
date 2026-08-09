@@ -124,6 +124,10 @@ interface FloorRow {
   ion_task_id: string | null
   from_date: string
   cadence_kind: string | null
+  /** the SLICE's own required days (its translation) — a two-body
+   *  customer's pool slice says 7 while its fountain slice says 2; the
+   *  agreement's merged pattern cannot say either (2026-08-09). */
+  times_per_week: number | null
   anchor_starts_on: string | null
 }
 
@@ -150,13 +154,16 @@ const INTERVAL_BY_FREQUENCY: Record<string, CadenceInterval> = {
 export class SupabaseQuotaRepository implements QuotaRepository {
   constructor(private readonly client: QueryClient) {}
 
+  /** each slice's own required days, from its translation (floor) */
+  private requiredByTask = new Map<string, number>()
+
   /** floor stops -> mirror-vocabulary SlotRows (+ synthesized TaskRows for
    *  fresh successors the mirror hasn't ingested yet). */
-  private async floorSlots(tasks: TaskRow[]): Promise<{ slots: SlotRow[]; extraTasks: TaskRow[]; placedTaskIds: Set<string> }> {
+  private async floorSlots(tasks: TaskRow[]): Promise<{ slots: SlotRow[]; extraTasks: TaskRow[]; placedTaskIds: Set<string>; requiredByTask: Map<string, number> }> {
     const [floor, emps, custs] = await Promise.all([
       fetchAll<FloorRow>(
         this.client.schema("routing").from("v_current_placements")
-          .select("quota_id, customer_id, weekday, tech_id, ion_task_id, from_date, cadence_kind, anchor_starts_on")
+          .select("quota_id, customer_id, weekday, tech_id, ion_task_id, from_date, cadence_kind, times_per_week, anchor_starts_on")
           .not("tech_id", "is", null),
         "v_current_placements",
       ),
@@ -176,6 +183,7 @@ export class SupabaseQuotaRepository implements QuotaRepository {
     const slots: SlotRow[] = []
     const extraTasks = new Map<string, TaskRow>()
     const placedTaskIds = new Set<string>()
+    const requiredByTask = new Map<string, number>()
     for (const r of floor) {
       if (!r.ion_task_id) continue
       let task = taskOfIon.get(r.ion_task_id)
@@ -194,6 +202,7 @@ export class SupabaseQuotaRepository implements QuotaRepository {
         ? (weekOf(new Date(`${r.anchor_starts_on}T00:00:00Z`)) % 2 === 0 ? "biweekly_a" : "biweekly_b")
         : null
       placedTaskIds.add(task.id)
+      if (r.times_per_week) requiredByTask.set(task.id, r.times_per_week)
       slots.push({
         task_id: task.id,
         day_of_week: r.weekday,
@@ -201,7 +210,7 @@ export class SupabaseQuotaRepository implements QuotaRepository {
         frequency: parity ?? (r.cadence_kind === "monthly" ? "monthly" : "weekly"),
       })
     }
-    return { slots, extraTasks: [...extraTasks.values()], placedTaskIds }
+    return { slots, extraTasks: [...extraTasks.values()], placedTaskIds, requiredByTask }
   }
 
   async liveIn(week: WeekIndex): Promise<Quota[]> {
@@ -220,7 +229,8 @@ export class SupabaseQuotaRepository implements QuotaRepository {
       ),
       this.serviceMedians(),
     ])
-    const { slots, extraTasks, placedTaskIds } = await this.floorSlots(tasks)
+    const { slots, extraTasks, placedTaskIds, requiredByTask } = await this.floorSlots(tasks)
+    this.requiredByTask = requiredByTask
     // THE FLOOR IS THE PLACEMENT TRUTH (2026-08-09): a mirror task the
     // floor does not carry is a task the routing model does not route —
     // a superseded old the mirror has not retired yet, or one not in the
@@ -248,7 +258,8 @@ export class SupabaseQuotaRepository implements QuotaRepository {
         .eq("status", "active"),
       "tasks(route)",
     )
-    const { slots, extraTasks, placedTaskIds } = await this.floorSlots(tasks)
+    const { slots, extraTasks, placedTaskIds, requiredByTask } = await this.floorSlots(tasks)
+    this.requiredByTask = requiredByTask
     void placedTaskIds // route queries are floor-derived by construction
     const onRoute = new Set(
       slots.filter((s) => s.tech_employee_id === techId && s.day_of_week === weekday).map((s) => s.task_id),
@@ -419,7 +430,17 @@ export class SupabaseQuotaRepository implements QuotaRepository {
         // Q12: the contract does not yet state days-per-week — the ACL must
         // translate ION's day roster into it. Until then this mirrors the
         // placements, so coverage only catches quotas with no stops at all.
-        requiredDays: Math.max(placed.length, 1),
+        //
+        // DISTINCT placements, not rows (2026-08-09): a Quota holds at most
+        // one stop per (tech, weekday), so two service bodies served by the
+        // same tech on the same day are ONE stop — counting the rows made
+        // Highlands and Turners Cove permanently "2 owed" for work that was
+        // fully covered. Extra stops are owed only when a body genuinely
+        // sits on its own day (Carter's rule).
+        requiredDays: Math.max(
+          new Set(placed.map((x) => `${x.tech_employee_id}|${x.day_of_week}`)).size,
+          1,
+        ),
         visitsThisPeriod: periodVisits.get(task.id) ?? 0,
         serviceMinutes: serviceMedians.get(task.id) ?? null,
         orderingConstraint: "none" as OrderingConstraint,
