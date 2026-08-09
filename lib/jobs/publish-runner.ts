@@ -133,5 +133,17 @@ export async function runPublish(scenarioId: string, opts: { live: boolean }): P
     { store, change: (input) => changeArrangement(changeDeps, input) },
     scenarioId, publishMoves, opts.live ? "live" : "dry",
   )
+
+  // CLOSE THE SCENARIO (2026-08-09): a live publish with nothing failed
+  // and nothing refused is the scenario realized — the batch closes it,
+  // never a single move. Without this the board kept showing published
+  // changes as unpublished (Carter's first real publish through the new
+  // pipeline: 5 moves landed in ION, the scenario stayed pending).
+  if (opts.live && !report.refused && (report.summary.failed ?? 0) === 0) {
+    const { error } = await sb.from("scenarios")
+      .update({ status: "committed", updated_at: new Date().toISOString() })
+      .eq("id", scenarioId)
+    if (error) throw new Error(`publish landed but the scenario could not be closed: ${error.message}`)
+  }
   return { publicationId: report.publicationId, refused: report.refused, summary: report.summary, droppedEnded, unresolvable }
 }
