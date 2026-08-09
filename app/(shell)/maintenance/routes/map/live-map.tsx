@@ -194,6 +194,8 @@ function publishToastFor(outcome: PublicationOutcome | null): string {
   const parts = [`Published ${done} change${done === 1 ? "" : "s"} to ION`]
   if (skipped) parts.push(`${skipped} already matched ION`)
   if (bridges) parts.push(`${bridges} free bridge visit${bridges === 1 ? "" : "s"} pending creation`)
+  const deferred = outcome.tally.deferred_bookkeeping ?? 0
+  if (deferred) parts.push(`${deferred} awaiting a book refresh (ION is correct)`)
   return parts.join(" · ")
 }
 

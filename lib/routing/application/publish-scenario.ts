@@ -108,11 +108,17 @@ export async function publishScenario(
       const allCommitted = report.echoes.every((e) => e.committed)
       const status = report.ops.length === 0 ? "skipped_no_diff"
         : mode === "live" && !allCommitted ? "failed" : "done"
+      // a deferred placement is bookkeeping debt on a LANDED write — it
+      // rides the row as a note, never a failure (2026-08-09)
+      const note = report.placementDeferred ?? report.recordSkipped
       await deps.store.recordMove(pub.id, {
         quotaId: m.quotaId, ionTaskId: m.ionTaskId, writeKind: report.plan,
         status, ops: report.ops, echoes: report.echoes,
-        ...(status === "failed" ? { error: "one or more ops not committed (see echoes)" } : {}),
+        ...(status === "failed"
+          ? { error: "one or more ops not committed (see echoes)" }
+          : note ? { error: `note: ${note}` } : {}),
       })
+      if (note) summary.deferred_bookkeeping = (summary.deferred_bookkeeping ?? 0) + 1
       summary[status]++
 
       // accepted bridge: a one-time no-charge rider — blocked on the probe

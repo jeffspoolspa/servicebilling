@@ -134,6 +134,25 @@ export async function runPublish(scenarioId: string, opts: { live: boolean }): P
     scenarioId, publishMoves, opts.live ? "live" : "dry",
   )
 
+  // RECONCILE DEFERRED BOOKKEEPING: a landed write whose placement could
+  // not be recorded (stale terms vs the agreement's own slices) is healed
+  // by the refresh sentence, which recomposes terms from every slice.
+  if (opts.live && (report.summary.deferred_bookkeeping ?? 0) > 0) {
+    const { refreshAgreement } = await import("../agreements/application/refresh-agreement")
+    const { data: rows } = await rt.from("publication_moves")
+      .select("ion_task_id").eq("publication_id", report.publicationId!).like("error", "note:%")
+    for (const row of rows ?? []) {
+      const a = await repo.byIonTaskId(String(row.ion_task_id), today)
+      if (!a) continue
+      try {
+        await refreshAgreement(
+          { repo, intake: intakeAdapter, forms: formsAdapter, quotas: quotasAdapter, catalogPriceCents: () => null },
+          a.id, new Date().toISOString(),
+        )
+      } catch { /* the nightly refresh will retry; never fail a landed publish */ }
+    }
+  }
+
   // CLOSE THE SCENARIO (2026-08-09): a live publish with nothing failed
   // and nothing refused is the scenario realized — the batch closes it,
   // never a single move. Without this the board kept showing published

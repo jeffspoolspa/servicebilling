@@ -71,6 +71,12 @@ export interface ChangeReport {
    *  a throwaway test task). LOUD in the report, never an exception after
    *  writes already committed. */
   recordSkipped?: string
+  /** live only: the placement could not be recorded because the stored
+   *  terms disagree with the agreement's CURRENT slices (multi-slice
+   *  agreements whose terms predate a slice). ION is written; the book
+   *  reconciles on the next refresh. Reported, never thrown — a publish
+   *  must not fail on our own stale bookkeeping (2026-08-09). */
+  placementDeferred?: string
   /** The current period's still-scheduled old visits that SERVE OUT
    *  before EndsOn — the seam is anchored on them (period-clear, RULED). */
   clearedVisits: string[]
@@ -223,6 +229,7 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
 
   let recorded = false
   let recordSkipped: string | undefined
+  let placementDeferred: string | undefined
   if (!input.dryRun && echoes.length && echoes.every((e) => e.committed)) {
     const agreement = await deps.repo.byIonTaskId(input.ionTaskId, input.effectiveDate)
     const slice = agreement?.openIncarnations().find((i) => i.ionTaskId === input.ionTaskId)
@@ -250,15 +257,23 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
     const oldOwn = new Set(current.schedule.stops.map((s) => `${current.stopType}|${s.weekday}|${s.techId}`))
     const others = (head ?? []).filter((s) => !oldOwn.has(`${s.type}|${s.weekday}|${s.techId}`))
     const stops = [...others, ...input.targetStops]
-    await convergePlacement(deps.quotas, {
-      agreementId: agreement.id, termsVersion: agreement.currentTerms().version,
-      pattern: agreement.currentTerms().pattern as never, stops,
-      fromDate: newStartsOn ?? input.effectiveDate, cause: "transition",
-    })
-    recorded = true
+    try {
+      await convergePlacement(deps.quotas, {
+        agreementId: agreement.id, termsVersion: agreement.currentTerms().version,
+        pattern: agreement.currentTerms().pattern as never, stops,
+        fromDate: newStartsOn ?? input.effectiveDate, cause: "transition",
+      })
+      recorded = true
+    } catch (e) {
+      // The ION write is DONE. Refusing here would leave the operator with
+      // a red toast for a change that landed — and no record of it. The
+      // agreement's terms are stale against its own slices; the refresh
+      // sentence recomposes them. Report and move on.
+      placementDeferred = `${String(e).replace(/^Error: /, "")} — ION is written; the book reconciles on refresh`
+    }
   }
 
-  return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes, recorded, recordSkipped }
+  return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes, recorded, recordSkipped, placementDeferred }
 }
 
 async function headStops(deps: ChangeDeps, agreementId: string, termsVersion: number): Promise<PlacementStop[] | null> {
