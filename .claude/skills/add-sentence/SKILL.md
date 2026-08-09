@@ -36,6 +36,26 @@ with its in-memory-store selfcheck beside it.
    LOUDLY (the backfill lost 305 tasks to a silent cap on 2026-08-08 —
    never again). Batch external fetches through one warm session.
 
+## Hosts — where a sentence runs (RULED 2026-08-08)
+
+The sentence is runtime-neutral (ports only); the HOST supplies adapters:
+
+- **Attended one-shot** -> a `scripts/` harness the operator watches
+  (dry-by-default; Carter arms live).
+- **Standing drainer / cadence** -> an esbuild BUNDLE deployed as a
+  Windmill script from the same commit (generated, never hand-edited).
+  One process: Postgres queue rows claimed directly, ION session held
+  in-process (lib functions, not REST jobs), echoes written, row
+  stamped. Zero cross-service hops; one failure surface.
+- **Vercel routes** -> UI-facing reads and command STAGING only — never
+  in the write-execution path (function ceilings + a second failure
+  surface inside every external write).
+
+Queues are Postgres tables with status columns (queue in, drainer
+through, events out — ADR 008); never an external broker: state lives
+in tables, facts in the stream, everything level-triggered and
+resumable. Hop count matters less than failure-surface count per move.
+
 ## Non-negotiable conventions
 
 - **ION/QBO surfaces**: read the `ion-automation` / `quickbooks-windmill`
