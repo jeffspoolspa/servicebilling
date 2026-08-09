@@ -45,15 +45,35 @@ async function main() {
   if (!pubId) throw new Error("usage: repair-publication-successors.ts <healPublicationId> [--live]")
   const live = process.argv.includes("--live")
 
+  // THE LEDGER (no un-ledgered ION writes, ever — Carter's catch): the
+  // repair is its own publication, tied to the one it repairs
+  const { data: healPub } = await rt.from("publications").select("scenario_id").eq("id", pubId).single()
+  const { data: repairPub, error: ePub } = await rt.from("publications")
+    .insert({ scenario_id: healPub?.scenario_id, mode: live ? "live" : "dry", summary: { repair_of: pubId } })
+    .select("id").single()
+  if (ePub) throw ePub
+  console.log(`repair publication: ${repairPub!.id} (repairs ${pubId})`)
+  const ledger = async (quotaKey: string, ionTaskId: string, kind: string, status: string, echo: unknown) => {
+    const { error } = await rt.from("publication_moves").insert({
+      publication_id: repairPub!.id, quota_id: quotaKey, ion_task_id: ionTaskId,
+      write_kind: kind, status, ops: [], echoes: [echo],
+    })
+    if (error && !String(error.message).includes("duplicate")) throw error
+  }
+
   const { data: rows, error } = await rt.from("publication_moves")
     .select("ion_task_id, ops").eq("publication_id", pubId)
     .eq("write_kind", "supersede").eq("status", "done")
   if (error) throw error
 
   const stats = { amended: 0, amend_noop_or_dry: 0, phantoms_deleted: 0, skipped: 0 }
+  const { data: quotaRows } = await rt.from("publication_moves")
+    .select("quota_id, ion_task_id").eq("publication_id", pubId)
+  const quotaOf = new Map((quotaRows ?? []).map((q) => [q.ion_task_id, q.quota_id]))
   for (const row of rows ?? []) {
     const createOp = (row.ops as { op: string; fields?: Record<string, string>; ionCustId: string }[]).find((o) => o.op === "create")
     if (!createOp?.fields) continue
+    const quotaKey = quotaOf.get(row.ion_task_id) ?? row.ion_task_id
     const f = createOp.fields
     const wantStarts = f["StartsOn"]
     const wantDays = Object.entries(f).filter(([k, v]) => /^day[1-7]$/.test(k) && v)
@@ -77,6 +97,8 @@ async function main() {
     })
     if (live && amend.committed) stats.amended++
     else stats.amend_noop_or_dry++
+    await ledger(quotaKey, keeper.ionTaskId, "repair_amend",
+      !live ? "done" : amend.committed ? "done" : "failed", amend)
     console.log(`  keeper ${keeper.ionTaskId}: AssignedTo->${wantTech} ${live ? (amend.committed ? "OK" : "FAILED") : "(dry)"}`)
 
     for (const ph of phantoms) {
@@ -84,9 +106,13 @@ async function main() {
         op: "delete", ionTaskId: ph.ionTaskId, ionCustId: createOp.ionCustId, dry_run: !live,
       })
       if (live && del.committed) stats.phantoms_deleted++
+      await ledger(quotaKey, ph.ionTaskId, "repair_delete",
+        !live ? "done" : del.committed ? "done" : "failed", del)
       console.log(`  phantom ${ph.ionTaskId}: DELETE ${live ? (del.committed ? "DELETED" : `FAILED (still_listed=${del.still_listed})`) : "(dry)"}`)
     }
   }
+  await rt.from("publications").update({ finished_at: new Date().toISOString(), summary: { repair_of: pubId, ...stats } })
+    .eq("id", repairPub!.id)
   console.log(stats)
 }
 
