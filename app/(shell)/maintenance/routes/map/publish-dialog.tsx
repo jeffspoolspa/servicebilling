@@ -25,6 +25,7 @@ export interface PreviewRow {
   from: { weekday: number; tech: string }[]
   to: { weekday: number; tech: string }[]
   cadence: string
+  parity: { from: string; to: string } | null
   validity: string
   effectiveDate: string | null
   violations: { bound?: string; days?: number }[]
@@ -160,10 +161,14 @@ export function PublishDialog({
                   <tr key={r.quotaId} className="border-b border-line-soft/40">
                     <td className="py-1.5 pr-2 text-ink-dim">{r.customer}</td>
                     <td className="pr-2 text-ink-mute">
-                      {r.from.map((s) => `${DAYS[s.weekday]} ${s.tech}`).join(", ") || "—"}
+                      {r.parity
+                        ? r.parity.from
+                        : r.from.map((s) => `${DAYS[s.weekday]} ${s.tech}`).join(", ") || "—"}
                     </td>
                     <td className="pr-2 text-ink">
-                      {r.to.map((s) => `${DAYS[s.weekday]} ${s.tech}`).join(", ") || "—"}
+                      {r.parity
+                        ? r.parity.to
+                        : r.to.map((s) => `${DAYS[s.weekday]} ${s.tech}`).join(", ") || "—"}
                     </td>
                     <td className="pr-2 text-ink-mute">{r.cadence}</td>
                     <td>

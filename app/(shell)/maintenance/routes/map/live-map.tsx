@@ -3356,8 +3356,11 @@ function sidesOf(e: RoutingEvent): {
   if (e.kind === "StopMoved") return { from: at(e.from), to: at(e.to) }
   if (e.kind === "StopPlaced") return { from: null, to: at(e.to) }
   if (e.kind === "StopRemoved") return { from: at(e.from), to: null }
+  // a parity flip has no stop sides — rendering `from` as null made it
+  // read as "unplaced -> week A", which looks like placing a stop that
+  // was never placed. It carries BOTH weeks; show them.
   const week = (w: number) => ({ day: `week ${w % 2 === 0 ? "A" : "B"}`, techId: "" })
-  return { from: null, to: week(e.toAnchorWeek) }
+  return { from: week(e.fromAnchorWeek), to: week(e.toAnchorWeek) }
 }
 
 /**
