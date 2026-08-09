@@ -108,6 +108,11 @@ export function renderWrites(
     assertIonTechId(s.techId)
     fields[dayField(s.weekday)] = s.techId
   }
+  // AssignedTo: interval cadences READ THIS FIELD, not the day selects —
+  // the 2026-08-09 incident cloned the OLD tech onto every biweekly
+  // successor (Emily kept her superseded pools). Single-stop targets set
+  // it; multi-day weekly clears it (the day selects rule there).
+  fields["AssignedTo"] = plan.target.stops.length === 1 ? plan.target.stops[0].techId : ""
   fields["StartsOn"] = ionDate(newStartsOn)
   fields["EndsOn"] = plan.target.period.endsOn ? ionDate(plan.target.period.endsOn) : ""
   const createNew: WriteOp = {

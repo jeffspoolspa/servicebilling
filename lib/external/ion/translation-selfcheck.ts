@@ -305,6 +305,7 @@ check("renderWrites: supersede = EndsOn old at start-1 + create with StartsOn, E
   assert.ok(!("EventID" in ops[1].fields!))
   assert.strictEqual(ops[1].fields!["StartsOn"], "08/12/2026")
   assert.strictEqual(ops[1].fields!["day4"], "90001") // Wednesday = day4
+  assert.strictEqual(ops[1].fields!["AssignedTo"], "90001") // interval reads AssignedTo — the Emily bug
   for (let d = 1; d <= 7; d++) if (d !== 4) assert.ok(!(`day${d}` in ops[1].fields!))
 })
 
