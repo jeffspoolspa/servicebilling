@@ -141,6 +141,7 @@ async function main() {
     if (v.validity === "never_valid") { console.log(`  BLOCKED: ${v.reasons.join("; ")}`); continue }
     const [last, ...next] = v.timeline.length && m.lastServed ? v.timeline : [null, ...v.timeline]
     console.log(`  last visit ${last ?? "(never served)"} │ starts ${v.effectiveDate} │ next: ${next.slice(0, 4).join(", ")}`)
+    for (const b of v.bridges) console.log(`  + BRIDGE (free QC visit): ${b.date} · ${techName.get(b.techId) ?? b.techId.slice(0, 8)} — old pattern serves the seam`)
     for (const g of v.violations) console.log(`  ✗ cadence law (${g.bound}): ${g.fromDate} → ${g.toDate} = ${g.gapDays}d`)
     for (const w of v.warnings) console.log(`  ⚠ ${w}`)
   }

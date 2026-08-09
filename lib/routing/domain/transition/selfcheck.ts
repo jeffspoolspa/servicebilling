@@ -196,4 +196,32 @@ check("REQUESTED flip that cannot fit the window: scheduled at nearest target-pa
   assert.strictEqual(v.violations[0].bound, "late")
 })
 
+check("BRIDGE VISITS: a late seam is healed by free old-pattern service until the new phase begins", () => {
+  // biweekly Tue -> Fri WITH a parity flip, last served Tue 07-28, cursor
+  // Mon 08-10. Earliest target-parity Friday is 08-21 (gap 24 > 19). The
+  // old phase still fires Tue 08-11 — a no-charge bridge splits the seam
+  // 14 + 10: healed, old tech serves it.
+  const [v] = planner.plan([weekly({
+    cadence: { kind: "biweekly" },
+    from: [{ weekday: 2, techId: "old-tech" }], to: [{ weekday: 5, techId: "new-tech" }],
+    lastServed: "2026-07-28", anchorShiftWeeks: 1,
+  })], ctx({ today: "2026-08-10" }))
+  assert.strictEqual(v.anchorDate, "2026-08-21")
+  assert.deepStrictEqual(v.bridges, [{ date: "2026-08-11", techId: "old-tech" }])
+  assert.deepStrictEqual(v.timeline.slice(0, 3), ["2026-07-28", "2026-08-11", "2026-08-21"])
+  assert.strictEqual(v.violations.length, 0) // the bridge heals the law
+})
+
+check("bridges only when they help: an unbridgeable seam keeps its LOUD violation", () => {
+  // last served long ago — every old-phase candidate is behind the cursor,
+  // so nothing can bridge; the violation must survive, loudly.
+  const [v] = planner.plan([weekly({
+    cadence: { kind: "biweekly" },
+    from: [{ weekday: 2, techId: "m" }], to: [{ weekday: 5, techId: "m" }],
+    lastServed: "2026-07-07", anchorShiftWeeks: 1,
+  })], ctx())
+  assert.deepStrictEqual(v.bridges, [])
+  assert.ok(v.violations.length >= 1)
+})
+
 console.log(`transition selfcheck: ${n} checks passed`)

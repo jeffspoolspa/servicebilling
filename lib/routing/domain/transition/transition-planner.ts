@@ -64,7 +64,17 @@ export interface MoveVerdict {
   readonly effectiveDate: string | null
   /** derived anchor for interval cadences (the phase; parity falls out) */
   readonly anchorDate: string | null
-  readonly timeline: string[] // lastServed ++ first projected firings
+  readonly timeline: string[] // lastServed ++ bridges ++ first projected firings
+  /**
+   * BRIDGE VISITS (RULED 2026-08-08): when the seam gap would break the
+   * max, the customer keeps being served ON THE OLD PATTERN — free,
+   * QC-style one-off visits at the old phase's firing dates — until the
+   * new pattern begins. Realized as no-charge one-time tasks riding the
+   * agreement (the existing QC-rider shape); the OLD stop's tech serves
+   * them (they know the pool). Only emitted when they actually heal or
+   * reduce the violation; a residual violation stays LOUD.
+   */
+  readonly bridges: { date: string; techId: string }[]
   readonly violations: GapViolation[]
   readonly warnings: string[]
 }
@@ -111,13 +121,13 @@ export class TransitionPlanner {
       const root = find(i)
       if (!v.ok) {
         return { quotaId: m.quotaId, validity: "never_valid", reasons: v.reasons,
-                 clusterId: root, effectiveDate: null, anchorDate: null, timeline: [], violations: [],
+                 clusterId: root, effectiveDate: null, anchorDate: null, timeline: [], bridges: [], violations: [],
                  warnings: [] }
       }
       const effective = dated[i]!.effective
-      const { anchorDate, timeline, violations } = this.seam(m, effective)
+      const { anchorDate, timeline, bridges, violations } = this.seam(m, effective)
       return { quotaId: m.quotaId, validity: "valid", reasons: v.reasons,
-               clusterId: root, effectiveDate: effective, anchorDate, timeline, violations,
+               clusterId: root, effectiveDate: effective, anchorDate, timeline, bridges, violations,
                warnings: warnings.get(m.quotaId) ?? [] }
     })
   }
@@ -209,7 +219,7 @@ export class TransitionPlanner {
   }
 
   /** Seam: derive the anchor (parity!) and prove the timeline against the law. */
-  private seam(m: MoveInput, effective: string): { anchorDate: string | null; timeline: string[]; violations: GapViolation[] } {
+  private seam(m: MoveInput, effective: string): { anchorDate: string | null; timeline: string[]; bridges: { date: string; techId: string }[]; violations: GapViolation[] } {
     const bounds = gapBoundsFor(m.cadence)
     const weekdays = m.to.map((s) => s.weekday)
     // SERVICE CONTINUITY: a move that changes WHO but not WHEN (same day-set,
@@ -276,8 +286,33 @@ export class TransitionPlanner {
     const firings = projectFirings(
       { cadence: m.cadence, weekdays, anchorDate }, projFrom, horizon,
     ).slice(0, 5)
-    const timeline = [...(m.lastServed ? [m.lastServed] : []), ...firings]
-    return { anchorDate, timeline, violations: [...anchorViolations, ...checkCadenceLaw(timeline, bounds)] }
+    let timeline = [...(m.lastServed ? [m.lastServed] : []), ...firings]
+    let violations = [...anchorViolations, ...checkCadenceLaw(timeline, bounds)]
+    let bridges: { date: string; techId: string }[] = []
+
+    // BRIDGE VISITS: a late-gap seam is healed by serving the OLD pattern
+    // (free) until the new one begins — old-phase firings between the
+    // cursor and the first new firing, old stop's tech. Adopted only when
+    // they strictly reduce the violations; anything residual stays loud.
+    if (violations.some((v) => v.bound === "late") && m.lastServed && firings.length) {
+      const oldWeekdays = m.from.map((s) => s.weekday)
+      const candidates = projectFirings(
+        { cadence: m.cadence, weekdays: oldWeekdays, anchorDate: m.lastServed },
+        base, addDays(firings[0], -1),
+      )
+      if (candidates.length) {
+        const techOf = (d: string) =>
+          m.from.find((s) => s.weekday === new Date(`${d}T00:00:00Z`).getUTCDay())?.techId ?? m.from[0].techId
+        const bridged = [...(m.lastServed ? [m.lastServed] : []), ...candidates, ...firings]
+        const bridgedViolations = [...anchorViolations.filter((v) => false), ...checkCadenceLaw(bridged, bounds)]
+        if (bridgedViolations.length < violations.length) {
+          bridges = candidates.map((date) => ({ date, techId: techOf(date) }))
+          timeline = bridged
+          violations = bridgedViolations
+        }
+      }
+    }
+    return { anchorDate, timeline, bridges, violations }
   }
 }
 
