@@ -82,11 +82,19 @@ export async function refreshAgreement(
   // the fetch list: ionCustId comes from each slice's latest stored
   // translation (every incarnation was born from one)
   const fetchList: { ionTaskId: string; ionCustId: string }[] = []
+  // a BRAND-NEW slice (fresh successor) has no stored translation yet —
+  // any sibling incarnation on the same agreement shares the customer
+  let siblingCust: string | null = null
+  for (const anyInc of agreement.lineage()) {
+    const t = await deps.intake.latest(anyInc.ionTaskId)
+    const c = (t?.translation as { ionCustomerId?: string } | null)?.ionCustomerId
+    if (c) { siblingCust = c; break }
+  }
   for (const inc of open) {
     const last = await deps.intake.latest(inc.ionTaskId)
-    const ionCustId = (last?.translation as { ionCustomerId?: string } | null)?.ionCustomerId
+    const ionCustId = (last?.translation as { ionCustomerId?: string } | null)?.ionCustomerId ?? siblingCust
     if (!ionCustId) {
-      await deps.intake.recordFailure(inc.ionTaskId, at, "no prior translation carries ionCustomerId — cannot prime the form", {})
+      await deps.intake.recordFailure(inc.ionTaskId, at, "no translation on any lineage slice carries ionCustomerId — cannot prime the form", {})
       report.quarantined++
       continue
     }
