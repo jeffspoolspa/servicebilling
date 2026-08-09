@@ -73,7 +73,7 @@ export async function runPublish(scenarioId: string, opts: { live: boolean }): P
     throw new Error(`write job ${jobId} timed out`)
   }
 
-  const { moves, droppedEnded } = await buildScenarioMoves(sb, scenarioId, agr)
+  const { moves, droppedEnded } = await buildScenarioMoves(pub, scenarioId, agr)
   const { data: allLoads } = await rt.from("v_current_placements").select("tech_id, weekday")
   const routeLoad = new Map<string, number>()
   const { data: emps } = await pub.from("employees").select("id, ion_employee_id")

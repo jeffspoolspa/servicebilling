@@ -30,7 +30,7 @@ async function main() {
   if (!scenarioId) throw new Error("usage: evaluate-scenario.ts <scenarioId>")
 
   const agrClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { db: { schema: "agreements" } })
-  const { scenName, moves, droppedEnded } = await buildScenarioMoves(sb, scenarioId, agrClient)
+  const { scenName, moves, droppedEnded } = await buildScenarioMoves(createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!), scenarioId, agrClient)
   if (droppedEnded.length) console.log(`dropped (agreement ENDED): ${droppedEnded.join(", ")}\n`)
   const quotaIds = [...new Set(moves.map((m) => m.quotaId))]
   // route loads (net-composite baseline): count per tech·day across ALL active

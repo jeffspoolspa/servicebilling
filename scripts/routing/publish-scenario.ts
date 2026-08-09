@@ -84,7 +84,7 @@ async function main() {
   const limit = limitArg >= 0 ? Number(process.argv[limitArg + 1]) : Infinity
 
   // fresh evaluation — never the stored preview
-  const { scenName, moves, droppedEnded } = await buildScenarioMoves(sb, scenarioId, agr)
+  const { scenName, moves, droppedEnded } = await buildScenarioMoves(createClient(URL_, KEY), scenarioId, agr)
   if (droppedEnded.length) {
     console.log(`dropped (agreement ENDED — no active successor): ${droppedEnded.length}`)
     for (const d of droppedEnded) console.log(`  ${d}`)
