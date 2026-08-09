@@ -1,14 +1,16 @@
 /**
- * Hydrates Quota aggregates out of the current tables.
+ * Hydrates Quota aggregates from the ROUTING FLOOR (repointed 2026-08-09).
  *
- * Shadow phase: the plan is a pure function of `maintenance.tasks`,
- * `maintenance.task_schedules` and the primary-location view, so it reflects
- * today's data by construction — nothing to migrate, nothing to sync. An active
- * slot carrying a day and a tech already *is* a stop.
+ * Placements come from routing.v_current_placements — the published read
+ * surface of the agreements/routing schemas that the publish pipeline
+ * keeps fresh on every write (verified same-day: the view had Matthew's
+ * Saturday route while task_schedules still said Caleb). maintenance.tasks
+ * remains only as the identity bridge (scenario vocabulary still speaks
+ * mirror task uuids); a floor row with no mirror task yet (a fresh
+ * successor before the next ingest) synthesizes its task from the floor.
  *
  * Rehydration, not formation: no decisions are made here and no events are
- * recorded. Rows that break an invariant are loaded as they are, so the audit
- * can report them rather than the loader throwing.
+ * recorded.
  */
 
 import {
@@ -113,6 +115,18 @@ interface SlotRow {
   frequency: string | null
 }
 
+/** One stop from routing.v_current_placements. */
+interface FloorRow {
+  quota_id: string
+  customer_id: string | null // qbo id (text)
+  weekday: number
+  tech_id: string | null // ION employee id
+  ion_task_id: string | null
+  from_date: string
+  cadence_kind: string | null
+  anchor_starts_on: string | null
+}
+
 interface VisitRow {
   task_id: string | null
   started_at: string
@@ -136,8 +150,60 @@ const INTERVAL_BY_FREQUENCY: Record<string, CadenceInterval> = {
 export class SupabaseQuotaRepository implements QuotaRepository {
   constructor(private readonly client: QueryClient) {}
 
+  /** floor stops -> mirror-vocabulary SlotRows (+ synthesized TaskRows for
+   *  fresh successors the mirror hasn't ingested yet). */
+  private async floorSlots(tasks: TaskRow[]): Promise<{ slots: SlotRow[]; extraTasks: TaskRow[] }> {
+    const [floor, emps, custs] = await Promise.all([
+      fetchAll<FloorRow>(
+        this.client.schema("routing").from("v_current_placements")
+          .select("quota_id, customer_id, weekday, tech_id, ion_task_id, from_date, cadence_kind, anchor_starts_on")
+          .not("tech_id", "is", null),
+        "v_current_placements",
+      ),
+      fetchAll<{ id: string; ion_employee_id: number | null }>(
+        this.client.from("employees").select("id, ion_employee_id").not("ion_employee_id", "is", null),
+        "employees",
+      ),
+      fetchAll<{ id: number; qbo_customer_id: string | null }>(
+        this.client.from("Customers").select("id, qbo_customer_id").not("qbo_customer_id", "is", null),
+        "Customers(identity)",
+      ),
+    ])
+    const uuidOfIonTech = new Map(emps.map((e) => [String(e.ion_employee_id), e.id]))
+    const custIdOfQbo = new Map(custs.map((c) => [String(c.qbo_customer_id), c.id]))
+    const taskOfIon = new Map(tasks.filter((t) => t.ion_task_id).map((t) => [String(t.ion_task_id), t]))
+
+    const slots: SlotRow[] = []
+    const extraTasks = new Map<string, TaskRow>()
+    for (const r of floor) {
+      if (!r.ion_task_id) continue
+      let task = taskOfIon.get(r.ion_task_id)
+      if (!task) {
+        // fresh successor the mirror has not ingested yet — synthesize
+        task = extraTasks.get(r.ion_task_id) ?? {
+          id: r.quota_id, // stable surrogate until the mirror mints its row
+          customer_id: r.customer_id ? (custIdOfQbo.get(r.customer_id) ?? null) : null,
+          starts_on: r.anchor_starts_on ?? r.from_date,
+          ends_on: null,
+          ion_task_id: r.ion_task_id,
+        }
+        extraTasks.set(r.ion_task_id, task)
+      }
+      const parity = r.cadence_kind === "biweekly" && r.anchor_starts_on
+        ? (weekOf(new Date(`${r.anchor_starts_on}T00:00:00Z`)) % 2 === 0 ? "biweekly_a" : "biweekly_b")
+        : null
+      slots.push({
+        task_id: task.id,
+        day_of_week: r.weekday,
+        tech_employee_id: r.tech_id ? (uuidOfIonTech.get(r.tech_id) ?? null) : null,
+        frequency: parity ?? (r.cadence_kind === "monthly" ? "monthly" : "weekly"),
+      })
+    }
+    return { slots, extraTasks: [...extraTasks.values()] }
+  }
+
   async liveIn(week: WeekIndex): Promise<Quota[]> {
-    const [tasks, slots, locations, medians] = await Promise.all([
+    const [tasks, locations, medians] = await Promise.all([
       fetchAll<TaskRow>(
         this.client
           .schema("maintenance")
@@ -146,22 +212,14 @@ export class SupabaseQuotaRepository implements QuotaRepository {
           .eq("status", "active"),
         "tasks",
       ),
-      fetchAll<SlotRow>(
-        this.client
-          .schema("maintenance")
-          .from("task_schedules")
-          .select("task_id, day_of_week, tech_employee_id, frequency")
-          .eq("active", true),
-        "task_schedules",
-      ),
       fetchAll<LocationRow>(
         this.client.from("v_customer_primary_location").select("customer_id, latitude, longitude"),
         "v_customer_primary_location",
       ),
       this.serviceMedians(),
     ])
-
-    return await this.hydrate(tasks, slots, locations, week, medians)
+    const { slots, extraTasks } = await this.floorSlots(tasks)
+    return await this.hydrate([...tasks, ...extraTasks], slots, locations, week, medians)
   }
 
   /**
@@ -170,48 +228,32 @@ export class SupabaseQuotaRepository implements QuotaRepository {
    * multi-day quota brings all of its stops, not just this day's.
    */
   async withPlacementOn(techId: string, weekday: number, week: WeekIndex): Promise<Quota[]> {
-    const daySlots = await fetchAll<SlotRow>(
-      this.client
-        .schema("maintenance")
-        .from("task_schedules")
-        .select("task_id, day_of_week, tech_employee_id, frequency")
-        .eq("active", true)
-        .eq("tech_employee_id", techId)
-        .eq("day_of_week", weekday),
-      "task_schedules(day)",
-    )
-    const taskIds = [...new Set(daySlots.map((s) => s.task_id))]
-    if (taskIds.length === 0) return []
-
+    // one floor pass; filter to the (tech, weekday) route, then bring each
+    // touched quota WHOLE (a multi-day quota carries all of its stops)
     const tasks = await fetchAll<TaskRow>(
       this.client
         .schema("maintenance")
         .from("tasks")
         .select("id, customer_id, starts_on, ends_on, ion_task_id")
-        .eq("status", "active")
-        .in("id", taskIds),
+        .eq("status", "active"),
       "tasks(route)",
     )
-    const [slots, locations] = await Promise.all([
-      fetchAll<SlotRow>(
-        this.client
-          .schema("maintenance")
-          .from("task_schedules")
-          .select("task_id, day_of_week, tech_employee_id, frequency")
-          .eq("active", true)
-          .in("task_id", taskIds),
-        "task_schedules(route)",
-      ),
-      fetchAll<LocationRow>(
-        this.client
-          .from("v_customer_primary_location")
-          .select("customer_id, latitude, longitude")
-          .in("customer_id", [...new Set(tasks.map((t) => t.customer_id).filter((c): c is number => c !== null))]),
-        "v_customer_primary_location(route)",
-      ),
-    ])
-    const medians = await this.serviceMedians(tasks.map((t) => t.id))
-    return await this.hydrate(tasks, slots, locations, week, medians)
+    const { slots, extraTasks } = await this.floorSlots(tasks)
+    const onRoute = new Set(
+      slots.filter((s) => s.tech_employee_id === techId && s.day_of_week === weekday).map((s) => s.task_id),
+    )
+    if (onRoute.size === 0) return []
+    const routeSlots = slots.filter((s) => onRoute.has(s.task_id))
+    const allTasks = [...tasks, ...extraTasks].filter((t) => onRoute.has(t.id))
+    const locations = await fetchAll<LocationRow>(
+      this.client
+        .from("v_customer_primary_location")
+        .select("customer_id, latitude, longitude")
+        .in("customer_id", [...new Set(allTasks.map((t) => t.customer_id).filter((c): c is number => c !== null))]),
+      "v_customer_primary_location(route)",
+    )
+    const medians = await this.serviceMedians(allTasks.map((t) => t.id))
+    return await this.hydrate(allTasks, routeSlots, locations, week, medians)
   }
 
   /**
