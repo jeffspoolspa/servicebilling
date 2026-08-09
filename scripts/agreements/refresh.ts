@@ -31,7 +31,7 @@ const WM_AUTH = { Authorization: `Bearer ${process.env.WINDMILL_TOKEN}` }
 
 /* ------------------------------- adapters -------------------------------- */
 
-function repoAdapter(): AgreementRepository {
+export function repoAdapter(): AgreementRepository {
   async function hydrate(row: { id: string; customer_id: string; basis: Basis; status: "active" | "ended"; ended_on: string | null }) {
     const { data: tvs } = await agr.from("terms_versions")
       .select("version, pattern, billing, period, from_at, cause")
@@ -115,7 +115,7 @@ function repoAdapter(): AgreementRepository {
   }
 }
 
-const intakeAdapter: IntakeStore = {
+export const intakeAdapter: IntakeStore = {
   async latest(ionTaskId) {
     const { data, error } = await agr.from("intake_translations")
       .select("observed_at, translation").eq("ion_task_id", ionTaskId)
@@ -137,7 +137,7 @@ const intakeAdapter: IntakeStore = {
   async replayableFailures() { return [] },
 }
 
-const formsAdapter: TaskFormSource = {
+export const formsAdapter: TaskFormSource = {
   async fetchForms(tasks) {
     const r = await fetch(`${WM_API}/jobs/run/p/f/ION/api/get_task_forms_batch`, {
       method: "POST", headers: { ...WM_AUTH, "Content-Type": "application/json" },
@@ -157,7 +157,7 @@ const formsAdapter: TaskFormSource = {
   },
 }
 
-const quotasAdapter: QuotaStore = {
+export const quotasAdapter: QuotaStore = {
   async quotaFor(agreementId, termsVersion) {
     const { data, error } = await rt.from("quotas").select("id")
       .eq("agreement_id", agreementId).eq("terms_version", termsVersion).maybeSingle()
@@ -232,7 +232,9 @@ async function main() {
   console.log(tally)
 }
 
-main().catch((e) => {
-  console.error(e)
-  process.exit(1)
-})
+if (process.argv[1]?.endsWith("refresh.ts")) {
+  main().catch((e) => {
+    console.error(e)
+    process.exit(1)
+  })
+}

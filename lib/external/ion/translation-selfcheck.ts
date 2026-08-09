@@ -282,4 +282,30 @@ check("programOf: the closed service-type decode — known labels classify, stra
   assert.ok(!stranger.ok && stranger.failed.includes("MYSTERY TYPE"))
 })
 
+import { renderWrites, ionDate } from "./render-write"
+
+check("renderWrites: amend = tech values onto day fields, nothing else", () => {
+  const f = form() // weekly, dayTechs from the base fixture
+  const currentStops = Object.entries(f.dayTechs).map(([d, t]) => ({ weekday: Number(d), techId: (t as { techId: string }).techId }))
+  const target = { pattern: { kind: "weekly", timesPerWeek: currentStops.length }, billing: translateTask(f, catalog) as never, period: { startsOn: f.startsOn, endsOn: f.endsOn }, stops: currentStops.map((s) => ({ ...s, techId: "T-NEW" })), note: f.note }
+  const ops = renderWrites(f, { kind: "amend", target: target as never })
+  assert.strictEqual(ops.length, 1)
+  assert.strictEqual(ops[0].op, "update")
+  for (const s of currentStops) assert.strictEqual(ops[0].changes[`day${s.weekday + 1}`], "T-NEW")
+  assert.ok(!("EndsOn" in ops[0].changes) && !("StartsOn" in ops[0].changes))
+})
+
+check("renderWrites: supersede = EndsOn old at start-1 + create with StartsOn, EventID stripped", () => {
+  const f = form()
+  const target = { pattern: { kind: "weekly", timesPerWeek: 1 }, billing: {} as never, period: { startsOn: f.startsOn, endsOn: null }, stops: [{ weekday: 3, techId: "T-NEW" }], note: f.note }
+  const ops = renderWrites(f, { kind: "supersede", target: target as never, effectiveWeekOf: "2026-08-10" }, "2026-08-12")
+  assert.strictEqual(ops.length, 2)
+  assert.deepStrictEqual(ops[0], { ...ops[0], op: "update", changes: { EndsOn: ionDate("2026-08-11") } })
+  assert.strictEqual(ops[1].op, "create")
+  assert.ok(!("EventID" in ops[1].fields!))
+  assert.strictEqual(ops[1].fields!["StartsOn"], ionDate("2026-08-12"))
+  assert.strictEqual(ops[1].fields!["day4"], "T-NEW") // Wednesday = day4
+  for (let d = 1; d <= 7; d++) if (d !== 4) assert.ok(!(`day${d}` in ops[1].fields!))
+})
+
 console.log(`translation selfcheck: ${n} checks passed`)
