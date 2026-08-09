@@ -1,15 +1,13 @@
 import { createClient } from "@supabase/supabase-js"
 const rt = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { db: { schema: "routing" } })
 async function main() {
+  const since = new Date().toISOString()
   let pubId: string | null = null
   for (let i = 0; i < 240; i++) { // up to 2h
     if (!pubId) {
       const { data } = await rt.from("publications").select("id, mode, started_at, refused, finished_at")
-        .eq("mode", "live").order("started_at", { ascending: false }).limit(1)
-      if (data?.[0] && !data[0].finished_at) { pubId = data[0].id; console.log(`LIVE publication started: ${pubId} at ${data[0].started_at}`) }
-      else if (data?.[0]?.finished_at && Date.parse(data[0].started_at) > Date.now() - 3 * 3600e3) {
-        pubId = data[0].id // already finished quickly
-      }
+        .eq("mode", "live").gte("started_at", since).order("started_at", { ascending: false }).limit(1)
+      if (data?.[0]) { pubId = data[0].id; console.log(`LIVE publication started: ${pubId} at ${data[0].started_at}`) }
     }
     if (pubId) {
       const { data: pub } = await rt.from("publications").select("finished_at, refused, summary").eq("id", pubId).single()

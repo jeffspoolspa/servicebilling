@@ -103,10 +103,15 @@ export async function publishScenario(
           ? { targetAnchorDate: m.verdict.anchorDate } : {}),
         dryRun: mode === "dry",
       })
-      const status = report.ops.length === 0 ? "skipped_no_diff" : "done"
+      // LIVE truthfulness (the aborted first run ledgered 500s as done):
+      // "done" requires every echo COMMITTED; anything less is failed.
+      const allCommitted = report.echoes.every((e) => e.committed)
+      const status = report.ops.length === 0 ? "skipped_no_diff"
+        : mode === "live" && !allCommitted ? "failed" : "done"
       await deps.store.recordMove(pub.id, {
         quotaId: m.quotaId, ionTaskId: m.ionTaskId, writeKind: report.plan,
         status, ops: report.ops, echoes: report.echoes,
+        ...(status === "failed" ? { error: "one or more ops not committed (see echoes)" } : {}),
       })
       summary[status]++
 
