@@ -49,6 +49,14 @@ is worse than no doc. If you find drift, fix the doc (or mark it `[drift]`).
 - Every doc opens with a `> Status:` line.
 - Every Mermaid diagram is paired with a text/table fallback (some viewers don't render Mermaid).
 
+## Architecture skills (use these for any domain/context work)
+
+`.claude/skills/` holds the executable form of this repo's architecture
+rulings: `/add-context`, `/add-entity`, `/add-sentence`, `/ca-review`.
+Building a new module, aggregate, or use case? Invoke the matching skill —
+it points at the exemplar files and carries the non-negotiables (context =
+schema, one writer per table, closed vendor decodes, events standard).
+
 ## Windmill gotchas (read the matching skill before touching these)
 
 - **ION Pool Care** scripts — read the `ion-automation` skill first. ION is ColdFusion

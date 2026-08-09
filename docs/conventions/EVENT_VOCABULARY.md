@@ -283,6 +283,23 @@ over `charge` events keyed by pm — the ADR 009 §D derivation, at last with
 its substrate. The imperative bumps in `process_maint_charges` retire when
 `v_autopay_health` lands.
 
+## Aggregate: `agreement` (`aggregate_id = agreements.service_agreements.id`, ordering: occurred_at)
+
+The ServiceAgreement aggregate (`lib/agreements`). Participants rule: every
+fact carries `agreement:{id}`, `customer:{id}`, `ion_task:{id}` (and the host
+`agreement:{riderOf}` on rider facts). Facts land in `maintenance.events`.
+
+| type | spoken | arm / emitted by | means |
+|---|---|---|---|
+| `agreement_opened` | AgreementOpened | authored — backfill / open sentence | agreement minted with terms v1 + open ION incarnation. payload `{basis, terms, provenance}` — `provenance: "reflection"` marks bootstrap-from-ION, not a commercial signing |
+| `agreement_basis_set` | AgreementBasisSet | authored — classify/reclassify | the WHY reclassified (program + standalone-vs-rider). payload `{before, after}` full-change |
+| `agreement_terms_changed` | AgreementTermsChanged | authored — RefreshAgreement (reflection) / changeTerms (intent) | a new terms version: pattern, billing MEANING, or period moved. payload `{before, after, provenance}` — representation churn (jsonb key order, evidence fields like serviceTypeLabel) must NEVER emit this (bitten twice 2026-08-08) |
+| `agreement_ended` | AgreementEnded | authored — end() | lifecycle close; all open incarnations close with it. payload `{ended_on, basis, provenance}` |
+| `agreement_ion_task_superseded` | AgreementIonTaskSuperseded | authored — recordIncarnation (echo) | the external id churned for ONE slice (covers-matched). payload `{from_ion_task_id, to_ion_task_id, cause}` |
+| `ion_prediction_missed` | IonPredictionMissed | authored — recordIncarnation | our write predicted amend/supersede and ION did the other — the model of ION drifted; every future prediction suspect until reviewed |
+
+---
+
 ## Aggregate: `work_order` (`aggregate_id = wo_number`) — billing annotations ONLY
 
 The WO is ION's aggregate (read-only mirror here; billing writes only its own

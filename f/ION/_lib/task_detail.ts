@@ -21,8 +21,9 @@
 // with dry_run=false. Single write path; idempotent via Old* diff; the next task/
 // schedule sync is the [reflection] that pulls the change back into our cache.
 
+import "playwright@1.40.0"
 import { ionFetch, ionFetchText, type IonSession } from "/f/ION/_lib/session"
-import { parse } from "node-html-parser"
+import { parse } from "node-html-parser@6.1.13"
 
 const DOW_FIELDS = ["day1", "day2", "day3", "day4", "day5", "day6", "day7"] // index 0=Sun .. 6=Sat
 const DOW_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
@@ -165,7 +166,57 @@ export async function updateTask(
       changed, field_count: Object.keys(newFields).length, payload_preview: newFields,
     }
   }
-  const res = await ionFetch(session, `${session.ionOrigin}/tasks/addTask.cfm?EventID=${ionTaskId}&isIFrame=1`, {
+  // BROWSER-FAITHFUL save: a real form submit is a plain document POST —
+  // no X-Requested-With — and the Referer is the form page itself. The
+  // first live boundary test (2026-08-08) showed the XHR-flavored POST
+  // answered 200 with a page shell and saved NOTHING.
+  const formUrl = `${session.ionOrigin}/tasks/addTask.cfm?EventID=${ionTaskId}&isIFrame=1`
+  const res = await ionFetch(session, formUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Referer": formUrl,
+      "Origin": session.ionOrigin,
+    },
+    body: new URLSearchParams(newFields).toString(),
+  })
+  const txt = await res.text()
+  return { dry_run: false, committed: res.ok, status: res.status, ionTaskId: String(ionTaskId), changed, response_preview: txt.slice(0, 3000) }
+}
+
+/**
+ * Create a NEW task: prime the customer (the blank form binds to the primed
+ * customer — same session mechanics as the UI's "add task from customer
+ * tab"), serialize the blank form, overlay `fields`, POST without EventID.
+ * dry_run=true (default) returns the exact payload WITHOUT submitting.
+ * The echo (the response / next list read) carries the new EventID — the
+ * caller records reality, never the prediction.
+ */
+export async function createTask(
+  session: IonSession,
+  ionCustId: string | number,
+  fields: Record<string, string>,
+  dry_run = true,
+) {
+  await ionFetchText(session, `${session.ionOrigin}/customers/customerTabs.cfm?customerid=${ionCustId}`)
+  const blankHtml = await ionFetchText(session, `${session.ionOrigin}/tasks/addTask.cfm?isIFrame=1`)
+  const blankForm = pickTaskForm(parse(blankHtml))
+  if (!blankForm) throw new Error("blank addTask form not found — create path shape changed?")
+  const blank = serializeForm(blankForm)
+  const newFields: Record<string, string> = { ...blank, ...fields }
+  delete newFields["EventID"]
+  if (!newFields["LinkUsed"]) newFields["LinkUsed"] = "Save"
+  if (!newFields["Submit"]) newFields["Submit"] = "Submit"
+
+  if (dry_run) {
+    return {
+      dry_run: true, committed: false, ionCustId: String(ionCustId),
+      would_post_to: "/tasks/addTask.cfm?isIFrame=1",
+      blank_customer_binding: blank["CustomerID"] ?? "(no CustomerID field)",
+      field_count: Object.keys(newFields).length, payload_preview: newFields,
+    }
+  }
+  const res = await ionFetch(session, `${session.ionOrigin}/tasks/addTask.cfm?isIFrame=1`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -176,12 +227,51 @@ export async function updateTask(
     body: new URLSearchParams(newFields).toString(),
   })
   const txt = await res.text()
-  return { dry_run: false, committed: res.ok, status: res.status, ionTaskId: String(ionTaskId), changed, response_preview: txt.slice(0, 400) }
+  // THE ECHO: the response (or its redirect) names the new task id. Try
+  // the shapes we can anticipate; keep a generous preview either way so
+  // the first live run teaches us the real one (echo over prediction).
+  const idMatch = txt.match(/EventID["'\s]*[=:]["'\s]*(\d{5,})/i)
+    ?? txt.match(/addTask\.cfm\?EventID=(\d{5,})/i)
+    ?? txt.match(/taskid["'\s]*[=:]["'\s]*(\d{5,})/i)
+  return {
+    dry_run: false, committed: res.ok, status: res.status, ionCustId: String(ionCustId),
+    new_event_id: idMatch ? idMatch[1] : null,
+    response_preview: txt.slice(0, 1200),
+  }
+}
+
+/**
+ * DELETE a task — the task list's own mechanic (captured live 2026-08-09):
+ * GET /tasks/tasklist.cfm?DeleteTaskID=<id> with the customer primed; the
+ * UI confirm is client-side only. ION refuses deletion once a service log
+ * exists, so this is inherently safe on never-served tasks. dry_run=true
+ * (default) returns the URL it WOULD hit.
+ */
+export async function deleteTask(
+  session: IonSession,
+  ionTaskId: string | number,
+  ionCustId: string | number,
+  dry_run = true,
+) {
+  const url = `${session.ionOrigin}/tasks/tasklist.cfm?DeleteTaskID=${ionTaskId}`
+  if (dry_run) {
+    return { dry_run: true, committed: false, ionTaskId: String(ionTaskId), would_get: url }
+  }
+  if (ionCustId) await ionFetchText(session, `${session.ionOrigin}/customers/customerTabs.cfm?customerid=${ionCustId}`)
+  const res = await ionFetch(session, url, { headers: { Referer: `${session.ionOrigin}/main.cfm` } })
+  const txt = await res.text()
+  // the echo: the returned task list should no longer contain the id
+  const stillListed = txt.includes(`DeleteTaskID=${ionTaskId}`) || txt.includes(`EventID=${ionTaskId}`)
+  return {
+    dry_run: false, committed: res.ok && !stillListed, status: res.status,
+    ionTaskId: String(ionTaskId), still_listed: stillListed,
+    response_preview: txt.slice(0, 400),
+  }
 }
 
 export function main() {
   return {
     library: "f/ION/_lib/task_detail",
-    exports: ["fetchTaskFormHtml", "parseTaskForm", "getTaskDetail", "updateTask"],
+    exports: ["fetchTaskFormHtml", "parseTaskForm", "getTaskDetail", "updateTask", "createTask", "deleteTask"],
   }
 }

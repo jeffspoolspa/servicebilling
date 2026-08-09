@@ -1,0 +1,5 @@
+-- Applied via MCP 2026-08-09 as routing_current_placements_v2.
+-- v2 (RULED 2026-08-09, UI repoint): + cadence from the terms pattern and
+-- + the slice's parity anchor (latest translation StartsOn — ION's truth),
+-- so the quota repository can hydrate entirely from the routing floor.
+-- (Full definition in the migration of record; see repo history.)
