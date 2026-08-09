@@ -38,39 +38,31 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   // A DRY RUN still runs inline: it writes nothing, the caller is a person
   // waiting on a preview, and there is nothing to survive.
   if (!dryRun) {
-    // Through the repository, never a hand-rolled query: it already knows the
-    // scenarios live in `maintenance` and how a stored change is shaped. The
-    // first cut guessed `routing.scenarios` and turned every live publish into
-    // "no scenario <id>".
+    // Through the repository, never a hand-rolled query.
     const stored = await new SupabaseScenarioRepository(sb as unknown as ScenarioClient).byId(id)
     if (!stored) return NextResponse.json({ error: `no scenario ${id}` }, { status: 404 })
     if (stored.status !== "pending") {
       return NextResponse.json({ error: `scenario is ${stored.status} — only pending publishes` }, { status: 409 })
     }
-    const taskIds = [...new Set(stored.changes.map((c) => c.quotaId))]
-    if (taskIds.length === 0) return NextResponse.json({ error: "scenario changes nothing" }, { status: 400 })
+    if (stored.changes.length === 0) return NextResponse.json({ error: "scenario changes nothing" }, { status: 400 })
 
-    // Name the target now. Which contract is being ended is the decision the
-    // operator just approved; re-deriving it at drain time risks acting on a
-    // different task than the one they saw.
-    const { data: known } = await sys.schema("maintenance").from("tasks")
-      .select("id, ion_task_id").in("id", taskIds)
-    const ionOf = new Map(((known ?? []) as { id: string; ion_task_id: string | null }[])
-      .map((t) => [t.id, t.ion_task_id]))
-
-    const queued: { taskId: string; queueId: string }[] = []
-    for (const taskId of taskIds) {
-      const { data: qid, error } = await sys.schema("maintenance")
-        .rpc("enqueue_schedule_change", {
-          p_task_id: taskId, p_scenario_id: id,
-          p_ion_task_id: ionOf.get(taskId) ?? null,
-          p_intent: { requested_by: caller.id, scenario_id: id },
-        })
-      if (error) return NextResponse.json({ error: `enqueue failed: ${error.message}` }, { status: 500 })
-      queued.push({ taskId, queueId: qid as string })
-    }
-    // 202: accepted, not done. The client watches the rows.
-    return NextResponse.json({ scenarioId: id, queued, watch: "maintenance.v_schedule_change_queue" }, { status: 202 })
+    // LIVE publishes ride Inngest (RULED 2026-08-09): durable delivery to
+    // the NEW sentence pipeline (period-clear, always-supersede, ledgered
+    // in routing.publications). The idempotency id absorbs double-clicks
+    // for this scenario VERSION; a refined scenario (new updated_at) is a
+    // new run. The old enqueue_schedule_change road is retired.
+    const { inngest } = await import("@/lib/jobs/inngest")
+    const version = (stored as { updatedAt?: string }).updatedAt ?? "v1"
+    await inngest.send({
+      id: `publish-${id}-${version}`,
+      name: "routing/scenario.publish",
+      data: { scenarioId: id, requestedBy: caller.id },
+    })
+    // 202: accepted, not done. The ledger is the record to watch.
+    return NextResponse.json(
+      { scenarioId: id, accepted: true, watch: "routing.publications (latest live row for this scenario)" },
+      { status: 202 },
+    )
   }
 
   const ion = new IonTasks({
