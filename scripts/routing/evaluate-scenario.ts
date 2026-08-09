@@ -42,7 +42,8 @@ async function main() {
     .select("task_id, tech_employee_id, day_of_week, frequency, active")
     .in("task_id", quotaIds)
     .eq("active", true)
-  const { data: tasks } = await sb.from("tasks").select("id, frequency, days_per_week").in("id", quotaIds)
+  const { data: tasks } = await sb.from("tasks").select("id, frequency, days_per_week, starts_on").in("id", quotaIds)
+  const startsOnOf = new Map((tasks ?? []).map((t) => [t.id, t.starts_on ? String(t.starts_on).slice(0, 10) : null]))
   const { data: visits } = await sb
     .from("visits")
     .select("task_id, started_at")
@@ -93,6 +94,7 @@ async function main() {
     moves.push({
       quotaId, cadence: cadenceOf(quotaId, from.length), from, to,
       lastServed: lastServed.get(quotaId) ?? null,
+      scheduleAnchor: startsOnOf.get(quotaId) ?? null,
       ...(netShift !== 0 ? { anchorShiftWeeks: netShift } : {}),
     })
   }

@@ -261,4 +261,20 @@ check("bridges only when they help: an unbridgeable seam keeps its LOUD violatio
   assert.ok(v.violations.length >= 1)
 })
 
+check("NEVER-SERVED tech swap holds for a scheduled FIRST visit in the current week", () => {
+  // task starts Thu 08-13 (never served); today Wed 08-12. Thursday's
+  // first visit is on the printed route — the swap lands Friday.
+  const [v] = planner.plan([weekly({
+    from: [{ weekday: 4, techId: "matthew" }], to: [{ weekday: 4, techId: "elaina" }],
+    lastServed: null, scheduleAnchor: "2026-08-13",
+  })], ctx())
+  assert.strictEqual(v.effectiveDate, "2026-08-14")
+  // first visit NEXT week -> nothing pends, swap lands today
+  const [w] = planner.plan([weekly({
+    from: [{ weekday: 4, techId: "matthew" }], to: [{ weekday: 4, techId: "elaina" }],
+    lastServed: null, scheduleAnchor: "2026-08-20",
+  })], ctx())
+  assert.strictEqual(w.effectiveDate, "2026-08-12")
+})
+
 console.log(`transition selfcheck: ${n} checks passed`)

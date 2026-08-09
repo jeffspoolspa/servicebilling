@@ -38,6 +38,10 @@ export interface MoveInput {
   readonly from: readonly { weekday: number; techId: string }[]
   readonly to: readonly { weekday: number; techId: string }[]
   readonly lastServed: string | null
+  /** The task's schedule anchor (StartsOn) — the pending-visit hold for
+   *  NEVER-SERVED tasks anchors here: a scheduled FIRST visit in the
+   *  current week is as owned by the printed route as any other. */
+  readonly scheduleAnchor?: string | null
   /** A REQUESTED parity change (AnchorShifted): shift the anchor by this
    *  many weeks within the cycle (biweekly flip = 1). Absent = no request;
    *  the seam may derive phase for day moves. */
@@ -174,21 +178,26 @@ export class TransitionPlanner {
   /** The old pattern's last still-scheduled visit in the period containing
    *  today (anchor-aligned cycle) — the visit the current week's plan owns. */
   private lastPendingCurrentPeriod(m: MoveInput, today: string): string | null {
-    if (!m.lastServed || !m.from.length) return null
+    const ref = m.lastServed ?? m.scheduleAnchor ?? null
+    if (!ref || !m.from.length) return null
     const oldWeekdays = m.from.map((s) => s.weekday)
-    let oldAnchor = m.lastServed
+    let oldAnchor = ref
     for (let k = 0; k < 7; k++) {
-      const c = addDays(m.lastServed, -k)
+      const c = addDays(ref, -k)
       if (oldWeekdays.includes(new Date(`${c}T00:00:00Z`).getUTCDay())) { oldAnchor = c; break }
     }
+
     const interval = m.cadence.kind === "biweekly" ? 2 : m.cadence.kind === "monthly" ? 4 : 1
     let periodEnd = sundayOfWeek(today)
     if (interval > 1) {
       const off = ((weeksBetween(mondayOf(oldAnchor), mondayOf(today)) % interval) + interval) % interval
       periodEnd = addDays(sundayOfWeek(today), (interval - 1 - off) * 7)
     }
+    // never-served: nothing can pend before the task's StartsOn
+    const from = !m.lastServed && m.scheduleAnchor && m.scheduleAnchor > today ? m.scheduleAnchor : today
+    if (from > periodEnd) return null
     const pending = projectFirings(
-      { cadence: m.cadence, weekdays: oldWeekdays, anchorDate: oldAnchor }, today, periodEnd,
+      { cadence: m.cadence, weekdays: oldWeekdays, anchorDate: oldAnchor }, from, periodEnd,
     )
     return pending.length ? pending[pending.length - 1] : null
   }
