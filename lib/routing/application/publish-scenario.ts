@@ -149,7 +149,8 @@ export async function publishScenario(
     } catch (e) {
       await deps.store.recordMove(pub.id, {
         quotaId: m.quotaId, ionTaskId: m.ionTaskId, writeKind: "unknown",
-        status: "failed", ops: [], echoes: [], error: String(e).slice(0, 400),
+        status: "failed", ops: [], echoes: [],
+        error: (e instanceof Error ? e.message : JSON.stringify(e)).slice(0, 400),
       })
       summary.failed++
     }

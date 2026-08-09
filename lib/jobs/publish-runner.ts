@@ -49,7 +49,8 @@ export async function runPublish(scenarioId: string, opts: { live: boolean }): P
         publication_id: id, quota_id: quotaId.replace(/:bridge$/, ""), ion_task_id: ionTaskId,
         write_kind: writeKind, status: "running", ops: [], echoes: [], steps: [],
       })
-      if (error && !String(error.message).includes("duplicate key")) throw error
+      if (error && !String(error.message).includes("duplicate key"))
+        throw new Error(`openMove refused: ${error.message}`)
     },
     async noteSteps(id, quotaId, ionTaskId, steps) {
       await rt.from("publication_moves").update({ steps: steps as object })
@@ -69,7 +70,8 @@ export async function runPublish(scenarioId: string, opts: { live: boolean }): P
         const { error } = await rt.from("publication_moves").insert({
           publication_id: id, quota_id: row.quotaId.replace(/:bridge$/, ""), ion_task_id: row.ionTaskId, ...base,
         })
-        if (error && !String(error.message).includes("duplicate key")) throw error
+        if (error && !String(error.message).includes("duplicate key"))
+          throw new Error(`recordMove refused: ${error.message}`)
       }
       // VERB FACTS (RULED 2026-08-09, EVENT_VOCABULARY.md): each confirmed
       // ION verb is a fact with its read-back evidence. Live only.

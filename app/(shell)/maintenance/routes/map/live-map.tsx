@@ -305,6 +305,14 @@ export function LiveMap({
   const [publishBusy, setPublishBusy] = useState(false)
   /** Armed = the user pressed Publish and is being asked to confirm in-app. */
   const [publishArmed, setPublishArmed] = useState(false)
+  // the outcome of a publish that reloaded the board (see publishToIon)
+  useEffect(() => {
+    try {
+      const t = sessionStorage.getItem("publish-outcome")
+      if (t) { sessionStorage.removeItem("publish-outcome"); setToast(t) }
+    } catch { /* no session storage, nothing to replay */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   /** What the publish is doing right now, and for how long. Work the user
    *  cannot see is work they assume has failed. */
   const [publishPhase, setPublishPhase] = useState<string | null>(null)
@@ -1541,13 +1549,13 @@ export function LiveMap({
       if (res.status === 202 && report.accepted) {
         setPublishPhase(`Accepted ${changes.length} change${changes.length === 1 ? "" : "s"} — ION is being written`)
         const outcome = await watchPublication(scenarioId!, setPublishPhase)
-        setToast(publishToastFor(outcome))
-        setPublishPhase("Re-reading the plan")
-        setPlan(Scenario.from(base()))
-        setViewing(null)
-        setRestoreNote(null)
-        await refreshScenarios()
-        router.refresh()
+        // WHAT YOU SEE IS THE FLOOR (RULED 2026-08-09): after a live
+        // publish settles, reload the page outright — the board redraws
+        // from the same placements rows verify_floor just checked, never
+        // from reconstructed client state. The toast survives the reload.
+        try { sessionStorage.setItem("publish-outcome", publishToastFor(outcome)) } catch { /* toast lost, state still true */ }
+        setPublishPhase("Re-reading the board from the floor")
+        window.location.reload()
         return
       }
 
@@ -2079,38 +2087,71 @@ export function LiveMap({
           )}
           {/* Remount on every plan revision: rows are index-keyed, so a
               revert must never meet yesterday's selection. */}
+          {publishArmed && !publishBusy && (
+            <div
+              className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60"
+              onClick={() => setPublishArmed(false)}
+            >
+              <div
+                className="max-h-[80vh] w-[600px] overflow-auto rounded-xl border border-line bg-panel p-4 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="pb-1 text-[13px] font-medium text-ink">
+                  {`Publish ${changes.length} change${changes.length === 1 ? "" : "s"} to ION`}
+                </div>
+                <div className="pb-3 text-[11px] leading-relaxed text-ink-mute">
+                  Every change supersedes: the old task ends and a successor is created. Each
+                  row passes the declared steps — end old &rarr; create successor &rarr; verify
+                  target &rarr; record book &rarr; converge placement &rarr; verify floor — and
+                  every step is confirmed by reading ION back, never by its response. A row is
+                  done only when the placements table matches its target.
+                </div>
+                {changeRows.map((r) => (
+                  <div
+                    key={r.index}
+                    className="flex items-center gap-1.5 border-t border-line-soft/40 py-1.5 text-[11px] first:border-0"
+                  >
+                    <span className="w-44 truncate text-ink-dim">{r.customer}</span>
+                    <Chip>{r.fromDay ?? "—"}</Chip>
+                    <Chip>{r.fromTech ?? "—"}</Chip>
+                    <span className="text-ink-mute">&rarr;</span>
+                    <Chip>{r.toDay ?? "—"}</Chip>
+                    <Chip>{r.toTech ?? "—"}</Chip>
+                    <span className="flex-1" />
+                    <span className="text-[10px] text-ink-mute">supersede</span>
+                  </div>
+                ))}
+                <div className="flex justify-end gap-2 pt-3">
+                  <button
+                    className="rounded-full border border-line px-3 py-1 text-[11px] text-dim hover:text-ink"
+                    onClick={() => setPublishArmed(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="rounded-full border border-emerald-500/60 bg-emerald-500/25 px-3 py-1 text-[11px] font-medium text-emerald-200 hover:bg-emerald-500/35"
+                    onClick={() => void publishToIon()}
+                  >
+                    {`Confirm — write ${changes.length} to ION`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <ChangesTable
             key={rev}
             rows={changeRows}
             onRevert={revertChanges}
             headerExtra={
               <>
-                {publishArmed && !publishBusy ? (
-                  <span className="flex shrink-0 items-center gap-1">
-                    <button
-                      className="shrink-0 rounded-full border border-emerald-500/60 bg-emerald-500/25 px-2.5 py-0.5 text-[10.5px] font-medium text-emerald-200 hover:bg-emerald-500/35"
-                      title={`writes ${changes.length} change${changes.length === 1 ? "" : "s"} to the live ION schedule — each task is rewritten with its complete week, so unchanged days are preserved`}
-                      onClick={() => void publishToIon()}
-                    >
-                      {`Confirm — write ${changes.length} to ION`}
-                    </button>
-                    <button
-                      className="shrink-0 rounded-full border border-line px-2 py-0.5 text-[10.5px] text-dim hover:text-ink"
-                      onClick={() => setPublishArmed(false)}
-                    >
-                      Cancel
-                    </button>
-                  </span>
-                ) : (
-                  <button
-                    className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-[10.5px] font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
-                    title="write these changes to ION — each task is rewritten with its complete week"
-                    disabled={publishBusy || scenarioBusy}
-                    onClick={() => setPublishArmed(true)}
-                  >
-                    {publishBusy ? `Publishing… ${publishElapsed}s` : "Publish to ION"}
-                  </button>
-                )}
+                <button
+                  className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 text-[10.5px] font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
+                  title="opens the publish confirmation — every row and the steps it will pass through, before anything writes"
+                  disabled={publishBusy || scenarioBusy}
+                  onClick={() => setPublishArmed(true)}
+                >
+                  {publishBusy ? `Publishing… ${publishElapsed}s` : "Publish to ION"}
+                </button>
                 {saveName === null ? (
                 <button
                   className="shrink-0 rounded-full border border-violet-400/40 bg-violet-400/10 px-2.5 py-0.5 text-[10.5px] font-medium text-violet-300 hover:bg-violet-400/20 disabled:opacity-50"
