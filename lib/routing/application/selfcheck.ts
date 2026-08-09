@@ -199,7 +199,7 @@ async function main() {
       r5.summary.landed_unverified === 1 && r5.summary.done === 0 && rows[0].status === "landed_unverified")
 
     // 6. every move opens a RUNNING row before its verbs fire
-    check("moves open running rows before verbs (2+1+1; refusals open none)", opened === 4)
+    check("moves open running rows before verbs (2+1+1+1; refusals open none)", opened === 5)
   }
 
   // verifyBorn: the born row must match the target arrangement
