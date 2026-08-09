@@ -379,9 +379,22 @@ export function LiveMap({
           setViewing({ id: sid } as never)
         }
         const r = await fetch(`/api/routing/scenarios/${sid}/preview`)
-        const body = await r.json()
+        const text = await r.text()
+        let body: { error?: string; rows?: PreviewRow[] }
+        try {
+          body = JSON.parse(text)
+        } catch {
+          // HTML back means the route was not there (a deploy still
+          // rolling) or the session bounced us to a login page — say THAT
+          setPreviewError(
+            r.status === 404
+              ? "the preview endpoint is not deployed yet — wait for the deploy to finish and reopen"
+              : `the server returned a page, not data (HTTP ${r.status}) — you may need to sign in again`,
+          )
+          return
+        }
         if (!r.ok) { setPreviewError(body.error ?? `preview failed (${r.status})`); return }
-        setPreview(body.rows as PreviewRow[])
+        setPreview(body.rows ?? [])
       } catch (e) {
         setPreviewError(e instanceof Error ? e.message : String(e))
       }

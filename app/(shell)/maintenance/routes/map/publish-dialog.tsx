@@ -81,8 +81,8 @@ export function PublishDialog({
   const withBridges = (preview ?? []).filter((r) => r.bridges.length > 0)
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-6">
-      <div className="flex h-[88vh] w-[min(1100px,94vw)] flex-col rounded-xl border border-line bg-panel shadow-2xl">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-6">
+      <div className="flex h-[88vh] w-[min(1100px,94vw)] flex-col rounded-xl border border-line bg-bg-surface shadow-2xl">
         {/* ------------------------------------------------ header */}
         <div className="flex items-center gap-3 border-b border-line-soft px-5 py-3">
           <div className="text-[14px] font-medium text-ink">
