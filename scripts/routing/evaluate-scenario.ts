@@ -179,7 +179,8 @@ body{font:13px/1.45 -apple-system,system-ui,sans-serif;margin:16px;color:#111}
 @media (prefers-color-scheme: dark){body{background:#111;color:#ddd} td,th{border-color:#333!important} thead th{background:#1c1c1c!important} tr.bad{background:#3a1414!important}}
 h1{font-size:16px} .sub{color:#888;margin-bottom:12px}
 table{border-collapse:collapse;width:100%}
-th,td{border:1px solid #ccc;padding:4px 8px;text-align:left;vertical-align:top;white-space:nowrap}
+th,td{border:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+td:nth-child(6),td:nth-child(7),td:nth-child(8){white-space:nowrap}
 thead th{position:sticky;top:0;background:#f2f2f2}
 tr.bad{background:#ffe8e8}
 .bridge{font-weight:600}
