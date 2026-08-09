@@ -166,19 +166,21 @@ check("conservative policy: the blanket rule rides ON the machinery — Monday, 
   assert.strictEqual(v.violations.length, 0) // law still proves the seam
 })
 
-check("REQUESTED same-day flip under [10,14]: 21-day seam, one bridge splits it 11+10 — healed", () => {
-  // A same-day parity flip's gaps are 7+14k by arithmetic: 7 is EARLY
-  // (cannot un-serve a pool), 21 is LATE but bridgeable. The planner
-  // prefers the bridgeable overshoot: anchor Tue 09-01, one free visit
-  // ~midseam, every gap inside the window.
+check("same-day flip: the CUT next-period visit returns as the bridge rider (Carter's Gage mechanics)", () => {
+  // Served Tue 08-11 (cycle through 08-23). The flip's new parity starts
+  // 09-01; next-period 08-25 is CUT by EndsOn — and comes back as the
+  // free bridge rider on the SAME date. Two-stream law: max gaps 14+7
+  // (all visits) hold; min gap 21 (paid only — 08-11 -> 09-01) holds;
+  // the 7-day gap after a FREE visit is legal because the minimum
+  // protects the paid cadence, not our generosity.
   const [v] = planner.plan([weekly({
     cadence: { kind: "biweekly" },
     from: [{ weekday: 2, techId: "old-tech" }], to: [{ weekday: 2, techId: "old-tech" }],
     lastServed: "2026-08-11", anchorShiftWeeks: 1,
   })], ctx())
   assert.strictEqual(v.anchorDate, "2026-09-01")
-  assert.strictEqual(v.bridges.length, 1)
-  assert.deepStrictEqual(v.timeline.slice(0, 3), ["2026-08-11", v.bridges[0].date, "2026-09-01"])
+  assert.deepStrictEqual(v.bridges, [{ date: "2026-08-25", techId: "old-tech" }])
+  assert.deepStrictEqual(v.timeline.slice(0, 3), ["2026-08-11", "2026-08-25", "2026-09-01"])
   assert.strictEqual(v.violations.length, 0)
 })
 
@@ -199,20 +201,21 @@ check("REQUESTED flip that cannot fit the window: scheduled at nearest target-pa
   assert.strictEqual(v.violations[0].bound, "late")
 })
 
-check("BRIDGE VISITS: a day+parity move's 24-day seam splits 12+12 — one free visit, healed", () => {
+check("PERIOD-CLEAR beats the bridge: the scheduled 08-11 visit fills the seam — no freebie needed", () => {
   // biweekly Tue -> Fri WITH a parity flip, last served Tue 07-28, cursor
-  // Mon 08-10. Earliest target-parity Friday: 08-21 (gap 24 > 14). One
-  // bridge at the midpoint (08-09, clamped to the cursor 08-10) splits
-  // the seam 13 + 11 — both inside [10,14]; old tech serves it.
+  // Mon 08-10. Under the old cut-law this needed a free bridge; now the
+  // old pattern's SCHEDULED Tue 08-11 clears (it was owed anyway) and
+  // anchors the seam: 08-11 -> Fri 08-21 = 10 days, in window. Zero
+  // bridges, zero deletions, zero violations.
   const [v] = planner.plan([weekly({
     cadence: { kind: "biweekly" },
     from: [{ weekday: 2, techId: "old-tech" }], to: [{ weekday: 5, techId: "new-tech" }],
     lastServed: "2026-07-28", anchorShiftWeeks: 1,
   })], ctx({ today: "2026-08-10" }))
   assert.strictEqual(v.anchorDate, "2026-08-21")
-  assert.strictEqual(v.bridges.length, 1)
-  assert.ok(v.bridges[0].date >= "2026-08-10" && v.bridges[0].techId === "old-tech")
-  assert.strictEqual(v.violations.length, 0) // the bridge heals the law
+  assert.deepStrictEqual(v.bridges, [])
+  assert.deepStrictEqual(v.timeline.slice(0, 3), ["2026-07-28", "2026-08-11", "2026-08-21"])
+  assert.strictEqual(v.violations.length, 0)
 })
 
 check("bridges only when they help: an unbridgeable seam keeps its LOUD violation", () => {

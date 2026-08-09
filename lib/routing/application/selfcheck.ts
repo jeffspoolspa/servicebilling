@@ -88,32 +88,34 @@ async function main() {
   })
   check("typed stops: clean + chem_check on the SAME day converge", wr.action === "opened")
 
-  // the unseen-visit fix: EndsOn must cut pending OLD firings the plan
-  // never counted (planner reads completed visits only)
-  const { oldTaskEndsOn } = await import("./change-arrangement")
+  // PERIOD-CLEAR (RULED): the current period's scheduled visit serves out
+  // and anchors the seam; only next-period firings are cut; nobody waits
+  // for Sunday to make the change.
+  const { periodClearEndsOn } = await import("./change-arrangement")
   {
-    // weekly Tuesday task, today Mon 08-10, new pattern starts Fri 08-14:
-    // the old task still fires Tue 08-11 — EndsOn must be 08-10, and the
-    // cut visit is SEEN
-    const cut = oldTaskEndsOn(
+    // weekly Tuesday task, today Mon 08-10, new pattern starts Mon 08-17:
+    // this week's Tue 08-11 CLEARS (EndsOn = Sunday 08-16); nothing cut
+    const pc = periodClearEndsOn(
       { cadence: { kind: "weekly", timesPerWeek: 1 }, weekdays: [2], anchorDate: null },
-      "2026-08-14", "2026-08-10",
+      "2026-08-17", "2026-08-10",
     )
-    check("pending old firing before newStartsOn is cut (EndsOn = day before it)",
-      cut.endsOn === "2026-08-10" && JSON.stringify(cut.cutVisits) === JSON.stringify(["2026-08-11"]))
-    // no pending firing between: ceiling applies (newStartsOn - 1)
-    const clean = oldTaskEndsOn(
+    check("current period's visit clears; EndsOn = its Sunday",
+      pc.endsOn === "2026-08-16" && JSON.stringify(pc.clearedVisits) === JSON.stringify(["2026-08-11"]) && pc.cutVisits.length === 0)
+    // new pattern starts two weeks out: this week clears, NEXT week's cut
+    const far = periodClearEndsOn(
+      { cadence: { kind: "weekly", timesPerWeek: 1 }, weekdays: [2], anchorDate: null },
+      "2026-08-24", "2026-08-10",
+    )
+    check("next-period firings are cut (the change is a new period)",
+      far.endsOn === "2026-08-16" && JSON.stringify(far.clearedVisits) === JSON.stringify(["2026-08-11"]) &&
+      JSON.stringify(far.cutVisits) === JSON.stringify(["2026-08-18"]))
+    // no pending firing before the new start: ceiling applies
+    const clean = periodClearEndsOn(
       { cadence: { kind: "weekly", timesPerWeek: 1 }, weekdays: [2], anchorDate: null },
       "2026-08-14", "2026-08-11",
     )
     check("no pending firing: EndsOn is the ceiling newStartsOn-1",
-      clean.endsOn === "2026-08-13" && clean.cutVisits.length === 0)
-    // today's visit is never cut — the truck may already be rolling
-    const today = oldTaskEndsOn(
-      { cadence: { kind: "weekly", timesPerWeek: 1 }, weekdays: [1], anchorDate: null },
-      "2026-08-14", "2026-08-10", // Monday task, today Monday
-    )
-    check("today's own visit survives (cut starts tomorrow)", today.cutVisits.length === 0)
+      clean.endsOn === "2026-08-13" && clean.clearedVisits.length === 0 && clean.cutVisits.length === 0)
   }
 
   console.log(`\nall ${n} checks passed`)

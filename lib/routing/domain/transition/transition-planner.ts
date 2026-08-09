@@ -125,7 +125,7 @@ export class TransitionPlanner {
                  warnings: [] }
       }
       const effective = dated[i]!.effective
-      const { anchorDate, timeline, bridges, violations } = this.seam(m, effective)
+      const { anchorDate, timeline, bridges, violations } = this.seam(m, effective, ctx.today)
       return { quotaId: m.quotaId, validity: "valid", reasons: v.reasons,
                clusterId: root, effectiveDate: effective, anchorDate, timeline, bridges, violations,
                warnings: warnings.get(m.quotaId) ?? [] }
@@ -218,8 +218,14 @@ export class TransitionPlanner {
     return out
   }
 
-  /** Seam: derive the anchor (parity!) and prove the timeline against the law. */
-  private seam(m: MoveInput, effective: string): { anchorDate: string | null; timeline: string[]; bridges: { date: string; techId: string }[]; violations: GapViolation[] } {
+  /** Seam: derive the anchor (parity!) and prove the timeline against the law.
+   *
+   * PERIOD-CLEAR (RULED 2026-08-08): the old task's SCHEDULED visit in its
+   * current period is real service — it clears (EndsOn falls after it) and
+   * ANCHORS the seam, so a mid-week change neither deletes a visit the
+   * customer was owed nor buys a free bridge to fill a gap a scheduled
+   * visit already fills. Only next-period old firings are cut. */
+  private seam(m: MoveInput, effective: string, today: string): { anchorDate: string | null; timeline: string[]; bridges: { date: string; techId: string }[]; violations: GapViolation[] } {
     const bounds = gapBoundsFor(m.cadence)
     const weekdays = m.to.map((s) => s.weekday)
     // SERVICE CONTINUITY: a move that changes WHO but not WHEN (same day-set,
@@ -233,8 +239,47 @@ export class TransitionPlanner {
     const base = continuous ? addDays(m.lastServed!, 1) : effective
     const horizon = addDays(base, m.cadence.kind === "monthly" ? 70 : 42)
 
+    // the old pattern's still-scheduled visits (strictly future — a past
+    // uncompleted firing is a missed visit, not a pending one). Anchor
+    // snapped back to the nearest old stop weekday (Gage was served a day
+    // late; the phase belongs to the schedule, not the slippage).
+    const oldWeekdays = m.from.map((s) => s.weekday)
+    let pendingAll: string[] = []
+    if (m.lastServed && oldWeekdays.length) {
+      let oldAnchor = m.lastServed
+      for (let k = 0; k < 7; k++) {
+        const c = addDays(m.lastServed, -k)
+        if (oldWeekdays.includes(new Date(`${c}T00:00:00Z`).getUTCDay())) { oldAnchor = c; break }
+      }
+      pendingAll = projectFirings(
+        { cadence: m.cadence, weekdays: oldWeekdays, anchorDate: oldAnchor },
+        addDays(today, 1), horizon,
+      )
+    }
+    /** The CURRENT PERIOD = the old-anchor-aligned cycle containing TODAY
+     *  (weekly: this week; biweekly: this 2-week cycle). Its pending visit
+     *  clears — it was owed; next-period pendings are cut (the change is a
+     *  new period). Gage: today sits in his 08-03..08-16 cycle whose visit
+     *  was served 08-05, so 08-18 is NEXT period — cut, not cleared. */
+    const intervalWeeks = m.cadence.kind === "biweekly" ? 2 : m.cadence.kind === "monthly" ? 4 : 1
+    let periodEnd = sundayOfWeek(today)
+    if (intervalWeeks > 1 && m.lastServed) {
+      let oldAnchor = m.lastServed
+      for (let k = 0; k < 7; k++) {
+        const c = addDays(m.lastServed, -k)
+        if (oldWeekdays.includes(new Date(`${c}T00:00:00Z`).getUTCDay())) { oldAnchor = c; break }
+      }
+      const off = ((weeksBetween(mondayOf(oldAnchor), mondayOf(today)) % intervalWeeks) + intervalWeeks) % intervalWeeks
+      periodEnd = addDays(sundayOfWeek(today), (intervalWeeks - 1 - off) * 7)
+    }
+    const clearedFor = (firstNew: string): string[] =>
+      pendingAll.filter((d) => d < firstNew && d <= periodEnd)
+    const seamLastFor = (firstNew: string): string => {
+      const c = clearedFor(firstNew)
+      return c.length ? c[c.length - 1] : m.lastServed!
+    }
+
     let anchorDate: string | null = null
-    const anchorViolations: GapViolation[] = []
     if (m.cadence.kind !== "weekly") {
       const interval = m.cadence.kind === "biweekly" ? 2 : 4
       if (m.anchorShiftWeeks !== undefined && m.lastServed) {
@@ -254,19 +299,11 @@ export class TransitionPlanner {
           if (!weekdays.includes(new Date(`${candidate}T00:00:00Z`).getUTCDay())) continue
           if (!targetParity(candidate)) continue
           firstAny = firstAny ?? candidate
-          const gap = daysBetween(m.lastServed, candidate)
+          const gap = daysBetween(seamLastFor(candidate), candidate)
           if (gap >= bounds.loDays && gap <= bounds.hiDays) { anchorDate = candidate; break }
           if (gap >= bounds.loDays && !firstBridgeable) firstBridgeable = candidate
         }
-        const fallback = anchorDate ?? firstBridgeable ?? firstAny
-        if (!anchorDate && fallback) {
-          anchorDate = fallback
-          anchorViolations.push({
-            bound: daysBetween(m.lastServed, fallback) > bounds.hiDays ? "late" : "early",
-            fromDate: m.lastServed, toDate: fallback,
-            gapDays: daysBetween(m.lastServed, fallback),
-          })
-        }
+        if (!anchorDate) anchorDate = firstBridgeable ?? firstAny
       } else {
         // no request: derive the phase whose first firing best honors the
         // ideal gap (day moves that incidentally rephase)
@@ -274,7 +311,7 @@ export class TransitionPlanner {
         for (let offset = 0; offset < (m.cadence.kind === "biweekly" ? 14 : 28); offset++) {
           const candidate = addDays(base, offset)
           if (!weekdays.includes(new Date(`${candidate}T00:00:00Z`).getUTCDay())) continue
-          const gap = m.lastServed ? daysBetween(m.lastServed, candidate) : bounds.idealDays
+          const gap = m.lastServed ? daysBetween(seamLastFor(candidate), candidate) : bounds.idealDays
           if (gap < bounds.loDays || gap > bounds.hiDays) continue
           const score = Math.abs(gap - bounds.idealDays)
           if (!best || score < best.score) best = { anchor: candidate, score }
@@ -285,45 +322,73 @@ export class TransitionPlanner {
 
     const startFrom = m.lastServed && m.lastServed >= base ? addDays(m.lastServed, 1) : base
     // the new phase BEGINS at the anchor (the superseding task's StartsOn);
-    // same-phase dates before it belong to no task and must not project
-    // (found live: a requested flip emitted anchor-14d and flagged a
-    // phantom 6-day gap)
-    const projFrom = anchorDate && anchorDate > startFrom ? anchorDate : startFrom
+    // same-phase dates before it belong to no task and must not project.
+    // For weekly, the first new firing also honors the lo-gap from the
+    // seam anchor: a cleared Thursday pending pushes a Thu->Fri move's
+    // first Friday to NEXT week instead of double-serving this one.
+    let projFrom = anchorDate && anchorDate > startFrom ? anchorDate : startFrom
+    if (m.cadence.kind === "weekly" && m.lastServed) {
+      const probe = projectFirings({ cadence: m.cadence, weekdays, anchorDate }, projFrom, horizon)
+      if (probe.length) {
+        const seamL = seamLastFor(probe[0])
+        const minStart = addDays(seamL, Math.ceil(bounds.loDays))
+        if (minStart > projFrom) projFrom = minStart
+      }
+    }
     const firings = projectFirings(
       { cadence: m.cadence, weekdays, anchorDate }, projFrom, horizon,
     ).slice(0, 5)
-    let timeline = [...(m.lastServed ? [m.lastServed] : []), ...firings]
-    let violations = [...anchorViolations, ...checkCadenceLaw(timeline, bounds)]
+    const cleared = firings.length ? clearedFor(firings[0]) : []
+    // THE TWO-STREAM LAW (RULED 2026-08-08): the MINIMUM gap protects the
+    // customer's PAID cadence — free bridge visits are exempt from it. The
+    // MAXIMUM gap protects service coverage — every visit counts,
+    // bridges included. So: min over the paid stream, max over the full
+    // stream.
+    const paid = [...(m.lastServed ? [m.lastServed] : []), ...cleared, ...firings]
+    const lawOver = (paidT: string[], allT: string[]): GapViolation[] => [
+      ...checkCadenceLaw(paidT, bounds).filter((v) => v.bound === "early"),
+      ...checkCadenceLaw(allT, bounds).filter((v) => v.bound === "late"),
+    ]
+    let timeline = paid
+    let violations = lawOver(paid, paid)
     let bridges: { date: string; techId: string }[] = []
 
-    // BRIDGE VISITS: a late-gap seam is healed by free one-off visits that
-    // SPLIT the seam into legal pieces — one more of the customer's
-    // previous rhythm, timed so every gap lands inside [lo,hi] (a same-day
-    // parity flip's 21-day seam becomes 10+11; the old-phase +14 repeat
-    // would leave an illegal 7-day tail under the tightened bounds).
-    // Old stop's tech serves them. Adopted only when they strictly reduce
-    // violations; residual violations stay loud.
+    // BRIDGE VISITS: the CUT next-period visits come back as free riders —
+    // "one more of their previous visit", same dates the old pattern would
+    // have served (Gage: the deleted 08-18 IS the bridge). Old stop's tech
+    // serves them. Adopted only when they strictly reduce violations;
+    // residual violations stay loud. Fallback when no old-phase date fits:
+    // split the seam evenly.
     if (violations.some((v) => v.bound === "late") && m.lastServed && firings.length) {
-      const seamDays = daysBetween(m.lastServed, firings[0])
-      for (let pieces = 2; pieces <= 5; pieces++) {
-        if (seamDays < pieces * bounds.loDays || seamDays > pieces * bounds.hiDays) continue
-        const positions: string[] = []
-        for (let i = 1; i < pieces; i++) {
-          let d = addDays(m.lastServed, Math.round((seamDays * i) / pieces))
-          if (d < base) d = base // never schedule the past
-          positions.push(d)
+      const techOf = (d: string) =>
+        m.from.find((s) => s.weekday === new Date(`${d}T00:00:00Z`).getUTCDay())?.techId ?? m.from[0].techId
+      const adopt = (dates: string[]): boolean => {
+        if (!dates.length) return false
+        const allT = [...paid, ...dates].sort()
+        const v2 = lawOver(paid, allT)
+        if (v2.length < violations.length) {
+          bridges = dates.map((date) => ({ date, techId: techOf(date) }))
+          timeline = allT
+          violations = v2
+          return true
         }
-        const uniq = [...new Set(positions)].filter((d) => d < firings[0])
-        if (!uniq.length) continue
-        const techOf = (d: string) =>
-          m.from.find((s) => s.weekday === new Date(`${d}T00:00:00Z`).getUTCDay())?.techId ?? m.from[0].techId
-        const bridged = [m.lastServed, ...uniq, ...firings]
-        const bridgedViolations = checkCadenceLaw(bridged, bounds)
-        if (bridgedViolations.length < violations.length) {
-          bridges = uniq.map((date) => ({ date, techId: techOf(date) }))
-          timeline = bridged
-          violations = bridgedViolations
-          break
+        return false
+      }
+      // primary: the cut old-phase dates inside the seam
+      const oldPhase = pendingAll.filter((d) => d > periodEnd && d >= base && d < firings[0])
+      if (!adopt(oldPhase)) {
+        // fallback: even split of the seam
+        const seamAnchor = seamLastFor(firings[0])
+        const seamDays = daysBetween(seamAnchor, firings[0])
+        for (let pieces = 2; pieces <= 5; pieces++) {
+          if (seamDays > pieces * bounds.hiDays) continue
+          const positions: string[] = []
+          for (let i = 1; i < pieces; i++) {
+            let d = addDays(seamAnchor, Math.round((seamDays * i) / pieces))
+            if (d < base) d = base
+            positions.push(d)
+          }
+          if (adopt([...new Set(positions)].filter((d) => d < firings[0]))) break
         }
       }
     }
@@ -340,6 +405,12 @@ const nextMonday = (isoDate: string): string => {
 const addDays = (isoDate: string, n: number): string => {
   const d = new Date(`${isoDate}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+const sundayOfWeek = (isoDate: string): string => {
+  const d = new Date(`${mondayOf(isoDate)}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 6)
   return d.toISOString().slice(0, 10)
 }
 

@@ -86,8 +86,11 @@ async function main() {
   })
 
   console.log(`plan: ${report.plan}${report.newStartsOn ? `  newStartsOn: ${report.newStartsOn}` : ""}  recorded: ${report.recorded}`)
+  if (report.clearedVisits.length) {
+    console.log(`CLEARS (current period serves out before EndsOn — the seam anchors on these): ${report.clearedVisits.join(", ")}`)
+  }
   if (report.cutVisits.length) {
-    console.log(`CUT (pending old-task visits the plan excluded — EndsOn placed before them): ${report.cutVisits.join(", ")}`)
+    console.log(`CUT (next-period old visits — the change takes effect as a new period): ${report.cutVisits.join(", ")}`)
   }
   for (const e of report.echoes) {
     console.log(`\n── ${e.op.why} ──`)
