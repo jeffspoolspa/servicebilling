@@ -36,25 +36,29 @@ with its in-memory-store selfcheck beside it.
    LOUDLY (the backfill lost 305 tasks to a silent cap on 2026-08-08 —
    never again). Batch external fetches through one warm session.
 
-## Hosts — where a sentence runs (RULED 2026-08-08)
+## Hosts — where a sentence runs (RULED 2026-08-08, corrected same day)
 
-The sentence is runtime-neutral (ports only); the HOST supplies adapters:
+THE APPLICATION LIVES IN ONE PLACE. Business logic is never duplicated
+onto a second deploy target — no bundles of lib/ shipped to Windmill
+(VETOED: two sources of truth with a build step between them).
 
 - **Attended one-shot** -> a `scripts/` harness the operator watches
   (dry-by-default; Carter arms live).
-- **Standing drainer / cadence** -> an esbuild BUNDLE deployed as a
-  Windmill script from the same commit (generated, never hand-edited).
-  One process: Postgres queue rows claimed directly, ION session held
-  in-process (lib functions, not REST jobs), echoes written, row
-  stamped. Zero cross-service hops; one failure surface.
-- **Vercel routes** -> UI-facing reads and command STAGING only — never
-  in the write-execution path (function ceilings + a second failure
-  surface inside every external write).
+- **Standing drainer / cadence** -> the APP's host (Vercel cron/route)
+  claiming Postgres queue rows and talking to external systems DIRECTLY
+  through gateway adapters. ION after login is plain HTTP: the app
+  reads the stored session and does form GET/POST in-process — no
+  per-op Windmill jobs.
+- **Windmill's role shrinks to what its workers uniquely provide**: the
+  chromium session MINTER (sole minter, ADR 012) publishing the session
+  to a shared store, plus legacy ingestion flows until strangled. A
+  stale-session detection calls the minter webhook and retries.
 
 Queues are Postgres tables with status columns (queue in, drainer
 through, events out — ADR 008); never an external broker: state lives
 in tables, facts in the stream, everything level-triggered and
-resumable. Hop count matters less than failure-surface count per move.
+resumable. Failure surfaces per move, not hop counts, drive the shape —
+and one codebase beats both.
 
 ## Non-negotiable conventions
 
