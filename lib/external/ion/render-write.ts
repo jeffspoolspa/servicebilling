@@ -104,3 +104,42 @@ export function renderWrites(
   }
   return [endOld, createNew]
 }
+
+/** ION's ServiceRepeat option ids — captured live 2026-08-08 (closed;
+ *  probe_repeat_options re-reads them if ION ever changes the list). */
+export const SERVICE_REPEAT = {
+  daily: "1", weekly: "2", biweekly: "3", monthly: "4",
+} as const
+
+/** QUALITY CONTROL @ $0.00 — the no-charge service type (data-grounded). */
+export const QC_SERVICE_TYPE_ID = "1271674"
+
+/**
+ * renderBridgeOp — a BRIDGE VISIT as ION spells it (RULED 2026-08-08):
+ * a DAILY task whose StartsOn = EndsOn = the bridge date — exactly one
+ * generated visit, then it ends itself. Service type QUALITY CONTROL
+ * (no charge); the incoming tech serves it. Fields clone the main
+ * task's rawFields so every hidden input rides along.
+ */
+export function renderBridgeOp(
+  form: IonTaskForm,
+  bridge: { date: string; techId: string },
+): WriteOp {
+  const fields: Record<string, string> = { ...form.rawFields }
+  delete fields["EventID"]
+  for (let d = 1; d <= 7; d++) delete fields[`day${d}`]
+  const weekday = new Date(`${bridge.date}T00:00:00Z`).getUTCDay()
+  fields[dayField(weekday)] = bridge.techId
+  fields["AssignedTo"] = bridge.techId
+  fields["ServiceRepeat"] = SERVICE_REPEAT.daily
+  fields["ServiceType"] = QC_SERVICE_TYPE_ID
+  fields["StartsOn"] = bridge.date
+  fields["EndsOn"] = bridge.date
+  fields["itemcost"] = ""
+  fields["tasknote"] = "Transition bridge visit — no charge (auto)"
+  return {
+    op: "create", ionTaskId: null, ionCustId: form.customerId,
+    changes: { StartsOn: bridge.date, EndsOn: bridge.date }, fields,
+    why: `bridge rider: free QC visit ${bridge.date} (daily, one-day period)`,
+  }
+}

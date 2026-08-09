@@ -282,7 +282,7 @@ check("programOf: the closed service-type decode — known labels classify, stra
   assert.ok(!stranger.ok && stranger.failed.includes("MYSTERY TYPE"))
 })
 
-import { renderWrites, ionDate } from "./render-write"
+import { renderWrites, ionDate, renderBridgeOp, SERVICE_REPEAT, QC_SERVICE_TYPE_ID } from "./render-write"
 
 check("renderWrites: amend = tech values onto day fields, nothing else", () => {
   const f = form() // weekly, dayTechs from the base fixture
@@ -306,6 +306,18 @@ check("renderWrites: supersede = EndsOn old at start-1 + create with StartsOn, E
   assert.strictEqual(ops[1].fields!["StartsOn"], "2026-08-12")
   assert.strictEqual(ops[1].fields!["day4"], "T-NEW") // Wednesday = day4
   for (let d = 1; d <= 7; d++) if (d !== 4) assert.ok(!(`day${d}` in ops[1].fields!))
+})
+
+check("renderBridgeOp: a daily one-day no-charge QC task on the bridge date, incoming tech", () => {
+  const op = renderBridgeOp(form(), { date: "2026-08-18", techId: "caleb" })
+  assert.strictEqual(op.op, "create")
+  assert.ok(!("EventID" in op.fields!))
+  assert.strictEqual(op.fields!["ServiceRepeat"], SERVICE_REPEAT.daily)
+  assert.strictEqual(op.fields!["ServiceType"], QC_SERVICE_TYPE_ID)
+  assert.strictEqual(op.fields!["StartsOn"], "2026-08-18")
+  assert.strictEqual(op.fields!["EndsOn"], "2026-08-18")
+  assert.strictEqual(op.fields!["day3"], "caleb") // 08-18 is a Tuesday
+  assert.strictEqual(op.fields!["itemcost"], "")
 })
 
 console.log(`translation selfcheck: ${n} checks passed`)
