@@ -66,15 +66,16 @@ export interface MoveVerdict {
   readonly anchorDate: string | null
   readonly timeline: string[] // lastServed ++ bridges ++ first projected firings
   /**
-   * BRIDGE VISITS (RULED 2026-08-08): when the seam gap would break the
-   * max, the customer keeps being served ON THE OLD PATTERN — free,
-   * QC-style one-off visits at the old phase's firing dates — until the
-   * new pattern begins. Realized as no-charge one-time tasks riding the
-   * agreement (the existing QC-rider shape); the OLD stop's tech serves
-   * them (they know the pool). Only emitted when they actually heal or
-   * reduce the violation; a residual violation stays LOUD.
+   * BRIDGE PROPOSALS (RULED 2026-08-08, revised same day): when the seam
+   * would break the max gap, propose free QC-rider visits ON THE NEW
+   * ROUTE — the new day and new tech, one period-week before the first
+   * new visit (newStartsOn - 7k). OPTIONAL, per-violation, user-ruled:
+   * defaultAccept is true for biweekly (the common flip seam) and false
+   * otherwise (the proposal is the suggestion; the user decides). When
+   * defaultAccept holds, the verdict's timeline/violations include the
+   * bridge; declining re-opens the violation.
    */
-  readonly bridges: { date: string; techId: string }[]
+  readonly bridges: { date: string; techId: string; defaultAccept: boolean }[]
   readonly violations: GapViolation[]
   readonly warnings: string[]
 }
@@ -225,7 +226,7 @@ export class TransitionPlanner {
    * ANCHORS the seam, so a mid-week change neither deletes a visit the
    * customer was owed nor buys a free bridge to fill a gap a scheduled
    * visit already fills. Only next-period old firings are cut. */
-  private seam(m: MoveInput, effective: string, today: string): { anchorDate: string | null; timeline: string[]; bridges: { date: string; techId: string }[]; violations: GapViolation[] } {
+  private seam(m: MoveInput, effective: string, today: string): { anchorDate: string | null; timeline: string[]; bridges: { date: string; techId: string; defaultAccept: boolean }[]; violations: GapViolation[] } {
     const bounds = gapBoundsFor(m.cadence)
     const weekdays = m.to.map((s) => s.weekday)
     // SERVICE CONTINUITY: a move that changes WHO but not WHEN (same day-set,
@@ -351,44 +352,38 @@ export class TransitionPlanner {
     ]
     let timeline = paid
     let violations = lawOver(paid, paid)
-    let bridges: { date: string; techId: string }[] = []
+    let bridges: { date: string; techId: string; defaultAccept: boolean }[] = []
 
-    // BRIDGE VISITS: the CUT next-period visits come back as free riders —
-    // "one more of their previous visit", same dates the old pattern would
-    // have served (Gage: the deleted 08-18 IS the bridge). Old stop's tech
-    // serves them. Adopted only when they strictly reduce violations;
-    // residual violations stay loud. Fallback when no old-phase date fits:
-    // split the seam evenly.
+    // BRIDGE PROPOSALS: the new ROUTE serves the seam — same weekday and
+    // tech as the first new visit, one week earlier (newStartsOn - 7k,
+    // chained until the seam gap closes). Free QC riders; the new tech
+    // meets the pool early. Default YES for biweekly, user-ruled
+    // otherwise (the proposal rides the verdict as the suggestion).
     if (violations.some((v) => v.bound === "late") && m.lastServed && firings.length) {
-      const techOf = (d: string) =>
-        m.from.find((s) => s.weekday === new Date(`${d}T00:00:00Z`).getUTCDay())?.techId ?? m.from[0].techId
-      const adopt = (dates: string[]): boolean => {
-        if (!dates.length) return false
+      const firstNew = firings[0]
+      const newWeekday = new Date(`${firstNew}T00:00:00Z`).getUTCDay()
+      const newTech = m.to.find((s) => s.weekday === newWeekday)?.techId ?? m.to[0].techId
+      const seamAnchor = seamLastFor(firstNew)
+      const dates: string[] = []
+      for (let k = 1; k <= 5; k++) {
+        const d = addDays(firstNew, -7 * k)
+        if (d < base || d <= seamAnchor) break
+        dates.unshift(d)
+        if (daysBetween(seamAnchor, d) <= bounds.hiDays) break
+      }
+      if (dates.length) {
         const allT = [...paid, ...dates].sort()
         const v2 = lawOver(paid, allT)
         if (v2.length < violations.length) {
-          bridges = dates.map((date) => ({ date, techId: techOf(date) }))
-          timeline = allT
-          violations = v2
-          return true
-        }
-        return false
-      }
-      // primary: the cut old-phase dates inside the seam
-      const oldPhase = pendingAll.filter((d) => d > periodEnd && d >= base && d < firings[0])
-      if (!adopt(oldPhase)) {
-        // fallback: even split of the seam
-        const seamAnchor = seamLastFor(firings[0])
-        const seamDays = daysBetween(seamAnchor, firings[0])
-        for (let pieces = 2; pieces <= 5; pieces++) {
-          if (seamDays > pieces * bounds.hiDays) continue
-          const positions: string[] = []
-          for (let i = 1; i < pieces; i++) {
-            let d = addDays(seamAnchor, Math.round((seamDays * i) / pieces))
-            if (d < base) d = base
-            positions.push(d)
+          const defaultAccept = m.cadence.kind === "biweekly"
+          bridges = dates.map((date) => ({ date, techId: newTech, defaultAccept }))
+          if (defaultAccept) {
+            // accepted by default: the verdict reflects the bridged plan
+            timeline = allT
+            violations = v2
           }
-          if (adopt([...new Set(positions)].filter((d) => d < firings[0]))) break
+          // defaultAccept=false: violation stays LOUD; the proposal is the
+          // attached suggestion awaiting the user's ruling
         }
       }
     }

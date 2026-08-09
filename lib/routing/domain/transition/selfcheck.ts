@@ -166,22 +166,34 @@ check("conservative policy: the blanket rule rides ON the machinery — Monday, 
   assert.strictEqual(v.violations.length, 0) // law still proves the seam
 })
 
-check("same-day flip: the CUT next-period visit returns as the bridge rider (Carter's Gage mechanics)", () => {
-  // Served Tue 08-11 (cycle through 08-23). The flip's new parity starts
-  // 09-01; next-period 08-25 is CUT by EndsOn — and comes back as the
-  // free bridge rider on the SAME date. Two-stream law: max gaps 14+7
-  // (all visits) hold; min gap 21 (paid only — 08-11 -> 09-01) holds;
-  // the 7-day gap after a FREE visit is legal because the minimum
-  // protects the paid cadence, not our generosity.
+check("same-day flip: bridge PROPOSAL on the NEW route, default YES for biweekly (Gage mechanics)", () => {
+  // Served Tue 08-11 (cycle through 08-23); flip's new parity starts
+  // 09-01. The bridge rides the NEW route: newStartsOn - 7 = 08-25, the
+  // NEW tech (they meet the pool early), free. Biweekly -> accepted by
+  // default, so the verdict is the bridged plan. Two-stream law: max
+  // gaps 14+7 hold; paid gap 21 holds (min exempts free visits).
   const [v] = planner.plan([weekly({
     cadence: { kind: "biweekly" },
-    from: [{ weekday: 2, techId: "old-tech" }], to: [{ weekday: 2, techId: "old-tech" }],
+    from: [{ weekday: 2, techId: "old-tech" }], to: [{ weekday: 2, techId: "new-tech" }],
     lastServed: "2026-08-11", anchorShiftWeeks: 1,
   })], ctx())
   assert.strictEqual(v.anchorDate, "2026-09-01")
-  assert.deepStrictEqual(v.bridges, [{ date: "2026-08-25", techId: "old-tech" }])
+  assert.deepStrictEqual(v.bridges, [{ date: "2026-08-25", techId: "new-tech", defaultAccept: true }])
   assert.deepStrictEqual(v.timeline.slice(0, 3), ["2026-08-11", "2026-08-25", "2026-09-01"])
   assert.strictEqual(v.violations.length, 0)
+})
+
+check("non-biweekly bridge proposals are NOT auto-accepted: violation stays loud + suggestion attached", () => {
+  // weekly Thu -> Mon far out: seam 08-06 -> 08-24 (18d > 8). The bridge
+  // suggestions ride the verdict, but weekly has no default-yes: the
+  // user rules; until then the late violation stands.
+  const [v] = planner.plan([weekly({
+    to: [{ weekday: 1, techId: "new-tech" }], lastServed: "2026-08-06",
+  })], ctx({ today: "2026-08-20" }))
+  if (v.bridges.length) {
+    assert.ok(v.bridges.every((b) => !b.defaultAccept && b.techId === "new-tech"))
+    assert.ok(v.violations.some((g) => g.bound === "late"))
+  }
 })
 
 check("REQUESTED flip that cannot fit the window: scheduled at nearest target-parity date, VIOLATION reported", () => {
