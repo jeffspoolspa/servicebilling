@@ -42,7 +42,7 @@ export interface PublicationStore {
     quotaId: string
     ionTaskId: string
     writeKind: string
-    status: "done" | "skipped_no_diff" | "failed" | "bridge_needs_probe" | "landed_unverified"
+    status: "done" | "skipped_no_diff" | "failed" | "bridge_needs_probe" | "landed_unverified" | "produced_no_change"
     ops: unknown[]
     echoes: unknown[]
     steps?: StepRecord[]
@@ -50,6 +50,9 @@ export interface PublicationStore {
     error?: string
   }): Promise<void>
   finish(publicationId: string, summary: Record<string, number>): Promise<void>
+  /** did an earlier publication of THIS scenario already land this task?
+   *  (tells a resume apart from a change we failed to express) */
+  alreadyLanded?(scenarioId: string, ionTaskId: string): Promise<boolean>
 }
 
 export interface PublishDeps {
@@ -80,7 +83,10 @@ export async function publishScenario(
   mode: "dry" | "live",
 ): Promise<PublishReport> {
   const pub = await deps.store.open(scenarioId, mode)
-  const summary: Record<string, number> = { done: 0, skipped_no_diff: 0, failed: 0, bridge_needs_probe: 0, landed_unverified: 0 }
+  const summary: Record<string, number> = {
+    done: 0, skipped_no_diff: 0, failed: 0, bridge_needs_probe: 0,
+    landed_unverified: 0, produced_no_change: 0,
+  }
 
   // publish-time refusal: the fresh evaluation must be CLEAN
   const neverValid = moves.filter((m) => m.verdict.validity === "never_valid")
@@ -117,8 +123,16 @@ export async function publishScenario(
       // Writes confirmed in ION while the floor does not yet say so are
       // landed_unverified — loud, never silently done, and never a lying
       // red failure on a landed write.
+      // NO OPS IS NOT SUCCESS (RULED 2026-08-09): on a RESUME, an empty
+      // diff means the move already landed — correct and silent. On a
+      // first pass it means we could not express the operator's intent
+      // (Marie Malone's parity flip rendered nothing and reported
+      // "published"). The ledger tells them apart: a move already
+      // recorded done in an earlier publication of this scenario is a
+      // resume; anything else is a change we LOST.
       const allCommitted = report.echoes.every((e) => e.committed)
-      const status = report.ops.length === 0 ? "skipped_no_diff"
+      const status = report.ops.length === 0
+        ? ((await deps.store.alreadyLanded?.(scenarioId, m.ionTaskId)) ? "skipped_no_diff" : "produced_no_change")
         : mode === "live" && !allCommitted ? "failed"
         : mode === "live" && !report.verified ? "landed_unverified"
         : "done"
@@ -126,7 +140,9 @@ export async function publishScenario(
       await deps.store.recordMove(pub.id, {
         quotaId: m.quotaId, ionTaskId: m.ionTaskId, writeKind: report.plan,
         status, ops: report.ops, echoes: report.echoes, steps: report.steps,
-        ...(status === "failed"
+        ...(status === "produced_no_change"
+          ? { error: "the requested change rendered NO ION operations — its intent did not survive translation (see steps: plan)" }
+          : status === "failed"
           ? { error: `halted at ${report.steps.find((st) => st.status === "failed")?.step ?? "an unverified op"} (see steps)` }
           : status === "landed_unverified"
             ? { error: `note: ION writes confirmed; floor not verified — ${note ?? report.steps.find((st) => st.status === "failed")?.step ?? "see steps"}` }

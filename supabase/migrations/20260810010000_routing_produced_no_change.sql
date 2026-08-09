@@ -1,0 +1,3 @@
+-- Applied via MCP 2026-08-09 as routing_publication_moves_produced_no_change.
+-- A requested change rendering NO ION operations is not success — on a first
+-- pass it means the intent did not survive translation. Definition in git.

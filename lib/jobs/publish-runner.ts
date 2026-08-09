@@ -90,6 +90,14 @@ export async function runPublish(scenarioId: string, opts: { live: boolean }): P
         if (facts.length) await sb.from("events").insert(facts)
       }
     },
+    async alreadyLanded(scenarioId, ionTaskId) {
+      const { data } = await rt.from("publications").select("id").eq("scenario_id", scenarioId).eq("mode", "live")
+      const ids = (data ?? []).map((p) => p.id)
+      if (!ids.length) return false
+      const { data: rows } = await rt.from("publication_moves")
+        .select("status").in("publication_id", ids).eq("ion_task_id", ionTaskId).eq("status", "done")
+      return (rows ?? []).length > 0
+    },
     async finish(id, summary) {
       await rt.from("publications").update({ finished_at: new Date().toISOString(), summary }).eq("id", id)
     },

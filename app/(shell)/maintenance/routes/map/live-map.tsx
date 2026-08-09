@@ -197,6 +197,10 @@ function publishToastFor(outcome: PublicationOutcome | null): string {
   const skipped = outcome.tally.skipped_no_diff ?? 0
   const failed = outcome.tally.failed ?? 0
   const bridges = outcome.bridgesPending
+  const lost = outcome.tally.produced_no_change ?? 0
+  if (lost > 0) {
+    return `${lost} change${lost === 1 ? "" : "s"} produced NO ION write — the intent did not survive translation. NOTHING was published for ${lost === 1 ? "it" : "them"}.`
+  }
   if (failed > 0) {
     const first = outcome.failures[0]
     return `${done} published, ${failed} FAILED${first?.ionTaskId ? ` (task ${first.ionTaskId}: ${first.error ?? "see ledger"})` : ""}`

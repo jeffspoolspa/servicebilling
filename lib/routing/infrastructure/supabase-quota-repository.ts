@@ -444,6 +444,7 @@ export class SupabaseQuotaRepository implements QuotaRepository {
         visitsThisPeriod: periodVisits.get(task.id) ?? 0,
         serviceMinutes: serviceMedians.get(task.id) ?? null,
         orderingConstraint: "none" as OrderingConstraint,
+        anchorStartsOn: task.starts_on ?? null,
         startWeek,
         endWeek: task.ends_on ? weekOf(new Date(task.ends_on)) : null,
       }

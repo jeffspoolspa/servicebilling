@@ -68,6 +68,10 @@ export interface Requirement {
    */
   readonly visitsThisPeriod?: number
   readonly orderingConstraint: OrderingConstraint
+  /** ION's StartsOn for this arrangement — the parity anchor as a DATE.
+   *  A never-served slice has no visit history but always has this, and
+   *  a parity flip needs it as its reference (2026-08-09). */
+  readonly anchorStartsOn?: string | null
   readonly startWeek: WeekIndex
   /** null means open-ended, which is the normal case. */
   readonly endWeek: WeekIndex | null

@@ -96,7 +96,12 @@ export async function buildScenarioMoves(sb: any, scenarioId: string, agr?: any)
     moves.push({
       quotaId, cadence, from, to,
       lastServed: lastServed.get(quotaId) ?? null,
-      scheduleAnchor: null,
+      // the slice's own anchor (ION's StartsOn). A never-served successor
+      // has no visit history, but it always has an anchor — without this a
+      // parity flip on a fresh task computed NO anchor date, rendered NO
+      // ops, and reported "published" for a change that did nothing
+      // (Marie Malone, 2026-08-09).
+      scheduleAnchor: quota.requirement.anchorStartsOn ?? null,
       ...(netShift !== 0 ? { anchorShiftWeeks: netShift } : {}),
     })
   }

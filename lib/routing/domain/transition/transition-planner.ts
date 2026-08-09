@@ -327,19 +327,22 @@ export class TransitionPlanner {
       pendingAll.filter((d) => d < firstNew && d <= periodEnd)
     const seamLastFor = (firstNew: string): string => {
       const c = clearedFor(firstNew)
-      return c.length ? c[c.length - 1] : m.lastServed!
+      return c.length ? c[c.length - 1] : (m.lastServed ?? m.scheduleAnchor ?? firstNew)
     }
 
     let anchorDate: string | null = null
     if (m.cadence.kind !== "weekly") {
       const interval = m.cadence.kind === "biweekly" ? 2 : 4
-      if (m.anchorShiftWeeks !== undefined && m.lastServed) {
+      // parity is measured from the last served week, or — for a slice
+      // with no history yet — from its own anchor (RULED 2026-08-09)
+      const parityRef = m.lastServed ?? m.scheduleAnchor ?? null
+      if (m.anchorShiftWeeks !== undefined && parityRef) {
         // REQUESTED shift: candidates are target-parity dates only, parity
         // measured relative to the last served week (epoch-free). Earliest
         // candidate inside the gap window wins; none inside = violation.
         const shift = ((m.anchorShiftWeeks % interval) + interval) % interval
         const targetParity = (date: string) =>
-          ((weeksBetween(mondayOf(m.lastServed!), mondayOf(date)) % interval) + interval) % interval === shift
+          ((weeksBetween(mondayOf(parityRef), mondayOf(date)) % interval) + interval) % interval === shift
         // fallback preference: the smallest gap >= lo (a LATE overshoot is
         // bridgeable with free visits; an EARLY undershoot is not — you
         // cannot un-serve a pool)
