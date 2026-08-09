@@ -28,8 +28,9 @@ const weekly = (over: Partial<MoveInput> = {}): MoveInput => ({
 
 /* --------------------------- cadence law ---------------------------------- */
 
-check("biweekly bounds are the RULED [6,19] (revised 2026-08-08: a day-late predecessor must not push a flip out two weeks)", () => {
-  assert.deepStrictEqual(gapBoundsFor({ kind: "biweekly" }), { loDays: 6, hiDays: 19, idealDays: 14 })
+check("bounds are the RULED tightened windows: biweekly [10,14], weekly [5,8] — bridges absorb the seams", () => {
+  assert.deepStrictEqual(gapBoundsFor({ kind: "biweekly" }), { loDays: 10, hiDays: 14, idealDays: 14 })
+  assert.deepStrictEqual(gapBoundsFor({ kind: "weekly", timesPerWeek: 1 }), { loDays: 5, hiDays: 8, idealDays: 7 })
 })
 
 check("the law reads one stream — the seam is just the first gap", () => {
@@ -154,7 +155,7 @@ check("A/B flip is VALID with a derived date — verdict and date are separate",
     lastServed: "2026-08-11", // just served — flip must wait out the gap
   })], ctx())
   assert.strictEqual(v.validity, "valid")
-  assert.ok(v.anchorDate! >= "2026-08-17") // >=6d after last served (RULED lo bound)
+  assert.ok(v.anchorDate! >= "2026-08-21") // >=10d after last served (RULED lo bound)
   assert.strictEqual(v.violations.length, 0)
 })
 
@@ -165,17 +166,19 @@ check("conservative policy: the blanket rule rides ON the machinery — Monday, 
   assert.strictEqual(v.violations.length, 0) // law still proves the seam
 })
 
-check("REQUESTED anchor flip: earliest opposite-parity date inside [6,19] wins", () => {
-  // biweekly Tuesday, last served Tue 2026-08-11 (week of 08-10). A
-  // requested flip (shift 1) must land in an opposite-parity week: Tue
-  // 08-18 (gap 7, in window) — NOT the same-parity 08-25 the old pattern
-  // would keep, and never a silent re-derivation.
+check("REQUESTED same-day flip under [10,14]: 21-day seam, one bridge splits it 11+10 — healed", () => {
+  // A same-day parity flip's gaps are 7+14k by arithmetic: 7 is EARLY
+  // (cannot un-serve a pool), 21 is LATE but bridgeable. The planner
+  // prefers the bridgeable overshoot: anchor Tue 09-01, one free visit
+  // ~midseam, every gap inside the window.
   const [v] = planner.plan([weekly({
     cadence: { kind: "biweekly" },
-    from: [{ weekday: 2, techId: "m" }], to: [{ weekday: 2, techId: "m" }],
+    from: [{ weekday: 2, techId: "old-tech" }], to: [{ weekday: 2, techId: "old-tech" }],
     lastServed: "2026-08-11", anchorShiftWeeks: 1,
   })], ctx())
-  assert.strictEqual(v.anchorDate, "2026-08-18")
+  assert.strictEqual(v.anchorDate, "2026-09-01")
+  assert.strictEqual(v.bridges.length, 1)
+  assert.deepStrictEqual(v.timeline.slice(0, 3), ["2026-08-11", v.bridges[0].date, "2026-09-01"])
   assert.strictEqual(v.violations.length, 0)
 })
 
@@ -196,19 +199,19 @@ check("REQUESTED flip that cannot fit the window: scheduled at nearest target-pa
   assert.strictEqual(v.violations[0].bound, "late")
 })
 
-check("BRIDGE VISITS: a late seam is healed by free old-pattern service until the new phase begins", () => {
+check("BRIDGE VISITS: a day+parity move's 24-day seam splits 12+12 — one free visit, healed", () => {
   // biweekly Tue -> Fri WITH a parity flip, last served Tue 07-28, cursor
-  // Mon 08-10. Earliest target-parity Friday is 08-21 (gap 24 > 19). The
-  // old phase still fires Tue 08-11 — a no-charge bridge splits the seam
-  // 14 + 10: healed, old tech serves it.
+  // Mon 08-10. Earliest target-parity Friday: 08-21 (gap 24 > 14). One
+  // bridge at the midpoint (08-09, clamped to the cursor 08-10) splits
+  // the seam 13 + 11 — both inside [10,14]; old tech serves it.
   const [v] = planner.plan([weekly({
     cadence: { kind: "biweekly" },
     from: [{ weekday: 2, techId: "old-tech" }], to: [{ weekday: 5, techId: "new-tech" }],
     lastServed: "2026-07-28", anchorShiftWeeks: 1,
   })], ctx({ today: "2026-08-10" }))
   assert.strictEqual(v.anchorDate, "2026-08-21")
-  assert.deepStrictEqual(v.bridges, [{ date: "2026-08-11", techId: "old-tech" }])
-  assert.deepStrictEqual(v.timeline.slice(0, 3), ["2026-07-28", "2026-08-11", "2026-08-21"])
+  assert.strictEqual(v.bridges.length, 1)
+  assert.ok(v.bridges[0].date >= "2026-08-10" && v.bridges[0].techId === "old-tech")
   assert.strictEqual(v.violations.length, 0) // the bridge heals the law
 })
 

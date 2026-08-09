@@ -24,10 +24,10 @@ export type CadenceKind =
   | { kind: "monthly" }
 
 export function gapBoundsFor(c: CadenceKind): GapBounds {
-  if (c.kind === "biweekly") return { loDays: 6, hiDays: 19, idealDays: 14 } // RULED (revised 2026-08-08)
+  if (c.kind === "biweekly") return { loDays: 10, hiDays: 14, idealDays: 14 } // RULED (tightened 2026-08-08: bridges absorb the seams)
   if (c.kind === "monthly") return { loDays: 24, hiDays: 32, idealDays: 28 } // provisional
   switch (c.timesPerWeek) {
-    case 1: return { loDays: 5, hiDays: 9, idealDays: 7 } // provisional
+    case 1: return { loDays: 5, hiDays: 8, idealDays: 7 } // RULED (tightened 2026-08-08)
     case 2: return { loDays: 2, hiDays: 5, idealDays: 3.5 } // provisional
     case 3: return { loDays: 1, hiDays: 4, idealDays: 2.3 } // provisional
     default: return { loDays: 1, hiDays: 2, idealDays: 1 } // 4x+ provisional

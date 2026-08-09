@@ -244,15 +244,21 @@ export class TransitionPlanner {
         const shift = ((m.anchorShiftWeeks % interval) + interval) % interval
         const targetParity = (date: string) =>
           ((weeksBetween(mondayOf(m.lastServed!), mondayOf(date)) % interval) + interval) % interval === shift
-        let fallback: string | null = null
-        for (let offset = 0; offset < interval * 14; offset++) {
+        // fallback preference: the smallest gap >= lo (a LATE overshoot is
+        // bridgeable with free visits; an EARLY undershoot is not — you
+        // cannot un-serve a pool)
+        let firstAny: string | null = null
+        let firstBridgeable: string | null = null
+        for (let offset = 0; offset < interval * 21; offset++) {
           const candidate = addDays(base, offset)
           if (!weekdays.includes(new Date(`${candidate}T00:00:00Z`).getUTCDay())) continue
           if (!targetParity(candidate)) continue
-          fallback = fallback ?? candidate
+          firstAny = firstAny ?? candidate
           const gap = daysBetween(m.lastServed, candidate)
           if (gap >= bounds.loDays && gap <= bounds.hiDays) { anchorDate = candidate; break }
+          if (gap >= bounds.loDays && !firstBridgeable) firstBridgeable = candidate
         }
+        const fallback = anchorDate ?? firstBridgeable ?? firstAny
         if (!anchorDate && fallback) {
           anchorDate = fallback
           anchorViolations.push({
@@ -290,25 +296,34 @@ export class TransitionPlanner {
     let violations = [...anchorViolations, ...checkCadenceLaw(timeline, bounds)]
     let bridges: { date: string; techId: string }[] = []
 
-    // BRIDGE VISITS: a late-gap seam is healed by serving the OLD pattern
-    // (free) until the new one begins — old-phase firings between the
-    // cursor and the first new firing, old stop's tech. Adopted only when
-    // they strictly reduce the violations; anything residual stays loud.
+    // BRIDGE VISITS: a late-gap seam is healed by free one-off visits that
+    // SPLIT the seam into legal pieces — one more of the customer's
+    // previous rhythm, timed so every gap lands inside [lo,hi] (a same-day
+    // parity flip's 21-day seam becomes 10+11; the old-phase +14 repeat
+    // would leave an illegal 7-day tail under the tightened bounds).
+    // Old stop's tech serves them. Adopted only when they strictly reduce
+    // violations; residual violations stay loud.
     if (violations.some((v) => v.bound === "late") && m.lastServed && firings.length) {
-      const oldWeekdays = m.from.map((s) => s.weekday)
-      const candidates = projectFirings(
-        { cadence: m.cadence, weekdays: oldWeekdays, anchorDate: m.lastServed },
-        base, addDays(firings[0], -1),
-      )
-      if (candidates.length) {
+      const seamDays = daysBetween(m.lastServed, firings[0])
+      for (let pieces = 2; pieces <= 5; pieces++) {
+        if (seamDays < pieces * bounds.loDays || seamDays > pieces * bounds.hiDays) continue
+        const positions: string[] = []
+        for (let i = 1; i < pieces; i++) {
+          let d = addDays(m.lastServed, Math.round((seamDays * i) / pieces))
+          if (d < base) d = base // never schedule the past
+          positions.push(d)
+        }
+        const uniq = [...new Set(positions)].filter((d) => d < firings[0])
+        if (!uniq.length) continue
         const techOf = (d: string) =>
           m.from.find((s) => s.weekday === new Date(`${d}T00:00:00Z`).getUTCDay())?.techId ?? m.from[0].techId
-        const bridged = [...(m.lastServed ? [m.lastServed] : []), ...candidates, ...firings]
-        const bridgedViolations = [...anchorViolations.filter((v) => false), ...checkCadenceLaw(bridged, bounds)]
+        const bridged = [m.lastServed, ...uniq, ...firings]
+        const bridgedViolations = checkCadenceLaw(bridged, bounds)
         if (bridgedViolations.length < violations.length) {
-          bridges = candidates.map((date) => ({ date, techId: techOf(date) }))
+          bridges = uniq.map((date) => ({ date, techId: techOf(date) }))
           timeline = bridged
           violations = bridgedViolations
+          break
         }
       }
     }
