@@ -4,8 +4,8 @@
  * (keeper = highest-id task matching the target start+days), then:
  *   - AMEND the keeper's AssignedTo to the target tech (idempotent —
  *     no-op where already correct; fixes every ELOPER-cloned successor)
- *   - END-DATE every phantom/duplicate with EndsOn = StartsOn - 1 day
- *     (never generates a visit; leaves active surfaces immediately)
+ *   - DELETE every phantom/duplicate via the task list's own mechanic
+ *     (RULED: delete, not end-date; ION refuses deletes once served)
  *   npx tsx scripts/routing/repair-publication-successors.ts <healPublicationId> [--live]
  */
 import { createClient } from "@supabase/supabase-js"
@@ -50,7 +50,7 @@ async function main() {
     .eq("write_kind", "supersede").eq("status", "done")
   if (error) throw error
 
-  const stats = { amended: 0, amend_noop_or_dry: 0, phantoms_ended: 0, skipped: 0 }
+  const stats = { amended: 0, amend_noop_or_dry: 0, phantoms_deleted: 0, skipped: 0 }
   for (const row of rows ?? []) {
     const createOp = (row.ops as { op: string; fields?: Record<string, string>; ionCustId: string }[]).find((o) => o.op === "create")
     if (!createOp?.fields) continue
@@ -80,12 +80,11 @@ async function main() {
     console.log(`  keeper ${keeper.ionTaskId}: AssignedTo->${wantTech} ${live ? (amend.committed ? "OK" : "FAILED") : "(dry)"}`)
 
     for (const ph of phantoms) {
-      const end = await wmJob("f/ION/api/write_task", {
-        op: "update", ionTaskId: ph.ionTaskId, ionCustId: createOp.ionCustId,
-        changes: { EndsOn: mmdd(ph.taskStarts, -1) }, dry_run: !live,
+      const del = await wmJob("f/ION/api/write_task", {
+        op: "delete", ionTaskId: ph.ionTaskId, ionCustId: createOp.ionCustId, dry_run: !live,
       })
-      if (live && end.committed) stats.phantoms_ended++
-      console.log(`  phantom ${ph.ionTaskId}: EndsOn ${mmdd(ph.taskStarts, -1)} ${live ? (end.committed ? "ENDED" : "FAILED") : "(dry)"}`)
+      if (live && del.committed) stats.phantoms_deleted++
+      console.log(`  phantom ${ph.ionTaskId}: DELETE ${live ? (del.committed ? "DELETED" : `FAILED (still_listed=${del.still_listed})`) : "(dry)"}`)
     }
   }
   console.log(stats)
