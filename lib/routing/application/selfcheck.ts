@@ -124,10 +124,12 @@ async function main() {
     const rows: { status: string; writeKind: string }[] = []
     let refused: string | null = null
     let opened = 0
+    let landedBefore = true
     const store = {
       async open() { return { id: "pub-1" } },
       async refuse(_id: string, reason: string) { refused = reason },
       async openMove() { opened++ },
+      async alreadyLanded() { return landedBefore },
       async noteSteps() {},
       async recordMove(_id: string, row: { status: string; writeKind: string }) { rows.push(row) },
       async finish() {},
@@ -172,8 +174,17 @@ async function main() {
       ops: [] as never, echoes: [] as never, recorded: false,
       steps: [] as never[], verified: false,
     })
+    landedBefore = true // this task landed in an earlier publication
     const r4 = await publishScenario({ store, change: changeNoDiff } as never, "s1", [mv()] as never, "live")
     check("resume: no-diff move skips itself (level-triggered publish)", r4.summary.skipped_no_diff === 1)
+
+    // a no-diff move that NEVER landed is a change we lost, not a resume
+    landedBefore = false
+    rows.length = 0
+    const r4b = await publishScenario({ store, change: changeNoDiff } as never, "s1", [mv()] as never, "live")
+    check("first pass: no ops means the intent was LOST, never 'skipped'",
+      r4b.summary.produced_no_change === 1 && r4b.summary.skipped_no_diff === 0)
+    landedBefore = true
 
     // 5. THE DONE GATE (RULED 2026-08-09): writes confirmed but floor not
     // verified is landed_unverified — loud, never silently done
