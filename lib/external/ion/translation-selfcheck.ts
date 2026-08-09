@@ -330,17 +330,4 @@ check("render REFUSES a mirror uuid tech id — the 2026-08-09 live-run bug dies
   assert.ok(threw)
 })
 
-import { renderInPlaceEdit } from "./render-write"
-
-check("never-served in-place edit: ONE update on the SAME task — days cleared+set, tech, StartsOn, no EndsOn", () => {
-  const op = renderInPlaceEdit(form(), [{ weekday: 1, techId: "90003" }], "2026-08-17")
-  assert.strictEqual(op.op, "update")
-  assert.strictEqual(op.ionTaskId, "4471") // SAME task
-  assert.strictEqual(op.changes["day2"], "90003") // Monday set
-  assert.strictEqual(op.changes["day3"], "") // old Tuesday cleared
-  assert.strictEqual(op.changes["AssignedTo"], "90003")
-  assert.strictEqual(op.changes["StartsOn"], "08/17/2026")
-  assert.strictEqual(op.changes["EndsOn"], "")
-})
-
 console.log(`translation selfcheck: ${n} checks passed`)

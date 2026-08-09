@@ -137,7 +137,6 @@ async function main() {
       quotaId: m.quotaId, ionTaskId, ionCustId,
       targetStops: m.to.map((s) => ({ ...s, techId: mapTech(s.techId), type: slice.covers.stopType })),
       targetEndsOn: storedEnds,
-      neverServed: m.lastServed === null,
       verdict: v,
     })
   }

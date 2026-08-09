@@ -22,7 +22,7 @@ import type { AgreementRepository } from "../../agreements/domain/ports/agreemen
 import { convergePlacement } from "./converge-placement"
 import { ionTaskFormFrom, translateTask, type IonTaskForm } from "../../external/ion/task-translation"
 import { planWrite, type IonWritePlan } from "../../external/ion/ion-write-plan"
-import { renderWrites, renderInPlaceEdit, type WriteOp } from "../../external/ion/render-write"
+import { renderWrites, type WriteOp } from "../../external/ion/render-write"
 import { projectFirings } from "../domain/transition/project-firings"
 
 export interface WriteEcho {
@@ -61,10 +61,6 @@ export interface ChangeInput {
    *  annual commercial must keep its real contract end. undefined =
    *  trust the live form (standalone harness use). */
   targetEndsOn?: string | null
-  /** NEVER-SERVED (no completed visits): any change edits the SAME task
-   *  in place — no supersession, no successor (RULED; the 2026-08-09
-   *  incident's root cause was leaving this display-only). */
-  neverServed?: boolean
   dryRun: boolean
 }
 
@@ -220,19 +216,7 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
       // same day-set: the new task re-covers any later dates itself — no cuts
     }
   }
-  let ops: WriteOp[]
-  if (input.neverServed && effectivePlan.kind !== "none") {
-    const starts = newStartsOn
-      ?? input.targetAnchorDate
-      ?? firstServiceDate(input.effectiveDate, input.targetStops.map((s) => s.weekday))
-    ops = [renderInPlaceEdit(form, target.stops, starts)]
-    effectivePlan = { kind: "amend", target }
-    newStartsOn = starts
-    cutVisits = []
-    clearedVisits = []
-  } else {
-    ops = renderWrites(form, effectivePlan, newStartsOn ?? undefined, oldEnds)
-  }
+  const ops = renderWrites(form, effectivePlan, newStartsOn ?? undefined, oldEnds)
 
   const echoes: WriteEcho[] = []
   for (const op of ops) echoes.push(await deps.execute(op, input.dryRun))

@@ -164,29 +164,8 @@ export function renderBridgeOp(
   }
 }
 
-/**
- * renderInPlaceEdit — the NEVER-SERVED road (RULED 2026-08-08, wired
- * 2026-08-09 after the incident proved the cost of leaving it display-
- * only): a task with no service history is freely editable in place —
- * days, tech, StartsOn — ONE update op on the SAME task id. No EndsOn,
- * no successor, no supersession.
- */
-export function renderInPlaceEdit(
-  form: IonTaskForm,
-  targetStops: readonly { weekday: number; techId: string }[],
-  newStartsOn: string,
-): WriteOp {
-  const changes: Record<string, string> = {}
-  for (let d = 1; d <= 7; d++) changes[`day${d}`] = ""
-  for (const s of targetStops) {
-    assertIonTechId(s.techId)
-    changes[dayField(s.weekday)] = s.techId
-  }
-  changes["AssignedTo"] = targetStops.length === 1 ? targetStops[0].techId : ""
-  changes["StartsOn"] = ionDate(newStartsOn)
-  changes["EndsOn"] = ""
-  return {
-    op: "update", ionTaskId: form.eventId, ionCustId: form.customerId, changes,
-    why: `never-served in-place edit: days/tech/StartsOn -> ${newStartsOn} on the SAME task`,
-  }
-}
+/* renderInPlaceEdit REMOVED (VETO RULED 2026-08-09): editing StartsOn in
+ * place — even on never-served tasks — is banned. Carter's UI test showed
+ * ION reclassifies COMPLETED visits as Unscheduled when StartsOn moves
+ * past them; the blast radius of the field is unknowable from outside.
+ * EVERY change supersedes. Uniformity beats id churn. */
