@@ -29,6 +29,11 @@ export async function updateSession(request: NextRequest) {
   // systems call these without a session cookie; they authenticate via
   // their own signed-payload mechanism (HMAC, etc.) inside the route
   // handler. Anything under /api/webhooks/* bypasses auth entirely.
+  // Inngest authenticates with its signing key inside the serve handler
+  // (same trust model as webhooks) — the session wall must not intercept.
+  if (path.startsWith("/api/inngest")) {
+    return NextResponse.next()
+  }
   if (path.startsWith("/api/webhooks/")) {
     return response
   }
