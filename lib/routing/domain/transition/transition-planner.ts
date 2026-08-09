@@ -307,17 +307,26 @@ export class TransitionPlanner {
         if (!anchorDate) anchorDate = firstBridgeable ?? firstAny
       } else {
         // no request: derive the phase whose first firing best honors the
-        // ideal gap (day moves that incidentally rephase)
+        // ideal gap (day moves that incidentally rephase). Fallback when
+        // nothing fits the window: the smallest bridgeable overshoot ON A
+        // STOP WEEKDAY — never a bare base date (an off-weekday anchor
+        // projects zero firings: found live on Janas/Metts/Hall, biweekly
+        // day moves whose every Thursday candidate missed [10,14]).
         let best: { anchor: string; score: number } | null = null
-        for (let offset = 0; offset < (m.cadence.kind === "biweekly" ? 14 : 28); offset++) {
+        let dFirstAny: string | null = null
+        let dFirstBridgeable: string | null = null
+        for (let offset = 0; offset < (m.cadence.kind === "biweekly" ? 28 : 56); offset++) {
           const candidate = addDays(base, offset)
           if (!weekdays.includes(new Date(`${candidate}T00:00:00Z`).getUTCDay())) continue
+          dFirstAny = dFirstAny ?? candidate
           const gap = m.lastServed ? daysBetween(seamLastFor(candidate), candidate) : bounds.idealDays
+          if (gap >= bounds.loDays && !dFirstBridgeable) dFirstBridgeable = candidate
           if (gap < bounds.loDays || gap > bounds.hiDays) continue
           const score = Math.abs(gap - bounds.idealDays)
           if (!best || score < best.score) best = { anchor: candidate, score }
+          if (offset >= (m.cadence.kind === "biweekly" ? 14 : 28) && best) break
         }
-        anchorDate = best?.anchor ?? base
+        anchorDate = best?.anchor ?? dFirstBridgeable ?? dFirstAny ?? base
       }
     }
 

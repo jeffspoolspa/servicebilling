@@ -4,6 +4,8 @@
  * planner derives dates). Reads the mirror, writes nothing.
  *
  *   npx tsx scripts/routing/evaluate-scenario.ts <scenarioId> [--verbose]
+ *     [--table <file.html>]   spot-check table: every move, where it
+ *                             lands, future visits, write shape, bridges
  */
 
 import { createClient } from "@supabase/supabase-js"
@@ -113,6 +115,8 @@ async function main() {
     routeLoad.set(k, (routeLoad.get(k) ?? 0) + 1)
   }
 
+  const tableArg = process.argv.indexOf("--table")
+  const tablePath = tableArg >= 0 ? process.argv[tableArg + 1] : null
   const today = new Date().toISOString().slice(0, 10)
   const verdicts = new TransitionPlanner().plan(moves, {
     today, routeLoad, maxPoolsPerRoute: 10,
@@ -138,6 +142,56 @@ async function main() {
   const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
   const fmt = (stops: readonly { weekday: number; techId: string }[]) =>
     stops.map((s) => `${techName.get(s.techId) ?? s.techId.slice(0, 8)}·${DAY[s.weekday]}`).join(" + ")
+
+  if (tablePath) {
+    const esc = (x: unknown) => String(x ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    const rows = verdicts
+      .map((v) => ({ v, m: moves.find((x) => x.quotaId === v.quotaId)! }))
+      .sort((a, b) => String(custName.get(a.v.quotaId)).localeCompare(String(custName.get(b.v.quotaId))))
+      .map(({ v, m }) => {
+        const daySetChanged = new Set(m.from.map((s) => s.weekday)).size !== new Set([...m.from, ...m.to].map((s) => s.weekday)).size
+          || [...new Set(m.from.map((s) => s.weekday))].sort().join() !== [...new Set(m.to.map((s) => s.weekday))].sort().join()
+        const flip = m.anchorShiftWeeks !== undefined
+        const write = m.lastServed === null && (daySetChanged || flip) ? "amend (never served)"
+          : daySetChanged || flip ? "supersede" : "amend"
+        const [last, ...next] = v.timeline.length && m.lastServed ? v.timeline : [null, ...v.timeline]
+        const bridgeSet = new Set(v.bridges.map((b) => b.date))
+        const nextCells = next.slice(0, 4).map((d) =>
+          d && bridgeSet.has(d) ? `<span class="bridge">${d} FREE</span>` : String(d ?? "")).join("<br>")
+        const flags = [
+          ...v.violations.map((g) => `LAW ${g.bound} ${g.gapDays}d`),
+          ...(v.warnings.length ? [`cap x${v.warnings.length}`] : []),
+        ].join("; ")
+        return `<tr${v.violations.length ? ' class="bad"' : ""}>
+<td>${esc(custName.get(v.quotaId))}</td>
+<td>${esc(m.cadence.kind === "weekly" ? `weekly ${m.cadence.timesPerWeek}x` : m.cadence.kind)}${flip ? " · FLIP" : ""}</td>
+<td>${esc(fmt(m.from))}</td><td>${esc(fmt(m.to))}</td>
+<td>${esc(write)}</td>
+<td>${esc(last ?? "never served")}</td>
+<td>${esc(v.effectiveDate)}</td>
+<td>${nextCells}</td>
+<td>${v.bridges.map((b) => `${b.date} · ${esc(techName.get(b.techId) ?? b.techId)}${b.defaultAccept ? " (default YES)" : " (NEEDS RULING)"}`).join("<br>") || "—"}</td>
+<td>${esc(flags) || "—"}</td></tr>`
+      })
+    const html = `<title>RH Current — dry-run landing table</title>
+<style>
+body{font:13px/1.45 -apple-system,system-ui,sans-serif;margin:16px;color:#111}
+@media (prefers-color-scheme: dark){body{background:#111;color:#ddd} td,th{border-color:#333!important} thead th{background:#1c1c1c!important} tr.bad{background:#3a1414!important}}
+h1{font-size:16px} .sub{color:#888;margin-bottom:12px}
+table{border-collapse:collapse;width:100%}
+th,td{border:1px solid #ccc;padding:4px 8px;text-align:left;vertical-align:top;white-space:nowrap}
+thead th{position:sticky;top:0;background:#f2f2f2}
+tr.bad{background:#ffe8e8}
+.bridge{font-weight:600}
+</style>
+<h1>RH Current — where everything lands (dry run, nothing written)</h1>
+<div class="sub">${moves.length} whole-config moves · evaluated ${today} · effective dates ${[...byDate].sort().map(([d, n]) => `${d}&times;${n}`).join("  ")} · violations ${violations} · bridges ${verdicts.reduce((n, v) => n + v.bridges.length, 0)}</div>
+<table><thead><tr><th>Customer</th><th>Cadence</th><th>Before</th><th>After</th><th>Write</th><th>Last visit</th><th>Effective</th><th>Next visits</th><th>Bridge</th><th>Flags</th></tr></thead>
+<tbody>${rows.join("")}</tbody></table>`
+    const { writeFileSync } = await import("node:fs")
+    writeFileSync(tablePath, html)
+    console.log(`table written: ${tablePath}`)
+  }
   for (const v of verdicts) {
     const m = moves.find((x) => x.quotaId === v.quotaId)!
     const flag = v.validity === "never_valid" ? " ✗" : v.violations.length ? " ⚠law" : v.warnings.length ? " ⚠cap" : ""
