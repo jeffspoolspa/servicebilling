@@ -139,6 +139,64 @@ async function watchQueue(ids: string[], say: (s: string) => void): Promise<Queu
   }
 }
 
+/** The publish ledger's shape, as the UI needs it. */
+interface PublicationOutcome {
+  id: string
+  finishedAt: string | null
+  refused: string | null
+  tally: Record<string, number>
+  failures: { ionTaskId: string | null; error: string | null }[]
+  bridgesPending: number
+}
+
+/**
+ * Watch the publish LEDGER (routing.publications) until the publication
+ * settles. The 202 receipt says "accepted"; only these rows say what
+ * happened — and they keep saying it after the tab closes.
+ */
+async function watchPublication(
+  scenarioId: string,
+  say: (s: string) => void,
+): Promise<PublicationOutcome | null> {
+  const deadline = Date.now() + 20 * 60_000
+  let last: PublicationOutcome | null = null
+  for (;;) {
+    const r = await fetch(`/api/routing/publications?scenario_id=${scenarioId}`)
+    if (r.ok) {
+      const { publication } = (await r.json()) as { publication: PublicationOutcome | null }
+      if (publication) {
+        last = publication
+        if (publication.finishedAt || publication.refused) return publication
+        const done = (publication.tally.done ?? 0) + (publication.tally.skipped_no_diff ?? 0)
+        const failed = publication.tally.failed ?? 0
+        say(`Writing to ION — ${done} done${failed ? `, ${failed} failed` : ""}`)
+      } else {
+        say("Starting the publish")
+      }
+    }
+    if (Date.now() > deadline) return last
+    await new Promise((res) => setTimeout(res, 3000))
+  }
+}
+
+/** What the operator is told. Refusals and failures lead; silence never does. */
+function publishToastFor(outcome: PublicationOutcome | null): string {
+  if (!outcome) return "Publish accepted, but the ledger did not report back — check routing.publications"
+  if (outcome.refused) return `Publish REFUSED — ${outcome.refused}. Nothing was written.`
+  const done = outcome.tally.done ?? 0
+  const skipped = outcome.tally.skipped_no_diff ?? 0
+  const failed = outcome.tally.failed ?? 0
+  const bridges = outcome.bridgesPending
+  if (failed > 0) {
+    const first = outcome.failures[0]
+    return `${done} published, ${failed} FAILED${first?.ionTaskId ? ` (task ${first.ionTaskId}: ${first.error ?? "see ledger"})` : ""}`
+  }
+  const parts = [`Published ${done} change${done === 1 ? "" : "s"} to ION`]
+  if (skipped) parts.push(`${skipped} already matched ION`)
+  if (bridges) parts.push(`${bridges} free bridge visit${bridges === 1 ? "" : "s"} pending creation`)
+  return parts.join(" · ")
+}
+
 /**
  * Cadence, short enough to sit in a selection row.
  *
@@ -1461,33 +1519,21 @@ export function LiveMap({
       const report = (await res.json()) as {
         error?: string
         committed?: boolean
+        accepted?: boolean
         results?: { accepted: boolean; detail: string }[]
         invalidated?: { reason: string }[]
-        queued?: { taskId: string; queueId: string }[]
       }
       if (!res.ok) throw new Error(report.error ?? `publish failed (${res.status})`)
 
-      // 202: the work is QUEUED, not done. This response is a receipt, not an
-      // outcome — so watch the rows. Closing the tab here loses nothing; the
-      // drainer finishes regardless, which is why the publish was queued.
-      if (res.status === 202 && report.queued?.length) {
-        const ids = report.queued.map((q) => q.queueId)
-        setPublishPhase(`Queued ${ids.length} change${ids.length === 1 ? "" : "s"} — waiting for ION`)
-        // Poke the drain. NOT silently: the first version threw the result
-        // away, so a 401 or a 500 looked exactly like success and rows sat
-        // queued four separate times with no evidence anywhere. Whatever this
-        // says, the queue row survives — but we say it.
-        void poke().then((why) => { if (why) setToast(`Queued, but the drainer did not start — ${why}`) })
-        const done = await watchQueue(ids, setPublishPhase)
-        const landed = done.filter((r) => r.state === "done")
-        const stuck = done.filter((r) => r.state !== "done")
-        setToast(
-          stuck.length === 0
-            ? `Published ${landed.length} task${landed.length === 1 ? "" : "s"} to ION${
-                landed[0]?.result_ion_task_id ? ` — new task ${landed[0].result_ion_task_id}` : ""
-              }`
-            : `${landed.length} landed, ${stuck.length} did not: ${stuck[0].error ?? stuck[0].state}`,
-        )
+      // 202: ACCEPTED, not done. An Inngest function executes the publish;
+      // the LEDGER (routing.publications) is the outcome, never this
+      // response — reading the receipt as a result reported a successful
+      // publish as "0 published" (2026-08-09). Watch the rows; closing the
+      // tab loses nothing, the function finishes regardless.
+      if (res.status === 202 && report.accepted) {
+        setPublishPhase(`Accepted ${changes.length} change${changes.length === 1 ? "" : "s"} — ION is being written`)
+        const outcome = await watchPublication(scenarioId!, setPublishPhase)
+        setToast(publishToastFor(outcome))
         setPublishPhase("Re-reading the plan")
         setPlan(Scenario.from(base()))
         setViewing(null)
