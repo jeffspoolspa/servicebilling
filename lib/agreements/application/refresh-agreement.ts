@@ -21,8 +21,8 @@ import type { TypedBilling, BillingShape, DayRate } from "../domain/service-agre
 import type { AgreementRepository } from "../domain/ports/agreement-repository"
 import type { IntakeStore } from "../domain/ports/intake-store"
 import type { TaskFormSource } from "../domain/ports/task-form-source"
-import type { QuotaStore, PlacementStop } from "../../routing/domain/ports/quota-store"
-import { convergePlacement } from "../../routing/application/converge-placement"
+import type { QuotaStore } from "../../routing/domain/ports/quota-store"
+import { editAgreement } from "./edit-agreement"
 import { ionTaskFormFrom, translateTask, type TaskTranslation } from "../../external/ion/task-translation"
 import { AgreementRuleError } from "../domain/service-agreement/agreement-rule-error"
 
@@ -38,7 +38,9 @@ export interface RefreshReport {
    *  carry the deterministic representative; a human untangles. Normal
    *  multi-rate slices (disjoint days) become dayRates, not flags. */
   mixedBilling: string[]
-  terms: "unchanged" | "versioned" | "ended"
+  /** `orphaned`: no open slice — the sweep decides whether this is a
+   *  cancellation or an unrecorded supersession. NEVER ended here. */
+  terms: "unchanged" | "versioned" | "ended" | "orphaned"
   placement: "unchanged" | "appended" | "opened" | "skipped"
 }
 
@@ -48,6 +50,7 @@ export interface RefreshDeps {
   forms: TaskFormSource
   quotas: QuotaStore
   catalogPriceCents: (serviceTypeId: string) => number | null
+  facts?: import("./edit-agreement").FactSink
 }
 
 export async function refreshAgreement(
@@ -67,15 +70,16 @@ export async function refreshAgreement(
   const open = agreement.openIncarnations()
   report.slices = open.length
   if (!open.length) {
-    // RULED 2026-08-08: an agreement IS its slices — every incarnation
-    // ended (ION-side ending with no successor) means nothing is standing:
-    // the agreement ends, the quota dies with its era, and scenarios drop
-    // the quota on their next evaluation.
-    const lastEnd = agreement.lineage()
-      .map((i) => i.to).filter((t): t is string => t !== null).sort().pop()
-    agreement.end((lastEnd ?? at).slice(0, 10), at, "reflection")
-    await deps.repo.save(agreement)
-    report.terms = "ended"
+    // ORPHANED, NOT ENDED (RULED 2026-08-09 — reversing the 08-08 rule).
+    // "Every slice closed" was read as "the customer cancelled", and on
+    // 2026-08-09 that ended 20 live agreements whose successors ION held
+    // but the book had never been told about: the refresh saw an
+    // end-dated task with no successor attached and concluded the work
+    // was over. A per-agreement read CANNOT tell cancellation from an
+    // unrecorded supersession — only a customer-grain look at ION can,
+    // because only there can you see whether a successor exists. So this
+    // reports and stops; SweepIonTasks rules on it.
+    report.terms = "orphaned"
     return report
   }
 
@@ -203,22 +207,21 @@ export async function refreshAgreement(
     endsOn: endsAll ? slices.map((s) => s.schedule.period.endsOn!).sort().pop()! : null,
   }
 
-  const versionsBefore = agreement.termsHistory().length
-  agreement.applyTranslation({ pattern, billing, period }, at)
-  await deps.repo.save(agreement)
-  const endedNow = agreement.endedOn !== null
-  report.terms = endedNow ? "ended"
-    : agreement.termsHistory().length > versionsBefore ? "versioned" : "unchanged"
-
-  if (endedNow) return report
-
-  const stops: PlacementStop[] = slices.flatMap((s) =>
-    s.schedule.stops.map((x) => ({ weekday: x.weekday, techId: x.techId, type: s.stopType })),
+  // THE ONE SENTENCE (RULED 2026-08-09): an observed change and a decided
+  // change take the same road; only provenance differs. This road states
+  // every slice it just read, so the composition has nothing to guess.
+  const edit = await editAgreement(
+    { repo: deps.repo, intake: deps.intake, quotas: deps.quotas, facts: deps.facts },
+    {
+      agreementId, origin: "ion_side", at,
+      terms: { pattern, billing, period },
+      slices: slices.map((s) => ({
+        ionTaskId: s.ionTaskId, stopType: s.stopType,
+        stops: s.schedule.stops.map((x) => ({ weekday: x.weekday, techId: x.techId })),
+      })),
+    },
   )
-  const outcome = await convergePlacement(deps.quotas, {
-    agreementId, termsVersion: agreement.currentTerms().version,
-    pattern, stops, fromDate: at.slice(0, 10), cause: "ion_side",
-  })
-  report.placement = outcome.action
+  report.terms = edit.terms === "skipped" ? "unchanged" : edit.terms
+  report.placement = edit.placement
   return report
 }

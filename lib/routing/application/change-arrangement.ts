@@ -19,7 +19,8 @@
 import type { PlacementStop, QuotaStore } from "../domain/ports/quota-store"
 import type { TaskFormSource } from "../../agreements/domain/ports/task-form-source"
 import type { AgreementRepository } from "../../agreements/domain/ports/agreement-repository"
-import { convergePlacement } from "./converge-placement"
+import { editAgreement } from "../../agreements/application/edit-agreement"
+import type { IntakeStore } from "../../agreements/domain/ports/intake-store"
 import { ionTaskFormFrom, translateTask, type IonTaskForm } from "../../external/ion/task-translation"
 import { planWrite, type IonWritePlan } from "../../external/ion/ion-write-plan"
 import { renderWrites, type WriteOp } from "../../external/ion/render-write"
@@ -89,6 +90,12 @@ export interface ChangeDeps {
   forms: TaskFormSource
   repo: AgreementRepository
   quotas: QuotaStore
+  /** the ledger EditAgreement reads unstated slices from (one composition
+   *  rule for both directions, RULED 2026-08-09) */
+  intake: IntakeStore
+  /** every convergence emits its fact — the workflow must be traceable by
+   *  the facts its calls emit (RULED 2026-08-09) */
+  facts?: import("../../agreements/application/edit-agreement").FactSink
   /** The Windmill write surface (f/ION/api/write_task). */
   execute: (op: WriteOp, dryRun: boolean) => Promise<WriteEcho>
   catalogPriceCents: (serviceTypeId: string) => number | null
@@ -354,54 +361,70 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
     // incarnation from the ECHO: supersede should have echoed a new id;
     // a kept id fires ion_prediction_missed inside recordIncarnation
     const echoedNewId = echoes.find((e) => e.echoedTaskId)?.echoedTaskId ?? input.ionTaskId
-    agreement.recordIncarnation(
-      { ionTaskId: echoedNewId, cause: "placement_change", covers: slice.covers },
-      at,
-      { newIncarnation: effectivePlan.kind === "supersede" },
-    )
-    await deps.repo.save(agreement)
-    cross("record_book", "passed", {
-      successor: echoedNewId,
-      confirmed: echoedNewId !== input.ionTaskId,
-    })
 
     // placement version: the slice's stops changed; compose the agreement's
     // full stop set = head minus THIS slice's old stops plus its new ones
     // (matching by value, not by type — a sibling slice of the SAME type,
     // like Winding River's second chem task, must survive untouched)
-    // COMPOSE BY SLICE, NOT BY VALUE (2026-08-09): matching the head's
-    // stops against the current form's values left a phantom whenever the
-    // head was stale (a wrong-tech publish put Wesley in the head while
-    // the form read Carlos — the "requires 1 stop but carries 2" refusal).
-    // A slice OWNS its stop type when it is the agreement's only open
-    // slice of that type: replace them wholesale. With sibling slices of
-    // the same type present, fall back to value matching until stops
-    // carry their slice id.
-    const head = await headStops(deps, agreement.id, agreement.currentTerms().version)
-    const siblingsSameType = agreement.openIncarnations()
-      .filter((i) => i.covers.stopType === slice.covers.stopType).length
-    const others = siblingsSameType <= 1
-      ? (head ?? []).filter((s) => s.type !== slice.covers.stopType)
-      : (head ?? []).filter((s) => {
-          const oldOwn = new Set(current.schedule.stops.map((x) => `${current.stopType}|${x.weekday}|${x.techId}`))
-          return !oldOwn.has(`${s.type}|${s.weekday}|${s.techId}`)
-        })
-    const stops = [...others, ...input.targetStops]
+    // THE ONE SENTENCE (RULED 2026-08-09): the book and the floor move
+    // through EditAgreement, exactly as an ION-observed change does —
+    // provenance is the only difference. The hand-rolled head-minus-slice
+    // composition that lived here (and invented a phantom stop) is gone;
+    // EditAgreement composes from the open slices, one rule for both
+    // directions.
+    // SAVING IS A STEP (RULED 2026-08-09, Carter): the ION verbs may be
+    // separate calls, but if either one's state fails to save, the process
+    // log must say exactly which. A throw here is not an anonymous
+    // failure — it is record_book, failed, with the reason.
+    let edit: Awaited<ReturnType<typeof editAgreement>>
     try {
-      await convergePlacement(deps.quotas, {
-        agreementId: agreement.id, termsVersion: agreement.currentTerms().version,
-        pattern: agreement.currentTerms().pattern as never, stops,
-        fromDate: newStartsOn ?? input.effectiveDate, cause: "transition",
-      })
-      recorded = true
-      cross("converge_placement", "passed", { stops })
+      edit = await editAgreement(
+      { repo: deps.repo, intake: deps.intake, quotas: deps.quotas, facts: deps.facts },
+      {
+        agreementId: agreement.id, origin: "our_edit", at,
+        incarnation: {
+          ionTaskId: echoedNewId, cause: "placement_change", covers: slice.covers,
+          predicted: { newIncarnation: effectivePlan.kind === "supersede" },
+        },
+        slices: [{
+          ionTaskId: echoedNewId, stopType: slice.covers.stopType,
+          stops: input.targetStops.map((s) => ({ weekday: s.weekday, techId: s.techId })),
+        }],
+      },
+      )
     } catch (e) {
-      // The ION write is DONE. Refusing here would leave the operator with
-      // a red toast for a change that landed — and no record of it. The
-      // agreement's terms are stale against its own slices; the refresh
-      // sentence recomposes them. Report and move on.
-      placementDeferred = `${String(e).replace(/^Error: /, "")} — ION is written; the book reconciles on refresh`
+      const why = (e instanceof Error ? e.message : String(e)).slice(0, 300)
+      cross("record_book", "failed", { why, ionWrites: "COMMITTED — ION holds the change, the book does not" })
+      return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes,
+        recorded: false, steps, verified: false,
+        recordSkipped: `book save failed after ION was written: ${why}` }
+    }
+    // A SUPERSESSION THAT KEPT ITS ID IS A FAILED SUPERSESSION (RULED
+    // 2026-08-09, Carter): we ended a task and created its successor, so
+    // an incarnation that comes back "unchanged" means the two halves did
+    // not both land — the book still points at the ended task. That is a
+    // failure, never a quiet pass.
+    const supersedeKeptId = effectivePlan.kind === "supersede" && edit.incarnation !== "recorded"
+    cross("record_book", edit.incarnation === "skipped" || supersedeKeptId ? "failed" : "passed", {
+      successor: echoedNewId, confirmed: echoedNewId !== input.ionTaskId, outcome: edit.incarnation,
+      ...(supersedeKeptId ? { why: "supersede recorded no new incarnation — the old task is ended and the book still points at it" } : {}),
+    })
+    if (supersedeKeptId) {
+      return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes,
+        recorded: false, steps, verified: false,
+        recordSkipped: "supersede did not record a successor — the book and ION disagree; reconcile before trusting this move" }
+    }
+    if (edit.unstatedSlices.length) {
+      placementDeferred = `sibling slices with no observed stops: ${edit.unstatedSlices.join(",")} — placement not converged (a partial stop set would delete real work)`
       cross("converge_placement", "failed", { why: placementDeferred })
+    } else if (edit.placementDeferred) {
+      // The ION write is DONE. Refusing here would leave the operator with
+      // a red toast for a change that landed — and no record of it.
+      placementDeferred = `${edit.placementDeferred} — ION is written; the book reconciles on refresh`
+      cross("converge_placement", "failed", { why: placementDeferred })
+    } else {
+      recorded = true
+      cross("converge_placement", "passed", { action: edit.placement })
     }
 
     // THE DONE GATE (RULED 2026-08-09): re-read the head placement and
@@ -409,7 +432,7 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
     // matches — nothing less.
     if (recorded) {
       const back = await headStops(deps, agreement.id, agreement.currentTerms().version)
-      const want = new Set(stops.map((x) => `${x.type}|${x.weekday}|${x.techId}`))
+      const want = new Set((edit.composed ?? []).map((x) => `${x.type}|${x.weekday}|${x.techId}`))
       const got = new Set((back ?? []).map((x) => `${x.type}|${x.weekday}|${x.techId}`))
       const match = want.size === got.size && [...want].every((k) => got.has(k))
       cross("verify_floor", match ? "passed" : "failed",

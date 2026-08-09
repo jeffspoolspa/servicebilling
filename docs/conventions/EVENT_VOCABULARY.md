@@ -296,6 +296,9 @@ fact carries `agreement:{id}`, `customer:{id}`, `ion_task:{id}` (and the host
 | `agreement_terms_changed` | AgreementTermsChanged | authored — RefreshAgreement (reflection) / changeTerms (intent) | a new terms version: pattern, billing MEANING, or period moved. payload `{before, after, provenance}` — representation churn (jsonb key order, evidence fields like serviceTypeLabel) must NEVER emit this (bitten twice 2026-08-08) |
 | `agreement_ended` | AgreementEnded | authored — end() | lifecycle close; all open incarnations close with it. payload `{ended_on, basis, provenance}` |
 | `agreement_ion_task_superseded` | AgreementIonTaskSuperseded | authored — recordIncarnation (echo) | the external id churned for ONE slice (covers-matched). payload `{from_ion_task_id, to_ion_task_id, cause}` |
+| `placement_converged` | PlacementConverged | authored — EditAgreement, on a real convergence | the FLOOR moved: this agreement's stop set changed. payload `{origin, provenance, action, stops, terms_version}` — the one fact that makes "when did this pool's day/tech change, and did we or ION do it" a query |
+| `ion_divergence_detected` | IonDivergenceDetected | authored — SweepIonTasks (dry) | ION's active-task report and the book disagree. payload `{kind, remedy}` — kinds: `ion_unknown` (ION holds a task the book doesn't), `book_only` (the book holds a task ION dropped), `orphaned` (agreement with no slice), `duplicate_claim` (two agreements, one task) |
+| `ion_divergence_resolved` | IonDivergenceResolved | authored — SweepIonTasks (armed) | the sweep applied a remedy through EditAgreement. payload carries `applied` (attached / closed / quarantined / failed) |
 | `ion_prediction_missed` | IonPredictionMissed | authored — recordIncarnation | our write predicted amend/supersede and ION did the other — the model of ION drifted; every future prediction suspect until reviewed |
 
 ---

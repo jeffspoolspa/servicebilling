@@ -13,7 +13,7 @@ import { TransitionPlanner } from "../../lib/routing/domain/transition/transitio
 import { changeArrangement, type ChangeDeps } from "../../lib/routing/application/change-arrangement"
 import { publishScenario, type PublishMove, type PublicationStore } from "../../lib/routing/application/publish-scenario"
 import type { WriteOp } from "../../lib/external/ion/render-write"
-import { repoAdapter, formsAdapter, quotasAdapter, intakeAdapter } from "../agreements/refresh"
+import { repoAdapter, formsAdapter, quotasAdapter, intakeAdapter, factsAdapter } from "../agreements/refresh"
 import { buildScenarioMoves } from "./scenario-moves"
 
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -169,6 +169,7 @@ async function main() {
 
   const changeDeps: ChangeDeps = {
     forms: formsAdapter, repo, quotas: quotasAdapter,
+    intake: intakeAdapter, facts: factsAdapter,
     execute: async (op, dryRun) => {
       const echo = await runWrite(op, dryRun)
       return { op, dryRun, committed: echo?.committed === true, echoedTaskId: (echo as { new_event_id?: string })?.new_event_id ?? null, preview: echo }

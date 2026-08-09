@@ -14,7 +14,7 @@ import { changeArrangement, type ChangeDeps } from "../routing/application/chang
 import { publishScenario, type PublishMove, type PublicationStore } from "../routing/application/publish-scenario"
 import type { WriteOp } from "../external/ion/render-write"
 import { buildScenarioMoves } from "../routing/adapters/scenario-moves"
-import { repoAdapter, intakeAdapter, formsAdapter, quotasAdapter } from "../agreements/adapters/supabase"
+import { repoAdapter, intakeAdapter, formsAdapter, quotasAdapter, factsAdapter } from "../agreements/adapters/supabase"
 
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -165,6 +165,7 @@ export async function runPublish(scenarioId: string, opts: { live: boolean }): P
   )
   const changeDeps: ChangeDeps = {
     forms: formsAdapter, repo, quotas: quotasAdapter,
+    intake: intakeAdapter, facts: factsAdapter,
     execute: async (op, dryRun) => {
       const echo = await runWrite(op, dryRun)
       // the CONFIRMED id from the list sandwich — never the response's claim

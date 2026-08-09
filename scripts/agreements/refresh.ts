@@ -31,8 +31,8 @@ const WM_AUTH = { Authorization: `Bearer ${process.env.WINDMILL_TOKEN}` }
 
 /* adapters graduated to lib/agreements/adapters/supabase.ts (shared with
    API routes + Inngest); re-exported here so script imports keep working */
-export { repoAdapter, intakeAdapter, formsAdapter, quotasAdapter } from "../../lib/agreements/adapters/supabase"
-import { repoAdapter, intakeAdapter, formsAdapter, quotasAdapter } from "../../lib/agreements/adapters/supabase"
+export { repoAdapter, intakeAdapter, formsAdapter, quotasAdapter, factsAdapter } from "../../lib/agreements/adapters/supabase"
+import { repoAdapter, intakeAdapter, formsAdapter, quotasAdapter, factsAdapter } from "../../lib/agreements/adapters/supabase"
 
 /* -------------------------------- harness -------------------------------- */
 
@@ -44,7 +44,7 @@ const argOf = (flag: string) => {
 async function main() {
   const deps: RefreshDeps = {
     repo: repoAdapter(), intake: intakeAdapter, forms: formsAdapter,
-    quotas: quotasAdapter, catalogPriceCents: () => null,
+    quotas: quotasAdapter, catalogPriceCents: () => null, facts: factsAdapter,
   }
   const at = new Date().toISOString()
 
@@ -67,10 +67,10 @@ async function main() {
     throw new Error("usage: refresh.ts --agreement <id> | --ion-task <id> | --all [--limit N]")
   }
 
-  const tally = { unchanged: 0, versioned: 0, ended: 0, placementMoved: 0, partial: 0, quarantined: 0, coversDrift: 0 }
+  const tally = { unchanged: 0, versioned: 0, ended: 0, orphaned: 0, placementMoved: 0, partial: 0, quarantined: 0, coversDrift: 0 }
   for (const id of ids) {
     const r = await refreshAgreement(deps, id, at)
-    tally[r.terms === "unchanged" ? "unchanged" : r.terms === "versioned" ? "versioned" : "ended"]++
+    tally[r.terms]++
     if (r.placement === "appended" || r.placement === "opened") tally.placementMoved++
     if (r.partial) tally.partial++
     tally.quarantined += r.quarantined

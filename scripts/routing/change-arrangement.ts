@@ -12,7 +12,7 @@
 
 import { changeArrangement, type ChangeDeps } from "../../lib/routing/application/change-arrangement"
 import type { WriteOp } from "../../lib/external/ion/render-write"
-import { repoAdapter, formsAdapter, quotasAdapter } from "../agreements/refresh"
+import { repoAdapter, formsAdapter, quotasAdapter, intakeAdapter, factsAdapter } from "../agreements/refresh"
 
 const WM_API = `${process.env.WINDMILL_BASE_URL!.replace(/\/$/, "")}/w/${process.env.WINDMILL_WORKSPACE}`
 const WM_AUTH = { Authorization: `Bearer ${process.env.WINDMILL_TOKEN}` }
@@ -66,6 +66,7 @@ async function main() {
 
   const deps: ChangeDeps = {
     forms: formsAdapter, repo, quotas: quotasAdapter,
+    intake: intakeAdapter, facts: factsAdapter,
     execute: async (op, dryRun) => {
       const echo = await runWrite(op, dryRun)
       return {

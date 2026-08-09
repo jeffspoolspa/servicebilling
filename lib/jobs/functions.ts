@@ -15,11 +15,11 @@
 import { inngest } from "./inngest"
 import { createClient } from "@supabase/supabase-js"
 import { refreshAgreement, type RefreshDeps } from "../agreements/application/refresh-agreement"
-import { repoAdapter, intakeAdapter, formsAdapter, quotasAdapter } from "../agreements/adapters/supabase"
+import { repoAdapter, intakeAdapter, formsAdapter, quotasAdapter, factsAdapter } from "../agreements/adapters/supabase"
 
 const deps = (): RefreshDeps => ({
   repo: repoAdapter(), intake: intakeAdapter, forms: formsAdapter,
-  quotas: quotasAdapter, catalogPriceCents: () => null,
+  quotas: quotasAdapter, catalogPriceCents: () => null, facts: factsAdapter,
 })
 
 export const publishScenarioFn = inngest.createFunction(
@@ -51,7 +51,7 @@ export const refreshAgreementsNightly = inngest.createFunction(
     }
     // batches as separate steps: each is retried independently and the
     // function survives redeploys mid-run
-    const summary = { unchanged: 0, versioned: 0, ended: 0, moved: 0, partial: 0 }
+    const summary = { unchanged: 0, versioned: 0, ended: 0, orphaned: 0, moved: 0, partial: 0 }
     for (let i = 0; i < ids.length; i += 25) {
       const batch = ids.slice(i, i + 25)
       const results = await step.run(`refresh-${i / 25}`, async () => {
@@ -65,6 +65,7 @@ export const refreshAgreementsNightly = inngest.createFunction(
       })
       for (const r of results) {
         if (r.partial) summary.partial++
+        else if (r.terms === "orphaned") summary.orphaned++ // the sweep rules on these
         else if (r.terms === "ended") summary.ended++
         else if (r.terms === "versioned") summary.versioned++
         else summary.unchanged++

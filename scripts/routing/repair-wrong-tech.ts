@@ -9,7 +9,7 @@
 import { createClient } from "@supabase/supabase-js"
 import { changeArrangement, type ChangeDeps } from "../../lib/routing/application/change-arrangement"
 import type { WriteOp } from "../../lib/external/ion/render-write"
-import { repoAdapter, intakeAdapter, formsAdapter, quotasAdapter } from "../../lib/agreements/adapters/supabase"
+import { repoAdapter, intakeAdapter, formsAdapter, quotasAdapter, factsAdapter } from "../../lib/agreements/adapters/supabase"
 
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -52,6 +52,7 @@ async function main() {
 
   const deps: ChangeDeps = {
     forms: formsAdapter, repo, quotas: quotasAdapter,
+    intake: intakeAdapter, facts: factsAdapter,
     execute: async (op, dryRun) => {
       const echo = await runWrite(op, dryRun)
       return { op, dryRun, committed: echo?.committed === true, echoedTaskId: null, preview: echo }

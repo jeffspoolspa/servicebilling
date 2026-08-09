@@ -178,3 +178,15 @@ export const quotasAdapter: QuotaStore = {
   },
 }
 
+
+/** The fact sink: every sentence's facts land in the one stream. */
+export const factsAdapter: import("../application/edit-agreement").FactSink = {
+  async emit(rows) {
+    if (!rows.length) return
+    const { error } = await maint.from("events").insert(rows.map((r) => ({
+      aggregate: r.aggregate, aggregate_id: r.aggregateId, type: r.type,
+      actor: "system", occurred_at: r.at, participants: r.participants, payload: r.payload,
+    })))
+    if (error) throw error
+  },
+}
