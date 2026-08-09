@@ -19,7 +19,10 @@ import { repoAdapter, intakeAdapter, formsAdapter, quotasAdapter, factsAdapter }
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
-export async function runPublish(scenarioId: string, opts: { live: boolean }): Promise<{
+export async function runPublish(
+  scenarioId: string,
+  opts: { live: boolean; bridgeDecisions?: readonly import("../routing/application/publish-scenario").BridgeDecision[] },
+): Promise<{
   publicationId: string | null
   refused: string | null
   summary: Record<string, number>
@@ -185,7 +188,7 @@ export async function runPublish(scenarioId: string, opts: { live: boolean }): P
   }
   const report = await publishScenario(
     { store, change: (input) => changeArrangement(changeDeps, input) },
-    scenarioId, publishMoves, opts.live ? "live" : "dry",
+    scenarioId, publishMoves, opts.live ? "live" : "dry", opts.bridgeDecisions,
   )
 
   // RECONCILE DEFERRED BOOKKEEPING: a landed write whose placement could

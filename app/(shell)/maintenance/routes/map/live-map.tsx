@@ -18,6 +18,7 @@ import { OptionPills } from "@/components/ui/option-pills"
 import { OfficeFilter } from "../_components/office-filter"
 import { ScopeMenu } from "../_components/scope-menu"
 import { ChangesTable, type ChangeRow } from "./changes-table"
+import { PublishDialog, type PreviewRow, type MoveProgress } from "./publish-dialog"
 import { TechSelect } from "./tech-select"
 import type { Office } from "@/lib/routing/infrastructure/offices"
 import {
@@ -142,6 +143,7 @@ async function watchQueue(ids: string[], say: (s: string) => void): Promise<Queu
 /** The publish ledger's shape, as the UI needs it. */
 interface PublicationOutcome {
   id: string
+  moves?: { ionTaskId: string; status: string; writeKind: string; steps: { step: string; status: string }[] }[]
   finishedAt: string | null
   refused: string | null
   tally: Record<string, number>
@@ -163,6 +165,8 @@ async function watchPublication(
    *  previous run's 6-failed summary in the seconds before its own row
    *  opened, and told the operator the new run had failed). */
   ignoreId: string | null = null,
+  /** per-row progress for the dialog's step rails */
+  onMoves?: (moves: { ionTaskId: string; status: string; writeKind: string; steps: { step: string; status: string }[] }[]) => void,
 ): Promise<PublicationOutcome | null> {
   const deadline = Date.now() + 20 * 60_000
   let last: PublicationOutcome | null = null
@@ -173,6 +177,7 @@ async function watchPublication(
       if (publication && publication.id === ignoreId) publication = null // the previous run, not ours
       if (publication) {
         last = publication
+        if (onMoves && publication.moves) onMoves(publication.moves)
         if (publication.finishedAt || publication.refused) return publication
         const done = (publication.tally.done ?? 0) + (publication.tally.skipped_no_diff ?? 0)
         const failed = publication.tally.failed ?? 0
@@ -315,6 +320,12 @@ export function LiveMap({
   const [publishBusy, setPublishBusy] = useState(false)
   /** Armed = the user pressed Publish and is being asked to confirm in-app. */
   const [publishArmed, setPublishArmed] = useState(false)
+  // the publish dialog's own state: the preview it rules on, and the live
+  // per-row progress it watches (RULED 2026-08-09 — the dialog stays open)
+  const [preview, setPreview] = useState<PreviewRow[] | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [moveProgress, setMoveProgress] = useState<Map<string, MoveProgress>>(new Map())
+  const [publishOutcome, setPublishOutcome] = useState<string | null>(null)
   // the outcome of a publish that reloaded the board (see publishToIon)
   useEffect(() => {
     try {
@@ -346,10 +357,36 @@ export function LiveMap({
   }, [publishSince])
 
   // Arming is a question, not a state to be left in.
+  // arming opens the dialog and asks what each change will do
   useEffect(() => {
     if (!publishArmed) return
-    const t = setTimeout(() => setPublishArmed(false), 8000)
-    return () => clearTimeout(t)
+    setPreview(null); setPreviewError(null); setPublishOutcome(null); setMoveProgress(new Map())
+    void (async () => {
+      let sid = viewing?.id ?? null
+      try {
+        if (sid) {
+          await fetch(`/api/routing/scenarios/${sid}`, {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ changes }),
+          })
+        } else {
+          const made = await fetch("/api/routing/scenarios", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: `published ${new Date().toISOString().slice(0, 16).replace("T", " ")}`, changes }),
+          })
+          if (!made.ok) throw new Error(`could not record the scenario (${made.status})`)
+          sid = ((await made.json()) as { scenario: { id: string } }).scenario.id
+          setViewing({ id: sid } as never)
+        }
+        const r = await fetch(`/api/routing/scenarios/${sid}/preview`)
+        const body = await r.json()
+        if (!r.ok) { setPreviewError(body.error ?? `preview failed (${r.status})`); return }
+        setPreview(body.rows as PreviewRow[])
+      } catch (e) {
+        setPreviewError(e instanceof Error ? e.message : String(e))
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [publishArmed])
 
   const [selected, setSelected] = useState<string | null>(null)
@@ -1501,13 +1538,12 @@ export function LiveMap({
    * published change has a name, a timestamp and a history entry rather than
    * vanishing into ION unattributed. The server closes it out on success.
    */
-  const publishToIon = async () => {
+  const publishToIon = async (bridgeDecisions: { quotaId: string; accepted: boolean; date: string }[] = []) => {
     if (publishBusy) return
     if (changes.length === 0) {
       setToast("Nothing to publish — there are no unpublished changes")
       return
     }
-    setPublishArmed(false)
     setPublishBusy(true)
     setPublishSince(Date.now())
     setPublishPhase("Recording the scenario")
@@ -1547,7 +1583,7 @@ export function LiveMap({
       const res = await fetch(`/api/routing/scenarios/${scenarioId}/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dry_run: false }),
+        body: JSON.stringify({ dry_run: false, bridge_decisions: bridgeDecisions }),
       })
       const report = (await res.json()) as {
         error?: string
@@ -1565,14 +1601,15 @@ export function LiveMap({
       // tab loses nothing, the function finishes regardless.
       if (res.status === 202 && report.accepted) {
         setPublishPhase(`Accepted ${changes.length} change${changes.length === 1 ? "" : "s"} — ION is being written`)
-        const outcome = await watchPublication(scenarioId!, setPublishPhase, baselineId)
-        // WHAT YOU SEE IS THE FLOOR (RULED 2026-08-09): after a live
-        // publish settles, reload the page outright — the board redraws
-        // from the same placements rows verify_floor just checked, never
-        // from reconstructed client state. The toast survives the reload.
+        const outcome = await watchPublication(scenarioId!, setPublishPhase, baselineId, (moves) => {
+          setMoveProgress(new Map(moves.map((m) => [m.ionTaskId, m])))
+        })
+        // The DIALOG stays open with the outcome (RULED 2026-08-09) — the
+        // operator closes it, and closing reloads the board so what they
+        // see is the floor verify_floor just checked.
+        setPublishOutcome(publishToastFor(outcome))
+        setPublishPhase(null)
         try { sessionStorage.setItem("publish-outcome", publishToastFor(outcome)) } catch { /* toast lost, state still true */ }
-        setPublishPhase("Re-reading the board from the floor")
-        window.location.reload()
         return
       }
 
@@ -2104,57 +2141,6 @@ export function LiveMap({
           )}
           {/* Remount on every plan revision: rows are index-keyed, so a
               revert must never meet yesterday's selection. */}
-          {publishArmed && !publishBusy && (
-            <div
-              className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60"
-              onClick={() => setPublishArmed(false)}
-            >
-              <div
-                className="max-h-[80vh] w-[600px] overflow-auto rounded-xl border border-line bg-panel p-4 shadow-2xl"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="pb-1 text-[13px] font-medium text-ink">
-                  {`Publish ${changes.length} change${changes.length === 1 ? "" : "s"} to ION`}
-                </div>
-                <div className="pb-3 text-[11px] leading-relaxed text-ink-mute">
-                  Every change supersedes: the old task ends and a successor is created. Each
-                  row passes the declared steps — end old &rarr; create successor &rarr; verify
-                  target &rarr; record book &rarr; converge placement &rarr; verify floor — and
-                  every step is confirmed by reading ION back, never by its response. A row is
-                  done only when the placements table matches its target.
-                </div>
-                {changeRows.map((r) => (
-                  <div
-                    key={r.index}
-                    className="flex items-center gap-1.5 border-t border-line-soft/40 py-1.5 text-[11px] first:border-0"
-                  >
-                    <span className="w-44 truncate text-ink-dim">{r.customer}</span>
-                    <Chip>{r.fromDay ?? "—"}</Chip>
-                    <Chip>{r.fromTech ?? "—"}</Chip>
-                    <span className="text-ink-mute">&rarr;</span>
-                    <Chip>{r.toDay ?? "—"}</Chip>
-                    <Chip>{r.toTech ?? "—"}</Chip>
-                    <span className="flex-1" />
-                    <span className="text-[10px] text-ink-mute">supersede</span>
-                  </div>
-                ))}
-                <div className="flex justify-end gap-2 pt-3">
-                  <button
-                    className="rounded-full border border-line px-3 py-1 text-[11px] text-dim hover:text-ink"
-                    onClick={() => setPublishArmed(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="rounded-full border border-emerald-500/60 bg-emerald-500/25 px-3 py-1 text-[11px] font-medium text-emerald-200 hover:bg-emerald-500/35"
-                    onClick={() => void publishToIon()}
-                  >
-                    {`Confirm — write ${changes.length} to ION`}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
           <ChangesTable
             key={rev}
             rows={changeRows}
@@ -2898,6 +2884,19 @@ export function LiveMap({
 
       {/* Running work is always visible: what it is doing, and for how long.
           This one does NOT self-clear — it ends when the work does. */}
+      {(publishArmed || publishBusy) && (
+        <PublishDialog
+          changeCount={changes.length}
+          preview={preview}
+          previewError={previewError}
+          running={publishBusy}
+          progress={moveProgress}
+          outcome={publishOutcome}
+          onCancel={() => setPublishArmed(false)}
+          onConfirm={(decisions) => void publishToIon(decisions)}
+          onClose={() => window.location.reload()}
+        />
+      )}
       {publishPhase && (
         <div
           className={`absolute bottom-32 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2.5 border-emerald-400/40 px-3.5 py-2 text-[12px] text-emerald-200 ${glass}`}

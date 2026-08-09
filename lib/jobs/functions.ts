@@ -24,14 +24,18 @@ const deps = (): RefreshDeps => ({
 
 export const publishScenarioFn = inngest.createFunction(
   { id: "publish-scenario", concurrency: 1, retries: 2, triggers: { event: "routing/scenario.publish" } },
-  async ({ event, step }: { event: { data: { scenarioId: string } }; step: { run<T>(name: string, fn: () => Promise<T>): Promise<T> } }) => {
+  async ({ event, step }: {
+    event: { data: { scenarioId: string; bridgeDecisions?: { quotaId: string; accepted: boolean; date: string }[] } }
+    step: { run<T>(name: string, fn: () => Promise<T>): Promise<T> }
+  }) => {
     const scenarioId = event.data.scenarioId as string
+    const bridgeDecisions = event.data.bridgeDecisions
     // the sentence pipeline runs as ONE step: it is internally resumable
     // (level-triggered per move), so a retry re-enters safely and skips
     // whatever already landed
     return await step.run("publish", async () => {
       const { runPublish } = await import("./publish-runner")
-      return runPublish(scenarioId, { live: true })
+      return runPublish(scenarioId, { live: true, bridgeDecisions })
     })
   },
 )

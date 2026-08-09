@@ -24,7 +24,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const sb = caller.viaToken ? createSupabaseAdmin() : await createSupabaseServer()
 
   const { id } = await ctx.params
-  const body = (await req.json().catch(() => ({}))) as { dry_run?: boolean }
+  const body = (await req.json().catch(() => ({}))) as {
+    dry_run?: boolean
+    /** the confirm dialog's bridge rulings (accepted + chosen date) */
+    bridge_decisions?: { quotaId: string; accepted: boolean; date: string }[]
+  }
   const dryRun = body.dry_run !== false
 
   const sys = createSupabaseAdmin() // system writes: the system correcting itself
@@ -56,7 +60,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     await inngest.send({
       id: `publish-${id}-${version}`,
       name: "routing/scenario.publish",
-      data: { scenarioId: id, requestedBy: caller.id },
+      data: { scenarioId: id, requestedBy: caller.id, bridgeDecisions: body.bridge_decisions ?? [] },
     })
     // 202: accepted, not done. The ledger is the record to watch.
     return NextResponse.json(

@@ -70,6 +70,14 @@ export interface PublishDeps {
   }) => Promise<ChangeReport>
 }
 
+/** The operator's ruling on one proposed bridge visit (the confirm
+ *  dialog): accepted or not, and on WHICH date (they may move it). */
+export interface BridgeDecision {
+  quotaId: string
+  accepted: boolean
+  date: string
+}
+
 export interface PublishReport {
   publicationId: string
   refused: string | null
@@ -81,6 +89,8 @@ export async function publishScenario(
   scenarioId: string,
   moves: PublishMove[],
   mode: "dry" | "live",
+  /** rulings from the confirm dialog; absent means "defaults stand" */
+  bridgeDecisions?: readonly BridgeDecision[],
 ): Promise<PublishReport> {
   const pub = await deps.store.open(scenarioId, mode)
   const summary: Record<string, number> = {
@@ -91,8 +101,12 @@ export async function publishScenario(
   // publish-time refusal: the fresh evaluation must be CLEAN
   const neverValid = moves.filter((m) => m.verdict.validity === "never_valid")
   const violating = moves.filter((m) => m.verdict.violations.length > 0)
+  // A ruling from the dialog SETTLES a proposal — accepted (on the date
+  // the operator chose) or declined. Only proposals nobody ruled on and
+  // that do not default-accept can refuse a live publication.
+  const ruledOn = new Map((bridgeDecisions ?? []).map((d) => [d.quotaId, d]))
   const undecidedBridges = mode === "live"
-    ? moves.filter((m) => m.verdict.bridges.some((b) => !b.defaultAccept))
+    ? moves.filter((m) => m.verdict.bridges.some((b) => !b.defaultAccept) && !ruledOn.has(m.quotaId))
     : []
   if (neverValid.length || violating.length || undecidedBridges.length) {
     const reason = [
@@ -151,8 +165,12 @@ export async function publishScenario(
       if (note) summary.deferred_bookkeeping = (summary.deferred_bookkeeping ?? 0) + 1
       summary[status]++
 
-      // accepted bridge: a one-time no-charge rider — blocked on the probe
-      const accepted = m.verdict.bridges.filter((b) => b.defaultAccept)
+      // accepted bridge: a one-time no-charge rider — blocked on the probe.
+      // The operator's ruling wins over the default, including its DATE.
+      const ruling = ruledOn.get(m.quotaId)
+      const accepted = ruling
+        ? (ruling.accepted ? m.verdict.bridges.slice(0, 1).map((b) => ({ ...b, date: ruling.date })) : [])
+        : m.verdict.bridges.filter((b) => b.defaultAccept)
       if (accepted.length) {
         await deps.store.recordMove(pub.id, {
           quotaId: `${m.quotaId}`, ionTaskId: `${m.ionTaskId}:bridge`,
