@@ -53,7 +53,7 @@ const fixtureBilling = (priceCents: number) => ({
   billingType: "per_visit", invoiceStyle: "summary", consumables: "included", sendConsumables: true,
 }) as never
 
-function fakes(agreement: ServiceAgreement, formDetail: Record<string, unknown> | "FAIL") {
+function fakes(agreement: ServiceAgreement, formDetail: Record<string, unknown> | Map<string, Record<string, unknown>> | "FAIL") {
   const saved: ServiceAgreement[] = []
   const failures: string[] = []
   const recorded: string[] = []
@@ -73,11 +73,11 @@ function fakes(agreement: ServiceAgreement, formDetail: Record<string, unknown> 
     },
     forms: {
       async fetchForms(tasks) {
-        return tasks.map((t) =>
-          formDetail === "FAIL"
-            ? { ionTaskId: t.ionTaskId, ok: false as const, error: "HTTP 500" }
-            : { ionTaskId: t.ionTaskId, ok: true as const, fields: FIELDS, detail: formDetail },
-        )
+        return tasks.map((t) => {
+          if (formDetail === "FAIL") return { ionTaskId: t.ionTaskId, ok: false as const, error: "HTTP 500" }
+          const d = formDetail instanceof Map ? formDetail.get(t.ionTaskId)! : formDetail
+          return { ionTaskId: t.ionTaskId, ok: true as const, fields: { ...FIELDS, EventID: t.ionTaskId }, detail: d }
+        })
       },
     },
     quotas: quotaFake(placements),
@@ -147,6 +147,41 @@ async function main() {
     const { deps } = fakes(a, detail({ serviceType: { value: "690605", text: "CHEMICAL TESTING" } }))
     const r = await refreshAgreement(deps, "agr-deen", "2026-08-09T00:00:00Z")
     check("covers drift: flagged + partial + no convergence", r.coversDrift.length === 1 && r.partial && r.placement === "skipped")
+  }
+
+  // 6. the condition card: two chem slices, disjoint days, two prices ->
+  //    default = lowest, premium days become dayRates; second run unchanged
+  {
+    const a = ServiceAgreement.rehydrate(
+      "agr-wr", "7933", { kind: "customer_contract", program: "maintenance" },
+      [{
+        version: 1,
+        pattern: { chem_check: { kind: "weekly", timesPerWeek: 4 } },
+        billing: { chem_check: fixtureBilling(5000) },
+        period: { startsOn: "2026-03-15", endsOn: null },
+        from: "2026-08-08T00:00:00Z", cause: "opened",
+      }],
+      [
+        { ionTaskId: "849", from: "2026-08-08T00:00:00Z", to: null, cause: "opened", covers: { stopType: "chem_check", ionProfileId: "p" } },
+        { ionTaskId: "853", from: "2026-08-08T00:00:00Z", to: null, cause: "opened", covers: { stopType: "chem_check", ionProfileId: "p" } },
+      ],
+      "active", null,
+    )
+    const details = new Map<string, Record<string, unknown>>([
+      ["849", detail({ ionTaskId: "849", serviceType: { value: "690605", text: "CHEMICAL TESTING" }, itemCost: "50.00",
+        perDayTech: [{ dow: 2, techId: "t1", techName: "A" }, { dow: 4, techId: "t1", techName: "A" }] })],
+      ["853", detail({ ionTaskId: "853", serviceType: { value: "690605", text: "CHEMICAL TESTING" }, itemCost: "85.00",
+        perDayTech: [{ dow: 0, techId: "t2", techName: "B" }, { dow: 6, techId: "t2", techName: "B" }] })],
+    ])
+    const { deps } = fakes(a, details as never)
+    const r1 = await refreshAgreement(deps, "agr-wr", "2026-08-09T00:00:00Z")
+    const card = a.currentTerms().billing.chem_check!
+    check("card: versioned with default 5000 + weekend dayRate 8500",
+      r1.terms === "versioned" && card.priceCents === 5000 &&
+      card.dayRates!.length === 1 && card.dayRates![0].priceCents === 8500 &&
+      JSON.stringify(card.dayRates![0].days) === JSON.stringify([0, 6]))
+    const r2 = await refreshAgreement(deps, "agr-wr", "2026-08-09T01:00:00Z")
+    check("card: identical slices reconverge to unchanged", r2.terms === "unchanged" && r2.mixedBilling.length === 0)
   }
 
   console.log(`\nrefresh-agreement selfcheck: all ${n} checks passed`)

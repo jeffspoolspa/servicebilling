@@ -17,7 +17,7 @@
  */
 
 import type { RequiredPattern, StopType } from "../domain/service-agreement/required-pattern"
-import type { TypedBilling, BillingShape } from "../domain/service-agreement/billing-shape"
+import type { TypedBilling, BillingShape, DayRate } from "../domain/service-agreement/billing-shape"
 import type { AgreementRepository } from "../domain/ports/agreement-repository"
 import type { IntakeStore } from "../domain/ports/intake-store"
 import type { TaskFormSource } from "../domain/ports/task-form-source"
@@ -33,10 +33,10 @@ export interface RefreshReport {
   quarantined: number
   partial: boolean
   coversDrift: string[] // ionTaskIds whose stopType no longer matches covers
-  /** slices of ONE type disagreeing on billing meaning (Winding River:
-   *  weekday chem $50 vs weekend chem $85). Terms carry the deterministic
-   *  representative (lowest ionTaskId); the full truth stays per-slice in
-   *  the intake ledger. Needs a ruling on per-slice rates. */
+  /** price groups within a type whose day sets OVERLAP — the condition
+   *  card cannot represent them (same type, same day, two prices). Terms
+   *  carry the deterministic representative; a human untangles. Normal
+   *  multi-rate slices (disjoint days) become dayRates, not flags. */
   mixedBilling: string[]
   terms: "unchanged" | "versioned" | "ended"
   placement: "unchanged" | "appended" | "opened" | "skipped"
@@ -131,13 +131,9 @@ export async function refreshAgreement(
   const pattern: RequiredPattern = {}
   const billing: TypedBilling = {}
   for (const type of ["clean", "chem_check"] as StopType[]) {
-    // deterministic representative: lowest ionTaskId (map order flapped
-    // Winding River's chem price between $50/$85 on 2026-08-08)
     const ofType = slices.filter((s) => s.stopType === type)
       .sort((a, b) => a.ionTaskId.localeCompare(b.ionTaskId))
     if (!ofType.length) continue
-    const prices = new Set(ofType.map((s) => (s.billing as { priceCents: number | null }).priceCents))
-    if (prices.size > 1) report.mixedBilling.push(`${type}: ${[...prices].join("/")}`)
     const nonWeekly = ofType.filter((s) => s.schedule.frequency.kind !== "weekly")
     if (nonWeekly.length > 1) throw new AgreementRuleError(`two ${type} slices with interval cadences — unrepresentable`)
     if (ofType.length === 1 && nonWeekly.length === 1) pattern[type] = ofType[0].schedule.frequency
@@ -145,7 +141,37 @@ export async function refreshAgreement(
       const days = new Set(ofType.flatMap((s) => s.schedule.stops.map((x) => x.weekday)))
       pattern[type] = { kind: "weekly", timesPerWeek: Math.min(Math.max(days.size, 1), 7) as 1 }
     }
-    billing[type] = ofType[0].billing as unknown as BillingShape
+
+    // the condition card (RULED): price groups within a type become the
+    // default (lowest price) + dayRates for the premium groups, days =
+    // each group's observed stop days. Overlapping day sets cannot be
+    // carded (same type+day, two prices) — flag, keep the representative.
+    const byPrice = new Map<number | null, typeof ofType>()
+    for (const sl of ofType) {
+      const price = (sl.billing as { priceCents: number | null }).priceCents
+      byPrice.set(price, [...(byPrice.get(price) ?? []), sl])
+    }
+    const base = ofType[0].billing as unknown as BillingShape
+    if (byPrice.size <= 1) {
+      billing[type] = base
+    } else {
+      const groups = [...byPrice.entries()]
+        .map(([priceCents, sls]) => ({
+          priceCents,
+          days: [...new Set(sls.flatMap((sl) => sl.schedule.stops.map((x) => x.weekday)))].sort(),
+        }))
+        .sort((a, b) => (a.priceCents ?? 0) - (b.priceCents ?? 0))
+      const overlap = groups.some((g, i) =>
+        groups.slice(i + 1).some((h) => g.days.some((d) => h.days.includes(d))))
+      if (overlap || groups.some((g) => g.priceCents === null)) {
+        report.mixedBilling.push(`${type}: ${groups.map((g) => g.priceCents).join("/")} (uncardable)`)
+        billing[type] = base
+      } else {
+        const [dflt, ...premium] = groups
+        const dayRates: DayRate[] = premium.map((g) => ({ days: g.days, priceCents: g.priceCents! }))
+        billing[type] = { ...base, priceCents: dflt.priceCents, dayRates }
+      }
+    }
   }
   const starts = slices.map((s) => s.schedule.period.startsOn).filter(Boolean).sort()
   const endsAll = slices.every((s) => s.schedule.period.endsOn !== null)
