@@ -300,6 +300,24 @@ fact carries `agreement:{id}`, `customer:{id}`, `ion_task:{id}` (and the host
 
 ---
 
+## Aggregate: `publication` (`aggregate_id = routing.publications.id`) — confirmed ION verbs
+
+A publish move is a DECLARED PROCESS (RULED 2026-08-09): each verb completes
+only on a verifying READ of ION's state (form re-read, task-list Expires,
+list sandwich), never its HTTP response. Each confirmed verb emits one fact
+carrying that read-back evidence; the operational step ledger (per-step
+status, `routing.publication_moves.steps`) is the working record and these
+facts are the permanent ones. Emitted by the publish runner's store, live
+publications only.
+
+| type | spoken | arm / emitted by | means |
+|---|---|---|---|
+| `ion_task_ended` | IonTaskEnded | authored — publish runner, on a verified `end_old` | an ION task's EndsOn confirmed by the task list's Expires column (or its absence from the active list). payload `{step, by, evidence}` — evidence carries the read-back |
+| `ion_task_created` | IonTaskCreated | authored — publish runner, on a verified `create_successor` | a new ION task confirmed by the list sandwich: born id = after-list minus before-list, exactly one. payload evidence carries `new_task_id` + the born row |
+| `ion_task_amended` | IonTaskAmended | authored — publish runner, on a verified `amend_form` | an in-place field change confirmed by form re-read (dates compared at value grain — ION stores forms ISO, lists M/D/Y). payload evidence carries the per-field verify table |
+
+---
+
 ## Aggregate: `work_order` (`aggregate_id = wo_number`) — billing annotations ONLY
 
 The WO is ION's aggregate (read-only mirror here; billing writes only its own

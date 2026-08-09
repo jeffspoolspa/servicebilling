@@ -19,7 +19,7 @@
  */
 
 import type { MoveVerdict } from "../domain/transition/transition-planner"
-import type { ChangeReport } from "./change-arrangement"
+import type { ChangeReport, StepRecord } from "./change-arrangement"
 
 export interface PublishMove {
   quotaId: string
@@ -33,13 +33,19 @@ export interface PublishMove {
 export interface PublicationStore {
   open(scenarioId: string, mode: "dry" | "live"): Promise<{ id: string }>
   refuse(publicationId: string, reason: string): Promise<void>
+  /** A move opens as a RUNNING row before any verb fires, so the operator
+   *  watches each step cross off live (RULED 2026-08-09). */
+  openMove(publicationId: string, quotaId: string, ionTaskId: string, writeKind: string): Promise<void>
+  /** Progressive step notes onto the running row (fire-and-forget). */
+  noteSteps(publicationId: string, quotaId: string, ionTaskId: string, steps: StepRecord[]): Promise<void>
   recordMove(publicationId: string, row: {
     quotaId: string
     ionTaskId: string
     writeKind: string
-    status: "done" | "skipped_no_diff" | "failed" | "bridge_needs_probe"
+    status: "done" | "skipped_no_diff" | "failed" | "bridge_needs_probe" | "landed_unverified"
     ops: unknown[]
     echoes: unknown[]
+    steps?: StepRecord[]
     bridge?: unknown
     error?: string
   }): Promise<void>
@@ -57,6 +63,7 @@ export interface PublishDeps {
     targetAnchorDate?: string
     targetEndsOn?: string | null
     dryRun: boolean
+    onStep?: (steps: StepRecord[]) => void | Promise<void>
   }) => Promise<ChangeReport>
 }
 
@@ -73,7 +80,7 @@ export async function publishScenario(
   mode: "dry" | "live",
 ): Promise<PublishReport> {
   const pub = await deps.store.open(scenarioId, mode)
-  const summary: Record<string, number> = { done: 0, skipped_no_diff: 0, failed: 0, bridge_needs_probe: 0 }
+  const summary: Record<string, number> = { done: 0, skipped_no_diff: 0, failed: 0, bridge_needs_probe: 0, landed_unverified: 0 }
 
   // publish-time refusal: the fresh evaluation must be CLEAN
   const neverValid = moves.filter((m) => m.verdict.validity === "never_valid")
@@ -93,6 +100,7 @@ export async function publishScenario(
 
   for (const m of moves) {
     try {
+      await deps.store.openMove(pub.id, m.quotaId, m.ionTaskId, "pending")
       const report = await deps.change({
         ionTaskId: m.ionTaskId,
         ionCustId: m.ionCustId,
@@ -102,21 +110,27 @@ export async function publishScenario(
         ...(m.verdict.anchorDate && m.verdict.bridges.length === 0 && isIntervalRephase(m)
           ? { targetAnchorDate: m.verdict.anchorDate } : {}),
         dryRun: mode === "dry",
+        onStep: (steps) => deps.store.noteSteps(pub.id, m.quotaId, m.ionTaskId, steps),
       })
-      // LIVE truthfulness (the aborted first run ledgered 500s as done):
-      // "done" requires every echo COMMITTED; anything less is failed.
+      // LIVE truthfulness, tightened (RULED 2026-08-09): "done" means the
+      // converged placements row MATCHES the target (verify_floor passed).
+      // Writes confirmed in ION while the floor does not yet say so are
+      // landed_unverified — loud, never silently done, and never a lying
+      // red failure on a landed write.
       const allCommitted = report.echoes.every((e) => e.committed)
       const status = report.ops.length === 0 ? "skipped_no_diff"
-        : mode === "live" && !allCommitted ? "failed" : "done"
-      // a deferred placement is bookkeeping debt on a LANDED write — it
-      // rides the row as a note, never a failure (2026-08-09)
+        : mode === "live" && !allCommitted ? "failed"
+        : mode === "live" && !report.verified ? "landed_unverified"
+        : "done"
       const note = report.placementDeferred ?? report.recordSkipped
       await deps.store.recordMove(pub.id, {
         quotaId: m.quotaId, ionTaskId: m.ionTaskId, writeKind: report.plan,
-        status, ops: report.ops, echoes: report.echoes,
+        status, ops: report.ops, echoes: report.echoes, steps: report.steps,
         ...(status === "failed"
-          ? { error: "one or more ops not committed (see echoes)" }
-          : note ? { error: `note: ${note}` } : {}),
+          ? { error: `halted at ${report.steps.find((st) => st.status === "failed")?.step ?? "an unverified op"} (see steps)` }
+          : status === "landed_unverified"
+            ? { error: `note: ION writes confirmed; floor not verified — ${note ?? report.steps.find((st) => st.status === "failed")?.step ?? "see steps"}` }
+            : note ? { error: `note: ${note}` } : {}),
       })
       if (note) summary.deferred_bookkeeping = (summary.deferred_bookkeeping ?? 0) + 1
       summary[status]++

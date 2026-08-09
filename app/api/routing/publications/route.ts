@@ -29,13 +29,20 @@ export async function GET(req: Request) {
 
   const { data: moves } = await rt
     .from("publication_moves")
-    .select("status, write_kind, ion_task_id, error")
+    .select("status, write_kind, ion_task_id, error, steps")
     .eq("publication_id", pub.id)
 
   const tally: Record<string, number> = {}
   for (const m of moves ?? []) tally[m.status] = (tally[m.status] ?? 0) + 1
   const failures = (moves ?? []).filter((m) => m.status === "failed")
     .map((m) => ({ ionTaskId: m.ion_task_id, error: m.error }))
+
+  // the RUNNING move's latest crossed step — the pill narrates it live
+  const running = (moves ?? []).find((m) => m.status === "running")
+  const runningSteps = (running?.steps ?? []) as { step: string; status: string }[]
+  const current = running
+    ? { ionTaskId: running.ion_task_id, step: runningSteps.at(-1)?.step ?? "starting" }
+    : null
 
   return NextResponse.json({
     publication: {
@@ -45,6 +52,11 @@ export async function GET(req: Request) {
       refused: pub.refused,
       summary: pub.summary,
       tally,
+      current,
+      moves: (moves ?? []).map((m) => ({
+        ionTaskId: m.ion_task_id, status: m.status, writeKind: m.write_kind,
+        steps: ((m.steps ?? []) as { step: string; status: string }[]).map((st) => ({ step: st.step, status: st.status })),
+      })),
       failures: failures.slice(0, 5),
       bridgesPending: tally["bridge_needs_probe"] ?? 0,
     },

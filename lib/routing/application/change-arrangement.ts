@@ -25,6 +25,56 @@ import { planWrite, type IonWritePlan } from "../../external/ion/ion-write-plan"
 import { renderWrites, type WriteOp } from "../../external/ion/render-write"
 import { projectFirings } from "../domain/transition/project-firings"
 
+/** One crossed-off step of THE DECLARED PROCESS (RULED 2026-08-09). */
+export interface StepRecord {
+  step: string
+  status: "passed" | "failed"
+  at: string
+  /** layer · class/module · method doing this step (the declared table). */
+  by: string
+  evidence?: unknown
+}
+
+/**
+ * THE DECLARED PROCESS (RULED 2026-08-09): a publish move is a series of
+ * named steps; each names the layer, class and method doing it, and each
+ * completes only on a VERIFYING READ of ION's state — never its response.
+ * The move is done only when verify_floor passes: the converged placements
+ * row matches the target, written exclusively from confirmed writes/reads.
+ */
+export const WRITE_PROCESS: Record<string, string> = {
+  read_current: "acl · lib/external/ion/task-translation · ionTaskFormFrom + translateTask",
+  plan: "acl · lib/external/ion/ion-write-plan · planWrite",
+  end_old: "external · f/ION/_lib/task_detail · updateTask — verified by task-list Expires read-back",
+  amend_form: "external · f/ION/_lib/task_detail · updateTask — verified by form re-read field compare",
+  create_successor: "external · f/ION/_lib/task_detail · createTask — verified by list sandwich (born id exact)",
+  verify_target: "application · change-arrangement · verifyBorn — born row vs target stops",
+  record_book: "domain · ServiceAgreement · recordIncarnation — successor = the CONFIRMED id",
+  converge_placement: "application · converge-placement · convergePlacement",
+  verify_floor: "application · change-arrangement · head placement read-back vs target — THE DONE GATE",
+}
+
+/** Pure: does the born task's list row match the target arrangement? */
+export function verifyBorn(
+  born: { taskStarts?: string; activeDays?: number[]; assignedTo?: string } | null,
+  target: readonly { weekday: number }[],
+  newStartsOn: string | null,
+  wantTechName: string | null,
+): { ok: boolean; why?: string } {
+  if (!born) return { ok: false, why: "no born row (create unverified)" }
+  const wantDays = [...new Set(target.map((s) => s.weekday))].sort().join(",")
+  const gotDays = [...(born.activeDays ?? [])].sort().join(",")
+  if (wantDays !== gotDays) return { ok: false, why: `days: want [${wantDays}] got [${gotDays}]` }
+  if (newStartsOn) {
+    const mdy = `${Number(newStartsOn.slice(5, 7))}/${Number(newStartsOn.slice(8, 10))}/${newStartsOn.slice(0, 4)}`
+    const gs = (born.taskStarts ?? "").replace(/\b0/g, "")
+    if (gs !== mdy.replace(/\b0/g, "")) return { ok: false, why: `starts: want ${mdy} got ${born.taskStarts}` }
+  }
+  if (wantTechName && born.assignedTo && born.assignedTo.trim() !== wantTechName.trim())
+    return { ok: false, why: `tech: want "${wantTechName}" got "${born.assignedTo}"` }
+  return { ok: true }
+}
+
 export interface WriteEcho {
   op: WriteOp
   dryRun: boolean
@@ -42,6 +92,10 @@ export interface ChangeDeps {
   /** The Windmill write surface (f/ION/api/write_task). */
   execute: (op: WriteOp, dryRun: boolean) => Promise<WriteEcho>
   catalogPriceCents: (serviceTypeId: string) => number | null
+  /** ION display name for a numeric tech id (employees.ion_username) —
+   *  lets verify_target check the born row's AssignedTo without another
+   *  ION read. Optional: absent skips the name comparison. */
+  techNameOf?: (ionTechId: string) => string | null
 }
 
 export interface ChangeInput {
@@ -62,6 +116,8 @@ export interface ChangeInput {
    *  trust the live form (standalone harness use). */
   targetEndsOn?: string | null
   dryRun: boolean
+  /** live progress: called after every step crossing (fire-and-forget). */
+  onStep?: (steps: StepRecord[]) => void | Promise<void>
 }
 
 export interface ChangeReport {
@@ -86,6 +142,11 @@ export interface ChangeReport {
   ops: WriteOp[]
   echoes: WriteEcho[]
   recorded: boolean
+  /** the crossed-off process — one record per step, with evidence. */
+  steps: StepRecord[]
+  /** true ONLY when verify_floor passed: the placements row matches the
+   *  target. Anything less is not done (RULED 2026-08-09). */
+  verified: boolean
 }
 
 /**
@@ -224,18 +285,69 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
   }
   const ops = renderWrites(form, effectivePlan, newStartsOn ?? undefined, oldEnds)
 
+  const steps: StepRecord[] = []
+  const cross = (step: string, status: "passed" | "failed", evidence?: unknown) => {
+    steps.push({ step, status, at: new Date().toISOString(), by: WRITE_PROCESS[step] ?? step, evidence })
+    if (input.onStep) void Promise.resolve(input.onStep(steps)).catch(() => {})
+  }
+  cross("read_current", "passed", {
+    stops: current.schedule.stops, period: current.schedule.period, cadence: current.schedule.frequency.kind,
+  })
+  cross("plan", "passed", {
+    kind: effectivePlan.kind, newStartsOn, oldEnds: oldEnds ?? null,
+    ops: ops.map((o) => ({ op: o.op, changes: o.changes })),
+  })
+
   const echoes: WriteEcho[] = []
-  for (const op of ops) echoes.push(await deps.execute(op, input.dryRun))
+  for (const op of ops) {
+    const stepName = op.op === "create" ? "create_successor"
+      : op.changes && "EndsOn" in op.changes && effectivePlan.kind === "supersede" ? "end_old" : "amend_form"
+    const echo = await deps.execute(op, input.dryRun)
+    echoes.push(echo)
+    if (input.dryRun) { cross(stepName, "passed", { dry_run: true }); continue }
+    const ev = (echo.preview ?? {}) as Record<string, unknown>
+    if (echo.committed) {
+      cross(stepName, "passed", {
+        verified: ev.verified, new_task_id: ev.new_task_id, born_row: ev.born_row, status: ev.status,
+      })
+    } else {
+      // HALT ON FAILURE (RULED 2026-08-09): a failed verb stops the move —
+      // never end an old task and skip its successor silently, and never
+      // create on top of an unconfirmed end.
+      cross(stepName, "failed", {
+        status: ev.status, verified: ev.verified, ambiguous_births: ev.ambiguous_births,
+        still: "remaining verbs NOT executed",
+      })
+      break
+    }
+  }
+
+  // verify_target: the born task's own list row must match the arrangement
+  const createEcho = echoes.find((e) => e.op.op === "create")
+  if (!input.dryRun && createEcho?.committed) {
+    const bornRow = ((createEcho.preview ?? {}) as { born_row?: { taskStarts?: string; activeDays?: number[]; assignedTo?: string } }).born_row ?? null
+    const primaryTech = input.targetStops[0]?.techId ?? null
+    const v = verifyBorn(bornRow, input.targetStops, newStartsOn,
+      primaryTech && deps.techNameOf ? deps.techNameOf(primaryTech) : null)
+    cross("verify_target", v.ok ? "passed" : "failed", v.ok ? { born: bornRow } : { why: v.why, born: bornRow })
+    if (!v.ok) {
+      return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes,
+        recorded: false, steps, verified: false,
+        recordSkipped: `verify_target failed: ${v.why} — book NOT updated, reconcile required` }
+    }
+  }
 
   let recorded = false
   let recordSkipped: string | undefined
   let placementDeferred: string | undefined
+  let verified = false
   if (!input.dryRun && echoes.length && echoes.every((e) => e.committed)) {
     const agreement = await deps.repo.byIonTaskId(input.ionTaskId, input.effectiveDate)
     const slice = agreement?.openIncarnations().find((i) => i.ionTaskId === input.ionTaskId)
     if (!agreement || !slice) {
       recordSkipped = `no open agreement slice for ${input.ionTaskId} — writes committed, book NOT updated (throwaway task?)`
-      return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes, recorded, recordSkipped }
+      cross("record_book", "failed", { why: recordSkipped })
+      return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes, recorded, recordSkipped, steps, verified }
     }
     const at = new Date().toISOString()
 
@@ -248,6 +360,10 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
       { newIncarnation: effectivePlan.kind === "supersede" },
     )
     await deps.repo.save(agreement)
+    cross("record_book", "passed", {
+      successor: echoedNewId,
+      confirmed: echoedNewId !== input.ionTaskId,
+    })
 
     // placement version: the slice's stops changed; compose the agreement's
     // full stop set = head minus THIS slice's old stops plus its new ones
@@ -278,16 +394,31 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
         fromDate: newStartsOn ?? input.effectiveDate, cause: "transition",
       })
       recorded = true
+      cross("converge_placement", "passed", { stops })
     } catch (e) {
       // The ION write is DONE. Refusing here would leave the operator with
       // a red toast for a change that landed — and no record of it. The
       // agreement's terms are stale against its own slices; the refresh
       // sentence recomposes them. Report and move on.
       placementDeferred = `${String(e).replace(/^Error: /, "")} — ION is written; the book reconciles on refresh`
+      cross("converge_placement", "failed", { why: placementDeferred })
+    }
+
+    // THE DONE GATE (RULED 2026-08-09): re-read the head placement and
+    // compare to the composed target. done means the placements row
+    // matches — nothing less.
+    if (recorded) {
+      const back = await headStops(deps, agreement.id, agreement.currentTerms().version)
+      const want = new Set(stops.map((x) => `${x.type}|${x.weekday}|${x.techId}`))
+      const got = new Set((back ?? []).map((x) => `${x.type}|${x.weekday}|${x.techId}`))
+      const match = want.size === got.size && [...want].every((k) => got.has(k))
+      cross("verify_floor", match ? "passed" : "failed",
+        match ? { placements: [...got] } : { want: [...want], got: [...got] })
+      verified = match
     }
   }
 
-  return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes, recorded, recordSkipped, placementDeferred }
+  return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes, recorded, recordSkipped, placementDeferred, steps, verified }
 }
 
 async function headStops(deps: ChangeDeps, agreementId: string, termsVersion: number): Promise<PlacementStop[] | null> {

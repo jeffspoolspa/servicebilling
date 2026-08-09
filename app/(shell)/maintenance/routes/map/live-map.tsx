@@ -145,6 +145,7 @@ interface PublicationOutcome {
   finishedAt: string | null
   refused: string | null
   tally: Record<string, number>
+  current: { ionTaskId: string; step: string } | null
   failures: { ionTaskId: string | null; error: string | null }[]
   bridgesPending: number
 }
@@ -169,7 +170,10 @@ async function watchPublication(
         if (publication.finishedAt || publication.refused) return publication
         const done = (publication.tally.done ?? 0) + (publication.tally.skipped_no_diff ?? 0)
         const failed = publication.tally.failed ?? 0
-        say(`Writing to ION — ${done} done${failed ? `, ${failed} failed` : ""}`)
+        // narrate the RUNNING move's current step — the operator watches
+        // the declared process cross off (RULED 2026-08-09)
+        const at = publication.current ? ` — task ${publication.current.ionTaskId}: ${publication.current.step}` : ""
+        say(`Writing to ION — ${done} done${failed ? `, ${failed} failed` : ""}${at}`)
       } else {
         say("Starting the publish")
       }
@@ -196,6 +200,8 @@ function publishToastFor(outcome: PublicationOutcome | null): string {
   if (bridges) parts.push(`${bridges} free bridge visit${bridges === 1 ? "" : "s"} pending creation`)
   const deferred = outcome.tally.deferred_bookkeeping ?? 0
   if (deferred) parts.push(`${deferred} awaiting a book refresh (ION is correct)`)
+  const landed = outcome.tally.landed_unverified ?? 0
+  if (landed) parts.push(`${landed} WROTE ION but the floor is unverified — reconcile before trusting the board`)
   return parts.join(" · ")
 }
 

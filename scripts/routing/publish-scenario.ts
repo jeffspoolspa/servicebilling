@@ -59,15 +59,35 @@ const storeAdapter: PublicationStore = {
       .update({ refused: reason, finished_at: new Date().toISOString() }).eq("id", publicationId)
     if (error) throw error
   },
-  async recordMove(publicationId, row) {
+  async openMove(publicationId, quotaId, ionTaskId, writeKind) {
     const { error } = await rt.from("publication_moves").insert({
-      publication_id: publicationId, quota_id: row.quotaId.replace(/:bridge$/, ""),
-      ion_task_id: row.ionTaskId, write_kind: row.writeKind, status: row.status,
-      ops: row.ops as object, echoes: row.echoes as object,
-      bridge: (row.bridge as object) ?? null, error: row.error ?? null,
+      publication_id: publicationId, quota_id: quotaId.replace(/:bridge$/, ""), ion_task_id: ionTaskId,
+      write_kind: writeKind, status: "running", ops: [], echoes: [], steps: [],
     })
-    // bridge rows share the quota pk with the move row — tolerate the dup
     if (error && !String(error.message).includes("duplicate key")) throw error
+  },
+  async noteSteps(publicationId, quotaId, ionTaskId, steps) {
+    await rt.from("publication_moves").update({ steps: steps as object })
+      .eq("publication_id", publicationId).eq("quota_id", quotaId.replace(/:bridge$/, "")).eq("ion_task_id", ionTaskId)
+  },
+  async recordMove(publicationId, row) {
+    const base = {
+      write_kind: row.writeKind, status: row.status,
+      ops: row.ops as object, echoes: row.echoes as object,
+      ...(row.steps ? { steps: row.steps as object } : {}),
+      bridge: (row.bridge as object) ?? null, error: row.error ?? null,
+    }
+    const { data: upd } = await rt.from("publication_moves").update(base)
+      .eq("publication_id", publicationId).eq("quota_id", row.quotaId.replace(/:bridge$/, ""))
+      .eq("ion_task_id", row.ionTaskId).select("ion_task_id")
+    if (!upd?.length) {
+      const { error } = await rt.from("publication_moves").insert({
+        publication_id: publicationId, quota_id: row.quotaId.replace(/:bridge$/, ""),
+        ion_task_id: row.ionTaskId, ...base,
+      })
+      // bridge rows share the quota pk with the move row — tolerate the dup
+      if (error && !String(error.message).includes("duplicate key")) throw error
+    }
   },
   async finish(publicationId, summary) {
     const { error } = await rt.from("publications")

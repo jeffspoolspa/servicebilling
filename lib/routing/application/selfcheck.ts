@@ -123,9 +123,12 @@ async function main() {
   {
     const rows: { status: string; writeKind: string }[] = []
     let refused: string | null = null
+    let opened = 0
     const store = {
       async open() { return { id: "pub-1" } },
       async refuse(_id: string, reason: string) { refused = reason },
+      async openMove() { opened++ },
+      async noteSteps() {},
       async recordMove(_id: string, row: { status: string; writeKind: string }) { rows.push(row) },
       async finish() {},
     }
@@ -142,6 +145,7 @@ async function main() {
     const changeOk = async () => ({
       plan: "amend" as const, newStartsOn: null, clearedVisits: [], cutVisits: [],
       ops: [{ op: "update" }] as never, echoes: [{ committed: true }] as never, recorded: true,
+      steps: [{ step: "verify_floor", status: "passed" as const, at: "t", by: "x" }], verified: true,
     })
 
     // 1. dirty evaluation refuses the WHOLE publication
@@ -166,9 +170,39 @@ async function main() {
     const changeNoDiff = async () => ({
       plan: "none" as const, newStartsOn: null, clearedVisits: [], cutVisits: [],
       ops: [] as never, echoes: [] as never, recorded: false,
+      steps: [] as never[], verified: false,
     })
     const r4 = await publishScenario({ store, change: changeNoDiff } as never, "s1", [mv()] as never, "live")
     check("resume: no-diff move skips itself (level-triggered publish)", r4.summary.skipped_no_diff === 1)
+
+    // 5. THE DONE GATE (RULED 2026-08-09): writes confirmed but floor not
+    // verified is landed_unverified — loud, never silently done
+    const changeLandedUnverified = async () => ({
+      plan: "supersede" as const, newStartsOn: "2026-08-12", clearedVisits: [], cutVisits: [],
+      ops: [{ op: "update" }, { op: "create" }] as never, echoes: [{ committed: true }, { committed: true }] as never,
+      recorded: true, steps: [{ step: "verify_floor", status: "failed" as const, at: "t", by: "x" }], verified: false,
+    })
+    rows.length = 0
+    const r5 = await publishScenario({ store, change: changeLandedUnverified } as never, "s1", [mv()] as never, "live")
+    check("done gate: unverified floor is landed_unverified, not done",
+      r5.summary.landed_unverified === 1 && r5.summary.done === 0 && rows[0].status === "landed_unverified")
+
+    // 6. every move opens a RUNNING row before its verbs fire
+    check("moves open running rows before verbs (2+1+1; refusals open none)", opened === 4)
+  }
+
+  // verifyBorn: the born row must match the target arrangement
+  const { verifyBorn } = await import("./change-arrangement")
+  {
+    const born = { taskStarts: "08/12/2026", activeDays: [3], assignedTo: "MNT-B CV, CARLOS" }
+    check("verifyBorn passes a matching born row",
+      verifyBorn(born, [{ weekday: 3 }], "2026-08-12", "MNT-B CV, CARLOS").ok)
+    check("verifyBorn refuses wrong day",
+      !verifyBorn(born, [{ weekday: 1 }], "2026-08-12", "MNT-B CV, CARLOS").ok)
+    check("verifyBorn refuses wrong tech name",
+      !verifyBorn(born, [{ weekday: 3 }], "2026-08-12", "MNT-B WG, WESLEY").ok)
+    check("verifyBorn refuses a missing born row (unconfirmed create)",
+      !verifyBorn(null, [{ weekday: 3 }], "2026-08-12", null).ok)
   }
 
   console.log(`\nall ${n} checks passed`)
