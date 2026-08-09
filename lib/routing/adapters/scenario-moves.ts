@@ -48,15 +48,63 @@ export async function buildScenarioMoves(sb: any, scenarioId: string, agr?: any)
   const quotaById = new Map(quotas.map((q) => [q.id, q]))
 
   const today = new Date().toISOString().slice(0, 10)
-  const { data: visits } = await sb.schema("maintenance")
-    .from("visits")
-    .select("task_id, started_at")
-    .in("task_id", [...new Set(changes.map((c) => c.quotaId))])
-    .eq("status", "completed")
-    .order("started_at", { ascending: false })
+
+  // LAST SERVED FOLLOWS THE LINEAGE (RULED 2026-08-09): a pool superseded
+  // last week has ZERO visits on its new task, so reading visits by the
+  // current task alone makes every fresh successor look never-served —
+  // and the gap law cannot protect a pool whose history it cannot see
+  // (Marie Malone's parity flip proposed a first service with no bridge
+  // because her predecessor's visits were invisible). The whole
+  // agreement's lineage answers "when were they last serviced".
+  const quotaIds = [...new Set(changes.map((c) => c.quotaId))]
+  const taskRows = ((await sb.schema("maintenance")
+    .from("tasks").select("id, ion_task_id").in("id", quotaIds)).data ?? []) as { id: string; ion_task_id: string }[]
+  const ionOfQuota = new Map(taskRows.map((t) => [t.id, String(t.ion_task_id)]))
+  const incs = ((await agr.from("ion_incarnations").select("agreement_id, ion_task_id")).data
+    ?? []) as { agreement_id: string; ion_task_id: string | null }[]
+  const agreementOfIon = new Map<string, string>()
+  const ionsOfAgreement = new Map<string, string[]>()
+  for (const i of incs) {
+    if (!i.ion_task_id) continue
+    agreementOfIon.set(String(i.ion_task_id), i.agreement_id)
+    ionsOfAgreement.set(i.agreement_id, [...(ionsOfAgreement.get(i.agreement_id) ?? []), String(i.ion_task_id)])
+  }
+  // every ion task in each quota's lineage -> the mirror task ids to scan
+  const lineageIons = new Set<string>()
+  for (const qid of quotaIds) {
+    const ion = ionOfQuota.get(qid)
+    const agreementId = ion ? agreementOfIon.get(ion) : undefined
+    for (const sib of (agreementId ? ionsOfAgreement.get(agreementId) ?? [] : [])) lineageIons.add(sib)
+    if (ion) lineageIons.add(ion)
+  }
+  const lineageTasks: { id: string; ion_task_id: string }[] = lineageIons.size
+    ? (((await sb.schema("maintenance").from("tasks").select("id, ion_task_id")
+        .in("ion_task_id", [...lineageIons])).data ?? []) as { id: string; ion_task_id: string }[])
+    : []
+  const taskIdOfIon = new Map(lineageTasks.map((t) => [String(t.ion_task_id), t.id]))
+  const visits: { task_id: string; started_at: string }[] = lineageTasks.length
+    ? (((await sb.schema("maintenance").from("visits")
+        .select("task_id, started_at")
+        .in("task_id", lineageTasks.map((t) => t.id))
+        .eq("status", "completed")
+        .order("started_at", { ascending: false })).data ?? []) as { task_id: string; started_at: string }[])
+    : []
+  const lastByTaskId = new Map<string, string>()
+  for (const v of visits) {
+    if (!lastByTaskId.has(v.task_id)) lastByTaskId.set(v.task_id, String(v.started_at).slice(0, 10))
+  }
   const lastServed = new Map<string, string>()
-  for (const v of (visits ?? []) as { task_id: string; started_at: string }[]) {
-    if (!lastServed.has(v.task_id)) lastServed.set(v.task_id, String(v.started_at).slice(0, 10))
+  for (const qid of quotaIds) {
+    const ion = ionOfQuota.get(qid)
+    const agreementId = ion ? agreementOfIon.get(ion) : undefined
+    const sibs = agreementId ? (ionsOfAgreement.get(agreementId) ?? []) : (ion ? [ion] : [])
+    let latest: string | null = null
+    for (const sibIon of sibs) {
+      const tid = taskIdOfIon.get(sibIon)
+      const d = tid ? lastByTaskId.get(tid) : undefined
+      if (d && (!latest || d > latest)) latest = d
+    }
+    if (latest) lastServed.set(qid, latest)
   }
 
   const byQuota = new Map<string, Change[]>()

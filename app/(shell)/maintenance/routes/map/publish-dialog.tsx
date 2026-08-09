@@ -28,6 +28,9 @@ export interface PreviewRow {
   parity: { from: string; to: string } | null
   validity: string
   effectiveDate: string | null
+  /** the day she is actually served next — for an interval cadence this
+   *  is the new anchor, NOT the earliest the change may take effect */
+  anchorDate: string | null
   violations: { bound?: string; days?: number }[]
   bridges: { date: string; tech: string; techId: string; defaultAccept: boolean }[]
 }
@@ -174,7 +177,13 @@ export function PublishDialog({
                     <td>
                       {running
                         ? <StepRail prog={prog} />
-                        : <span className="text-ink-mute">{r.effectiveDate ?? "—"}</span>}
+                        : (
+                          <span className={r.bridges.length ? "text-amber-300" : "text-ink-mute"}>
+                            {r.anchorDate ?? r.effectiveDate ?? "—"}
+                            {r.bridges.length > 0 && " · gap needs a bridge"}
+                            {r.violations.length > 0 && " · VIOLATES cadence"}
+                          </span>
+                        )}
                     </td>
                   </tr>
                 )
