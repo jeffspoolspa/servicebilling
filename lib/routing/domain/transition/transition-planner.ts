@@ -22,9 +22,13 @@ import { projectFirings } from "./project-firings"
  * Clusters (shared constraint surfaces) survive as the GROUPING for the
  * capacity warnings — the net composite is only computable scenario-wide.
  *
- * PARITY IS DERIVED AT SEAMS: for interval cadences the planner picks the
- * anchor phase whose first firing best honors the ideal gap from the last
- * served visit — A/B flips are usually OUTPUTS of transitions.
+ * PARITY (CORRECTED 2026-08-08): an anchor flip is a REQUESTED change
+ * (AnchorShifted in the scenario vocabulary), never silently re-derived.
+ * A requested shift schedules by picking the earliest target-parity date
+ * whose gap from the last served visit sits inside the cadence window
+ * (biweekly: [7,20]); no candidate in the window is a VIOLATION, reported,
+ * never papered over. Only moves WITHOUT a requested shift keep the
+ * derive-the-phase behavior (day moves that incidentally rephase).
  */
 
 export interface MoveInput {
@@ -34,6 +38,10 @@ export interface MoveInput {
   readonly from: readonly { weekday: number; techId: string }[]
   readonly to: readonly { weekday: number; techId: string }[]
   readonly lastServed: string | null
+  /** A REQUESTED parity change (AnchorShifted): shift the anchor by this
+   *  many weeks within the cycle (biweekly flip = 1). Absent = no request;
+   *  the seam may derive phase for day moves. */
+  readonly anchorShiftWeeks?: number
 }
 
 export interface WeekContext {
@@ -216,27 +224,60 @@ export class TransitionPlanner {
     const horizon = addDays(base, m.cadence.kind === "monthly" ? 70 : 42)
 
     let anchorDate: string | null = null
+    const anchorViolations: GapViolation[] = []
     if (m.cadence.kind !== "weekly") {
-      // pick the phase whose FIRST firing best honors the ideal gap from
-      // the last served visit — parity is an output, not a choice
-      let best: { anchor: string; score: number } | null = null
-      for (let offset = 0; offset < (m.cadence.kind === "biweekly" ? 14 : 28); offset++) {
-        const candidate = addDays(base, offset)
-        if (!weekdays.includes(new Date(`${candidate}T00:00:00Z`).getUTCDay())) continue
-        const gap = m.lastServed ? daysBetween(m.lastServed, candidate) : bounds.idealDays
-        if (gap < bounds.loDays || gap > bounds.hiDays) continue
-        const score = Math.abs(gap - bounds.idealDays)
-        if (!best || score < best.score) best = { anchor: candidate, score }
+      const interval = m.cadence.kind === "biweekly" ? 2 : 4
+      if (m.anchorShiftWeeks !== undefined && m.lastServed) {
+        // REQUESTED shift: candidates are target-parity dates only, parity
+        // measured relative to the last served week (epoch-free). Earliest
+        // candidate inside the gap window wins; none inside = violation.
+        const shift = ((m.anchorShiftWeeks % interval) + interval) % interval
+        const targetParity = (date: string) =>
+          ((weeksBetween(mondayOf(m.lastServed!), mondayOf(date)) % interval) + interval) % interval === shift
+        let fallback: string | null = null
+        for (let offset = 0; offset < interval * 14; offset++) {
+          const candidate = addDays(base, offset)
+          if (!weekdays.includes(new Date(`${candidate}T00:00:00Z`).getUTCDay())) continue
+          if (!targetParity(candidate)) continue
+          fallback = fallback ?? candidate
+          const gap = daysBetween(m.lastServed, candidate)
+          if (gap >= bounds.loDays && gap <= bounds.hiDays) { anchorDate = candidate; break }
+        }
+        if (!anchorDate && fallback) {
+          anchorDate = fallback
+          anchorViolations.push({
+            bound: daysBetween(m.lastServed, fallback) > bounds.hiDays ? "late" : "early",
+            fromDate: m.lastServed, toDate: fallback,
+            gapDays: daysBetween(m.lastServed, fallback),
+          })
+        }
+      } else {
+        // no request: derive the phase whose first firing best honors the
+        // ideal gap (day moves that incidentally rephase)
+        let best: { anchor: string; score: number } | null = null
+        for (let offset = 0; offset < (m.cadence.kind === "biweekly" ? 14 : 28); offset++) {
+          const candidate = addDays(base, offset)
+          if (!weekdays.includes(new Date(`${candidate}T00:00:00Z`).getUTCDay())) continue
+          const gap = m.lastServed ? daysBetween(m.lastServed, candidate) : bounds.idealDays
+          if (gap < bounds.loDays || gap > bounds.hiDays) continue
+          const score = Math.abs(gap - bounds.idealDays)
+          if (!best || score < best.score) best = { anchor: candidate, score }
+        }
+        anchorDate = best?.anchor ?? base
       }
-      anchorDate = best?.anchor ?? base
     }
 
     const startFrom = m.lastServed && m.lastServed >= base ? addDays(m.lastServed, 1) : base
+    // the new phase BEGINS at the anchor (the superseding task's StartsOn);
+    // same-phase dates before it belong to no task and must not project
+    // (found live: a requested flip emitted anchor-14d and flagged a
+    // phantom 6-day gap)
+    const projFrom = anchorDate && anchorDate > startFrom ? anchorDate : startFrom
     const firings = projectFirings(
-      { cadence: m.cadence, weekdays, anchorDate }, startFrom, horizon,
+      { cadence: m.cadence, weekdays, anchorDate }, projFrom, horizon,
     ).slice(0, 5)
     const timeline = [...(m.lastServed ? [m.lastServed] : []), ...firings]
-    return { anchorDate, timeline, violations: checkCadenceLaw(timeline, bounds) }
+    return { anchorDate, timeline, violations: [...anchorViolations, ...checkCadenceLaw(timeline, bounds)] }
   }
 }
 
@@ -251,6 +292,9 @@ const addDays = (isoDate: string, n: number): string => {
   d.setUTCDate(d.getUTCDate() + n)
   return d.toISOString().slice(0, 10)
 }
+
+const weeksBetween = (mondayA: string, mondayB: string): number =>
+  Math.round((Date.parse(`${mondayB}T00:00:00Z`) - Date.parse(`${mondayA}T00:00:00Z`)) / (7 * 86_400_000))
 
 /** Same Mon-Sun service week? */
 const sameServiceWeek = (a: string, b: string): boolean => mondayOf(a) === mondayOf(b)

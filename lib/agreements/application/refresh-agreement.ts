@@ -173,10 +173,14 @@ export async function refreshAgreement(
       }
     }
   }
+  // startsOn is a HISTORICAL fact (when service began), not an observation:
+  // interval-cadence StartsOn churns with every parity flip (ION's
+  // triple-duty field), and tracking it would version terms on a pure
+  // reroute. Only endsOn is observed; startsOn holds once set.
   const starts = slices.map((s) => s.schedule.period.startsOn).filter(Boolean).sort()
   const endsAll = slices.every((s) => s.schedule.period.endsOn !== null)
   const period = {
-    startsOn: starts[0] ?? null,
+    startsOn: agreement.currentTerms().period.startsOn ?? starts[0] ?? null,
     endsOn: endsAll ? slices.map((s) => s.schedule.period.endsOn!).sort().pop()! : null,
   }
 

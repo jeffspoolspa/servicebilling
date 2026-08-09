@@ -9,6 +9,7 @@
 import { createClient } from "@supabase/supabase-js"
 import { TransitionPlanner, type MoveInput } from "../../lib/routing/domain/transition/transition-planner"
 import type { CadenceKind } from "../../lib/routing/domain/transition/cadence-law"
+import { scenarioChangesFrom } from "../../lib/routing/domain/transition/scenario-change"
 
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
   db: { schema: "maintenance" },
@@ -28,7 +29,14 @@ async function main() {
 
   const { data: scen, error } = await sb.from("scenarios").select("name, changes").eq("id", scenarioId).single()
   if (error || !scen) throw new Error(`scenario not found: ${error?.message}`)
-  const changes = scen.changes as Change[]
+  const intake = scenarioChangesFrom(scen.changes)
+  if (!intake.ok) throw new Error(`scenario refused: ${intake.failed}`)
+  const changes = intake.changes as unknown as Change[]
+  if (intake.agreementsRoad.length) {
+    console.log(`AGREEMENTS ROAD (not routing moves — terms changes to rule on):`)
+    for (const c of intake.agreementsRoad) console.log(`  ${c.kind} quota ${c.quotaId.slice(0, 8)}`)
+    console.log("")
+  }
   const quotaIds = [...new Set(changes.map((c) => c.quotaId))]
 
   // current whole configurations + cadence, per touched quota
@@ -74,12 +82,17 @@ async function main() {
     for (const c of chs) {
       if (c.kind === "StopMoved" && c.from && c.to) {
         to = to.map((s) => (s.weekday === c.from!.weekday && s.techId === c.from!.techId ? { weekday: c.to!.weekday, techId: c.to!.techId } : s))
-      } else if (c.kind === "StopRemoved" && c.from) {
-        to = to.filter((s) => !(s.weekday === c.from!.weekday && s.techId === c.from!.techId))
       }
-      // AnchorShifted: config unchanged — the planner derives the phase
+      // AnchorShifted: a REQUESTED parity change — carried to the planner
+      // as anchorShiftWeeks, never re-derived (RULED 2026-08-08)
     }
-    moves.push({ quotaId, cadence: cadenceOf(quotaId, from.length), from, to, lastServed: lastServed.get(quotaId) ?? null })
+    const anchor = chs.find((c) => c.kind === "AnchorShifted") as
+      | { fromAnchorWeek: number; toAnchorWeek: number } | undefined
+    moves.push({
+      quotaId, cadence: cadenceOf(quotaId, from.length), from, to,
+      lastServed: lastServed.get(quotaId) ?? null,
+      ...(anchor ? { anchorShiftWeeks: anchor.toAnchorWeek - anchor.fromAnchorWeek } : {}),
+    })
   }
 
   // route loads (net-composite baseline): count per tech·day across ALL active

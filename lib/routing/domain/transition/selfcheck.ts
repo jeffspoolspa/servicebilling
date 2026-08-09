@@ -165,4 +165,35 @@ check("conservative policy: the blanket rule rides ON the machinery — Monday, 
   assert.strictEqual(v.violations.length, 0) // law still proves the seam
 })
 
+check("REQUESTED anchor flip: earliest opposite-parity date inside [7,20] wins", () => {
+  // biweekly Tuesday, last served Tue 2026-08-11 (week of 08-10). A
+  // requested flip (shift 1) must land in an opposite-parity week: Tue
+  // 08-18 (gap 7, in window) — NOT the same-parity 08-25 the old pattern
+  // would keep, and never a silent re-derivation.
+  const [v] = planner.plan([weekly({
+    cadence: { kind: "biweekly" },
+    from: [{ weekday: 2, techId: "m" }], to: [{ weekday: 2, techId: "m" }],
+    lastServed: "2026-08-11", anchorShiftWeeks: 1,
+  })], ctx())
+  assert.strictEqual(v.anchorDate, "2026-08-18")
+  assert.strictEqual(v.violations.length, 0)
+})
+
+check("REQUESTED flip that cannot fit the window: scheduled at nearest target-parity date, VIOLATION reported", () => {
+  // just served Tue 08-11; flip candidates on target parity: 08-11 week is
+  // current parity so next odd week Tue is 08-25 -> gap 14? No: flip from
+  // 08-11's parity -> target weeks are 08-18's parity... 08-18 gap 7 fits.
+  // Force the impossible case with cursor pushing base past the window:
+  // base = today 2026-08-12; last served 2026-07-20 (23 days before the
+  // first target-parity Tuesday available) -> every candidate exceeds 20.
+  const [v] = planner.plan([weekly({
+    cadence: { kind: "biweekly" },
+    from: [{ weekday: 2, techId: "m" }], to: [{ weekday: 2, techId: "m" }],
+    lastServed: "2026-07-20", anchorShiftWeeks: 1,
+  })], ctx())
+  assert.strictEqual(v.validity, "valid") // the move itself is legal
+  assert.ok(v.violations.length >= 1) // but the seam breaches the law, loudly
+  assert.strictEqual(v.violations[0].bound, "late")
+})
+
 console.log(`transition selfcheck: ${n} checks passed`)

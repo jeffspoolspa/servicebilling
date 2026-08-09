@@ -50,6 +50,10 @@ export interface ChangeInput {
   targetStops: readonly PlacementStop[]
   /** Planner-computed: the change may not serve before this date. */
   effectiveDate: string
+  /** AnchorShifted only: the planner's window-checked anchor date. The new
+   *  task's StartsOn IS this date (StartsOn is the parity anchor for
+   *  interval cadences — ION's triple-duty field). */
+  targetAnchorDate?: string
   dryRun: boolean
 }
 
@@ -84,13 +88,18 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
   const target = {
     pattern: current.schedule.frequency, // placement change: terms untouched
     billing: current.billing,
-    period: current.schedule.period,
+    // an anchor flip moves StartsOn (the parity anchor) — planWrite reads
+    // the period diff and answers supersede, exactly the ruled write shape
+    period: input.targetAnchorDate
+      ? { ...current.schedule.period, startsOn: input.targetAnchorDate }
+      : current.schedule.period,
     stops: input.targetStops.map((s) => ({ weekday: s.weekday, techId: s.techId })),
     note: form.note,
   }
   const plan = planWrite(current, target, input.effectiveDate)
   const newStartsOn =
-    plan.kind === "supersede" ? firstServiceDate(input.effectiveDate, target.stops.map((s) => s.weekday)) : null
+    plan.kind !== "supersede" ? null
+      : input.targetAnchorDate ?? firstServiceDate(input.effectiveDate, target.stops.map((s) => s.weekday))
   const ops = renderWrites(form, plan, newStartsOn ?? undefined)
 
   const echoes: WriteEcho[] = []
