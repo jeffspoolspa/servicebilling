@@ -66,7 +66,18 @@ export async function refreshAgreement(
 
   const open = agreement.openIncarnations()
   report.slices = open.length
-  if (!open.length) return report
+  if (!open.length) {
+    // RULED 2026-08-08: an agreement IS its slices — every incarnation
+    // ended (ION-side ending with no successor) means nothing is standing:
+    // the agreement ends, the quota dies with its era, and scenarios drop
+    // the quota on their next evaluation.
+    const lastEnd = agreement.lineage()
+      .map((i) => i.to).filter((t): t is string => t !== null).sort().pop()
+    agreement.end((lastEnd ?? at).slice(0, 10), at, "reflection")
+    await deps.repo.save(agreement)
+    report.terms = "ended"
+    return report
+  }
 
   // the fetch list: ionCustId comes from each slice's latest stored
   // translation (every incarnation was born from one)

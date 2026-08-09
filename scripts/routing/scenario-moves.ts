@@ -16,9 +16,10 @@ type Change = {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function buildScenarioMoves(sb: any, scenarioId: string): Promise<{
+export async function buildScenarioMoves(sb: any, scenarioId: string, agr?: any): Promise<{
   scenName: string
   moves: MoveInput[]
+  droppedEnded: string[]
 }> {
   const { data: scen, error } = await sb.from("scenarios").select("name, changes").eq("id", scenarioId).single()
   if (error || !scen) throw new Error(`scenario not found: ${error?.message}`)
@@ -33,8 +34,8 @@ export async function buildScenarioMoves(sb: any, scenarioId: string): Promise<{
     .select("task_id, tech_employee_id, day_of_week, frequency, active")
     .in("task_id", quotaIds)
     .eq("active", true)
-  const { data: tasks } = await sb.from("tasks").select("id, frequency, days_per_week, starts_on").in("id", quotaIds) as
-    { data: { id: string; frequency: string | null; days_per_week: number | null; starts_on: string | null }[] | null }
+  const { data: tasks } = await sb.from("tasks").select("id, ion_task_id, frequency, days_per_week, starts_on").in("id", quotaIds) as
+    { data: { id: string; ion_task_id: string | null; frequency: string | null; days_per_week: number | null; starts_on: string | null }[] | null }
   const startsOnOf = new Map<string, string | null>(
     (tasks ?? []).map((t) => [t.id, t.starts_on ? String(t.starts_on).slice(0, 10) : null]))
   const { data: visits } = await sb
@@ -92,5 +93,23 @@ export async function buildScenarioMoves(sb: any, scenarioId: string): Promise<{
     })
   }
 
-  return { scenName: scen.name as string, moves }
+  // ENDED agreements drop their quotas from every scenario (RULED
+  // 2026-08-08): an ION-side ending with no successor already ended the
+  // agreement on refresh — the scenario just hasn't heard yet.
+  let droppedEnded: string[] = []
+  if (agr) {
+    const ionIds = (tasks ?? []).map((t) => t.ion_task_id).filter(Boolean)
+    const { data: endedRows } = await agr
+      .from("ion_incarnations")
+      .select("ion_task_id, service_agreements!inner(status)")
+      .in("ion_task_id", ionIds)
+      .eq("service_agreements.status", "ended")
+    const endedIon = new Set((endedRows ?? []).map((r: { ion_task_id: string }) => r.ion_task_id))
+    const ionOf = new Map((tasks ?? []).map((t) => [t.id, t.ion_task_id]))
+    droppedEnded = moves.filter((m) => endedIon.has(ionOf.get(m.quotaId) ?? "")).map((m) => `${m.quotaId} (ion ${ionOf.get(m.quotaId)})`)
+    const dropSet = new Set(droppedEnded.map((d) => d.split(" ")[0]))
+    for (let i = moves.length - 1; i >= 0; i--) if (dropSet.has(moves[i].quotaId)) moves.splice(i, 1)
+  }
+
+  return { scenName: scen.name as string, moves, droppedEnded }
 }

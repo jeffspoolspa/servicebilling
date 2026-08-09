@@ -20,6 +20,7 @@ const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const sb = createClient(URL_, KEY, { db: { schema: "maintenance" } })
 const rt = createClient(URL_, KEY, { db: { schema: "routing" } })
+const agr = createClient(URL_, KEY, { db: { schema: "agreements" } })
 
 const WM_API = `${process.env.WINDMILL_BASE_URL!.replace(/\/$/, "")}/w/${process.env.WINDMILL_WORKSPACE}`
 const WM_AUTH = { Authorization: `Bearer ${process.env.WINDMILL_TOKEN}` }
@@ -83,7 +84,11 @@ async function main() {
   const limit = limitArg >= 0 ? Number(process.argv[limitArg + 1]) : Infinity
 
   // fresh evaluation — never the stored preview
-  const { scenName, moves } = await buildScenarioMoves(sb, scenarioId)
+  const { scenName, moves, droppedEnded } = await buildScenarioMoves(sb, scenarioId, agr)
+  if (droppedEnded.length) {
+    console.log(`dropped (agreement ENDED — no active successor): ${droppedEnded.length}`)
+    for (const d of droppedEnded) console.log(`  ${d}`)
+  }
   const { data: allLoads } = await sb.from("v_task_schedules_with_context")
     .select("tech_employee_id, day_of_week").eq("active", true)
   const routeLoad = new Map<string, number>()

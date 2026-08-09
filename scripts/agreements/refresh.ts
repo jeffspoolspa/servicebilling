@@ -61,6 +61,8 @@ export function repoAdapter(): AgreementRepository {
       if (error) throw error
       const hit = (data ?? []).find((i) => i.from_at.slice(0, 10) <= onDate && (i.to_at === null || i.to_at.slice(0, 10) >= onDate))
         ?? (data ?? []).find((i) => i.to_at === null)
+        // an ENDED slice still names its agreement (the lifecycle read):
+        ?? (data ?? []).sort((a, b) => a.from_at.localeCompare(b.from_at)).pop()
       return hit ? this.byId(hit.agreement_id) : null
     },
     async byCustomer(customerId) {
