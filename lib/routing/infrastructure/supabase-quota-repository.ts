@@ -152,7 +152,7 @@ export class SupabaseQuotaRepository implements QuotaRepository {
 
   /** floor stops -> mirror-vocabulary SlotRows (+ synthesized TaskRows for
    *  fresh successors the mirror hasn't ingested yet). */
-  private async floorSlots(tasks: TaskRow[]): Promise<{ slots: SlotRow[]; extraTasks: TaskRow[] }> {
+  private async floorSlots(tasks: TaskRow[]): Promise<{ slots: SlotRow[]; extraTasks: TaskRow[]; placedTaskIds: Set<string> }> {
     const [floor, emps, custs] = await Promise.all([
       fetchAll<FloorRow>(
         this.client.schema("routing").from("v_current_placements")
@@ -175,6 +175,7 @@ export class SupabaseQuotaRepository implements QuotaRepository {
 
     const slots: SlotRow[] = []
     const extraTasks = new Map<string, TaskRow>()
+    const placedTaskIds = new Set<string>()
     for (const r of floor) {
       if (!r.ion_task_id) continue
       let task = taskOfIon.get(r.ion_task_id)
@@ -192,6 +193,7 @@ export class SupabaseQuotaRepository implements QuotaRepository {
       const parity = r.cadence_kind === "biweekly" && r.anchor_starts_on
         ? (weekOf(new Date(`${r.anchor_starts_on}T00:00:00Z`)) % 2 === 0 ? "biweekly_a" : "biweekly_b")
         : null
+      placedTaskIds.add(task.id)
       slots.push({
         task_id: task.id,
         day_of_week: r.weekday,
@@ -199,7 +201,7 @@ export class SupabaseQuotaRepository implements QuotaRepository {
         frequency: parity ?? (r.cadence_kind === "monthly" ? "monthly" : "weekly"),
       })
     }
-    return { slots, extraTasks: [...extraTasks.values()] }
+    return { slots, extraTasks: [...extraTasks.values()], placedTaskIds }
   }
 
   async liveIn(week: WeekIndex): Promise<Quota[]> {
@@ -218,8 +220,16 @@ export class SupabaseQuotaRepository implements QuotaRepository {
       ),
       this.serviceMedians(),
     ])
-    const { slots, extraTasks } = await this.floorSlots(tasks)
-    return await this.hydrate([...tasks, ...extraTasks], slots, locations, week, medians)
+    const { slots, extraTasks, placedTaskIds } = await this.floorSlots(tasks)
+    // THE FLOOR IS THE PLACEMENT TRUTH (2026-08-09): a mirror task the
+    // floor does not carry is a task the routing model does not route —
+    // a superseded old the mirror has not retired yet, or one not in the
+    // book. Hydrating it with zero stops invented 99 phantom "owed"
+    // quotas on the board (Carter, minutes after the repoint). The real
+    // backlog is a quota IN the floor holding fewer stops than its
+    // pattern requires, which coverage() still reports.
+    const routed = [...tasks.filter((t) => placedTaskIds.has(t.id)), ...extraTasks]
+    return await this.hydrate(routed, slots, locations, week, medians)
   }
 
   /**
@@ -238,7 +248,8 @@ export class SupabaseQuotaRepository implements QuotaRepository {
         .eq("status", "active"),
       "tasks(route)",
     )
-    const { slots, extraTasks } = await this.floorSlots(tasks)
+    const { slots, extraTasks, placedTaskIds } = await this.floorSlots(tasks)
+    void placedTaskIds // route queries are floor-derived by construction
     const onRoute = new Set(
       slots.filter((s) => s.tech_employee_id === techId && s.day_of_week === weekday).map((s) => s.task_id),
     )
