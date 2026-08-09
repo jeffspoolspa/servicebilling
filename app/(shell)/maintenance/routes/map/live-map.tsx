@@ -158,13 +158,19 @@ interface PublicationOutcome {
 async function watchPublication(
   scenarioId: string,
   say: (s: string) => void,
+  /** the latest publication BEFORE this click — never report its corpse
+   *  as this run's outcome (the replay bug, 2026-08-09: a retry read the
+   *  previous run's 6-failed summary in the seconds before its own row
+   *  opened, and told the operator the new run had failed). */
+  ignoreId: string | null = null,
 ): Promise<PublicationOutcome | null> {
   const deadline = Date.now() + 20 * 60_000
   let last: PublicationOutcome | null = null
   for (;;) {
     const r = await fetch(`/api/routing/publications?scenario_id=${scenarioId}`)
     if (r.ok) {
-      const { publication } = (await r.json()) as { publication: PublicationOutcome | null }
+      let { publication } = (await r.json()) as { publication: PublicationOutcome | null }
+      if (publication && publication.id === ignoreId) publication = null // the previous run, not ours
       if (publication) {
         last = publication
         if (publication.finishedAt || publication.refused) return publication
@@ -1527,6 +1533,13 @@ export function LiveMap({
       setPublishPhase(
         `Checking ${changes.length} task${changes.length === 1 ? "" : "s"} against ION, then writing`,
       )
+      // baseline: the latest publication BEFORE this click — the watcher
+      // must never mistake its corpse for this run's outcome
+      let baselineId: string | null = null
+      try {
+        const b = await fetch(`/api/routing/publications?scenario_id=${scenarioId}`)
+        if (b.ok) baselineId = ((await b.json()) as { publication: { id: string } | null }).publication?.id ?? null
+      } catch { /* no baseline readable — the watcher just waits for a settle */ }
       const res = await fetch(`/api/routing/scenarios/${scenarioId}/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1548,7 +1561,7 @@ export function LiveMap({
       // tab loses nothing, the function finishes regardless.
       if (res.status === 202 && report.accepted) {
         setPublishPhase(`Accepted ${changes.length} change${changes.length === 1 ? "" : "s"} — ION is being written`)
-        const outcome = await watchPublication(scenarioId!, setPublishPhase)
+        const outcome = await watchPublication(scenarioId!, setPublishPhase, baselineId)
         // WHAT YOU SEE IS THE FLOOR (RULED 2026-08-09): after a live
         // publish settles, reload the page outright — the board redraws
         // from the same placements rows verify_floor just checked, never
