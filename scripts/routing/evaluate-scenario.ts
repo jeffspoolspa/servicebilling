@@ -11,7 +11,7 @@
 import { createClient } from "@supabase/supabase-js"
 import { TransitionPlanner, type MoveInput } from "../../lib/routing/domain/transition/transition-planner"
 import type { CadenceKind } from "../../lib/routing/domain/transition/cadence-law"
-import { scenarioChangesFrom } from "../../lib/routing/domain/transition/scenario-change"
+import { buildScenarioMoves } from "./scenario-moves"
 
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
   db: { schema: "maintenance" },
@@ -29,76 +29,8 @@ async function main() {
   const conservative = process.argv.includes("--conservative")
   if (!scenarioId) throw new Error("usage: evaluate-scenario.ts <scenarioId>")
 
-  const { data: scen, error } = await sb.from("scenarios").select("name, changes").eq("id", scenarioId).single()
-  if (error || !scen) throw new Error(`scenario not found: ${error?.message}`)
-  const intake = scenarioChangesFrom(scen.changes)
-  if (!intake.ok) throw new Error(`scenario refused: ${intake.failed}`)
-  const changes = intake.changes as unknown as Change[]
-  const quotaIds = [...new Set(changes.map((c) => c.quotaId))]
-
-  // current whole configurations + cadence, per touched quota
-  const { data: rows } = await sb
-    .from("v_task_schedules_with_context")
-    .select("task_id, tech_employee_id, day_of_week, frequency, active")
-    .in("task_id", quotaIds)
-    .eq("active", true)
-  const { data: tasks } = await sb.from("tasks").select("id, frequency, days_per_week, starts_on").in("id", quotaIds)
-  const startsOnOf = new Map((tasks ?? []).map((t) => [t.id, t.starts_on ? String(t.starts_on).slice(0, 10) : null]))
-  const { data: visits } = await sb
-    .from("visits")
-    .select("task_id, started_at")
-    .in("task_id", quotaIds)
-    .eq("status", "completed")
-    .order("started_at", { ascending: false })
-
-  const configOf = new Map<string, { weekday: number; techId: string }[]>()
-  for (const r of rows ?? []) {
-    const list = configOf.get(r.task_id) ?? []
-    list.push({ weekday: r.day_of_week, techId: r.tech_employee_id })
-    configOf.set(r.task_id, list)
-  }
-  const lastServed = new Map<string, string>()
-  for (const v of visits ?? []) {
-    if (!lastServed.has(v.task_id)) lastServed.set(v.task_id, String(v.started_at).slice(0, 10))
-  }
-  const cadenceOf = (taskId: string, stops: number): CadenceKind => {
-    const t = (tasks ?? []).find((x) => x.id === taskId)
-    if (t?.frequency === "biweekly") return { kind: "biweekly" }
-    if (t?.frequency === "monthly") return { kind: "monthly" }
-    const n = (t?.days_per_week ?? stops) || 1
-    return { kind: "weekly", timesPerWeek: Math.min(Math.max(n, 1), 7) as 1 | 2 | 3 | 4 | 5 | 6 | 7 }
-  }
-
-  // whole-config transitions: carry untouched stops (the vocabulary migration)
-  const byQuota = new Map<string, Change[]>()
-  for (const c of changes) (byQuota.get(c.quotaId) ?? byQuota.set(c.quotaId, []).get(c.quotaId)!).push(c)
-
-  const moves: MoveInput[] = []
-  for (const [quotaId, chs] of byQuota) {
-    const from = configOf.get(quotaId) ?? []
-    let to = [...from]
-    for (const c of chs) {
-      if (c.kind === "StopMoved" && c.from && c.to) {
-        to = to.map((s) => (s.weekday === c.from!.weekday && s.techId === c.from!.techId ? { weekday: c.to!.weekday, techId: c.to!.techId } : s))
-      }
-      // AnchorShifted: a REQUESTED parity change — carried to the planner
-      // as anchorShiftWeeks, never re-derived (RULED 2026-08-08)
-    }
-    // NET the anchor shifts: a drag to the other week and back records two
-    // rows that cancel (Bryant/Thurlow in RH Current) — the request is the
-    // SUM of shifts, not the first row
-    const netShift = chs
-      .filter((c) => c.kind === "AnchorShifted")
-      .reduce((sum, c) => sum + ((c as unknown as { toAnchorWeek: number; fromAnchorWeek: number }).toAnchorWeek
-        - (c as unknown as { toAnchorWeek: number; fromAnchorWeek: number }).fromAnchorWeek), 0)
-    moves.push({
-      quotaId, cadence: cadenceOf(quotaId, from.length), from, to,
-      lastServed: lastServed.get(quotaId) ?? null,
-      scheduleAnchor: startsOnOf.get(quotaId) ?? null,
-      ...(netShift !== 0 ? { anchorShiftWeeks: netShift } : {}),
-    })
-  }
-
+  const { scenName, moves } = await buildScenarioMoves(sb, scenarioId)
+  const quotaIds = [...new Set(moves.map((m) => m.quotaId))]
   // route loads (net-composite baseline): count per tech·day across ALL active
   const { data: emps } = await createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
     .from("employees").select("id, first_name, last_name")
@@ -136,7 +68,7 @@ async function main() {
   }
   const clusters = new Set(verdicts.map((v) => v.clusterId)).size
 
-  console.log(`scenario "${scen.name}" — ${changes.length} changes → ${moves.length} whole-config moves${conservative ? "  [CONSERVATIVE: everything next Monday]" : ""}`)
+  console.log(`scenario "${scenName}" — ${moves.length} whole-config moves${conservative ? "  [CONSERVATIVE: everything next Monday]" : ""}`)
   console.log(`validity: ${[...byValidity].map(([k, n]) => `${k}=${n}`).join("  ")}`)
   console.log(`clusters: ${clusters}`)
   console.log(`effective dates: ${[...byDate].sort().map(([d, n]) => `${d}×${n}`).join("  ")}`)

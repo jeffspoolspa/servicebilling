@@ -118,6 +118,59 @@ async function main() {
       clean.endsOn === "2026-08-13" && clean.clearedVisits.length === 0 && clean.cutVisits.length === 0)
   }
 
+  // PublishScenario: refuse-on-dirty, ledger every outcome, resume via no-diff
+  const { publishScenario } = await import("./publish-scenario")
+  {
+    const rows: { status: string; writeKind: string }[] = []
+    let refused: string | null = null
+    const store = {
+      async open() { return { id: "pub-1" } },
+      async refuse(_id: string, reason: string) { refused = reason },
+      async recordMove(_id: string, row: { status: string; writeKind: string }) { rows.push(row) },
+      async finish() {},
+    }
+    const verdict = (over: object = {}) => ({
+      quotaId: "q", validity: "valid" as const, reasons: [], clusterId: 0,
+      effectiveDate: "2026-08-10", anchorDate: null, timeline: [], bridges: [],
+      violations: [], warnings: [], ...over,
+    })
+    const mv = (over: object = {}) => ({
+      quotaId: "q1", ionTaskId: "t1", ionCustId: "c1",
+      targetStops: [{ weekday: 1, techId: "a", type: "clean" as const }],
+      verdict: verdict(), ...over,
+    })
+    const changeOk = async () => ({
+      plan: "amend" as const, newStartsOn: null, clearedVisits: [], cutVisits: [],
+      ops: [{ op: "update" }] as never, echoes: [{ committed: true }] as never, recorded: true,
+    })
+
+    // 1. dirty evaluation refuses the WHOLE publication
+    const r1 = await publishScenario({ store, change: changeOk } as never, "s1",
+      [mv({ verdict: verdict({ violations: [{ bound: "late" }] }) })] as never, "live")
+    check("publish refuses on fresh violations (nothing written)", r1.refused !== null && rows.length === 0)
+
+    // 2. live mode refuses undecided (non-default) bridge proposals
+    const r2 = await publishScenario({ store, change: changeOk } as never, "s1",
+      [mv({ verdict: verdict({ bridges: [{ date: "2026-08-11", techId: "x", defaultAccept: false }] }) })] as never, "live")
+    check("publish refuses undecided bridges in live mode", r2.refused !== null && r2.refused.includes("undecided"))
+
+    // 3. happy path ledgers done + bridge_needs_probe for accepted bridges
+    const r3 = await publishScenario({ store, change: changeOk } as never, "s1", [
+      mv(),
+      mv({ quotaId: "q2", ionTaskId: "t2", verdict: verdict({ bridges: [{ date: "2026-08-11", techId: "x", defaultAccept: true }] }) }),
+    ] as never, "dry")
+    check("publish ledgers done + accepted bridge as needs-probe",
+      r3.refused === null && r3.summary.done === 2 && r3.summary.bridge_needs_probe === 1)
+
+    // 4. resume: an already-realized move has no diff -> skipped, no write
+    const changeNoDiff = async () => ({
+      plan: "none" as const, newStartsOn: null, clearedVisits: [], cutVisits: [],
+      ops: [] as never, echoes: [] as never, recorded: false,
+    })
+    const r4 = await publishScenario({ store, change: changeNoDiff } as never, "s1", [mv()] as never, "live")
+    check("resume: no-diff move skips itself (level-triggered publish)", r4.summary.skipped_no_diff === 1)
+  }
+
   console.log(`\nall ${n} checks passed`)
 }
 
