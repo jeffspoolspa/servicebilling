@@ -105,6 +105,18 @@ async function main() {
   const ionOf = new Map((taskRows ?? []).map((t) => [t.id, String(t.ion_task_id)]))
   const repo = repoAdapter()
 
+  // TECH ID TRANSLATION AT THE BORDER (the 2026-08-09 lesson): scenario
+  // stops carry MIRROR employee uuids; ION wants ITS numeric ids
+  const pub2 = createClient(URL_, KEY)
+  const { data: emps } = await pub2.from("employees").select("id, ion_employee_id")
+  const ionTechOf = new Map((emps ?? []).map((e) => [String(e.id), e.ion_employee_id ? String(e.ion_employee_id) : null]))
+  const mapTech = (techId: string): string => {
+    if (/^\d+$/.test(techId)) return techId
+    const mapped = ionTechOf.get(techId)
+    if (!mapped) throw new Error(`no ion_employee_id for employee ${techId} — cannot publish`)
+    return mapped
+  }
+
   // resolve ALL moves first — a book gap refuses the publication with the
   // COMPLETE list (one loud triage list beats dying on the first straggler)
   const publishMoves: PublishMove[] = []
@@ -119,9 +131,12 @@ async function main() {
     const last = await intakeAdapter.latest(ionTaskId)
     const ionCustId = (last?.translation as { ionCustomerId?: string } | null)?.ionCustomerId
     if (!ionCustId) { unresolvable.push(`${ionTaskId}: no stored translation`); continue }
+    const storedEnds = (last?.translation as { schedule?: { period?: { endsOn: string | null } } } | null)
+      ?.schedule?.period?.endsOn ?? null
     publishMoves.push({
       quotaId: m.quotaId, ionTaskId, ionCustId,
-      targetStops: m.to.map((s) => ({ ...s, type: slice.covers.stopType })),
+      targetStops: m.to.map((s) => ({ ...s, techId: mapTech(s.techId), type: slice.covers.stopType })),
+      targetEndsOn: storedEnds,
       verdict: v,
     })
   }

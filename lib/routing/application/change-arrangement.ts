@@ -55,6 +55,12 @@ export interface ChangeInput {
    *  task's StartsOn IS this date (StartsOn is the parity anchor for
    *  interval cadences — ION's triple-duty field). */
   targetAnchorDate?: string
+  /** The successor's period end — the AGREEMENT's truth (stored pre-cut
+   *  translation), never the freshly cut form's EndsOn: a resumed
+   *  supersede must not propagate its own cut onto the successor, and an
+   *  annual commercial must keep its real contract end. undefined =
+   *  trust the live form (standalone harness use). */
+  targetEndsOn?: string | null
   dryRun: boolean
 }
 
@@ -154,10 +160,12 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
     pattern: current.schedule.frequency, // placement change: terms untouched
     billing: current.billing,
     // an anchor flip moves StartsOn (the parity anchor) — planWrite reads
-    // the period diff and answers supersede, exactly the ruled write shape
-    period: input.targetAnchorDate
-      ? { ...current.schedule.period, startsOn: input.targetAnchorDate }
-      : current.schedule.period,
+    // the period diff and answers supersede, exactly the ruled write shape.
+    // endsOn: the agreement's truth when given (see targetEndsOn).
+    period: {
+      startsOn: input.targetAnchorDate ?? current.schedule.period.startsOn,
+      endsOn: input.targetEndsOn !== undefined ? input.targetEndsOn : current.schedule.period.endsOn,
+    },
     stops: input.targetStops.map((s) => ({ weekday: s.weekday, techId: s.techId })),
     note: form.note,
   }

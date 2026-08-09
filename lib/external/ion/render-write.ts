@@ -34,13 +34,14 @@ export interface WriteOp {
   readonly why: string
 }
 
-/** Date wire format: ISO. StartsOn/EndsOn are native <input type="date">
- *  fields — the REAL browser save (captured live 2026-08-08, boundary
- *  test) posts YYYY-MM-DD. And the form NEVER renders EndsOn back: it is
- *  write-only; verification reads the TASK LIST (an end-dated task
- *  leaves active surfaces immediately), never the form field. */
+/** Date wire format: MM/DD/YYYY — the PROVEN format on BOTH paths (the
+ *  boundary test's create and its first EndsOn save). The 2026-08-09
+ *  live run proved ISO 500s on the create path; the browser's ISO was
+ *  the edit page's date-input serialization only. EndsOn remains
+ *  write-only: verification reads the TASK LIST, never the form field. */
 export function ionDate(iso: string): string {
-  return iso
+  const [y, m, d] = iso.split("-")
+  return `${m}/${d}/${y}`
 }
 
 const isoMinusDays = (iso: string, n: number) => {
@@ -51,6 +52,15 @@ const isoMinusDays = (iso: string, n: number) => {
 
 /** day1=Sunday .. day7=Saturday (ION's form fields). */
 const dayField = (weekday: number) => `day${weekday + 1}`
+
+/** ION employee ids are numeric. A mirror UUID reaching a day select is
+ *  the 2026-08-09 live-run bug (ION 500s on every op) — REFUSE at render
+ *  so the class dies in dry runs, never live. */
+const assertIonTechId = (techId: string): void => {
+  if (!/^\d+$/.test(techId)) {
+    throw new Error(`techId "${techId}" is not an ION employee id — map mirror uuids via employees.ion_employee_id before rendering`)
+  }
+}
 
 export function renderWrites(
   form: IonTaskForm,
@@ -70,6 +80,7 @@ export function renderWrites(
     const currentByDay = new Map<number, string>()
     for (const [d, t] of Object.entries(form.dayTechs)) currentByDay.set(Number(d), (t as { techId: string }).techId)
     for (const s of plan.target.stops) {
+      assertIonTechId(s.techId)
       if (currentByDay.get(s.weekday) !== s.techId) changes[dayField(s.weekday)] = s.techId
     }
     // interval cadences carry one AssignedTo instead of day fields
@@ -93,7 +104,10 @@ export function renderWrites(
   const fields: Record<string, string> = { ...form.rawFields }
   delete fields["EventID"] // a create has no identity yet
   for (let d = 1; d <= 7; d++) delete fields[`day${d}`]
-  for (const s of plan.target.stops) fields[dayField(s.weekday)] = s.techId
+  for (const s of plan.target.stops) {
+    assertIonTechId(s.techId)
+    fields[dayField(s.weekday)] = s.techId
+  }
   fields["StartsOn"] = ionDate(newStartsOn)
   fields["EndsOn"] = plan.target.period.endsOn ? ionDate(plan.target.period.endsOn) : ""
   const createNew: WriteOp = {
@@ -128,13 +142,14 @@ export function renderBridgeOp(
   const fields: Record<string, string> = { ...form.rawFields }
   delete fields["EventID"]
   for (let d = 1; d <= 7; d++) delete fields[`day${d}`]
+  assertIonTechId(bridge.techId)
   const weekday = new Date(`${bridge.date}T00:00:00Z`).getUTCDay()
   fields[dayField(weekday)] = bridge.techId
   fields["AssignedTo"] = bridge.techId
   fields["ServiceRepeat"] = SERVICE_REPEAT.daily
   fields["ServiceType"] = QC_SERVICE_TYPE_ID
-  fields["StartsOn"] = bridge.date
-  fields["EndsOn"] = bridge.date
+  fields["StartsOn"] = ionDate(bridge.date)
+  fields["EndsOn"] = ionDate(bridge.date)
   fields["itemcost"] = ""
   fields["tasknote"] = "Transition bridge visit — no charge (auto)"
   return {

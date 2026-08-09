@@ -287,37 +287,46 @@ import { renderWrites, ionDate, renderBridgeOp, SERVICE_REPEAT, QC_SERVICE_TYPE_
 check("renderWrites: amend = tech values onto day fields, nothing else", () => {
   const f = form() // weekly, dayTechs from the base fixture
   const currentStops = Object.entries(f.dayTechs).map(([d, t]) => ({ weekday: Number(d), techId: (t as { techId: string }).techId }))
-  const target = { pattern: { kind: "weekly", timesPerWeek: currentStops.length }, billing: translateTask(f, catalog) as never, period: { startsOn: f.startsOn, endsOn: f.endsOn }, stops: currentStops.map((s) => ({ ...s, techId: "T-NEW" })), note: f.note }
+  const target = { pattern: { kind: "weekly", timesPerWeek: currentStops.length }, billing: translateTask(f, catalog) as never, period: { startsOn: f.startsOn, endsOn: f.endsOn }, stops: currentStops.map((s) => ({ ...s, techId: "90001" })), note: f.note }
   const ops = renderWrites(f, { kind: "amend", target: target as never })
   assert.strictEqual(ops.length, 1)
   assert.strictEqual(ops[0].op, "update")
-  for (const s of currentStops) assert.strictEqual(ops[0].changes[`day${s.weekday + 1}`], "T-NEW")
+  for (const s of currentStops) assert.strictEqual(ops[0].changes[`day${s.weekday + 1}`], "90001")
   assert.ok(!("EndsOn" in ops[0].changes) && !("StartsOn" in ops[0].changes))
 })
 
 check("renderWrites: supersede = EndsOn old at start-1 + create with StartsOn, EventID stripped", () => {
   const f = form()
-  const target = { pattern: { kind: "weekly", timesPerWeek: 1 }, billing: {} as never, period: { startsOn: f.startsOn, endsOn: null }, stops: [{ weekday: 3, techId: "T-NEW" }], note: f.note }
+  const target = { pattern: { kind: "weekly", timesPerWeek: 1 }, billing: {} as never, period: { startsOn: f.startsOn, endsOn: null }, stops: [{ weekday: 3, techId: "90001" }], note: f.note }
   const ops = renderWrites(f, { kind: "supersede", target: target as never, effectiveWeekOf: "2026-08-10" }, "2026-08-12")
   assert.strictEqual(ops.length, 2)
-  assert.deepStrictEqual(ops[0].changes, { EndsOn: "2026-08-11" }) // ISO — the browser's own wire format
+  assert.deepStrictEqual(ops[0].changes, { EndsOn: "08/11/2026" }) // MM/DD — the PROVEN wire format
   assert.strictEqual(ops[1].op, "create")
   assert.ok(!("EventID" in ops[1].fields!))
-  assert.strictEqual(ops[1].fields!["StartsOn"], "2026-08-12")
-  assert.strictEqual(ops[1].fields!["day4"], "T-NEW") // Wednesday = day4
+  assert.strictEqual(ops[1].fields!["StartsOn"], "08/12/2026")
+  assert.strictEqual(ops[1].fields!["day4"], "90001") // Wednesday = day4
   for (let d = 1; d <= 7; d++) if (d !== 4) assert.ok(!(`day${d}` in ops[1].fields!))
 })
 
 check("renderBridgeOp: a daily one-day no-charge QC task on the bridge date, incoming tech", () => {
-  const op = renderBridgeOp(form(), { date: "2026-08-18", techId: "caleb" })
+  const op = renderBridgeOp(form(), { date: "2026-08-18", techId: "90002" })
   assert.strictEqual(op.op, "create")
   assert.ok(!("EventID" in op.fields!))
   assert.strictEqual(op.fields!["ServiceRepeat"], SERVICE_REPEAT.daily)
   assert.strictEqual(op.fields!["ServiceType"], QC_SERVICE_TYPE_ID)
-  assert.strictEqual(op.fields!["StartsOn"], "2026-08-18")
-  assert.strictEqual(op.fields!["EndsOn"], "2026-08-18")
-  assert.strictEqual(op.fields!["day3"], "caleb") // 08-18 is a Tuesday
+  assert.strictEqual(op.fields!["StartsOn"], "08/18/2026")
+  assert.strictEqual(op.fields!["EndsOn"], "08/18/2026")
+  assert.strictEqual(op.fields!["day3"], "90002") // 08-18 is a Tuesday
   assert.strictEqual(op.fields!["itemcost"], "")
+})
+
+check("render REFUSES a mirror uuid tech id — the 2026-08-09 live-run bug dies in dry runs", () => {
+  const f = form()
+  let threw = false
+  try {
+    renderWrites(f, { kind: "amend", target: { pattern: { kind: "weekly", timesPerWeek: 1 }, billing: {} as never, period: { startsOn: null, endsOn: null }, stops: [{ weekday: 2, techId: "5b95db49-8ebd-4724-85f0-840efeb49c3f" }], note: "" } as never })
+  } catch (e) { threw = String(e).includes("ion_employee_id") }
+  assert.ok(threw)
 })
 
 console.log(`translation selfcheck: ${n} checks passed`)
