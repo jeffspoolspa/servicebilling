@@ -34,8 +34,12 @@ next-env.d.ts
 # vercel
 .vercel
 
-# preview (kept for reference but not deployed)
-preview/
+# preview (kept for reference but not deployed). ANCHORED: an unanchored
+# `preview/` matches EVERY directory named preview at any depth — it
+# silently swallowed app/api/routing/scenarios/[id]/preview/route.ts,
+# which built locally and 404'd in production with a clean git status
+# (2026-08-09).
+/preview/
 
 # windmill (mirror; secrets are filtered but be safe)
 windmill/**/secret-*
