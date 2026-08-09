@@ -74,7 +74,7 @@ async function main() {
       const echo = await runWrite(op, dryRun)
       return {
         op, dryRun, committed: echo.committed === true,
-        echoedTaskId: null, // live create echo parsing lands with the boundary-week test
+        echoedTaskId: (echo as { new_event_id?: string })?.new_event_id ?? null,
         preview: echo,
       }
     },

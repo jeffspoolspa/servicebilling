@@ -136,7 +136,7 @@ async function main() {
     forms: formsAdapter, repo, quotas: quotasAdapter,
     execute: async (op, dryRun) => {
       const echo = await runWrite(op, dryRun)
-      return { op, dryRun, committed: echo?.committed === true, echoedTaskId: null, preview: echo }
+      return { op, dryRun, committed: echo?.committed === true, echoedTaskId: (echo as { new_event_id?: string })?.new_event_id ?? null, preview: echo }
     },
     catalogPriceCents: () => null,
   }
