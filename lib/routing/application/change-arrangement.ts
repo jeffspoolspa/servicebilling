@@ -253,9 +253,23 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
     // full stop set = head minus THIS slice's old stops plus its new ones
     // (matching by value, not by type — a sibling slice of the SAME type,
     // like Winding River's second chem task, must survive untouched)
+    // COMPOSE BY SLICE, NOT BY VALUE (2026-08-09): matching the head's
+    // stops against the current form's values left a phantom whenever the
+    // head was stale (a wrong-tech publish put Wesley in the head while
+    // the form read Carlos — the "requires 1 stop but carries 2" refusal).
+    // A slice OWNS its stop type when it is the agreement's only open
+    // slice of that type: replace them wholesale. With sibling slices of
+    // the same type present, fall back to value matching until stops
+    // carry their slice id.
     const head = await headStops(deps, agreement.id, agreement.currentTerms().version)
-    const oldOwn = new Set(current.schedule.stops.map((s) => `${current.stopType}|${s.weekday}|${s.techId}`))
-    const others = (head ?? []).filter((s) => !oldOwn.has(`${s.type}|${s.weekday}|${s.techId}`))
+    const siblingsSameType = agreement.openIncarnations()
+      .filter((i) => i.covers.stopType === slice.covers.stopType).length
+    const others = siblingsSameType <= 1
+      ? (head ?? []).filter((s) => s.type !== slice.covers.stopType)
+      : (head ?? []).filter((s) => {
+          const oldOwn = new Set(current.schedule.stops.map((x) => `${current.stopType}|${x.weekday}|${x.techId}`))
+          return !oldOwn.has(`${s.type}|${s.weekday}|${s.techId}`)
+        })
     const stops = [...others, ...input.targetStops]
     try {
       await convergePlacement(deps.quotas, {
