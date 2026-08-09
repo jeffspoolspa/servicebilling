@@ -26,7 +26,7 @@ import { projectFirings } from "./project-firings"
  * (AnchorShifted in the scenario vocabulary), never silently re-derived.
  * A requested shift schedules by picking the earliest target-parity date
  * whose gap from the last served visit sits inside the cadence window
- * (biweekly: [7,20]); no candidate in the window is a VIOLATION, reported,
+ * (biweekly: [6,19]); no candidate in the window is a VIOLATION, reported,
  * never papered over. Only moves WITHOUT a requested shift keep the
  * derive-the-phase behavior (day moves that incidentally rephase).
  */

@@ -28,8 +28,8 @@ const weekly = (over: Partial<MoveInput> = {}): MoveInput => ({
 
 /* --------------------------- cadence law ---------------------------------- */
 
-check("biweekly bounds are the RULED [7,20]", () => {
-  assert.deepStrictEqual(gapBoundsFor({ kind: "biweekly" }), { loDays: 7, hiDays: 20, idealDays: 14 })
+check("biweekly bounds are the RULED [6,19] (revised 2026-08-08: a day-late predecessor must not push a flip out two weeks)", () => {
+  assert.deepStrictEqual(gapBoundsFor({ kind: "biweekly" }), { loDays: 6, hiDays: 19, idealDays: 14 })
 })
 
 check("the law reads one stream — the seam is just the first gap", () => {
@@ -154,7 +154,7 @@ check("A/B flip is VALID with a derived date — verdict and date are separate",
     lastServed: "2026-08-11", // just served — flip must wait out the gap
   })], ctx())
   assert.strictEqual(v.validity, "valid")
-  assert.ok(v.anchorDate! >= "2026-08-18") // >=7d after last served (RULED lo bound)
+  assert.ok(v.anchorDate! >= "2026-08-17") // >=6d after last served (RULED lo bound)
   assert.strictEqual(v.violations.length, 0)
 })
 
@@ -165,7 +165,7 @@ check("conservative policy: the blanket rule rides ON the machinery — Monday, 
   assert.strictEqual(v.violations.length, 0) // law still proves the seam
 })
 
-check("REQUESTED anchor flip: earliest opposite-parity date inside [7,20] wins", () => {
+check("REQUESTED anchor flip: earliest opposite-parity date inside [6,19] wins", () => {
   // biweekly Tuesday, last served Tue 2026-08-11 (week of 08-10). A
   // requested flip (shift 1) must land in an opposite-parity week: Tue
   // 08-18 (gap 7, in window) — NOT the same-parity 08-25 the old pattern

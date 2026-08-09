@@ -32,11 +32,6 @@ async function main() {
   const intake = scenarioChangesFrom(scen.changes)
   if (!intake.ok) throw new Error(`scenario refused: ${intake.failed}`)
   const changes = intake.changes as unknown as Change[]
-  if (intake.agreementsRoad.length) {
-    console.log(`AGREEMENTS ROAD (not routing moves — terms changes to rule on):`)
-    for (const c of intake.agreementsRoad) console.log(`  ${c.kind} quota ${c.quotaId.slice(0, 8)}`)
-    console.log("")
-  }
   const quotaIds = [...new Set(changes.map((c) => c.quotaId))]
 
   // current whole configurations + cadence, per touched quota

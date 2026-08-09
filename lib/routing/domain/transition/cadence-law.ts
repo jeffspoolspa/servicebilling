@@ -4,7 +4,11 @@
  * to satisfy it. Fulfillment is a fold over actual visit DATES against these
  * bounds — configuration-free by construction.
  *
- * biweekly [7,20] RULED 2026-08-08 (generous both ends — a 7-day gap on an
+ * biweekly [6,19] RULED 2026-08-08 (revised same day from [7,20]: the gap is
+ * measured from the ACTUAL last visit, and a predecessor served a day late
+ * must not push a parity flip out two weeks — Gage, Stephen: last served
+ * Wed 08-05 for a Tuesday stop made the natural next-week flip a 6-day gap.
+ * Original note: a 7-day gap on an
  * A/B flip is legal). Every other row is PROVISIONAL until Carter edits it.
  */
 
@@ -20,7 +24,7 @@ export type CadenceKind =
   | { kind: "monthly" }
 
 export function gapBoundsFor(c: CadenceKind): GapBounds {
-  if (c.kind === "biweekly") return { loDays: 7, hiDays: 20, idealDays: 14 } // RULED
+  if (c.kind === "biweekly") return { loDays: 6, hiDays: 19, idealDays: 14 } // RULED (revised 2026-08-08)
   if (c.kind === "monthly") return { loDays: 24, hiDays: 32, idealDays: 28 } // provisional
   switch (c.timesPerWeek) {
     case 1: return { loDays: 5, hiDays: 9, idealDays: 7 } // provisional
