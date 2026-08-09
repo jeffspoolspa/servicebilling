@@ -52,16 +52,12 @@ async function main() {
   const effective = argOf("--effective") ?? new Date().toISOString().slice(0, 10)
 
   const repo = repoAdapter()
-  const agreement = await repo.byIonTaskId(ionTaskId, effective)
-  if (!agreement) throw new Error(`no agreement holds ${ionTaskId}`)
-  const slice = agreement.openIncarnations().find((i) => i.ionTaskId === ionTaskId)
-  if (!slice) throw new Error(`${ionTaskId} is not an open slice`)
-
-  // ionCustId from the latest stored translation
+  // ionCustId: stored translation if the task is in the book, else --cust
   const { intakeAdapter } = await import("../agreements/refresh")
   const last = await intakeAdapter.latest(ionTaskId)
-  const ionCustId = (last?.translation as { ionCustomerId?: string })?.ionCustomerId
-  if (!ionCustId) throw new Error("no stored translation carries ionCustomerId")
+  const ionCustId = (last?.translation as { ionCustomerId?: string } | null)?.ionCustomerId
+    ?? argOf("--cust") ?? null
+  if (!ionCustId) throw new Error("task not in the book: pass --cust <ionCustId>")
 
   const targetStops = toArg.split(",").map((part) => {
     const [type, weekday, techId] = part.split(":")
@@ -86,6 +82,7 @@ async function main() {
   })
 
   console.log(`plan: ${report.plan}${report.newStartsOn ? `  newStartsOn: ${report.newStartsOn}` : ""}  recorded: ${report.recorded}`)
+  if (report.recordSkipped) console.log(`RECORD SKIPPED: ${report.recordSkipped}`)
   if (report.clearedVisits.length) {
     console.log(`CLEARS (current period serves out before EndsOn — the seam anchors on these): ${report.clearedVisits.join(", ")}`)
   }

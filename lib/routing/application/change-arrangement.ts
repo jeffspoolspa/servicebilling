@@ -61,6 +61,10 @@ export interface ChangeInput {
 export interface ChangeReport {
   plan: IonWritePlan["kind"]
   newStartsOn: string | null
+  /** live only: why recording was skipped (task outside the book — e.g.
+   *  a throwaway test task). LOUD in the report, never an exception after
+   *  writes already committed. */
+  recordSkipped?: string
   /** The current period's still-scheduled old visits that SERVE OUT
    *  before EndsOn — the seam is anchored on them (period-clear, RULED). */
   clearedVisits: string[]
@@ -210,11 +214,14 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
   for (const op of ops) echoes.push(await deps.execute(op, input.dryRun))
 
   let recorded = false
+  let recordSkipped: string | undefined
   if (!input.dryRun && echoes.length && echoes.every((e) => e.committed)) {
     const agreement = await deps.repo.byIonTaskId(input.ionTaskId, input.effectiveDate)
-    if (!agreement) throw new Error(`no agreement holds ${input.ionTaskId}`)
-    const slice = agreement.openIncarnations().find((i) => i.ionTaskId === input.ionTaskId)
-    if (!slice) throw new Error(`${input.ionTaskId} is not an open slice`)
+    const slice = agreement?.openIncarnations().find((i) => i.ionTaskId === input.ionTaskId)
+    if (!agreement || !slice) {
+      recordSkipped = `no open agreement slice for ${input.ionTaskId} — writes committed, book NOT updated (throwaway task?)`
+      return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes, recorded, recordSkipped }
+    }
     const at = new Date().toISOString()
 
     // incarnation from the ECHO: supersede should have echoed a new id;
@@ -243,7 +250,7 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
     recorded = true
   }
 
-  return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes, recorded }
+  return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops, echoes, recorded, recordSkipped }
 }
 
 async function headStops(deps: ChangeDeps, agreementId: string, termsVersion: number): Promise<PlacementStop[] | null> {
