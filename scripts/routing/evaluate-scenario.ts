@@ -81,12 +81,17 @@ async function main() {
       // AnchorShifted: a REQUESTED parity change — carried to the planner
       // as anchorShiftWeeks, never re-derived (RULED 2026-08-08)
     }
-    const anchor = chs.find((c) => c.kind === "AnchorShifted") as
-      | { fromAnchorWeek: number; toAnchorWeek: number } | undefined
+    // NET the anchor shifts: a drag to the other week and back records two
+    // rows that cancel (Bryant/Thurlow in RH Current) — the request is the
+    // SUM of shifts, not the first row
+    const netShift = chs
+      .filter((c) => c.kind === "AnchorShifted")
+      .reduce((sum, c) => sum + ((c as unknown as { toAnchorWeek: number; fromAnchorWeek: number }).toAnchorWeek
+        - (c as unknown as { toAnchorWeek: number; fromAnchorWeek: number }).fromAnchorWeek), 0)
     moves.push({
       quotaId, cadence: cadenceOf(quotaId, from.length), from, to,
       lastServed: lastServed.get(quotaId) ?? null,
-      ...(anchor ? { anchorShiftWeeks: anchor.toAnchorWeek - anchor.fromAnchorWeek } : {}),
+      ...(netShift !== 0 ? { anchorShiftWeeks: netShift } : {}),
     })
   }
 
