@@ -1,8 +1,24 @@
 /**
- * SweepIonTasks — THE DETECTOR (RULED 2026-08-09, Carter): read ION's own
- * active-task report and set-difference it against the book. Whatever
- * diverges is a change like any other and goes through EditAgreement —
- * the same sentence our publishes use, differing only in provenance.
+ * SweepIonTasks — THE BACKSTOP for changes made OUTSIDE our application
+ * (RULED 2026-08-09, Carter). It reads ION's active-task report, set-
+ * differences it against the book, and TRANSLATES what it sees into the
+ * vocabulary we already have — it owns no vocabulary of its own:
+ *
+ *     an observed difference  ->  agreement_terms_changed
+ *                             ->  placement_converged
+ *                             ->  agreement_ion_task_superseded
+ *                             ->  agreement_ended
+ *
+ * and a difference that is the result of a change WE made converges to
+ * exactly the facts we already recorded, which means it does NOTHING.
+ * That is the shape: level-triggered convergence, silence on agreement.
+ *
+ * IT IS NOT THE MECHANISM FOR OUR OWN WRITES. Relying on an ION read to
+ * learn what our own application did would mean we did something wrong
+ * (Carter, 2026-08-09) — our writes declare their intent BEFORE touching
+ * ION and land it on confirmation, so the book knows them without asking.
+ * What is left for the sweep is genuinely external: a tech edited a task
+ * in ION, someone deleted one, a task was created by hand.
  *
  *   "they would have showed up on the active task report as tasks that we
  *    don't have right on the sweep?"
@@ -39,7 +55,9 @@
  *                 two above: it either regains a slice (attach) or is
  *                 provably cancelled (no live task for that customer).
  *
- * Dry by default: a sweep REPORTS, and only applies when armed.
+ * Dry by default: a sweep REPORTS, and only applies when armed. A
+ * divergence it cannot express in our vocabulary is QUARANTINED for a
+ * human — never guessed, never given a private fact type.
  */
 
 import type { AgreementRepository } from "../domain/ports/agreement-repository"
@@ -79,10 +97,16 @@ export interface SweepDeps {
   orphanedAgreements: () => Promise<{ agreementId: string; customerId: string; ionCustId: string | null }[]>
   /** agreements for one ION customer, with their open slice count */
   agreementsOfCustomer: (ionCustId: string) => Promise<{ agreementId: string; openSlices: number; status: string }[]>
+  /** declarations we made that never landed — OUR defects, surfaced
+   *  separately from ION-side change (RULED 2026-08-09) */
+  pendingDeclarations?: () => Promise<{
+    declarationId: string; agreementId: string; ionTaskId: string | null
+    ionCustId: string | null; intent: unknown
+  }[]>
 }
 
 export interface Divergence {
-  kind: "ion_unknown" | "book_only" | "orphaned" | "duplicate_claim"
+  kind: "ion_unknown" | "book_only" | "orphaned" | "duplicate_claim" | "our_write_unconfirmed"
   ionTaskId: string | null
   ionCustId: string | null
   agreementId: string | null
@@ -114,6 +138,30 @@ export async function sweepIonTasks(
 
   const bookByTask = new Map(slices.map((s) => [s.ionTaskId, s]))
   const activeById = new Map(active.map((t) => [t.ionTaskId, t]))
+
+  /* --------- OUR OWN WORK, SEEN FROM ION: a bug, not a divergence -------- */
+  // Every task we wrote was DECLARED before the write and LANDED on
+  // confirmation, so the book knows it without asking ION. If the sweep
+  // finds a task matching one of our pending declarations, exactly one of
+  // two things is true and both are OUR defect (Carter, 2026-08-09):
+  //   - the fact never reached ION  -> it failed downstream
+  //   - ION has it and we never landed it -> we failed to record it
+  // Either way it is not an ION-side change, and it is reported as a
+  // defect against the declaration rather than laundered into an
+  // ion_side observation.
+  const pending = await deps.pendingDeclarations?.() ?? []
+  for (const p of pending) {
+    const inIon = active.find((t) => t.ionTaskId === p.ionTaskId) ??
+      (p.ionTaskId ? undefined : undefined)
+    report.divergences.push({
+      kind: "our_write_unconfirmed", ionTaskId: p.ionTaskId ?? null, ionCustId: p.ionCustId ?? null,
+      agreementId: p.agreementId,
+      remedy: inIon
+        ? `OUR DEFECT: ION holds this task and declaration ${p.declarationId} never landed — the book failed to record a change that went through our domain model`
+        : `OUR DEFECT: declaration ${p.declarationId} was recorded and ION does not hold it — the write failed downstream. Intent: ${JSON.stringify(p.intent)}`,
+      applied: "quarantined",
+    })
+  }
 
   /* ------------------------- ION holds, book does not -------------------- */
   for (const t of active) {

@@ -33,6 +33,9 @@ export interface RefreshReport {
   quarantined: number
   partial: boolean
   coversDrift: string[] // ionTaskIds whose stopType no longer matches covers
+  /** declarations ION has not confirmed — a write in flight, or one that
+   *  died mid-supersession. Never silent (RULED 2026-08-09). */
+  pendingDeclarations?: string[]
   /** price groups within a type whose day sets OVERLAP — the condition
    *  card cannot represent them (same type, same day, two prices). Terms
    *  carry the deterministic representative; a human untangles. Normal
@@ -67,8 +70,11 @@ export async function refreshAgreement(
   if (!agreement) throw new AgreementRuleError(`no agreement ${agreementId}`)
   if (agreement.status === "ended") return report
 
-  const open = agreement.openIncarnations()
+  // only LANDED slices have an ION form to read; a pending declaration is
+  // an in-flight (or dead) write, surfaced rather than fetched
+  const open = agreement.landedIncarnations()
   report.slices = open.length
+  report.pendingDeclarations = agreement.pendingIncarnations().map((i) => i.id)
   if (!open.length) {
     // ORPHANED, NOT ENDED (RULED 2026-08-09 — reversing the 08-08 rule).
     // "Every slice closed" was read as "the customer cancelled", and on
@@ -90,19 +96,20 @@ export async function refreshAgreement(
   // any sibling incarnation on the same agreement shares the customer
   let siblingCust: string | null = null
   for (const anyInc of agreement.lineage()) {
+    if (!anyInc.ionTaskId) continue
     const t = await deps.intake.latest(anyInc.ionTaskId)
     const c = (t?.translation as { ionCustomerId?: string } | null)?.ionCustomerId
     if (c) { siblingCust = c; break }
   }
   for (const inc of open) {
-    const last = await deps.intake.latest(inc.ionTaskId)
+    const last = await deps.intake.latest(inc.ionTaskId!)
     const ionCustId = (last?.translation as { ionCustomerId?: string } | null)?.ionCustomerId ?? siblingCust
     if (!ionCustId) {
-      await deps.intake.recordFailure(inc.ionTaskId, at, "no translation on any lineage slice carries ionCustomerId — cannot prime the form", {})
+      await deps.intake.recordFailure(inc.ionTaskId!, at, "no translation on any lineage slice carries ionCustomerId — cannot prime the form", {})
       report.quarantined++
       continue
     }
-    fetchList.push({ ionTaskId: inc.ionTaskId, ionCustId })
+    fetchList.push({ ionTaskId: inc.ionTaskId!, ionCustId })
   }
 
   const translations = new Map<string, TaskTranslation>()
@@ -137,10 +144,10 @@ export async function refreshAgreement(
   // covers would mislabel every stop. Surface it; a human (or the
   // match-or-mint road) re-bases the slice.
   for (const inc of open) {
-    const t = translations.get(inc.ionTaskId)
+    const t = translations.get(inc.ionTaskId!)
     if (t && t.stopType !== inc.covers.stopType) {
-      report.coversDrift.push(inc.ionTaskId)
-      translations.delete(inc.ionTaskId)
+      report.coversDrift.push(inc.ionTaskId!)
+      translations.delete(inc.ionTaskId!)
     }
   }
 

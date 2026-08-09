@@ -2,7 +2,7 @@ import { AggregateRoot, type DomainEvent } from "@/lib/domain/kernel"
 import { AgreementRuleError } from "./agreement-rule-error"
 import type { Basis } from "./basis"
 import { sameBilling, type TypedBilling } from "./billing-shape"
-import type { IonIncarnation } from "./ion-incarnation"
+import { isPending, type IncarnationIntent, type IonIncarnation } from "./ion-incarnation"
 import { samePattern, type RequiredPattern } from "./required-pattern"
 import type { TermsVersion } from "./terms-version"
 
@@ -70,7 +70,10 @@ export class ServiceAgreement extends AggregateRoot<string> {
     }
     const a = new ServiceAgreement(
       args.id, args.customerId, args.basis, [v1],
-      (args.incarnations ?? []).map((i) => ({ ionTaskId: i.ionTaskId, from: args.at, to: null, cause: "opened" as const, covers: i.covers })),
+      (args.incarnations ?? []).map((i) => ({
+        id: newId(), ionTaskId: i.ionTaskId, from: args.at, to: null,
+        cause: "opened" as const, covers: i.covers, landedAt: args.at,
+      })),
       "active", null,
     )
     a.record(fact("agreement_opened", args.at, {
@@ -106,8 +109,19 @@ export class ServiceAgreement extends AggregateRoot<string> {
   lineage(): readonly IonIncarnation[] {
     return this.incarnations
   }
+  /** Everything standing: LANDED slices plus DECLARED ones ION has not
+   *  confirmed. A pending declaration is part of the picture — hiding it
+   *  is what "unrecorded supersession" meant. */
   openIncarnations(): readonly IonIncarnation[] {
-    return this.incarnations.filter((i) => i.to === null)
+    return this.incarnations.filter((i) => i.to === null && !i.abandonedAt)
+  }
+  /** Slices ION has confirmed — the only ones with a task id to write to. */
+  landedIncarnations(): readonly IonIncarnation[] {
+    return this.openIncarnations().filter((i) => i.ionTaskId !== null)
+  }
+  /** Declared, not yet confirmed. A publish in flight, or one that died. */
+  pendingIncarnations(): readonly IonIncarnation[] {
+    return this.openIncarnations().filter(isPending)
   }
   /** The open task carrying a slice; the singular read for one-task agreements. */
   currentIonTaskId(covers?: Partial<IonIncarnation["covers"]>): string | null {
@@ -194,13 +208,82 @@ export class ServiceAgreement extends AggregateRoot<string> {
     if (this._status === "ended") return
     this._status = "ended"
     this._endedOn = on
-    for (const open of this.openIncarnations()) this.closeIncarnation(open.ionTaskId, at)
+    for (const open of this.landedIncarnations()) this.closeIncarnation(open.ionTaskId!, at)
     this.record(fact("agreement_ended", at, {
       ended_on: on, basis: this.basis, provenance,
     }, this.participants()))
   }
 
   /* ----------------------- the external-identity ledger ------------------- */
+
+  /* ------------------------ write-ahead declaration ---------------------- */
+
+  /**
+   * DECLARE a supersession BEFORE ION is touched (RULED 2026-08-09):
+   * "there should be no such thing as an unrecorded supersession." Our id
+   * and the intended shape are recorded first, so every later state is
+   * readable — landed, or pending with the intent that was attempted.
+   * Returns the declaration id the caller lands or abandons.
+   */
+  declareIncarnation(
+    d: { id: string; covers: IonIncarnation["covers"]; cause: IonIncarnation["cause"]; intent: IncarnationIntent },
+    at: string,
+  ): string {
+    if (this._status === "ended") throw new AgreementRuleError("an ended agreement cannot declare a supersession")
+    const already = this.pendingIncarnations().find(
+      (i) => i.covers.stopType === d.covers.stopType && i.covers.ionProfileId === d.covers.ionProfileId,
+    )
+    // one intended supersession per slice at a time: a retry RESUMES the
+    // declaration instead of declaring a second one (the duplicate class)
+    if (already) return already.id
+
+    this.incarnations.push({
+      id: d.id, ionTaskId: null, from: at, to: null, cause: d.cause, covers: d.covers,
+      intent: d.intent, declaredAt: at, landedAt: null, abandonedAt: null, abandonedReason: null,
+    })
+    this.record(fact("ion_supersession_declared", at, {
+      declaration_id: d.id, covers: d.covers, cause: d.cause, intent: d.intent,
+    }, this.participants()))
+    return d.id
+  }
+
+  /**
+   * LAND a declaration: ION's own state confirmed the born task. This is
+   * where the predecessor closes — never before, so a failed create can
+   * never leave the agreement with no standing slice.
+   */
+  landIncarnation(declarationId: string, ionTaskId: string, at: string): void {
+    const d = this.incarnations.find((i) => i.id === declarationId)
+    if (!d) throw new AgreementRuleError(`no declaration ${declarationId} on this agreement`)
+    if (d.ionTaskId !== null) {
+      if (d.ionTaskId !== ionTaskId) {
+        throw new AgreementRuleError(`declaration ${declarationId} already landed as ${d.ionTaskId}, cannot land ${ionTaskId}`)
+      }
+      return // idempotent: the same landing twice is one landing
+    }
+    const predecessor = d.intent?.supersedes ?? null
+    this.incarnations = this.incarnations.map((i) =>
+      i.id === declarationId ? { ...i, ionTaskId, landedAt: at } : i,
+    )
+    if (predecessor) this.closeIncarnation(predecessor, at)
+    this.record(fact("agreement_ion_task_superseded", at, {
+      from_ion_task_id: predecessor, to_ion_task_id: ionTaskId,
+      cause: d.cause, declaration_id: declarationId,
+    }, this.participants()))
+  }
+
+  /** The write provably did not happen. The declaration closes with its
+   *  reason; the predecessor keeps standing, untouched. */
+  abandonDeclaration(declarationId: string, reason: string, at: string): void {
+    const d = this.incarnations.find((i) => i.id === declarationId)
+    if (!d || d.ionTaskId !== null || d.abandonedAt) return
+    this.incarnations = this.incarnations.map((i) =>
+      i.id === declarationId ? { ...i, abandonedAt: at, abandonedReason: reason, to: at } : i,
+    )
+    this.record(fact("ion_supersession_abandoned", at, {
+      declaration_id: declarationId, reason, intent: d.intent ?? null,
+    }, this.participants()))
+  }
 
   /**
    * Append what the ECHO proved. `predicted` is what our write intended —
@@ -216,7 +299,7 @@ export class ServiceAgreement extends AggregateRoot<string> {
     // supersession is per SLICE: the echo replaces the open incarnation
     // covering the same (stopType, profile), never its siblings
     const open = this.incarnations.find(
-      (i) => i.to === null &&
+      (i) => i.to === null && i.ionTaskId !== null &&
         i.covers.stopType === echo.covers.stopType &&
         i.covers.ionProfileId === echo.covers.ionProfileId,
     )
@@ -230,8 +313,11 @@ export class ServiceAgreement extends AggregateRoot<string> {
     }
     if (!isNew) return // echo says the id survived — nothing to append
 
-    if (open) this.closeIncarnation(open.ionTaskId, at)
-    this.incarnations.push({ ionTaskId: echo.ionTaskId, from: at, to: null, cause: echo.cause, covers: echo.covers })
+    if (open?.ionTaskId) this.closeIncarnation(open.ionTaskId, at)
+    this.incarnations.push({
+      id: newId(), ionTaskId: echo.ionTaskId, from: at, to: null,
+      cause: echo.cause, covers: echo.covers, landedAt: at,
+    })
     this.record(fact("agreement_ion_task_superseded", at, {
       from_ion_task_id: open?.ionTaskId ?? null, to_ion_task_id: echo.ionTaskId, cause: echo.cause,
     }, this.participants()))
@@ -246,10 +332,16 @@ export class ServiceAgreement extends AggregateRoot<string> {
   /** Every fact carries the correlation ids — the rule that makes the
    *  cross-stream biography a query instead of archaeology. */
   private participants(): string[] {
-    const ion = this.incarnations.filter((i) => i.to === null).map((i) => `ion_task:${i.ionTaskId}`)
+    const ion = this.incarnations
+      .filter((i) => i.to === null && i.ionTaskId !== null)
+      .map((i) => `ion_task:${i.ionTaskId}`)
     return [`agreement:${this.id}`, `customer:${this.customerId}`, ...ion]
   }
 }
+
+/** ids are minted by the caller in production (the declaration id travels
+ *  into ION's write); this is the fallback for reflected incarnations. */
+const newId = (): string => globalThis.crypto.randomUUID()
 
 const fact = (type: string, at: string, payload: Record<string, unknown>, participants: string[]): DomainEvent => ({
   type, at, payload, participants,

@@ -46,6 +46,9 @@ export interface StepRecord {
 export const WRITE_PROCESS: Record<string, string> = {
   read_current: "acl · lib/external/ion/task-translation · ionTaskFormFrom + translateTask",
   plan: "acl · lib/external/ion/ion-write-plan · planWrite",
+  declare_supersession: "domain · ServiceAgreement · declareIncarnation — OUR id + the intended shape, written BEFORE ION is touched",
+  land_incarnation: "domain · ServiceAgreement · landIncarnation — binds the confirmed id; the predecessor closes HERE, never earlier",
+  abandon_declaration: "domain · ServiceAgreement · abandonDeclaration — the write provably did not happen",
   end_old: "external · f/ION/_lib/task_detail · updateTask — verified by task-list Expires read-back",
   amend_form: "external · f/ION/_lib/task_detail · updateTask — verified by form re-read field compare",
   create_successor: "external · f/ION/_lib/task_detail · createTask — verified by list sandwich (born id exact)",
@@ -305,6 +308,40 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
     ops: ops.map((o) => ({ op: o.op, changes: o.changes })),
   })
 
+  // WRITE-AHEAD (RULED 2026-08-09, Carter — "there should be no such
+  // thing as an unrecorded supersession"): before ION is touched, the
+  // supersession is DECLARED with our own id and the shape we intend. A
+  // process that dies anywhere after this leaves a readable declaration,
+  // not a hole. A retry finds the same declaration and resumes it.
+  let declarationId: string | null = null
+  let liveAgreement: Awaited<ReturnType<typeof deps.repo.byIonTaskId>> = null
+  let liveSlice: { covers: { stopType: "clean" | "chem_check"; ionProfileId: string } } | undefined
+  if (!input.dryRun && effectivePlan.kind === "supersede") {
+    liveAgreement = await deps.repo.byIonTaskId(input.ionTaskId, input.effectiveDate)
+    liveSlice = liveAgreement?.openIncarnations().find((i) => i.ionTaskId === input.ionTaskId)
+    if (liveAgreement && liveSlice) {
+      declarationId = liveAgreement.declareIncarnation({
+        id: globalThis.crypto.randomUUID(),
+        covers: liveSlice.covers,
+        cause: "placement_change",
+        intent: {
+          stops: input.targetStops.map((s) => ({ weekday: s.weekday, techId: s.techId })),
+          startsOn: newStartsOn, endsOn: input.targetEndsOn ?? null,
+          supersedes: input.ionTaskId,
+        },
+      }, new Date().toISOString())
+      await deps.repo.save(liveAgreement)
+      cross("declare_supersession", "passed", { declarationId, supersedes: input.ionTaskId })
+    } else {
+      cross("declare_supersession", "failed", {
+        why: `no open agreement slice for ${input.ionTaskId} — refusing to write ION for work the book cannot record`,
+      })
+      return { plan: effectivePlan.kind, newStartsOn, clearedVisits, cutVisits, ops: [], echoes: [],
+        recorded: false, steps, verified: false,
+        recordSkipped: `no open agreement slice for ${input.ionTaskId} — NOTHING was written to ION` }
+    }
+  }
+
   const echoes: WriteEcho[] = []
   for (const op of ops) {
     const stepName = op.op === "create" ? "create_successor"
@@ -325,6 +362,14 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
         status: ev.status, verified: ev.verified, ambiguous_births: ev.ambiguous_births,
         still: "remaining verbs NOT executed",
       })
+      // the declared supersession did not happen: close the declaration
+      // with its reason so no pending intent lingers as a mystery
+      if (declarationId && liveAgreement && stepName === "create_successor") {
+        liveAgreement.abandonDeclaration(declarationId,
+          `create_successor did not commit (status ${String(ev.status)})`, new Date().toISOString())
+        await deps.repo.save(liveAgreement)
+        cross("abandon_declaration", "passed", { declarationId })
+      }
       break
     }
   }
@@ -382,10 +427,14 @@ export async function changeArrangement(deps: ChangeDeps, input: ChangeInput): P
       { repo: deps.repo, intake: deps.intake, quotas: deps.quotas, facts: deps.facts },
       {
         agreementId: agreement.id, origin: "our_edit", at,
-        incarnation: {
-          ionTaskId: echoedNewId, cause: "placement_change", covers: slice.covers,
-          predicted: { newIncarnation: effectivePlan.kind === "supersede" },
-        },
+        // a declared supersession LANDS (the row already exists); an amend
+        // keeps its id and records nothing new
+        ...(declarationId
+          ? { land: { declarationId, ionTaskId: echoedNewId } }
+          : effectivePlan.kind === "supersede"
+            ? { incarnation: { ionTaskId: echoedNewId, cause: "placement_change" as const, covers: slice.covers,
+                predicted: { newIncarnation: true } } }
+            : {}),
         slices: [{
           ionTaskId: echoedNewId, stopType: slice.covers.stopType,
           stops: input.targetStops.map((s) => ({ weekday: s.weekday, techId: s.techId })),

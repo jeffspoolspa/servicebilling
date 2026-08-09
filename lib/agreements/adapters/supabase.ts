@@ -30,14 +30,16 @@ export function repoAdapter(): AgreementRepository {
       .select("version, pattern, billing, period, from_at, cause")
       .eq("agreement_id", row.id).order("version")
     const { data: incs } = await agr.from("ion_incarnations")
-      .select("ion_task_id, from_at, to_at, cause, covers")
+      .select("id, ion_task_id, from_at, to_at, cause, covers, intent, declared_at, landed_at, abandoned_at, abandoned_reason")
       .eq("agreement_id", row.id).order("from_at")
     const versions: TermsVersion[] = (tvs ?? []).map((v) => ({
       version: v.version, pattern: v.pattern, billing: v.billing,
       period: v.period, from: v.from_at, cause: v.cause,
     }))
     const incarnations: IonIncarnation[] = (incs ?? []).map((i) => ({
-      ionTaskId: i.ion_task_id, from: i.from_at, to: i.to_at, cause: i.cause, covers: i.covers,
+      id: i.id, ionTaskId: i.ion_task_id, from: i.from_at, to: i.to_at, cause: i.cause, covers: i.covers,
+      intent: i.intent, declaredAt: i.declared_at, landedAt: i.landed_at,
+      abandonedAt: i.abandoned_at, abandonedReason: i.abandoned_reason,
     }))
     return ServiceAgreement.rehydrate(row.id, row.customer_id, row.basis, versions, incarnations, row.status, row.ended_on)
   }
@@ -78,20 +80,36 @@ export function repoAdapter(): AgreementRepository {
         })
         if (error) throw error
       }
+      // OUR id is the identity (write-ahead, RULED 2026-08-09): a
+      // declaration inserts a row with no ion_task_id; landing binds it.
       const { data: dbIncs } = await agr.from("ion_incarnations")
-        .select("ion_task_id, from_at, to_at").eq("agreement_id", a.id)
-      const dbByKey = new Map((dbIncs ?? []).map((i) => [`${i.ion_task_id}|${i.from_at}`, i]))
+        .select("id, ion_task_id, to_at, landed_at, abandoned_at").eq("agreement_id", a.id)
+      const dbById = new Map((dbIncs ?? []).map((i) => [i.id, i]))
       for (const i of a.lineage()) {
-        const db = dbByKey.get(`${i.ionTaskId}|${i.from}`)
+        const db = dbById.get(i.id)
         if (!db) {
           const { error } = await agr.from("ion_incarnations").insert({
-            agreement_id: a.id, ion_task_id: i.ionTaskId, from_at: i.from, to_at: i.to,
+            id: i.id, agreement_id: a.id, ion_task_id: i.ionTaskId, from_at: i.from, to_at: i.to,
             cause: i.cause, covers: i.covers as object,
+            intent: (i.intent as object) ?? null, declared_at: i.declaredAt ?? null,
+            landed_at: i.landedAt ?? null, abandoned_at: i.abandonedAt ?? null,
+            abandoned_reason: i.abandonedReason ?? null,
           })
           if (error) throw error
-        } else if (db.to_at === null && i.to !== null) {
-          const { error } = await agr.from("ion_incarnations").update({ to_at: i.to })
-            .eq("agreement_id", a.id).eq("ion_task_id", i.ionTaskId).eq("from_at", i.from)
+          continue
+        }
+        const patch: Record<string, unknown> = {}
+        if (db.ion_task_id === null && i.ionTaskId !== null) {
+          patch.ion_task_id = i.ionTaskId
+          patch.landed_at = i.landedAt ?? new Date().toISOString()
+        }
+        if (db.to_at === null && i.to !== null) patch.to_at = i.to
+        if (!db.abandoned_at && i.abandonedAt) {
+          patch.abandoned_at = i.abandonedAt
+          patch.abandoned_reason = i.abandonedReason ?? null
+        }
+        if (Object.keys(patch).length) {
+          const { error } = await agr.from("ion_incarnations").update(patch).eq("id", i.id)
           if (error) throw error
         }
       }

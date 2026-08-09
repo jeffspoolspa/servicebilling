@@ -43,7 +43,7 @@ function deen(): ServiceAgreement {
       period: { startsOn: "2026-02-02", endsOn: null },
       from: "2026-08-08T00:00:00Z", cause: "opened",
     }],
-    [{ ionTaskId: "5764017", from: "2026-08-08T00:00:00Z", to: null, cause: "opened", covers: { stopType: "clean", ionProfileId: "3348" } }],
+    [{ id: "inc-1", ionTaskId: "5764017", from: "2026-08-08T00:00:00Z", to: null, cause: "opened", covers: { stopType: "clean", ionProfileId: "3348" } }],
     "active", null,
   )
 }
@@ -74,9 +74,9 @@ function fakes(agreement: ServiceAgreement, formDetail: Record<string, unknown> 
     forms: {
       async fetchForms(tasks) {
         return tasks.map((t) => {
-          if (formDetail === "FAIL") return { ionTaskId: t.ionTaskId, ok: false as const, error: "HTTP 500" }
+          if (formDetail === "FAIL") return { id: "inc-2", ionTaskId: t.ionTaskId, ok: false as const, error: "HTTP 500" }
           const d = formDetail instanceof Map ? formDetail.get(t.ionTaskId)! : formDetail
-          return { ionTaskId: t.ionTaskId, ok: true as const, fields: { ...FIELDS, EventID: t.ionTaskId }, detail: d }
+          return { id: "inc-3", ionTaskId: t.ionTaskId, ok: true as const, fields: { ...FIELDS, EventID: t.ionTaskId }, detail: d }
         })
       },
     },
@@ -162,15 +162,15 @@ async function main() {
         from: "2026-08-08T00:00:00Z", cause: "opened",
       }],
       [
-        { ionTaskId: "849", from: "2026-08-08T00:00:00Z", to: null, cause: "opened", covers: { stopType: "chem_check", ionProfileId: "p" } },
-        { ionTaskId: "853", from: "2026-08-08T00:00:00Z", to: null, cause: "opened", covers: { stopType: "chem_check", ionProfileId: "p" } },
+        { id: "inc-4", ionTaskId: "849", from: "2026-08-08T00:00:00Z", to: null, cause: "opened", covers: { stopType: "chem_check", ionProfileId: "p" } },
+        { id: "inc-5", ionTaskId: "853", from: "2026-08-08T00:00:00Z", to: null, cause: "opened", covers: { stopType: "chem_check", ionProfileId: "p" } },
       ],
       "active", null,
     )
     const details = new Map<string, Record<string, unknown>>([
-      ["849", detail({ ionTaskId: "849", serviceType: { value: "690605", text: "CHEMICAL TESTING" }, itemCost: "50.00",
+      ["849", detail({ id: "inc-6", ionTaskId: "849", serviceType: { value: "690605", text: "CHEMICAL TESTING" }, itemCost: "50.00",
         perDayTech: [{ dow: 2, techId: "t1", techName: "A" }, { dow: 4, techId: "t1", techName: "A" }] })],
-      ["853", detail({ ionTaskId: "853", serviceType: { value: "690605", text: "CHEMICAL TESTING" }, itemCost: "85.00",
+      ["853", detail({ id: "inc-7", ionTaskId: "853", serviceType: { value: "690605", text: "CHEMICAL TESTING" }, itemCost: "85.00",
         perDayTech: [{ dow: 0, techId: "t2", techName: "B" }, { dow: 6, techId: "t2", techName: "B" }] })],
     ])
     const { deps } = fakes(a, details as never)

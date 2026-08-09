@@ -1,0 +1,6 @@
+-- Applied via MCP 2026-08-09 as agreements_write_ahead_incarnations.
+-- WRITE-AHEAD INCARNATIONS (RULED, Carter): "there should be no such thing
+-- as an unrecorded supersession." The incarnation carries OUR id, declared
+-- before ION is touched, with the intended shape; ion_task_id is a
+-- late-binding attribute that LANDS on read-back confirmation. States are
+-- total: declared | landed | abandoned. Definition of record in git.

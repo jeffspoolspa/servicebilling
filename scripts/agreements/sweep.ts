@@ -82,6 +82,17 @@ async function main() {
         agr.from("ion_incarnations").select("agreement_id").is("to_at", null).range(f, t))).map((i) => i.agreement_id))
       return sas.filter((s) => !open.has(s.id)).map((s) => ({ agreementId: s.id, customerId: s.customer_id, ionCustId: null }))
     },
+    pendingDeclarations: async () => {
+      const rows = await all<{ id: string; agreement_id: string; ion_task_id: string | null; intent: unknown }>(
+        (f, t) => agr.from("ion_incarnations")
+          .select("id, agreement_id, ion_task_id, intent")
+          .is("ion_task_id", null).is("abandoned_at", null).range(f, t),
+      )
+      return rows.map((r) => ({
+        declarationId: r.id, agreementId: r.agreement_id, ionTaskId: r.ion_task_id,
+        ionCustId: null, intent: r.intent,
+      }))
+    },
     agreementsOfCustomer: async (ionCustId) => {
       // ION customer -> our customer, then its agreements + open slice counts
       const pub = createClient(URL_, KEY)
@@ -103,7 +114,7 @@ async function main() {
   console.log(`\n=== SWEEP ${apply ? "APPLIED" : "(dry)"} ===`)
   console.log(`ION reports ${report.reportedTasks} active · the book holds ${report.bookSlices} open slices`)
   console.log(report.tally)
-  for (const kind of ["ion_unknown", "book_only", "orphaned"] as const) {
+  for (const kind of ["our_write_unconfirmed", "duplicate_claim", "ion_unknown", "book_only", "orphaned"] as const) {
     const of = report.divergences.filter((d) => d.kind === kind)
     if (!of.length) continue
     console.log(`\n${kind} (${of.length}):`)

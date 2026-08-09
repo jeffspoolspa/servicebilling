@@ -297,11 +297,30 @@ fact carries `agreement:{id}`, `customer:{id}`, `ion_task:{id}` (and the host
 | `agreement_ended` | AgreementEnded | authored — end() | lifecycle close; all open incarnations close with it. payload `{ended_on, basis, provenance}` |
 | `agreement_ion_task_superseded` | AgreementIonTaskSuperseded | authored — recordIncarnation (echo) | the external id churned for ONE slice (covers-matched). payload `{from_ion_task_id, to_ion_task_id, cause}` |
 | `placement_converged` | PlacementConverged | authored — EditAgreement, on a real convergence | the FLOOR moved: this agreement's stop set changed. payload `{origin, provenance, action, stops, terms_version}` — the one fact that makes "when did this pool's day/tech change, and did we or ION do it" a query |
-| `ion_divergence_detected` | IonDivergenceDetected | authored — SweepIonTasks (dry) | ION's active-task report and the book disagree. payload `{kind, remedy}` — kinds: `ion_unknown` (ION holds a task the book doesn't), `book_only` (the book holds a task ION dropped), `orphaned` (agreement with no slice), `duplicate_claim` (two agreements, one task) |
-| `ion_divergence_resolved` | IonDivergenceResolved | authored — SweepIonTasks (armed) | the sweep applied a remedy through EditAgreement. payload carries `applied` (attached / closed / quarantined / failed) |
+| `ion_supersession_declared` | IonSupersessionDeclared | authored — declareIncarnation, BEFORE ION is written | we intend to supersede: our own incarnation id and the shape we will write. payload `{declaration_id, covers, cause, intent}`. Its existence is what makes an unrecorded supersession impossible — a process that dies mid-write leaves this |
+| `ion_supersession_abandoned` | IonSupersessionAbandoned | authored — abandonDeclaration | the declared write provably did not happen; the predecessor still stands. payload `{declaration_id, reason, intent}` |
+| `ion_divergence_quarantined` | IonDivergenceQuarantined | authored — SweepIonTasks | an ION-side difference that CANNOT be expressed in the vocabulary above (two agreements claiming one task; an ambiguous customer). A human rules. This is the sweep's only fact — everything it *can* express, it emits as the normal facts below |
 | `ion_prediction_missed` | IonPredictionMissed | authored — recordIncarnation | our write predicted amend/supersede and ION did the other — the model of ION drifted; every future prediction suspect until reviewed |
 
 ---
+
+### The closed list: what a change to an agreement can BE
+
+Whether we decided it or ION did, a change is one of these — there is no
+fifth kind, and no private vocabulary for "the sweep saw something"
+(RULED 2026-08-09, Carter):
+
+| the change | the fact | emitted by |
+|---|---|---|
+| the commercial terms moved | `agreement_terms_changed` | EditAgreement (both directions; provenance differs) |
+| the arrangement moved | `placement_converged` | EditAgreement |
+| ION's task id churned | `ion_supersession_declared` -> `agreement_ion_task_superseded` (or `ion_supersession_abandoned`) | declare before the write, land on confirmation |
+| the agreement ended | `agreement_ended` | EditAgreement, only from a PROVED ending — never inferred from missing slices |
+
+A change that WE made converges to the facts we already recorded and
+therefore emits nothing: level-triggered convergence is silent when it
+agrees. An observation that cannot be expressed as one of these is
+quarantined, never invented.
 
 ## Aggregate: `publication` (`aggregate_id = routing.publications.id`) — confirmed ION verbs
 

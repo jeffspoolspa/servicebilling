@@ -61,7 +61,14 @@ export interface AgreementEdit {
   terms?: { pattern: RequiredPattern; billing: TypedBilling; period: { startsOn: string | null; endsOn: string | null } }
   /** The slices the caller can state. Others fill in from the ledger. */
   slices?: readonly SliceStops[]
-  /** An external-id churn proved by a read-back (never a prediction). */
+  /** LAND a write-ahead declaration: ION's state confirmed the born task
+   *  (write-ahead, RULED 2026-08-09). Preferred over `incarnation` for
+   *  anything we wrote — the declaration already exists. */
+  land?: { declarationId: string; ionTaskId: string }
+  /** The declared write provably did not happen. */
+  abandon?: { declarationId: string; reason: string }
+  /** An external-id churn proved by a read-back (never a prediction).
+   *  Used for changes we OBSERVE (ION-side), which had no declaration. */
   incarnation?: {
     ionTaskId: string
     cause: IonIncarnation["cause"]
@@ -77,7 +84,7 @@ export interface AgreementEditReport {
   agreementId: string
   origin: EditOrigin
   terms: "unchanged" | "versioned" | "ended" | "skipped"
-  incarnation: "unchanged" | "recorded" | "skipped"
+  incarnation: "unchanged" | "recorded" | "abandoned" | "skipped"
   placement: "unchanged" | "appended" | "opened" | "skipped"
   /** open slices whose stops nobody could state — the agreement's stop set
    *  would be a LIE, so placement is skipped and this is loud. */
@@ -138,6 +145,14 @@ export async function editAgreement(deps: EditDeps, edit: AgreementEdit): Promis
   }
 
   /* --------------------------- external identity ------------------------- */
+  if (edit.land) {
+    agreement.landIncarnation(edit.land.declarationId, edit.land.ionTaskId, edit.at)
+    report.incarnation = "recorded"
+  }
+  if (edit.abandon) {
+    agreement.abandonDeclaration(edit.abandon.declarationId, edit.abandon.reason, edit.at)
+    report.incarnation = "abandoned"
+  }
   if (edit.incarnation) {
     const before = agreement.openIncarnations().map((i) => i.ionTaskId).join(",")
     agreement.recordIncarnation(
@@ -167,6 +182,13 @@ export async function editAgreement(deps: EditDeps, edit: AgreementEdit): Promis
 
   const stops: PlacementStop[] = []
   for (const inc of open) {
+    // a DECLARED-not-landed slice means a write is in flight or died: the
+    // arrangement is not knowable yet, so the floor must not be rewritten
+    // from a half-picture (write-ahead, RULED 2026-08-09)
+    if (inc.ionTaskId === null) {
+      report.unstatedSlices.push(`declaration:${inc.id} (declared, ION has not confirmed it)`)
+      continue
+    }
     const s = stated.get(inc.ionTaskId)
     if (s) {
       stops.push(...s.stops.map((x) => ({ weekday: x.weekday, techId: x.techId, type: s.stopType })))
