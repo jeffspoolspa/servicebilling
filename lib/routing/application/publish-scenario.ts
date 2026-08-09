@@ -27,6 +27,7 @@ export interface PublishMove {
   ionCustId: string
   targetStops: { weekday: number; techId: string; type: "clean" | "chem_check" }[]
   targetEndsOn?: string | null
+  neverServed?: boolean
   verdict: MoveVerdict
 }
 
@@ -56,6 +57,7 @@ export interface PublishDeps {
     effectiveDate: string
     targetAnchorDate?: string
     targetEndsOn?: string | null
+    neverServed?: boolean
     dryRun: boolean
   }) => Promise<ChangeReport>
 }
@@ -98,6 +100,7 @@ export async function publishScenario(
         ionCustId: m.ionCustId,
         targetStops: m.targetStops,
         targetEndsOn: m.targetEndsOn,
+        neverServed: m.neverServed,
         effectiveDate: m.verdict.effectiveDate!,
         ...(m.verdict.anchorDate && m.verdict.bridges.length === 0 && isIntervalRephase(m)
           ? { targetAnchorDate: m.verdict.anchorDate } : {}),
