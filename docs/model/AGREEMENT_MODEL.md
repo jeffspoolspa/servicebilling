@@ -61,6 +61,10 @@ Two placements worth stating, since the four layers do not name them:
   agreements twice on 2026-08-08. Use `ImmutableArray<T>` with an explicit
   `Equals`, or a domain `SameAs(other)`.
 
+- **Full words in names, always** (RULED 2026-08-10): `targetCadence`,
+  never `to`; `adjustment`, never `adjust`; no single-letter lambdas in
+  domain code. Terseness is how the old seam function became unreadable.
+
 ## Classes
 
 ```csharp
