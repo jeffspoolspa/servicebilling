@@ -113,13 +113,22 @@ tests/
 
 **Proof:** save/reload agree; second active agreement refuses at the DB.
 
-## Phase 3 — ION reads via existing Windmill HTTP
+## Phase 3 — ION infrastructure, ours from day one
 
-- [ ] `IonVocabulary`: port the closed decodes; unknown → quarantine
-- [ ] `WindmillIonTasks`: Read + ListCustomerTasks over the working endpoints
+No Windmill anywhere in this system (RULED 2026-08-10) — the TS scripts are
+REFERENCE for ION's quirks, nothing more. Our session, our HTTP, our parser.
+
+- [ ] Image `mcr.microsoft.com/playwright/dotnet` (version pairing = the pin)
+- [ ] `IonSessionMinter` (Playwright login, OUR user) · `IonSessionPool`
+      (leases, one op/session, customer affinity, priming tracked) ·
+      `IonSessionKeeper` · sessions mirrored to Postgres
+- [ ] `IonFormParser` + `IonVocabulary` (closed decodes; unknown → quarantine)
+      · `IonTasks` read side: Read + ListCustomerTasks, login-page detection,
+      reads retry once · concurrency 2–3
 - [ ] `ConvergeSlice` + `AttachOrMint` (evidence ladder, ambiguity quarantines)
 
-**Proof:** dry reconcile of Highlands (two slices) reads exactly as ION.
+**Proof:** dry reconcile of Highlands (two slices) reads exactly as ION,
+zero Windmill calls; kill the process, restart → no re-login.
 
 ## Phase 4 — Worker + loop = THE BACKFILL
 
@@ -129,22 +138,12 @@ agreement from observation. Proves sync and seeds the DB in one motion.
 - [ ] `IonReconciliationLoop`: PeriodicTimer, scope/tick, advisory lock,
       failure ceiling, polite delay, `/health` (last sweep + divergences)
 - [ ] List tier (~2h, wide) → diff → form tier (narrow) · `LastObservedAt`
-- [ ] Deploy container (no Playwright yet) · dry backfill report → review
-      (~500 agreements; ELOPER must come out as ONE) → Carter arms
+- [ ] Deploy · dry backfill report → review (~500 agreements; ELOPER must
+      come out as ONE) → Carter arms
 
 **Proof:** divergences trend to zero; a hand edit in ION lands in one cycle.
 
-## Phase 5 — Own the session (Playwright in container)
-
-- [ ] Image `mcr.microsoft.com/playwright/dotnet` (version pairing = the pin)
-- [ ] Pool (leases, one op/session, customer affinity, priming tracked) +
-      `IonSessionKeeper` + minter for OUR user · mirrored to Postgres
-- [ ] `HttpIonTasks` replaces Windmill on reads; login-page detection;
-      reads retry once, writes never · concurrency 2–3
-
-**Proof:** full sweep in minutes, zero Windmill calls; restart → no re-login.
-
-## Phase 6 — First write: ChangeTech
+## Phase 5 — First write: ChangeTech
 
 - [ ] Write side: ApplySupersession (list-sandwich confirms born id or
       throws), ApplyAmendment (form re-read), CreateOneTime, Delete
@@ -154,7 +153,7 @@ agreement from observation. Proves sync and seeds the DB in one motion.
 **Proof:** canary verified in ION + book; kill worker mid-write → pending
 declaration RESUMES next pass (test it, don't assume it).
 
-## Phase 7 — ChangeParity + bridges + the app
+## Phase 6 — ChangeParity + bridges + the app
 
 - [ ] Preview/Run share one SeamPlanner call · bridge = one-time slice
       (`Reason(TransitionBridge)`), own declaration/create/landing
@@ -166,7 +165,7 @@ declaration RESUMES next pass (test it, don't assume it).
 **Proof:** Marie's flip through the dialog — the case that broke the old
 pipeline — lands correctly.
 
-## Phase 8 — Retirement (each its own decision)
+## Phase 7 — Retirement (each its own decision)
 
 - [ ] Board reads book floor → TS sweep/nightly off → old schema frozen for
       billing asOf → billing repoint (own project) → task_schedules mirror dies
@@ -176,10 +175,10 @@ pipeline — lands correctly.
 | TS piece | phase |
 |---|---|
 | sweep-ion-tasks + sweep script | 4 |
-| Windmill ION reads | 5 |
-| publish pipeline (runner, change-arrangement, Inngest fn) | 7 |
-| refresh-agreement + nightly | 8 |
-| converge-placement, v_current_placements, task_schedules | 8 |
+| publish pipeline (runner, change-arrangement, Inngest fn) | 6 |
+| refresh-agreement + nightly | 7 |
+| converge-placement, v_current_placements, task_schedules | 7 |
+| Windmill ION surface entirely (never used by .NET) | 7 — dies with its last TS caller |
 
 ## Open
 
