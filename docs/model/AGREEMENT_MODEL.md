@@ -14,7 +14,7 @@ maintenance/
   entities/
     agreement/                     THE aggregate, one file per class
       Agreement.cs  Slice.cs  Stop.cs  Incarnation.cs
-      SliceTerms.cs  Cadence.cs  Billing.cs  Basis.cs  Serves.cs
+      SliceTerms.cs  Cadence.cs  Billing.cs  Serves.cs  Reason.cs
       SeamPlanner.cs  CadenceLaw.cs  ArrangementDiff.cs    <- domain services
       AgreementRuleException.cs
   application/
@@ -44,7 +44,6 @@ Two placements worth stating, since the four layers do not name them:
 public sealed class Agreement : AggregateRoot<AgreementId>
 {
     public CustomerId CustomerId { get; }
-    public Basis Basis { get; }                     // program, riderOf
     public AgreementStatus Status { get; private set; }
     public DateOnly? EndedOn { get; private set; }
     private readonly List<Slice> _slices;
@@ -53,15 +52,16 @@ public sealed class Agreement : AggregateRoot<AgreementId>
     public Slice SliceOf(SliceId id);
     public Slice SliceCarrying(IonTaskId id);
     public Slice SliceOfStop(StopId id);
-    public SliceId AddSlice(Serves serves, SliceKind kind, SliceTerms terms, Instant at);
-    public void End(DateOnly on, Instant at, Provenance p);
+    public SliceId AddSlice(Serves serves, SliceKind kind, SliceTerms terms, Reason why, Instant at);
+    public void End(DateOnly on, Instant at, Provenance p);   // ends its slices with it
 }
 
 /// ONE serviced thing: the pool; the fountain; chem testing; a one-time QC.
 public sealed class Slice : Entity<SliceId>
 {
-    public Serves Serves { get; }                   // WorkType + body label
+    public Serves Serves { get; }                   // WorkType (the program) + body label
     public SliceKind Kind { get; }                  // Recurring | OneTime
+    public Reason Why { get; }                      // why this work exists at all
     public SliceStatus Status { get; private set; }
     public SliceTerms Terms => _terms[^1];          // cadence, billing, period
     public IonTaskId? CurrentIonTask { get; }       // the landed open incarnation
@@ -120,7 +120,30 @@ public abstract record Cadence                     // PARITY LIVES HERE
 
 public sealed record Billing(string ServiceTypeId, int? PriceCents,
                              BillingType Type, IReadOnlyList<DayRate> DayRates);
+
+/// WHY this work exists — what justifies a zero price, and what it repays.
+/// (Replaces Basis, RULED 2026-08-09: `rider` dissolved into slices, and
+/// `program` moved down to Serves. Nothing was left at agreement level.)
+public sealed record Reason(ReasonKind Kind, SliceId? Compensates = null);
+public enum ReasonKind { Contracted, QualityControl, TransitionBridge, Remediation }
 ```
+
+### Basis is deleted (2026-08-09)
+
+`Basis` carried `customer_contract | rider` plus a `program`. Under slices:
+
+- **`rider` dissolves.** Work that exists because another agreement does is
+  now a slice on that agreement, and the host cascade comes free — ending
+  the agreement ends its slices. The cross-aggregate event handler that
+  implemented "ending the host ends its riders" stops existing, and
+  `classify-basis` dies with it.
+- **`program` moves down** to `Serves.WorkType`, because it is decoded from
+  service type and a customer may hold a maintenance slice and a
+  green-to-clean slice at once.
+- **What is left at agreement level is the relationship itself** — customer,
+  lifecycle, and (when billing needs it) the invoicing policy. No `Basis`.
+- **The one thing worth keeping is the "because"** — `Slice.Why`. A free
+  slice with no recorded reason is an unexplained credit next month.
 
 ## Domain services
 
@@ -274,7 +297,8 @@ public sealed class ChangeParity(IAgreementRepository repo, IIonTasks ion, IVisi
         // the accepted bridge is a ONE-TIME SLICE — its own thing, its own ION task
         SliceId? bridge = ruling.Accepted
             ? agreement.AddSlice(slice.Serves, SliceKind.OneTime,
-                                 SliceTerms.FreeOneTime(ruling.Date), at)
+                                 SliceTerms.FreeOneTime(ruling.Date),
+                                 new Reason(ReasonKind.TransitionBridge, slice.Id), at)
             : null;
 
         await repo.Save(agreement);                                // both declarations recorded
@@ -323,6 +347,10 @@ public sealed class ChangeParity(IAgreementRepository repo, IIonTasks ion, IVisi
 
 ## Open questions
 
+- **Does a customer ever hold two CONCURRENT agreements?** With the fountain
+  and riders both slices, no case is left except a second property or a
+  different billing entity. If none, `one active agreement per customer`
+  becomes an enforceable invariant and the duplicate-claim class dies.
 - Does `AddStop` on a Recurring slice imply a frequency change, or can coverage
   legitimately lag the pattern? (Affects whether `AddStop` versions terms.)
 - Where does `Reflect` put a covers/serves change — is a work-type change a new
