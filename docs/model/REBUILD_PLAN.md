@@ -25,15 +25,70 @@ the new `book` schema — no shared tables, no conflict.
 - [ ] Scaffold:
 
 ```
-src/Maintenance/
-  Entities/Agreement/     Agreement Slice Stop Incarnation SliceTerms Cadence
-                          Billing Serves Reason + SeamPlanner CadenceLaw ArrangementDiff
-  Application/Ports/      IAgreementRepository IIonTasks IVisitHistory IObservationLog
-  Application/            ConvergeSlice ChangeTech ChangeParity SweepIonTasks AttachOrMint
-  Infrastructure/         Persistence/ Ion/ Scheduling/
-  Presentation/
-src/Host/                 one image; Workers:Ion flag picks api|worker role
-tests/Maintenance.Tests/
+src/
+  Maintenance/
+    Entities/
+      Agreement/
+        Agreement.cs                  aggregate root — slices, lifecycle, one-active invariant refusal
+        Slice.cs                      one serviced thing — verbs live here
+        Stop.cs                       (id, weekday, tech) entity
+        Incarnation.cs                ION id over time — declared/landed/abandoned
+        SliceTerms.cs                 VO — cadence + billing + period, versioned
+        Cadence.cs                    VO — Weekly|Biweekly|Monthly, TimesPerPeriod, parity anchor
+        Billing.cs                    VO — serviceType, price, dayRates (hand-written equality)
+        Serves.cs                     VO — WorkType (program) + body label
+        Reason.cs                     VO — why the work exists; what it compensates
+        SeamPlanner.cs                domain service — anchor first, gap second, bridge on lost firing
+        CadenceLaw.cs                 domain service — gap bounds per cadence
+        ArrangementDiff.cs            domain service — held vs observed -> ChangeSet
+        AgreementRuleException.cs
+    Application/
+      Ports/
+        IAgreementRepository.cs       load + Save (aggregate + facts + floor, ONE transaction)
+        IIonTasks.cs                  the six methods, our vocabulary, read-back confirmed
+        IVisitHistory.cs              last served across the lineage
+        IObservationLog.cs            evidence, never authority
+      ConvergeSlice.cs                read ION -> diff -> Reflect -> Save
+      ChangeTech.cs                   Reflect -> verb -> Declare -> write -> Land
+      ChangeParity.cs                 Preview + Run, same SeamPlanner call
+      SweepIonTasks.cs                population diff, list tier
+      AttachOrMint.cs                 unknown ION task -> the evidence ladder
+    Infrastructure/
+      Persistence/
+        BookDbContext.cs              EF Core, book schema, EF owns its migrations
+        EfAgreementRepository.cs      the one-transaction Save
+        SupabaseVisitHistory.cs       reads maintenance.visits + old lineage read-only
+      Ion/
+        IonTasks.cs                   implements IIonTasks — the only public type
+        IonSession.cs                 cookie + origin + primed-to (tracked, never assumed)
+        IonSessionPool.cs             leases, minting, customer affinity
+        IonSessionKeeper.cs           BackgroundService — ping idle, evict dead, refill
+        IonSessionMinter.cs           Playwright login — the ONLY browser code
+        IonFormParser.cs              ColdFusion HTML -> raw fields
+        IonFormRenderer.cs            slice intent -> form writes
+        IonVocabulary.cs              closed decodes; unknown throws
+        IonQuirks.md                  the documented weirdness, one place
+      Scheduling/
+        IonReconciliationLoop.cs      BackgroundService — the 2h driver
+        WorkRequestConsumer.cs        BackgroundService — NOTIFY + SKIP LOCKED
+        SweepLease.cs                 Postgres advisory lock — one runner
+        ReconciliationOptions.cs      intervals, caps, Apply flag
+    Presentation/
+      SliceEndpoints.cs               parity preview, change enqueue
+      ReconcileEndpoints.cs           manual nudge, divergence report
+      HealthEndpoints.cs              last sweep, pool state
+  Host/
+    Program.cs                        DI + role selection — Workers:Ion picks api|worker
+    appsettings.json                  intervals, urls; secrets via env
+    Dockerfile                        mcr.microsoft.com/playwright/dotnet base
+tests/
+  Maintenance.Tests/
+    Agreement/                        aggregate + verb tests, the parity chain verbatim
+    Services/                         SeamPlanner, CadenceLaw, ArrangementDiff
+    Application/                      use cases against FakeIonTasks
+    Fakes/
+      FakeIonTasks.cs                 canned ObservedSlices, scripted confirmations
+      InMemoryAgreementRepository.cs
 ```
 
 ## Phase 1 — Pure domain + tests (model mistakes surface HERE)
