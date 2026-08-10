@@ -93,14 +93,16 @@ public sealed class Slice : Entity<SliceId>
     private readonly List<Stop> _stops;
     private readonly List<Incarnation> _incarnations;
 
-    // placement verbs — no terms version
-    public StopId AddStop(Weekday d, TechId t, Instant at);
+    // placement verbs — MOVE a stop; never change how many there are
     public void ChangeTech(StopId s, TechId t, Instant at);
     public void ChangeDay(StopId s, Weekday d, Instant at);
     public void ChangeParity(DateOnly anchor, Instant at);   // validates: anchor on a stop
                                                              // weekday AND target parity
-    // terms verbs — versions terms
-    public void ChangeFrequency(Cadence c, Instant at);
+    // terms verbs — versions terms. RULED 2026-08-09: adding or removing a
+    // stop IS a frequency change (more days = more service = more money), so
+    // they happen in ONE call and cannot drift apart. There is no public
+    // AddStop / RemoveStop.
+    public void ChangeFrequency(Cadence to, StopAdjustment adjust, Instant at);
     public void Reprice(Billing b, Instant at);
 
     // external identity — write-ahead
@@ -134,12 +136,20 @@ public sealed class Incarnation : Entity<IncarnationId>
 public sealed record SliceTerms(int Version, Cadence Cadence, Billing Billing,
                                 Period Period, Instant From, TermsCause Cause);
 
-public abstract record Cadence                     // PARITY LIVES HERE
+/// PARITY LIVES HERE, and so does HOW MANY — the count is part of the
+/// cadence, which is what makes "add a stop" inexpressible without also
+/// saying what the customer now buys.
+public abstract record Cadence(int TimesPerPeriod)
 {
-    public sealed record Weekly(int TimesPerWeek)  : Cadence;
-    public sealed record Biweekly(DateOnly Anchor) : Cadence;
-    public sealed record Monthly(DateOnly Anchor)  : Cadence;
+    public sealed record Weekly(int TimesPerPeriod)                  : Cadence(TimesPerPeriod);
+    public sealed record Biweekly(DateOnly Anchor, int TimesPerPeriod) : Cadence(TimesPerPeriod);
+    public sealed record Monthly(DateOnly Anchor, int TimesPerPeriod)  : Cadence(TimesPerPeriod);
 }
+
+/// The stop changes a frequency change entails — stated, never inferred.
+public sealed record StopAdjustment(
+    IReadOnlyList<(Weekday Day, TechId Tech)> Add,
+    IReadOnlyList<StopId> Remove);
 
 public sealed record Billing(string ServiceTypeId, int? PriceCents,
                              BillingType Type, IReadOnlyList<DayRate> DayRates);
@@ -150,6 +160,28 @@ public sealed record Billing(string ServiceTypeId, int? PriceCents,
 public sealed record Reason(ReasonKind Kind, SliceId? Compensates = null);
 public enum ReasonKind { Contracted, QualityControl, TransitionBridge, Remediation }
 ```
+
+### Invariants
+
+1. **One ACTIVE agreement per customer** (RULED 2026-08-09). Enforced where
+   it cannot be argued with: `unique index on agreements (customer_id)
+   where status = 'active'`, plus a refusal when opening a second. This is
+   a cross-aggregate rule, so it lives at the boundary, not inside
+   `Agreement`. It also makes the duplicate-claim class — two agreements
+   holding one ION task, found on ELOPER 6031438 — unrepresentable for the
+   same customer.
+
+2. **Stop count changes only through `ChangeFrequency`.** More service days
+   means more money; letting a stop appear without terms moving would let
+   the schedule and the contract drift silently. Moving a stop
+   (`ChangeTech`, `ChangeDay`, `ChangeParity`) never changes the count.
+
+3. **Contract vs schedule.** `Cadence.TimesPerPeriod` states what the
+   customer BUYS. `Stops` state what is ARRANGED. Our own verbs keep them
+   equal by construction. `Reflect` may still observe fewer stops than the
+   contract requires — a day unassigned in ION — and that is real
+   underservice: reported as coverage drift, never silently re-versioned to
+   match. That is what "owed" was always trying to say.
 
 ### Basis is deleted (2026-08-09)
 
@@ -370,12 +402,6 @@ public sealed class ChangeParity(IAgreementRepository repo, IIonTasks ion, IVisi
 
 ## Open questions
 
-- **Does a customer ever hold two CONCURRENT agreements?** With the fountain
-  and riders both slices, no case is left except a second property or a
-  different billing entity. If none, `one active agreement per customer`
-  becomes an enforceable invariant and the duplicate-claim class dies.
-- Does `AddStop` on a Recurring slice imply a frequency change, or can coverage
-  legitimately lag the pattern? (Affects whether `AddStop` versions terms.)
 - Where does `Reflect` put a covers/serves change — is a work-type change a new
   slice or a redefinition of this one?
 - One-time slices and `ActiveAgreement`: a `OneTime` slice ending must not end
