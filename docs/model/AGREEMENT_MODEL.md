@@ -38,6 +38,29 @@ Two placements worth stating, since the four layers do not name them:
 - **Ports are declared in `application/ports/`** and implemented in
   `infrastructure/`. The entities layer depends on nothing.
 
+## Conventions
+
+- **`record` = value object, `class` = entity.** Records carry value
+  equality and immutability, which IS the definition of a value object;
+  entities are classes because their equality is identity.
+- **`abstract record` + sealed leaves = a closed set** (`Cadence` is
+  `Weekly | Biweekly | Monthly`, enforced by the compiler — the same
+  discipline as our closed decodes).
+- **Ids are `readonly record struct`** (`AgreementId(Guid)`,
+  `SliceId(Guid)`, `IonTaskId(string)`). Passing a `SliceId` where an
+  `AgreementId` belongs becomes a compile error — cheap insurance in a
+  system with quota ids, mirror ids, ION ids and tech ids in flight.
+- **Not every record is a value object.** `SeamDecision`, `ObservedSlice`,
+  `ChangeSet`, `Confirmation` and the `*Intent` types are MESSAGES — a
+  service's answer or an adapter's report. They carry no behaviour and are
+  not part of the aggregate's vocabulary.
+- **Records with collections need hand-written equality.** The generated
+  `Equals` compares `IReadOnlyList<DayRate>` BY REFERENCE, so two identical
+  `Billing`s read as different and every refresh would version terms that
+  never changed. That exact bug (in its JSON.stringify form) re-versioned
+  agreements twice on 2026-08-08. Use `ImmutableArray<T>` with an explicit
+  `Equals`, or a domain `SameAs(other)`.
+
 ## Classes
 
 ```csharp
