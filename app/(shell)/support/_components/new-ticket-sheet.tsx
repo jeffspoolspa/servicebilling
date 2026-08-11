@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useAccess } from "@/components/providers/access-provider"
 import { channelLabel } from "../_lib/labels"
 
 /**
@@ -22,6 +23,7 @@ export function NewTicketSheet(
   { onClose, onCreated }: { onClose: () => void; onCreated: (ticketId: string) => void },
 ) {
   const router = useRouter()
+  const openedBy = useAccess()?.email ?? "unknown"
   const [term, setTerm] = useState("")
   const [hits, setHits] = useState<CustomerHit[]>([])
   const [customer, setCustomer] = useState<CustomerHit | null>(null)
@@ -51,7 +53,7 @@ export function NewTicketSheet(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customerId: customer.qbo_customer_id, subject, channel, priority,
-          firstNote, openedBy: "carter",
+          firstNote, openedBy,
         }),
       })
       if (!res.ok) {

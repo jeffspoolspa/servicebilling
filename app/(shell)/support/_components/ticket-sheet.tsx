@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { MessageSquareText } from "lucide-react"
 import { Pill } from "@/components/ui/pill"
+import { useAccess } from "@/components/providers/access-provider"
 import { channelLabel } from "../_lib/labels"
 import { CustomerCard } from "./customer-panel"
 import type { ActivityEntry, CustomerPanel, TicketRow } from "../_lib/views"
@@ -21,6 +22,7 @@ import type { ActivityEntry, CustomerPanel, TicketRow } from "../_lib/views"
  */
 export function TicketSheet({ ticketId, onClose }: { ticketId: string; onClose: () => void }) {
   const router = useRouter()
+  const author = useAccess()?.email ?? "unknown"
   // Which ticket is showing — starts at the one clicked, and moves when someone
   // follows one of this customer's other open tickets without leaving the sheet.
   const [id, setId] = useState(ticketId)
@@ -148,7 +150,7 @@ export function TicketSheet({ ticketId, onClose }: { ticketId: string; onClose: 
             <button
               className="rounded-full border border-line px-3 py-1 text-[11px] text-dim hover:text-ink disabled:opacity-40"
               disabled={busy || !note.trim()}
-              onClick={async () => { if (await send("notes", { text: note, author: "carter" })) setNote("") }}
+              onClick={async () => { if (await send("notes", { text: note, author })) setNote("") }}
             >
               Add note
             </button>
@@ -167,7 +169,7 @@ export function TicketSheet({ ticketId, onClose }: { ticketId: string; onClose: 
                   className="rounded-full border border-emerald-500/60 bg-emerald-500/25 px-3 py-1 text-[11px]
                              font-medium text-emerald-200 hover:bg-emerald-500/35 disabled:opacity-40"
                   disabled={busy || !resolution.trim()}
-                  onClick={() => send("resolve", { resolution, resolvedBy: "carter" })}
+                  onClick={() => send("resolve", { resolution, resolvedBy: author })}
                 >
                   Resolve
                 </button>
@@ -176,7 +178,7 @@ export function TicketSheet({ ticketId, onClose }: { ticketId: string; onClose: 
               <button
                 className="rounded-full border border-line px-3 py-1 text-[11px] text-dim hover:text-ink disabled:opacity-40"
                 disabled={busy || !note.trim()}
-                onClick={() => send("reopen", { reason: note, by: "carter" })}
+                onClick={() => send("reopen", { reason: note, by: author })}
                 title="Type the reason in the note box, then reopen"
               >
                 Reopen
