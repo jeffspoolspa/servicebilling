@@ -2,18 +2,33 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { MessageSquareText } from "lucide-react"
 import { Pill } from "@/components/ui/pill"
-import type { ActivityEntry, TicketRow } from "../_lib/views"
+import { channelLabel } from "../_lib/labels"
+import { CustomerCard } from "./customer-panel"
+import type { ActivityEntry, CustomerPanel, TicketRow } from "../_lib/views"
 
 /**
  * One ticket: the conversation, and what you can do to it.
+ *
+ * Takes an ID, not a row, and loads its own data — so it opens the same way
+ * from a queue click or straight after creating a ticket, which is what
+ * lets someone keep taking notes while the caller is still on the line.
  *
  * Every action posts to /api/support/* (which forwards to the .NET domain)
  * and then re-reads. No optimistic updates: the whole point of the domain
  * refusing is that the screen shows what IS, not what was asked for.
  */
-export function TicketSheet({ ticket, onClose }: { ticket: TicketRow; onClose: () => void }) {
+export function TicketSheet({ ticketId, onClose }: { ticketId: string; onClose: () => void }) {
   const router = useRouter()
+  // Which ticket is showing — starts at the one clicked, and moves when someone
+  // follows one of this customer's other open tickets without leaving the sheet.
+  const [id, setId] = useState(ticketId)
+  useEffect(() => setId(ticketId), [ticketId])
+
+  const [ticket, setTicket] = useState<TicketRow | null>(null)
+  const [customer, setCustomer] = useState<CustomerPanel | null>(null)
+  const [others, setOthers] = useState<TicketRow[]>([])
   const [activity, setActivity] = useState<ActivityEntry[] | null>(null)
   const [note, setNote] = useState("")
   const [resolution, setResolution] = useState("")
@@ -21,16 +36,23 @@ export function TicketSheet({ ticket, onClose }: { ticket: TicketRow; onClose: (
   const [error, setError] = useState<string | null>(null)
 
   const load = async () => {
-    const res = await fetch(`/api/support/activity/${ticket.ticket_id}`)
-    setActivity(res.ok ? await res.json() : [])
+    const [header, entries] = await Promise.all([
+      fetch(`/api/support/ticket/${id}`),
+      fetch(`/api/support/activity/${id}`),
+    ])
+    if (header.ok) {
+      const detail = await header.json()
+      setTicket(detail.ticket); setCustomer(detail.customer); setOthers(detail.others)
+    }
+    setActivity(entries.ok ? await entries.json() : [])
   }
-  useEffect(() => { void load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [ticket.ticket_id])
+  useEffect(() => { void load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id])
 
   /** Post a command, surface the domain's own words when it refuses. */
   const send = async (path: string, body: unknown) => {
     setBusy(true); setError(null)
     try {
-      const res = await fetch(`/api/support/tickets/${ticket.ticket_id}/${path}`, {
+      const res = await fetch(`/api/support/tickets/${id}/${path}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       })
       if (!res.ok) {
@@ -53,20 +75,43 @@ export function TicketSheet({ ticket, onClose }: { ticket: TicketRow; onClose: (
         {/* ---------------------------------------------- header */}
         <div className="border-b border-line-soft px-5 py-3">
           <div className="flex items-center gap-2">
-            <span className="text-[14px] font-medium text-ink">{ticket.subject}</span>
-            <Pill tone={ticket.status === "Open" ? "cyan" : "neutral"}>{ticket.status}</Pill>
+            <span className="text-[14px] font-medium text-ink">{ticket?.subject ?? "Loading…"}</span>
+            {ticket && (
+              <Pill tone={ticket.status === "Open" ? "cyan" : "neutral"}>{ticket.status}</Pill>
+            )}
             <span className="flex-1" />
             <button className="text-[11px] text-dim hover:text-ink" onClick={onClose}>Close</button>
           </div>
-          <div className="pt-1 text-[11.5px] text-ink-mute">
-            {ticket.customer ?? "(unknown customer)"} · {ticket.channel} · opened by {ticket.opened_by}
-            {ticket.resolved_by && ` · resolved by ${ticket.resolved_by}`}
-          </div>
+          {ticket && (
+            <div className="pt-1 text-[11.5px] text-ink-mute">
+              {channelLabel(ticket.channel)} · opened by {ticket.opened_by}
+              {ticket.resolved_by && ` · resolved by ${ticket.resolved_by}`}
+            </div>
+          )}
         </div>
 
+        {/* --------------------------------- who it's for, and what else is open */}
+        {ticket && (
+          <CustomerCard
+            customer={customer}
+            others={others}
+            onOpenTicket={(next) => { setActivity(null); setId(next) }}
+          />
+        )}
+
         {/* ---------------------------------------------- timeline */}
+        <div className="flex items-center gap-2 border-b border-line-soft bg-white/[0.02] px-5 py-1.5">
+          <MessageSquareText className="size-3.5 text-ink-mute" />
+          <span className="text-[10.5px] uppercase tracking-wide text-ink-mute">Notes</span>
+          {activity && (
+            <span className="text-[10.5px] text-ink-mute">
+              {activity.length} entr{activity.length === 1 ? "y" : "ies"}
+            </span>
+          )}
+        </div>
         <div className="flex-1 overflow-auto px-5 py-3">
           {activity === null && <div className="text-[12px] text-ink-mute">Loading…</div>}
+          {activity?.length === 0 && <div className="text-[12px] text-ink-mute">No notes yet.</div>}
           {activity?.map((entry) => (
             <div key={entry.entry_id} className="border-t border-line-soft/40 py-2 first:border-0">
               <div className="flex items-center gap-2 text-[10.5px] text-ink-mute">
@@ -110,7 +155,7 @@ export function TicketSheet({ ticket, onClose }: { ticket: TicketRow; onClose: (
 
             <span className="flex-1" />
 
-            {ticket.status === "Open" ? (
+            {ticket?.status !== "Resolved" ? (
               <>
                 <input
                   className="w-56 rounded-lg border border-line bg-transparent px-2 py-1 text-[11.5px] text-ink"

@@ -2,7 +2,7 @@ import { requireModuleAccess } from "@/lib/auth/access"
 
 /**
  * Admin module guard. Only users with an `app_roles` row of (admin, admin)
- * can hit anything under /admin/*. Service viewers are bounced to /unauthorized.
+ * can hit anything under /admin/*. Service viewers are bounced to /home.
  *
  * Inside admin pages, the guard alone gates access. Per-action write
  * authorization is enforced again at the action / RPC level.

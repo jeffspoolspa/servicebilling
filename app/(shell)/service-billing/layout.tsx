@@ -30,7 +30,7 @@ export default async function ServiceBillingLayout({
   children: React.ReactNode
 }) {
   // Module access guard — viewer or admin can read; writes are gated
-  // separately at the action / RPC level. Redirects /login or /unauthorized.
+  // separately at the action / RPC level. Redirects /login or /home.
   await requireModuleAccess("service")
   const kpis = await getDashboardKpis()
 

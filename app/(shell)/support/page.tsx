@@ -1,3 +1,4 @@
+import { requireModuleAccess } from "@/lib/auth/access"
 import { TicketsTable } from "./_components/tickets-table"
 import { listTickets } from "./_lib/views"
 
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic"
  * forwards to the .NET domain where the rules live.
  */
 export default async function SupportPage() {
+  await requireModuleAccess("support")
   const tickets = await listTickets()
 
   const open = tickets.filter((ticket) => ticket.status === "Open")

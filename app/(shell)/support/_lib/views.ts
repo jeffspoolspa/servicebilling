@@ -48,12 +48,66 @@ export async function listTickets(status?: "Open" | "Resolved"): Promise<TicketR
   return (data ?? []) as TicketRow[]
 }
 
+/** One ticket's header row — the detail sheet loads its own data so it can
+ *  be opened by id, whether from a row click or straight after creation. */
+export async function ticketById(ticketId: string): Promise<TicketRow | null> {
+  const sb = await createSupabaseServer()
+  const { data, error } = await sb.schema("support").from("v_ticket_queue")
+    .select("*").eq("ticket_id", ticketId).maybeSingle()
+  if (error) throw new Error(`ticket: ${error.message}`)
+  return (data as TicketRow) ?? null
+}
+
 export async function ticketActivity(ticketId: string): Promise<ActivityEntry[]> {
   const sb = await createSupabaseServer()
   const { data, error } = await sb.schema("support").from("v_ticket_activity")
     .select("*").eq("ticket_id", ticketId).order("at")
   if (error) throw new Error(`ticket activity: ${error.message}`)
   return (data ?? []) as ActivityEntry[]
+}
+
+export interface CustomerPanel {
+  qbo_customer_id: string
+  display_name: string | null
+  phone: string | null
+  email: string | null
+  normalized_address: string | null
+  street: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
+  account_type: string | null
+  balance: number | null
+}
+
+/**
+ * The customer, for DISPLAY beside a ticket. A read model, not an entity:
+ * the support module owns no customer data and changes none of it, so this
+ * is a query returning a DTO rather than anything the domain knows about.
+ *
+ * When editing arrives it will NOT write here — it will go through QBO,
+ * which owns the record, and the change comes back on the sync.
+ */
+export async function customerPanel(qboCustomerId: string): Promise<CustomerPanel | null> {
+  const sb = await createSupabaseServer()
+  const { data, error } = await sb.from("Customers")
+    .select("qbo_customer_id, display_name, phone, email, normalized_address, street, city, state, zip, account_type, balance")
+    .eq("qbo_customer_id", qboCustomerId).maybeSingle()
+  if (error) throw new Error(`customer panel: ${error.message}`)
+  return (data as CustomerPanel) ?? null
+}
+
+/** This customer's OTHER open tickets — the duplicate-ticket check, and the
+ *  context someone needs before promising anything on a call. */
+export async function otherOpenTickets(
+  customerId: string, exceptTicketId: string,
+): Promise<TicketRow[]> {
+  const sb = await createSupabaseServer()
+  const { data, error } = await sb.schema("support").from("v_ticket_queue")
+    .select("*").eq("customer_id", customerId).eq("status", "Open")
+    .neq("ticket_id", exceptTicketId).order("opened_at", { ascending: false }).limit(10)
+  if (error) throw new Error(`other tickets: ${error.message}`)
+  return (data ?? []) as TicketRow[]
 }
 
 /** The customer lookup for a new ticket — the existing table, no domain involved. */

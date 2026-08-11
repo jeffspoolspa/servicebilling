@@ -16,7 +16,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { SyncIssuesBadge } from "@/components/sync/sync-issues-badge"
-import { useHasModule } from "@/components/providers/access-provider"
+import { useAccess, useHasModule } from "@/components/providers/access-provider"
 import type { ModuleKey } from "@/lib/auth/modules"
 
 /**
@@ -49,8 +49,10 @@ interface Item {
   label: string
   /** Path-prefix set that should light this item up. */
   matches: string[]
-  /** Module gate. Item is hidden when the user lacks access. `null` = always show. */
-  module: ModuleKey | null
+  /** Module gate. Item is hidden when the user has NONE of the listed
+   *  modules. `null` = always show. A list means "any of these grants it" —
+   *  Customers is reached from several modules and belongs to none. */
+  module: ModuleKey | ModuleKey[] | null
 }
 
 const ITEMS: Item[] = [
@@ -58,13 +60,12 @@ const ITEMS: Item[] = [
   {
     // Customers is a shared entity (used by Service for billing and by
     // Maintenance for dispatch), so it lives at the top level instead of
-    // under either module. The page itself doesn't enforce a module gate;
-    // anyone authenticated can look up a customer record.
+    // under either module — any of those three grants the link.
     href: "/customers",
     icon: Users,
     label: "Customers",
     matches: ["/customers"],
-    module: null,
+    module: ["service", "maintenance", "leads"],
   },
   {
     href: "/service",
@@ -93,13 +94,11 @@ const ITEMS: Item[] = [
     module: "leads",
   },
   {
-    // Tickets are customer-facing work that starts on a phone call, so like
-    // Customers they sit at the top level rather than under a module.
     href: "/support",
     icon: Headset,
     label: "Support",
     matches: ["/support"],
-    module: null,
+    module: "support",
   },
 ]
 
@@ -232,9 +231,10 @@ function SidebarLink({
 
 /** Wrapper that hides the link when the user lacks the item's module access. */
 function GatedSidebarLink({ item, path, collapsed }: { item: Item; path: string; collapsed: boolean }) {
-  const hasAccess = useHasModule(item.module ?? ("service" as ModuleKey))
   // module=null → always show (e.g., Home)
-  if (item.module !== null && !hasAccess) return null
+  const granted = item.module === null ? null : ([] as ModuleKey[]).concat(item.module)
+  const access = useAccess()
+  if (granted && !granted.some((key) => access?.modules[key])) return null
   return <SidebarLink item={item} path={path} collapsed={collapsed} />
 }
 

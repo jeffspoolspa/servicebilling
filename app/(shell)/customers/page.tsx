@@ -8,6 +8,8 @@ import { CustomerAddressCell } from "@/components/customers/customer-address-cel
 import { Users } from "lucide-react"
 import Link from "next/link"
 import { listCustomers } from "@/lib/queries/dashboard"
+import { getUserAccess } from "@/lib/auth/access"
+import { redirect } from "next/navigation"
 
 export const dynamic = "force-dynamic"
 
@@ -18,7 +20,15 @@ interface PageProps {
   searchParams: Promise<{ page?: string; sort?: string; dir?: string; q?: string; filter?: string }>
 }
 
+/** Customers belongs to no module — it is reached FROM one. Any of the three
+ *  grants it; a support-only login has no route in. */
+const GRANTED_BY = ["service", "maintenance", "leads"] as const
+
 export default async function CustomersPage({ searchParams }: PageProps) {
+  const access = await getUserAccess()
+  if (!access) redirect("/login")
+  if (!GRANTED_BY.some((key) => access.has(key))) redirect("/home")
+
   const sp = await searchParams
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1)
   const sort = sp.sort ?? "display_name"

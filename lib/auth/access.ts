@@ -77,13 +77,20 @@ export const getUserAccess = cache(async (): Promise<UserAccess | null> => {
  * to `module`. Use at the top of server components / page files / layouts.
  *
  * Redirects:
- *   - /login           if unauthenticated
- *   - /unauthorized    if authenticated but no access to this module
+ *   - /login   if unauthenticated
+ *   - /home    if authenticated but without this module
+ *
+ * NOT to an "unauthorized" page. What a user lacks is HIDDEN, not announced:
+ * the sidebar never renders the link, and typing the URL lands them back at
+ * their own work (/home forwards a single-module user straight into it). A
+ * refusal screen tells someone what exists that they cannot have, which is
+ * the opposite of hiding — and for a prototype login handed to people who
+ * only do tickets, it is a dead end they cannot act on.
  */
 export async function requireModuleAccess(module: ModuleKey): Promise<UserAccess> {
   const access = await getUserAccess()
   if (!access) redirect("/login")
-  if (!access.has(module)) redirect("/unauthorized")
+  if (!access.has(module)) redirect("/home")
   return access
 }
 
@@ -96,7 +103,7 @@ export async function requireModuleAccess(module: ModuleKey): Promise<UserAccess
  */
 export async function requireModuleWrite(module: ModuleKey): Promise<UserAccess> {
   const access = await requireModuleAccess(module)
-  if (!access.canWrite(module)) redirect("/unauthorized")
+  if (!access.canWrite(module)) redirect("/home")
   return access
 }
 

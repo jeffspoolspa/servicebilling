@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { authorize } from "@/lib/api/authorize"
+import { refuseUnlessSupport } from "@/app/(shell)/support/_lib/guard"
 
 /**
  * THE FORWARDER — the only bridge between this app and the .NET support API.
@@ -19,8 +19,8 @@ const API = process.env.DOTNET_API_URL
 const SECRET = process.env.DOTNET_API_SECRET
 
 async function forward(req: Request, path: string[]) {
-  const caller = await authorize(req)
-  if (!caller) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const refusal = await refuseUnlessSupport(req)
+  if (refusal) return refusal
 
   if (!API || !SECRET) {
     // Say which, rather than failing as a generic 500 — a missing env var is

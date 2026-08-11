@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { channelLabel } from "../_lib/labels"
 
 /**
  * Log a call. The customer comes from a typeahead over the EXISTING
@@ -17,7 +18,9 @@ const PRIORITIES = ["Low", "Medium", "High", "Critical"] as const
 
 interface CustomerHit { qbo_customer_id: string; display_name: string | null }
 
-export function NewTicketSheet({ onClose }: { onClose: () => void }) {
+export function NewTicketSheet(
+  { onClose, onCreated }: { onClose: () => void; onCreated: (ticketId: string) => void },
+) {
   const router = useRouter()
   const [term, setTerm] = useState("")
   const [hits, setHits] = useState<CustomerHit[]>([])
@@ -56,8 +59,9 @@ export function NewTicketSheet({ onClose }: { onClose: () => void }) {
         setError(failure.error ?? `failed (${res.status})`)   // the domain's own words
         return
       }
-      router.refresh()
-      onClose()
+      const { ticketId } = await res.json()
+      router.refresh()          // the queue picks up the new row
+      onCreated(ticketId)       // and the ticket opens, ready for the next note
     } finally { setBusy(false) }
   }
 
@@ -68,7 +72,7 @@ export function NewTicketSheet({ onClose }: { onClose: () => void }) {
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center border-b border-line-soft px-5 py-3">
-          <span className="text-[14px] font-medium text-ink">Log a call</span>
+          <span className="text-[14px] font-medium text-ink">Open a ticket</span>
           <span className="flex-1" />
           <button className="text-[11px] text-dim hover:text-ink" onClick={onClose}>Cancel</button>
         </div>
@@ -132,7 +136,9 @@ export function NewTicketSheet({ onClose }: { onClose: () => void }) {
                 value={channel}
                 onChange={(event) => setChannel(event.target.value as typeof channel)}
               >
-                {CHANNELS.map((option) => <option key={option} value={option}>{option}</option>)}
+                {CHANNELS.map((option) => (
+                  <option key={option} value={option}>{channelLabel(option)}</option>
+                ))}
               </select>
             </div>
             <div className="flex-1">

@@ -6,6 +6,7 @@ import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { Pill } from "@/components/ui/pill"
 import { TicketSheet } from "./ticket-sheet"
 import { NewTicketSheet } from "./new-ticket-sheet"
+import { channelLabel } from "../_lib/labels"
 import type { TicketRow } from "../_lib/views"
 
 /** Priority is the queue's first sort, so it reads as colour before text. */
@@ -20,7 +21,7 @@ const AGE = (days: number) =>
   days < 1 ? "today" : days < 2 ? "yesterday" : `${Math.floor(days)}d`
 
 export function TicketsTable({ rows }: { rows: TicketRow[] }) {
-  const [open, setOpen] = useState<TicketRow | null>(null)
+  const [openId, setOpenId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
 
   const columns: ColumnDef<TicketRow>[] = [
@@ -53,7 +54,9 @@ export function TicketsTable({ rows }: { rows: TicketRow[] }) {
     {
       accessorKey: "channel",
       header: ({ column }) => <DataTableColumnHeader column={column} title="Channel" />,
-      cell: ({ row }) => <span className="text-ink-mute">{row.original.channel}</span>,
+      cell: ({ row }) => (
+        <span className="text-ink-mute">{channelLabel(row.original.channel)}</span>
+      ),
     },
     {
       accessorKey: "age_days",
@@ -87,16 +90,24 @@ export function TicketsTable({ rows }: { rows: TicketRow[] }) {
                        text-[10.5px] font-medium text-emerald-300 hover:bg-emerald-500/20"
             onClick={() => setCreating(true)}
           >
-            Log a call
+            Open ticket
           </button>
         }
-        initialSorting={[{ id: "opened_at", desc: true }]}
+        initialSorting={[{ id: "age_days", desc: false }]}
         emptyText="No tickets yet."
-        onRowClick={(row) => setOpen(row)}
+        onRowClick={(row) => setOpenId(row.ticket_id)}
       />
 
-      {open && <TicketSheet ticket={open} onClose={() => setOpen(null)} />}
-      {creating && <NewTicketSheet onClose={() => setCreating(false)} />}
+      {openId && <TicketSheet ticketId={openId} onClose={() => setOpenId(null)} />}
+      {creating && (
+        <NewTicketSheet
+          onClose={() => setCreating(false)}
+          // Straight into the ticket: the caller is usually still talking, and
+          // hunting for the row you just made to add the next note is the
+          // friction this removes.
+          onCreated={(ticketId) => { setCreating(false); setOpenId(ticketId) }}
+        />
+      )}
     </>
   )
 }

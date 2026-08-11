@@ -15,7 +15,7 @@
  * A user can have multiple rows (one per module they have access to).
  */
 
-export type ModuleKey = "service" | "maintenance" | "leads" | "admin"
+export type ModuleKey = "service" | "maintenance" | "leads" | "support" | "admin"
 export type RoleKey = "viewer" | "admin"
 
 export interface RoleSpec {
@@ -72,6 +72,16 @@ export const MODULES: Record<ModuleKey, ModuleSpec> = {
     label: "Leads",
     description: "Maintenance lead intake, follow-up, and conversion.",
     routes: ["/leads"],
+    roles: {
+      admin:  { label: "Admin",  canWrite: true  },
+      viewer: { label: "Viewer", canWrite: false },
+    },
+  },
+  support: {
+    key: "support",
+    label: "Support",
+    description: "Customer tickets: phone calls, notes, resolutions.",
+    routes: ["/support", "/api/support"],
     roles: {
       admin:  { label: "Admin",  canWrite: true  },
       viewer: { label: "Viewer", canWrite: false },

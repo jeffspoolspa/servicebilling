@@ -24,7 +24,7 @@ export async function requireRole(role: AppRole) {
     .eq("auth_user_id", user.id)
 
   const has = roles?.some((r) => `${r.app}/${r.role}` === role || `${r.app}/admin` === role)
-  if (!has) redirect("/unauthorized")
+  if (!has) redirect("/home")
 
   return user
 }

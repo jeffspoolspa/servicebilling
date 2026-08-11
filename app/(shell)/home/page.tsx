@@ -1,4 +1,7 @@
+import { redirect } from "next/navigation"
 import { Home as HomeIcon } from "lucide-react"
+import { getUserAccess } from "@/lib/auth/access"
+import { MODULES } from "@/lib/auth/modules"
 
 export const metadata = { title: "Home" }
 
@@ -7,7 +10,12 @@ export const metadata = { title: "Home" }
  * summary / news / pinned tasks; for now it just holds space so the
  * sidebar's Home link has somewhere to land.
  */
-export default function HomePage() {
+export default async function HomePage() {
+  // Someone with exactly one module has nothing to pick — send them to it.
+  const access = await getUserAccess()
+  const keys = Object.keys(access?.modules ?? {}) as (keyof typeof MODULES)[]
+  if (keys.length === 1) redirect(MODULES[keys[0]].routes[0] as Parameters<typeof redirect>[0])
+
   return (
     <div className="flex-1 grid place-items-center px-7 py-16">
       <div className="flex flex-col items-center gap-3 text-center">
