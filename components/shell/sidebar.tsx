@@ -12,6 +12,7 @@ import {
   UserPlus,
   PanelLeftClose,
   PanelLeftOpen,
+  Headset,
 } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { SyncIssuesBadge } from "@/components/sync/sync-issues-badge"
@@ -90,6 +91,15 @@ const ITEMS: Item[] = [
     label: "Leads",
     matches: ["/leads"],
     module: "leads",
+  },
+  {
+    // Tickets are customer-facing work that starts on a phone call, so like
+    // Customers they sit at the top level rather than under a module.
+    href: "/support",
+    icon: Headset,
+    label: "Support",
+    matches: ["/support"],
+    module: null,
   },
 ]
 
