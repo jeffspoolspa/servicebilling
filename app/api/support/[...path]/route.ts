@@ -31,6 +31,17 @@ async function forward(req: Request, path: string[]) {
     )
   }
 
+  // A PRESENT variable can still be unusable. Railway shows its host without
+  // a scheme, and `fetch` on a scheme-less string throws ERR_INVALID_URL —
+  // which surfaced as an HTML 500 the sheet could only report as "failed
+  // (500)". Same check, same voice as the one above: name the cause.
+  if (!URL.canParse(API)) {
+    return NextResponse.json(
+      { error: `support API not configured (DOTNET_API_URL is not an absolute URL: "${API}" — it needs the https:// scheme)` },
+      { status: 503 },
+    )
+  }
+
   const body = req.method === "GET" ? undefined : await req.text()
   const upstream = await fetch(`${API}/${path.join("/")}`, {
     method: req.method,
