@@ -136,9 +136,16 @@ function GrantForm({
         spellCheck={false}
         className="bg-[#0E1C2A] border border-line rounded-lg px-3 py-2 text-sm text-ink focus:border-cyan focus:outline-none"
       />
+      <input
+        name="password"
+        type="text"
+        placeholder="Initial password — only if they have no office login"
+        className="bg-[#0E1C2A] border border-line rounded-lg px-3 py-2 text-sm text-ink font-mono focus:border-cyan focus:outline-none"
+      />
       <p className="text-ink-mute text-xs">
         Gusto usually stores personal emails — enter the @jeffspoolspa.com login they use for
-        this app if it differs.
+        this app if it differs. If they have no office login at all, set an initial password
+        and a synthetic account is created for them instead.
       </p>
       {state.error && <p className="text-coral text-xs">{state.error}</p>}
       {state.ok && <p className="text-grass text-xs">{state.ok}</p>}
