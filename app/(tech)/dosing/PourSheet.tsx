@@ -8,6 +8,7 @@ import {
   ArrowUp,
   Check,
   ChevronRight,
+  Info,
   PackageX,
   RotateCcw,
   X,
@@ -69,7 +70,11 @@ const LENS_METRICS: Record<Lens, { left: MetricRow[]; right: MetricRow[] }> = {
       { key: "calciumHardness", label: "Calcium", digits: 0 },
     ],
     right: [
-      { key: "totalAlkalinity", label: "Alk", digits: 0 },
+      // info: the LSI uses CARBONATE alkalinity — total alk corrected for
+      // the part CYA contributes. CYA sits right below so the pair reads
+      // together; the ⓘ explains the correction.
+      { key: "totalAlkalinity", label: "Alk", digits: 0, info: true },
+      { key: "cyanuricAcid", label: "CYA", digits: 0 },
       { key: "waterTempF", label: "Temp °F", digits: 0 },
     ],
   },
@@ -87,6 +92,8 @@ interface MetricRow {
   key: string
   label: string
   digits: number
+  /** Show a tappable ⓘ next to the label (opens an explainer modal). */
+  info?: boolean
 }
 
 function fmt(v: number | null | undefined, digits: number) {
@@ -103,12 +110,14 @@ function Metric({
   actual,
   showArrows,
   align,
+  onInfo,
 }: {
   row: MetricRow
   sample: Sample
   actual: Sample
   showArrows: boolean
   align: "left" | "right"
+  onInfo?: () => void
 }) {
   const isAssumed = actual.assumed?.includes(row.key) ?? false
   const measuredValue = sampleValue(actual, row.key)
@@ -143,11 +152,22 @@ function Metric({
       </div>
       <div
         className={cn(
-          "text-[10px] uppercase tracking-widest mt-1",
+          "flex items-center gap-1 text-[10px] uppercase tracking-widest mt-1",
+          align === "right" ? "justify-end" : "justify-start",
           isAssumed ? "text-orange-400/60" : "text-ink-mute",
         )}
       >
         {row.label}
+        {row.info && onInfo && (
+          <button
+            type="button"
+            onClick={onInfo}
+            aria-label={`About ${row.label}`}
+            className="text-cyan active:opacity-70 -m-2 p-2"
+          >
+            <Info className="w-3 h-3" strokeWidth={2.2} />
+          </button>
+        )}
       </div>
     </div>
   )
@@ -419,7 +439,7 @@ export function PourSheet({
   const minFc = sample.minimumFreeChlorine ?? null
   const fc = sample.freeChlorine ?? null
 
-  const [infoModal, setInfoModal] = useState<"warnings" | "retest" | null>(null)
+  const [infoModal, setInfoModal] = useState<"warnings" | "retest" | "alkalinity" | null>(null)
 
   // Show the assumed-legend only when the current lens displays an assumed value.
   const anyAssumed = [...metrics.left, ...metrics.right].some((row) =>
@@ -504,7 +524,7 @@ export function PourSheet({
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-4 py-5">
           <div className="justify-self-end space-y-4">
             {metrics.left.map((row) => (
-              <Metric key={row.key} row={row} sample={sample} actual={samples.actual} showArrows={showArrows} align="right" />
+              <Metric key={row.key} row={row} sample={sample} actual={samples.actual} showArrows={showArrows} align="right" onInfo={() => setInfoModal("alkalinity")} />
             ))}
           </div>
           {lens === "balance" ? (
@@ -514,7 +534,7 @@ export function PourSheet({
           )}
           <div className="justify-self-start space-y-4">
             {metrics.right.map((row) => (
-              <Metric key={row.key} row={row} sample={sample} actual={samples.actual} showArrows={showArrows} align="left" />
+              <Metric key={row.key} row={row} sample={sample} actual={samples.actual} showArrows={showArrows} align="left" onInfo={() => setInfoModal("alkalinity")} />
             ))}
           </div>
         </div>
@@ -580,6 +600,26 @@ export function PourSheet({
                 </div>
               )
             })}
+          </div>
+        </InfoModal>
+      )}
+
+      {infoModal === "alkalinity" && (
+        <InfoModal title="Alkalinity & CYA" onClose={() => setInfoModal(null)}>
+          <div className="space-y-2.5 text-sm text-ink-dim leading-relaxed">
+            <p>
+              The LSI is computed from <span className="text-ink">carbonate</span> alkalinity,
+              not the total your test kit reads.
+            </p>
+            <p>
+              Part of measured alkalinity is <span className="text-ink">cyanurate</span> — CYA
+              in its dissolved form. The engine subtracts that CYA contribution (it grows with
+              CYA and shifts with pH) before balancing, which is why CYA sits here on the
+              Balance card.
+            </p>
+            <p className="text-ink-mute text-xs">
+              Values shown are as measured; the correction happens inside the dosing engine.
+            </p>
           </div>
         </InfoModal>
       )}
