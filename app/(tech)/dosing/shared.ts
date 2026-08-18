@@ -54,6 +54,8 @@ export interface Sample {
   totalChlorine?: number | null
   ph?: number | null
   totalAlkalinity?: number | null
+  /** Total alkalinity minus the cyanurate (CYA) share — what the LSI uses. */
+  carbonateAlkalinity?: number | null
   calciumHardness?: number | null
   cyanuricAcid?: number | null
   salt?: number | null
