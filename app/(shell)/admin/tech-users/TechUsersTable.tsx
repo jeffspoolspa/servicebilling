@@ -6,21 +6,26 @@ import {
   createTechUser,
   resetTechPassword,
   deactivateTechUser,
+  grantOfficeMobileAccess,
+  removeOfficeMobileAccess,
   type ActionState,
 } from "./actions"
 
 interface Row {
   id: string
   display_name: string
+  email?: string | null
   tech_username: string | null
   has_login: boolean
 }
 
 const empty: ActionState = {}
 
-export function TechUsersTable({ rows }: { rows: Row[] }) {
+export function TechUsersTable({ rows, officeRows = [] }: { rows: Row[]; officeRows?: Row[] }) {
   const withLogin = rows.filter((r) => r.has_login)
   const withoutLogin = rows.filter((r) => !r.has_login)
+  const officeWith = officeRows.filter((r) => r.tech_username)
+  const officeWithout = officeRows.filter((r) => !r.tech_username)
 
   return (
     <div className="flex flex-col gap-6">
@@ -49,7 +54,103 @@ export function TechUsersTable({ rows }: { rows: Row[] }) {
           ))}
         </div>
       </section>
+
+      <section>
+        <h2 className="font-display text-lg mb-1">Office staff — mobile access</h2>
+        <p className="text-ink-mute text-sm mb-3">
+          Rides their office login: they sign in to the field app with the username below and
+          their usual office password. No separate account.
+        </p>
+        <div className="flex flex-col gap-2">
+          {officeWith.map((r) => (
+            <OfficeRow key={r.id} row={r} />
+          ))}
+          {officeWithout.map((r) => (
+            <OfficeRow key={r.id} row={r} />
+          ))}
+          {officeRows.length === 0 && (
+            <div className="text-ink-mute text-sm">No office employees with an email on file.</div>
+          )}
+        </div>
+      </section>
     </div>
+  )
+}
+
+function OfficeRow({ row }: { row: Row }) {
+  const [mode, setMode] = useState<"idle" | "grant" | "remove">("idle")
+  return (
+    <div className="border border-line-soft rounded-lg p-3 bg-bg-elev/40 flex flex-col gap-2">
+      <div className="flex items-center gap-3">
+        <div className="flex-1">
+          <div className="text-ink">{row.display_name}</div>
+          <div className="text-ink-mute text-xs font-mono">
+            {row.tech_username ?? row.email}
+          </div>
+        </div>
+        {mode === "idle" &&
+          (row.tech_username ? (
+            <Button size="sm" onClick={() => setMode("remove")}>
+              Remove mobile access
+            </Button>
+          ) : (
+            <Button size="sm" variant="primary" onClick={() => setMode("grant")}>
+              Grant mobile access
+            </Button>
+          ))}
+      </div>
+      {mode === "grant" && <GrantForm employeeId={row.id} onDone={() => setMode("idle")} />}
+      {mode === "remove" && <RemoveForm employeeId={row.id} onDone={() => setMode("idle")} />}
+    </div>
+  )
+}
+
+function GrantForm({ employeeId, onDone }: { employeeId: string; onDone: () => void }) {
+  const [state, action, pending] = useActionState(grantOfficeMobileAccess, empty)
+  return (
+    <form action={(fd) => action(fd)} className="flex flex-col gap-2">
+      <input type="hidden" name="employee_id" value={employeeId} />
+      <input
+        name="username"
+        required
+        placeholder="Username (e.g. jdoe)"
+        autoCapitalize="none"
+        spellCheck={false}
+        className="bg-[#0E1C2A] border border-line rounded-lg px-3 py-2 text-sm text-ink focus:border-cyan focus:outline-none"
+      />
+      {state.error && <p className="text-coral text-xs">{state.error}</p>}
+      {state.ok && <p className="text-grass text-xs">{state.ok}</p>}
+      <div className="flex gap-2">
+        <Button type="submit" variant="primary" size="sm" disabled={pending}>
+          {pending ? "Granting…" : "Grant access"}
+        </Button>
+        <Button type="button" size="sm" onClick={onDone}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function RemoveForm({ employeeId, onDone }: { employeeId: string; onDone: () => void }) {
+  const [state, action, pending] = useActionState(removeOfficeMobileAccess, empty)
+  return (
+    <form action={(fd) => action(fd)} className="flex flex-col gap-2">
+      <input type="hidden" name="employee_id" value={employeeId} />
+      <p className="text-ink-dim text-xs">
+        Removes the field-app username. Their office login is untouched.
+      </p>
+      {state.error && <p className="text-coral text-xs">{state.error}</p>}
+      {state.ok && <p className="text-grass text-xs">{state.ok}</p>}
+      <div className="flex gap-2">
+        <Button type="submit" variant="primary" size="sm" disabled={pending}>
+          {pending ? "Removing…" : "Confirm remove"}
+        </Button>
+        <Button type="button" size="sm" onClick={onDone}>
+          Cancel
+        </Button>
+      </div>
+    </form>
   )
 }
 

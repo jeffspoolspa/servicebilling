@@ -2,13 +2,13 @@ import { redirect } from "next/navigation"
 import { Paperclip } from "lucide-react"
 import { getCurrentEmployee } from "@/lib/auth/require-role"
 import { listMyFollowUps } from "@/lib/entities/follow-up"
-import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
+import { canUseTechApp } from "@/lib/auth/tech-app"
 import { cn } from "@/lib/utils/cn"
 
 export default async function FollowUpHistoryPage() {
   const employee = await getCurrentEmployee()
   if (!employee) redirect("/tech-login")
-  if (employee.department_id !== MAINTENANCE_DEPARTMENT_ID) redirect("/unauthorized")
+  if (!(await canUseTechApp(employee))) redirect("/unauthorized")
 
   const rows = await listMyFollowUps()
 

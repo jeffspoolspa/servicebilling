@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { getCurrentEmployee } from "@/lib/auth/require-role"
-import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
+import { canUseTechApp } from "@/lib/auth/tech-app"
 
 // Voice-to-text for the field Follow-Up description. The tech records raw audio
 // (browser MediaRecorder); we transcribe it here with a domain prompt and then
@@ -20,7 +20,7 @@ const VOCAB =
 
 export async function POST(req: NextRequest) {
   const employee = await getCurrentEmployee()
-  if (!employee || employee.department_id !== MAINTENANCE_DEPARTMENT_ID) {
+  if (!employee || !(await canUseTechApp(employee))) {
     return NextResponse.json({ error: "Not authorized." }, { status: 403 })
   }
 

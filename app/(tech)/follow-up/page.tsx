@@ -1,13 +1,13 @@
 import { redirect } from "next/navigation"
 import { getCurrentEmployee } from "@/lib/auth/require-role"
 import { listActiveCustomers } from "@/lib/entities/follow-up"
-import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
+import { canUseTechApp } from "@/lib/auth/tech-app"
 import { FollowUpForm } from "./FollowUpForm"
 
 export default async function FollowUpPage() {
   const employee = await getCurrentEmployee()
   if (!employee) redirect("/tech-login")
-  if (employee.department_id !== MAINTENANCE_DEPARTMENT_ID) redirect("/unauthorized")
+  if (!(await canUseTechApp(employee))) redirect("/unauthorized")
 
   const customers = await listActiveCustomers()
   const name =

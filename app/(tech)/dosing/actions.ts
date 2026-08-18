@@ -2,7 +2,7 @@
 
 import { z } from "zod"
 import { getCurrentEmployee } from "@/lib/auth/require-role"
-import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
+import { canUseTechApp } from "@/lib/auth/tech-app"
 import type { DosingResponse } from "./shared"
 
 // Accept the env URL with or without a scheme ("host.app" or "https://host.app").
@@ -37,8 +37,8 @@ export type DosingState =
 
 export async function getRecommendation(input: unknown): Promise<DosingState> {
   const employee = await getCurrentEmployee()
-  if (!employee || employee.department_id !== MAINTENANCE_DEPARTMENT_ID) {
-    return { ok: false, error: "Not signed in as a maintenance tech." }
+  if (!employee || !(await canUseTechApp(employee))) {
+    return { ok: false, error: "Not signed in to the field app." }
   }
 
   const parsed = schema.safeParse(input)

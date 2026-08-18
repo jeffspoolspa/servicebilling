@@ -3,7 +3,7 @@
 import { z } from "zod"
 import { revalidatePath } from "next/cache"
 import { getCurrentEmployee } from "@/lib/auth/require-role"
-import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
+import { canUseTechApp } from "@/lib/auth/tech-app"
 import { updateSignOutQuantity, deleteSignOut } from "@/lib/entities/inventory-signout"
 
 export type TodayActionState = { ok?: true; error?: string }
@@ -18,7 +18,7 @@ export async function updateTodaySignOut(
   formData: FormData,
 ): Promise<TodayActionState> {
   const emp = await getCurrentEmployee()
-  if (!emp || emp.department_id !== MAINTENANCE_DEPARTMENT_ID) {
+  if (!emp || !(await canUseTechApp(emp))) {
     return { error: "Not authorized." }
   }
 
@@ -45,7 +45,7 @@ export async function deleteTodaySignOut(
   formData: FormData,
 ): Promise<TodayActionState> {
   const emp = await getCurrentEmployee()
-  if (!emp || emp.department_id !== MAINTENANCE_DEPARTMENT_ID) {
+  if (!emp || !(await canUseTechApp(emp))) {
     return { error: "Not authorized." }
   }
 
