@@ -167,6 +167,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
         </button>
         {volumeOpen && (
           <ReadingWheelSheet
+            key="volume"
             field={VOLUME_WHEEL}
             value={volume ?? undefined}
             onDone={(v) => setVolume(v)}
@@ -241,6 +242,9 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
         </div>
         {wheelFor && (
           <ReadingWheelSheet
+            // key forces a fresh mount per field — the sheet's closing/scroll
+            // state must never carry across wheelFor changes.
+            key={wheelFor}
             field={READING_FIELDS.find((f) => f.key === wheelFor)!}
             value={readings[wheelFor]}
             onDone={(v) => setReadings((r) => ({ ...r, [wheelFor]: v }))}
