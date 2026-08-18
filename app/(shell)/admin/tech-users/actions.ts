@@ -112,9 +112,7 @@ export async function resetTechPassword(
     .eq("id", parsed.data.employee_id)
     .single()
   if (!emp?.auth_user_id) return { error: "Employee has no login to reset." }
-  if (!(await isSyntheticAccount(emp.auth_user_id))) {
-    return { error: "This is an office login — the person manages that password themselves." }
-  }
+  const synthetic = await isSyntheticAccount(emp.auth_user_id)
 
   const admin = createSupabaseAdmin()
   const { error } = await admin.auth.admin.updateUserById(emp.auth_user_id, {
@@ -123,7 +121,11 @@ export async function resetTechPassword(
   if (error) return { error: error.message }
 
   revalidatePath("/admin/tech-users")
-  return { ok: "Password reset." }
+  return {
+    ok: synthetic
+      ? "Password reset."
+      : "Password reset — this is their office login, so their desktop password changed too.",
+  }
 }
 
 const deactivateSchema = z.object({ employee_id: z.string().uuid() })

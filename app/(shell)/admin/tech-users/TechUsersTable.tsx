@@ -78,7 +78,7 @@ export function TechUsersTable({ rows, officeRows = [] }: { rows: Row[]; officeR
 }
 
 function OfficeRow({ row }: { row: Row }) {
-  const [mode, setMode] = useState<"idle" | "grant" | "remove">("idle")
+  const [mode, setMode] = useState<"idle" | "grant" | "remove" | "reset">("idle")
   return (
     <div className="border border-line-soft rounded-lg p-3 bg-bg-elev/40 flex flex-col gap-2">
       <div className="flex items-center gap-3">
@@ -90,9 +90,14 @@ function OfficeRow({ row }: { row: Row }) {
         </div>
         {mode === "idle" &&
           (row.tech_username ? (
-            <Button size="sm" onClick={() => setMode("remove")}>
-              Remove mobile access
-            </Button>
+            <>
+              <Button size="sm" onClick={() => setMode("reset")}>
+                Reset password
+              </Button>
+              <Button size="sm" onClick={() => setMode("remove")}>
+                Remove mobile access
+              </Button>
+            </>
           ) : (
             <Button size="sm" variant="primary" onClick={() => setMode("grant")}>
               Grant mobile access
@@ -103,6 +108,15 @@ function OfficeRow({ row }: { row: Row }) {
         <GrantForm employeeId={row.id} gustoEmail={row.email ?? null} onDone={() => setMode("idle")} />
       )}
       {mode === "remove" && <RemoveForm employeeId={row.id} onDone={() => setMode("idle")} />}
+      {mode === "reset" && (
+        <>
+          <p className="text-amber-300 text-xs">
+            If this person's mobile access rides their office login, this changes their desktop
+            password too.
+          </p>
+          <ResetForm employeeId={row.id} onDone={() => setMode("idle")} />
+        </>
+      )}
     </div>
   )
 }
