@@ -170,6 +170,9 @@ const grantSchema = z.object({
   // Gusto usually holds PERSONAL emails on employees rows; the office login
   // is a @jeffspoolspa.com account. Let the admin name it explicitly.
   office_email: z.string().email().optional().or(z.literal("")),
+  // Only used when the person has NO office login: their FIRST identity is a
+  // synthetic tech account, which needs an initial password.
+  password: z.string().min(8).optional().or(z.literal("")),
 })
 
 /**
@@ -188,9 +191,10 @@ export async function grantOfficeMobileAccess(
     employee_id: formData.get("employee_id"),
     username: String(formData.get("username") ?? "").trim().toLowerCase(),
     office_email: String(formData.get("office_email") ?? "").trim().toLowerCase(),
+    password: String(formData.get("password") ?? ""),
   })
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." }
-  const { employee_id, username, office_email } = parsed.data
+  const { employee_id, username, office_email, password } = parsed.data
 
   const server = await createSupabaseServer()
   const { data: emp } = await server
@@ -213,32 +217,51 @@ export async function grantOfficeMobileAccess(
     .maybeSingle()
   if (taken) return { error: "That username is already taken." }
 
-  // Find their office auth account by email.
+  // Find their office auth account by email; someone WITH an office login is
+  // always linked to it — one identity, never a parallel account.
   const admin = createSupabaseAdmin()
-  const wanted = String(matchEmail).toLowerCase()
+  const wanted = matchEmail ? String(matchEmail).toLowerCase() : null
   const { data: page, error: listErr } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
   if (listErr) return { error: listErr.message }
-  const authUser = page.users.find((u) => u.email?.toLowerCase() === wanted)
-  if (!authUser) {
-    return { error: `No office login found for ${wanted} — they need an office account first.` }
+  const authUser = wanted ? page.users.find((u) => u.email?.toLowerCase() === wanted) : undefined
+
+  if (authUser) {
+    const { error: linkErr } = await server
+      .from("employees")
+      .update({ auth_user_id: authUser.id, tech_username: username })
+      .eq("id", employee_id)
+    if (linkErr) return { error: linkErr.message }
+
+    revalidatePath("/admin/tech-users")
+    return { ok: `Mobile access granted — they sign in as ${username} with their office password.` }
   }
 
-  const { count } = await server
-    .from("app_roles")
-    .select("auth_user_id", { count: "exact", head: true })
-    .eq("auth_user_id", authUser.id)
-  if (!count) {
-    return { error: `${wanted} has no app roles — grant office access first.` }
+  // No office login anywhere: mint their FIRST identity, a synthetic tech
+  // account (same as maintenance techs get). Needs an initial password.
+  if (!password) {
+    return {
+      error: `No office login found for ${wanted ?? "this employee"} — set an initial password to create one.`,
+    }
   }
-
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    email: usernameToSyntheticEmail(username),
+    password,
+    email_confirm: true,
+  })
+  if (createErr || !created.user) {
+    return { error: createErr?.message ?? "Could not create auth user." }
+  }
   const { error: linkErr } = await server
     .from("employees")
-    .update({ auth_user_id: authUser.id, tech_username: username })
+    .update({ auth_user_id: created.user.id, tech_username: username })
     .eq("id", employee_id)
-  if (linkErr) return { error: linkErr.message }
+  if (linkErr) {
+    await admin.auth.admin.deleteUser(created.user.id)
+    return { error: linkErr.message }
+  }
 
   revalidatePath("/admin/tech-users")
-  return { ok: `Mobile access granted — they sign in as ${username} with their office password.` }
+  return { ok: `Login created — they sign in as ${username} with the password you set.` }
 }
 
 const removeSchema = z.object({ employee_id: z.string().uuid() })
