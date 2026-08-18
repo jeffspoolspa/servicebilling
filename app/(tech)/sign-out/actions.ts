@@ -4,7 +4,7 @@ import { z } from "zod"
 import { revalidatePath } from "next/cache"
 import { getCurrentEmployee } from "@/lib/auth/require-role"
 import { createSignOuts, getSignOutConfig, SIGNOUT_ITEM_IDS } from "@/lib/entities/inventory-signout"
-import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
+import { canUseTechApp } from "@/lib/auth/tech-app"
 
 const schema = z.object({
   rows: z
@@ -25,8 +25,8 @@ export async function submitSignOut(
 ): Promise<SubmitState> {
   const employee = await getCurrentEmployee()
   if (!employee) return { error: "Not signed in." }
-  if (employee.department_id !== MAINTENANCE_DEPARTMENT_ID) {
-    return { error: "Only maintenance staff can sign out inventory." }
+  if (!(await canUseTechApp(employee))) {
+    return { error: "Only field-app users can sign out inventory." }
   }
 
   const raw = formData.get("payload")

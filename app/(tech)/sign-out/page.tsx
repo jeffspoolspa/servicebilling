@@ -4,7 +4,7 @@ import {
   listSignOutItems,
   listTodaysSignOuts,
 } from "@/lib/entities/inventory-signout"
-import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
+import { canUseTechApp } from "@/lib/auth/tech-app"
 import { isFollowUpOnly } from "@/lib/auth/tech-scope"
 import { SignOutForm } from "./SignOutForm"
 import { TodayList } from "./TodayList"
@@ -17,7 +17,7 @@ interface Props {
 export default async function SignOutPage({ searchParams }: Props) {
   const employee = await getCurrentEmployee()
   if (!employee) redirect("/tech-login")
-  if (employee.department_id !== MAINTENANCE_DEPARTMENT_ID) redirect("/unauthorized")
+  if (!(await canUseTechApp(employee))) redirect("/unauthorized")
   if (await isFollowUpOnly(employee)) redirect("/follow-up")
 
   const [items, todaysRows, { prefill }] = await Promise.all([

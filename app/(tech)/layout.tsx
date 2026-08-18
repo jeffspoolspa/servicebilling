@@ -3,13 +3,12 @@ import { BottomNav } from "./BottomNav"
 import { TechMenu } from "./TechMenu"
 import { BottomBarProvider } from "./bottom-bar"
 import { getCurrentEmployee } from "@/lib/auth/require-role"
-import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
+import { canUseTechApp } from "@/lib/auth/tech-app"
 import { isFollowUpOnly } from "@/lib/auth/tech-scope"
 
 export default async function TechLayout({ children }: { children: React.ReactNode }) {
   const employee = await getCurrentEmployee()
-  const isAuthedMaintenance =
-    !!employee && employee.department_id === MAINTENANCE_DEPARTMENT_ID
+  const isAuthedMaintenance = await canUseTechApp(employee)
   const followUpOnly = isAuthedMaintenance && (await isFollowUpOnly(employee))
 
   return (

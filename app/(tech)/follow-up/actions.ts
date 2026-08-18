@@ -4,7 +4,7 @@ import { z } from "zod"
 import { revalidatePath } from "next/cache"
 import { getCurrentEmployee } from "@/lib/auth/require-role"
 import { createFollowUp, FOLLOW_UP_ISSUES } from "@/lib/entities/follow-up"
-import { MAINTENANCE_DEPARTMENT_ID } from "@/lib/auth/tech"
+import { canUseTechApp } from "@/lib/auth/tech-app"
 
 const schema = z.object({
   customer_id: z.number().int().positive(),
@@ -29,8 +29,8 @@ export async function submitFollowUp(
 ): Promise<SubmitState> {
   const employee = await getCurrentEmployee()
   if (!employee) return { error: "Not signed in." }
-  if (employee.department_id !== MAINTENANCE_DEPARTMENT_ID) {
-    return { error: "Only maintenance staff can submit follow-ups." }
+  if (!(await canUseTechApp(employee))) {
+    return { error: "Only field-app users can submit follow-ups." }
   }
 
   const raw = formData.get("payload")
