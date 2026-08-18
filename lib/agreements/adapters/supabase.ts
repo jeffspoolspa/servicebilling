@@ -20,8 +20,12 @@ const agr = createClient(URL_, KEY, { db: { schema: "agreements" } })
 const rt = createClient(URL_, KEY, { db: { schema: "routing" } })
 const maint = createClient(URL_, KEY, { db: { schema: "maintenance" } })
 
-const WM_API = `${process.env.WINDMILL_BASE_URL!.replace(/\/$/, "")}/w/${process.env.WINDMILL_WORKSPACE}`
-const WM_AUTH = { Authorization: `Bearer ${process.env.WINDMILL_TOKEN}` }
+// Resolved lazily — WINDMILL_* env vars are Production-scoped, and reading
+// them at module scope kills any build (Preview) that imports this file's
+// dependents while collecting page data.
+const wmApi = () =>
+  `${process.env.WINDMILL_BASE_URL!.replace(/\/$/, "")}/w/${process.env.WINDMILL_WORKSPACE}`
+const wmAuth = () => ({ Authorization: `Bearer ${process.env.WINDMILL_TOKEN}` })
 
 
 export function repoAdapter(): AgreementRepository {
@@ -152,14 +156,14 @@ export const intakeAdapter: IntakeStore = {
 
 export const formsAdapter: TaskFormSource = {
   async fetchForms(tasks) {
-    const r = await fetch(`${WM_API}/jobs/run/p/f/ION/api/get_task_forms_batch`, {
-      method: "POST", headers: { ...WM_AUTH, "Content-Type": "application/json" },
+    const r = await fetch(`${wmApi()}/jobs/run/p/f/ION/api/get_task_forms_batch`, {
+      method: "POST", headers: { ...wmAuth(), "Content-Type": "application/json" },
       body: JSON.stringify({ tasks }),
     })
     const jobId = (await r.text()).replace(/"/g, "")
     for (let i = 0; i < 120; i++) {
       await new Promise((res) => setTimeout(res, 5000))
-      const jr = await fetch(`${WM_API}/jobs_u/completed/get_result_maybe/${jobId}`, { headers: WM_AUTH })
+      const jr = await fetch(`${wmApi()}/jobs_u/completed/get_result_maybe/${jobId}`, { headers: wmAuth() })
       const d = await jr.json()
       if (d.completed) {
         if (!d.success) throw new Error(`batch job failed: ${JSON.stringify(d.result).slice(0, 300)}`)
