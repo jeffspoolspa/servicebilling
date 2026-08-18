@@ -167,6 +167,9 @@ export async function deactivateTechUser(
 const grantSchema = z.object({
   employee_id: z.string().uuid(),
   username: z.string().refine(isTechUsername, "Invalid username format."),
+  // Gusto usually holds PERSONAL emails on employees rows; the office login
+  // is a @jeffspoolspa.com account. Let the admin name it explicitly.
+  office_email: z.string().email().optional().or(z.literal("")),
 })
 
 /**
@@ -184,9 +187,10 @@ export async function grantOfficeMobileAccess(
   const parsed = grantSchema.safeParse({
     employee_id: formData.get("employee_id"),
     username: String(formData.get("username") ?? "").trim().toLowerCase(),
+    office_email: String(formData.get("office_email") ?? "").trim().toLowerCase(),
   })
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." }
-  const { employee_id, username } = parsed.data
+  const { employee_id, username, office_email } = parsed.data
 
   const server = await createSupabaseServer()
   const { data: emp } = await server
@@ -199,7 +203,8 @@ export async function grantOfficeMobileAccess(
     return { error: "Maintenance techs get logins via 'Add login' above." }
   }
   if (emp.tech_username) return { error: "This employee already has mobile access." }
-  if (!emp.email) return { error: "Employee has no email on file to match an office login." }
+  const matchEmail = office_email || emp.email
+  if (!matchEmail) return { error: "Enter the person's office login email." }
 
   const { data: taken } = await server
     .from("employees")
@@ -210,7 +215,7 @@ export async function grantOfficeMobileAccess(
 
   // Find their office auth account by email.
   const admin = createSupabaseAdmin()
-  const wanted = String(emp.email).toLowerCase()
+  const wanted = String(matchEmail).toLowerCase()
   const { data: page, error: listErr } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
   if (listErr) return { error: listErr.message }
   const authUser = page.users.find((u) => u.email?.toLowerCase() === wanted)
