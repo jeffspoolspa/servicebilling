@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Package, ClipboardList } from "lucide-react"
+import { Package, ClipboardList, FlaskConical } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { useBottomBar } from "./bottom-bar"
 
@@ -21,16 +21,23 @@ const modules = [
     icon: ClipboardList,
     match: ["/follow-up"],
   },
+  {
+    href: "/dosing",
+    label: "Dosing",
+    icon: FlaskConical,
+    match: ["/dosing"],
+  },
 ] as const
 
 export function BottomNav({ hideInventory = false }: { hideInventory?: boolean }) {
   const pathname = usePathname()
   const { action } = useBottomBar()
 
-  // Follow-up-only techs (RH/Savannah) get no Inventory module. With a single
-  // module the switcher is noise — render only the morphed action button.
+  // Follow-up-only techs (RH/Savannah) get no Inventory module — but Dosing
+  // is for every tech, every branch. With a single module the switcher is
+  // noise — render only the morphed action button.
   const visible = hideInventory
-    ? modules.filter((m) => m.href === "/follow-up")
+    ? modules.filter((m) => m.href !== "/truck-check")
     : modules
   if (!action && visible.length < 2) return null
 

@@ -480,8 +480,10 @@ Item catalog (Zoho), inventory snapshots, sign-outs, transfers.
 
 Tech-facing mobile UIs for in-field use.
 
-**UI routes** (`app/(tech)/`): a bottom nav switches the two **modules**
-(Inventory, Follow-Up); top tabs switch **sub-pages** within the active module.
+**UI routes** (`app/(tech)/`): a bottom nav switches the three **modules**
+(Inventory, Follow-Up, Dosing); top tabs switch **sub-pages** within the active
+module. Follow-up-only branches (RH/Savannah, `lib/auth/tech-scope.ts`) hide
+Inventory but keep Follow-Up and Dosing.
 - `/tech-login` — tech login (separate auth from internal staff)
 - Inventory module: `/truck-check` (truck inspection), `/sign-out` (equipment sign-out)
 - Follow-Up module: `/follow-up` (Submit — field follow-up form; entity:
@@ -490,6 +492,15 @@ Tech-facing mobile UIs for in-field use.
   `f/maintenance/sync_follow_ups_to_airtable` (row-as-outbox, ADR 008). On the
   Submit page the bottom nav morphs into the Submit button once a customer is
   chosen.
+- Dosing module: `/dosing` — water-sample wheel-picker form (FC/pH/CYA/Alk
+  required) that proxies via server action (`DOTNET_API_SECRET` +
+  `DOTNET_API_URL`) to the .NET Dosing API
+  (`POST /maintenance/dosing/recommendations`) and renders the pour sheet:
+  WHOOP-style Balance/Sanitation dials over the derived predicted sample
+  (actual + chosen dose options' effects, recalculated live on alternative
+  swap), coded warnings + retest modals, per-dose detail sheets (instruction,
+  effects, cautions). Absent reading = not measured, never 0. The only API
+  side effect is the append-only recommendation log row.
 
 **Database tables**:
 - `maintenance.truck_check_submissions` — currently empty; truck-check feature may not be in active use
