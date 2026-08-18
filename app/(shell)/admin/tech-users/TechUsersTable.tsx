@@ -99,13 +99,23 @@ function OfficeRow({ row }: { row: Row }) {
             </Button>
           ))}
       </div>
-      {mode === "grant" && <GrantForm employeeId={row.id} onDone={() => setMode("idle")} />}
+      {mode === "grant" && (
+        <GrantForm employeeId={row.id} gustoEmail={row.email ?? null} onDone={() => setMode("idle")} />
+      )}
       {mode === "remove" && <RemoveForm employeeId={row.id} onDone={() => setMode("idle")} />}
     </div>
   )
 }
 
-function GrantForm({ employeeId, onDone }: { employeeId: string; onDone: () => void }) {
+function GrantForm({
+  employeeId,
+  gustoEmail,
+  onDone,
+}: {
+  employeeId: string
+  gustoEmail: string | null
+  onDone: () => void
+}) {
   const [state, action, pending] = useActionState(grantOfficeMobileAccess, empty)
   return (
     <form action={(fd) => action(fd)} className="flex flex-col gap-2">
@@ -118,6 +128,18 @@ function GrantForm({ employeeId, onDone }: { employeeId: string; onDone: () => v
         spellCheck={false}
         className="bg-[#0E1C2A] border border-line rounded-lg px-3 py-2 text-sm text-ink focus:border-cyan focus:outline-none"
       />
+      <input
+        name="office_email"
+        type="email"
+        placeholder={`Office login email${gustoEmail ? ` (blank = ${gustoEmail})` : ""}`}
+        autoCapitalize="none"
+        spellCheck={false}
+        className="bg-[#0E1C2A] border border-line rounded-lg px-3 py-2 text-sm text-ink focus:border-cyan focus:outline-none"
+      />
+      <p className="text-ink-mute text-xs">
+        Gusto usually stores personal emails — enter the @jeffspoolspa.com login they use for
+        this app if it differs.
+      </p>
       {state.error && <p className="text-coral text-xs">{state.error}</p>}
       {state.ok && <p className="text-grass text-xs">{state.ok}</p>}
       <div className="flex gap-2">
