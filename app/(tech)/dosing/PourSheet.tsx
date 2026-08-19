@@ -52,6 +52,10 @@ const WARNING_TITLES: Record<string, string> = {
   "shock-fc-below-minimum": "Shock needed — FC below minimum",
 }
 
+// The dose slider is parked while we tune the touch feel — flip on to play
+// with it; the selection plumbing underneath stays live either way.
+const SHOW_DOSE_SLIDER = false
+
 const CAUTION_LABELS: Record<string, string> = {
   "separate-pour": "Pour this alone — circulate before adding anything else.",
 }
@@ -455,7 +459,7 @@ export function PourSheet({
   const selectedEffects = (i: number): Record<string, number> => {
     const o = optionAt(i)
     const rows = o.sensitivity
-    const idx = sens[i]
+    const idx = SHOW_DOSE_SLIDER ? sens[i] : undefined
     if (rows && idx != null && rows[idx]) return rows[idx].effects ?? {}
     return o.effects ?? {}
   }
@@ -755,7 +759,7 @@ export function PourSheet({
               const next = options[((choice[i] ?? 0) + 1) % options.length]
               const rows = chosen.sensitivity
               const recRow = rows?.findIndex((r) => r.recommended) ?? -1
-              const sensIdx = sens[i]
+              const sensIdx = SHOW_DOSE_SLIDER ? sens[i] : undefined
               const offGrid = rows && sensIdx != null && sensIdx !== recRow
               // "6 fl oz (~1.5s pour · ~5% of the jug)" → chip + hint; an
               // adjusted slider stop labels from its own amount + unit.
@@ -885,7 +889,7 @@ export function PourSheet({
                 setChoice((c) => ({ ...c, [detailFor]: j }))
                 setSens((v) => ({ ...v, [detailFor]: undefined }))
               }}
-              sensIdx={sens[detailFor]}
+              sensIdx={SHOW_DOSE_SLIDER ? sens[detailFor] : undefined}
               onSens={(j) => setSens((v) => ({ ...v, [detailFor]: j }))}
               onClose={() => setDetailFor(null)}
             />
@@ -1016,7 +1020,7 @@ function DoseDetailSheet({
         <div className="px-5 pt-3 pb-1 space-y-4">
           <div className="text-2xl text-cyan font-display">{shownAmount}</div>
 
-          {rows.length > 1 && (
+          {SHOW_DOSE_SLIDER && rows.length > 1 && (
             <div className="space-y-1">
               <Slider
                 min={0}
