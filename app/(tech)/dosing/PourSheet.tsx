@@ -8,6 +8,8 @@ import {
   ArrowUp,
   Check,
   ChevronRight,
+  ClipboardCopy,
+  FileText,
   Info,
   PackageX,
   RotateCcw,
@@ -400,6 +402,10 @@ export function PourSheet({
   customerName,
   onNewSample,
   onEditSample,
+  algae,
+  onAlgaeChange,
+  recalcPending,
+  recalcError,
 }: {
   result: DosingResponse
   customerName?: string
@@ -407,8 +413,13 @@ export function PourSheet({
   onNewSample: () => void
   /** Back to the form with the submitted values still in place. */
   onEditSample: () => void
+  algae: boolean
+  /** Re-calls the API with the flag — the response re-anchors everything. */
+  onAlgaeChange: (next: boolean) => void
+  recalcPending: boolean
+  recalcError: string | null
 }) {
-  const { samples, doses, warnings, retest, unfilled } = result
+  const { samples, doses, warnings, retest, unfilled, visitNote } = result
   const [lens, setLens] = useState<Lens>("balance")
   // Predicted is the default view; the corner toggle flips back to the
   // measured sample. Target isn't relevant to the tech here.
@@ -416,20 +427,35 @@ export function PourSheet({
   const [detailFor, setDetailFor] = useState<number | null>(null)
   // Per-dose product choice: index into [primary, ...alternatives].
   const [choice, setChoice] = useState<Record<number, number>>({})
+  // Per-dose slider stop on the CHOSEN option's pour grid; unset = the
+  // recommended stop. Cleared whenever the product choice changes.
+  const [sens, setSens] = useState<Record<number, number | undefined>>({})
+
+  const optionAt = (i: number) => {
+    const d = doses[i]
+    return [d, ...(d.alternatives ?? [])][choice[i] ?? 0] ?? d
+  }
+  const selectedEffects = (i: number): Record<string, number> => {
+    const o = optionAt(i)
+    const rows = o.sensitivity
+    const idx = sens[i]
+    if (rows && idx != null && rows[idx]) return rows[idx].effects ?? {}
+    return o.effects ?? {}
+  }
 
   // Predicted is DERIVED: actual + the chosen option's effects per dose.
   // Swapping an alternative recalculates it immediately.
   const predicted: Sample = useMemo(() => {
     const base: Record<string, unknown> = { ...samples.actual }
-    for (const [i, d] of doses.entries()) {
-      const opt = [d, ...(d.alternatives ?? [])][choice[i] ?? 0] ?? d
-      for (const [k, delta] of Object.entries(opt.effects ?? {})) {
+    for (const i of doses.keys()) {
+      for (const [k, delta] of Object.entries(selectedEffects(i))) {
         const cur = base[k]
         base[k] = Number(((typeof cur === "number" ? cur : 0) + delta).toFixed(2))
       }
     }
     return base as Sample
-  }, [samples.actual, doses, choice])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [samples.actual, doses, choice, sens])
 
   const sample: Sample = mode === "predicted" ? predicted : samples.actual
   const showArrows = mode === "predicted"
@@ -439,7 +465,7 @@ export function PourSheet({
   const minFc = sample.minimumFreeChlorine ?? null
   const fc = sample.freeChlorine ?? null
 
-  const [infoModal, setInfoModal] = useState<"warnings" | "retest" | "alk" | "ph" | null>(null)
+  const [infoModal, setInfoModal] = useState<"warnings" | "retest" | "alk" | "ph" | "visit" | null>(null)
 
   // Show the assumed-legend only when the current lens displays an assumed value.
   const anyAssumed = [...metrics.left, ...metrics.right].some((row) =>
@@ -547,6 +573,24 @@ export function PourSheet({
         )}
       </section>
 
+      {/* ── Visit note bar — the customer-facing record, modal w/ copy ── */}
+      {visitNote && (
+        <button
+          type="button"
+          onClick={() => setInfoModal("visit")}
+          className="w-full flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-ink border border-line-soft bg-bg-elev active:scale-[0.98] transition-transform duration-150"
+        >
+          <FileText className="w-4 h-4 shrink-0 text-cyan" strokeWidth={1.8} />
+          Visit note
+        </button>
+      )}
+
+      {recalcError && (
+        <p role="alert" className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3.5 py-2.5">
+          {recalcError}
+        </p>
+      )}
+
       {/* ── Warning + retest bars, side by side; tap opens a small modal ── */}
       {(warnings.length > 0 || retest.length > 0) && (
         <div className="flex gap-2.5">
@@ -571,6 +615,12 @@ export function PourSheet({
             </button>
           )}
         </div>
+      )}
+
+      {infoModal === "visit" && visitNote && (
+        <InfoModal title="Visit note" onClose={() => setInfoModal(null)}>
+          <VisitNoteBody note={visitNote} />
+        </InfoModal>
       )}
 
       {infoModal === "warnings" && (
@@ -686,8 +736,17 @@ export function PourSheet({
               const options = [d, ...(d.alternatives ?? [])]
               const chosen = options[choice[i] ?? 0] ?? d
               const next = options[((choice[i] ?? 0) + 1) % options.length]
-              // "6 fl oz (~1.5s pour · ~5% of the jug)" → chip + hint
-              const [, main, hint] = chosen.displayAmount.match(/^([^(]+?)(?:\s*\((.+)\))?$/) ?? []
+              const rows = chosen.sensitivity
+              const recRow = rows?.findIndex((r) => r.recommended) ?? -1
+              const sensIdx = sens[i]
+              const offGrid = rows && sensIdx != null && sensIdx !== recRow
+              // "6 fl oz (~1.5s pour · ~5% of the jug)" → chip + hint; an
+              // adjusted slider stop labels from its own amount + unit.
+              const [, main, hint] = offGrid
+                ? [undefined, `${rows[sensIdx]?.amount} ${chosen.unit === "flOz" ? "fl oz" : chosen.unit}`, undefined]
+                : (chosen.displayAmount.match(/^([^(]+?)(?:\s*\((.+)\))?$/) ?? [])
+              // The algae toggle lives on the chlorine card.
+              const isChlorine = "freeChlorine" in (d.effects ?? {})
               return (
                 // WHOOP activity-row layout: dose chip | name | instructions.
                 // The whole row opens the detail sheet — nothing to select.
@@ -714,17 +773,51 @@ export function PourSheet({
                         onClick={(e) => {
                           e.stopPropagation()
                           setChoice((c) => ({ ...c, [i]: ((c[i] ?? 0) + 1) % options.length }))
+                          setSens((v) => ({ ...v, [i]: undefined }))
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.stopPropagation()
                             setChoice((c) => ({ ...c, [i]: ((c[i] ?? 0) + 1) % options.length }))
+                            setSens((v) => ({ ...v, [i]: undefined }))
                           }
                         }}
                         className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-cyan active:opacity-70"
                       >
                         <ArrowLeftRight className="w-3 h-3" strokeWidth={2} />
                         or {next.displayAmount.replace(/\s*\(.*\)$/, "")} {next.product}
+                      </span>
+                    )}
+                    {isChlorine && (
+                      <span
+                        role="checkbox"
+                        aria-checked={algae}
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!recalcPending) onAlgaeChange(!algae)
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.stopPropagation()
+                            if (!recalcPending) onAlgaeChange(!algae)
+                          }
+                        }}
+                        className={cn(
+                          "mt-1 flex items-center gap-1.5 text-[11px]",
+                          recalcPending ? "opacity-60" : "active:opacity-70",
+                          algae ? "text-cyan" : "text-ink-dim",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "w-4 h-4 rounded-[5px] border grid place-items-center transition-colors duration-150",
+                            algae ? "bg-cyan border-cyan text-[#061018]" : "border-line bg-black/20 text-transparent",
+                          )}
+                        >
+                          <Check className="w-3 h-3" strokeWidth={3} />
+                        </span>
+                        {recalcPending ? "Recalculating…" : "Algae present"}
                       </span>
                     )}
                   </span>
@@ -768,7 +861,12 @@ export function PourSheet({
               dose={options[chosenIdx] ?? d}
               options={options}
               chosenIdx={chosenIdx}
-              onPick={(j) => setChoice((c) => ({ ...c, [detailFor]: j }))}
+              onPick={(j) => {
+                setChoice((c) => ({ ...c, [detailFor]: j }))
+                setSens((v) => ({ ...v, [detailFor]: undefined }))
+              }}
+              sensIdx={sens[detailFor]}
+              onSens={(j) => setSens((v) => ({ ...v, [detailFor]: j }))}
               onClose={() => setDetailFor(null)}
             />
           )
@@ -833,15 +931,29 @@ function DoseDetailSheet({
   options,
   chosenIdx,
   onPick,
+  sensIdx,
+  onSens,
   onClose,
 }: {
   dose: DoseOption
   options: DoseOption[]
   chosenIdx: number
   onPick: (i: number) => void
+  /** Selected pour-grid stop (undefined = the recommended one). */
+  sensIdx: number | undefined
+  onSens: (i: number) => void
   onClose: () => void
 }) {
   const [closing, setClosing] = useState(false)
+  const rows = dose.sensitivity ?? []
+  const recRow = rows.findIndex((r) => r.recommended)
+  const activeIdx = sensIdx ?? (recRow >= 0 ? recRow : 0)
+  const onRec = rows.length === 0 || activeIdx === recRow
+  const row = rows[activeIdx]
+  const shownAmount = onRec
+    ? dose.displayAmount
+    : `${row?.amount} ${dose.unit === "flOz" ? "fl oz" : dose.unit}`
+  const shownEffects = onRec ? dose.effects : (row?.effects ?? dose.effects)
   const dismiss = () => {
     if (closing) return
     setClosing(true)
@@ -882,7 +994,34 @@ function DoseDetailSheet({
         </div>
 
         <div className="px-5 pt-3 pb-1 space-y-4">
-          <div className="text-2xl text-cyan font-display">{dose.displayAmount}</div>
+          <div className="text-2xl text-cyan font-display">{shownAmount}</div>
+
+          {rows.length > 1 && (
+            <div className="space-y-1">
+              <input
+                type="range"
+                min={0}
+                max={rows.length - 1}
+                step={1}
+                value={activeIdx}
+                onChange={(e) => onSens(Number(e.target.value))}
+                aria-label={`${dose.product} dose`}
+                className="w-full accent-[#38bdf8]"
+              />
+              <div className="flex justify-between text-[10px] text-ink-mute tabular-nums">
+                <span>
+                  {rows[0].amount} {rows[0].unit === "flOz" ? "fl oz" : rows[0].unit}
+                </span>
+                <span className={cn(onRec ? "text-cyan" : "text-ink-dim")}>
+                  {onRec ? "recommended" : "adjusted"}
+                </span>
+                <span>
+                  {rows[rows.length - 1].amount}{" "}
+                  {rows[rows.length - 1].unit === "flOz" ? "fl oz" : rows[rows.length - 1].unit}
+                </span>
+              </div>
+            </div>
+          )}
 
           {options.length > 1 && (
             <div className="space-y-1.5">
@@ -921,13 +1060,13 @@ function DoseDetailSheet({
             </div>
           )}
 
-          {dose.effects && Object.keys(dose.effects).length > 0 && (
+          {shownEffects && Object.keys(shownEffects).length > 0 && (
             <div className="space-y-2.5">
               <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
                 What this dose does
               </h3>
               {/* Reading effects: pH to a tenth, everything else whole ppm */}
-              {Object.entries(dose.effects)
+              {Object.entries(shownEffects ?? {})
                 .filter(([k]) => k !== "saturationIndex" && k !== "minimumFreeChlorine")
                 .map(([k, delta]) => {
                   const text =
@@ -945,32 +1084,32 @@ function DoseDetailSheet({
                   )
                 })}
               {/* Derived indicators get their own square tiles */}
-              {(dose.effects.saturationIndex != null || dose.effects.minimumFreeChlorine != null) && (
+              {(shownEffects?.saturationIndex != null || shownEffects?.minimumFreeChlorine != null) && (
                 <div className="grid grid-cols-2 gap-2.5 pt-1">
-                  {dose.effects.saturationIndex != null && (
+                  {shownEffects.saturationIndex != null && (
                     <div className="rounded-xl border border-line-soft bg-[#0E1C2A] py-4 flex flex-col items-center gap-1">
                       <span
                         className={cn(
                           "text-xl font-display tabular-nums",
-                          dose.effects.saturationIndex >= 0 ? "text-emerald-300" : "text-red-300",
+                          shownEffects.saturationIndex >= 0 ? "text-emerald-300" : "text-red-300",
                         )}
                       >
-                        {dose.effects.saturationIndex >= 0 ? "+" : ""}
-                        {dose.effects.saturationIndex.toFixed(2)}
+                        {shownEffects.saturationIndex >= 0 ? "+" : ""}
+                        {shownEffects.saturationIndex.toFixed(2)}
                       </span>
                       <span className="text-[10px] uppercase tracking-widest text-ink-mute">LSI</span>
                     </div>
                   )}
-                  {dose.effects.minimumFreeChlorine != null && (
+                  {shownEffects.minimumFreeChlorine != null && (
                     <div className="rounded-xl border border-line-soft bg-[#0E1C2A] py-4 flex flex-col items-center gap-1">
                       <span
                         className={cn(
                           "text-xl font-display tabular-nums",
-                          dose.effects.minimumFreeChlorine >= 0 ? "text-emerald-300" : "text-red-300",
+                          shownEffects.minimumFreeChlorine >= 0 ? "text-emerald-300" : "text-red-300",
                         )}
                       >
-                        {dose.effects.minimumFreeChlorine >= 0 ? "+" : ""}
-                        {dose.effects.minimumFreeChlorine.toFixed(1)} ppm
+                        {shownEffects.minimumFreeChlorine >= 0 ? "+" : ""}
+                        {shownEffects.minimumFreeChlorine.toFixed(1)} ppm
                       </span>
                       <span className="text-[10px] uppercase tracking-widest text-ink-mute">Min FC</span>
                     </div>
@@ -995,6 +1134,70 @@ function DoseDetailSheet({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    // Older WebViews / denied permission: legacy path.
+    try {
+      const ta = document.createElement("textarea")
+      ta.value = text
+      ta.style.position = "fixed"
+      ta.style.opacity = "0"
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand("copy")
+      ta.remove()
+      return ok
+    } catch {
+      return false
+    }
+  }
+}
+
+/** The customer-facing record: header lines end with ":", everything else
+ * indents under them. Copy sends the RAW string — never re-composed. */
+function VisitNoteBody({ note }: { note: string }) {
+  const [copied, setCopied] = useState<"idle" | "ok" | "failed">("idle")
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1 max-h-[50dvh] overflow-y-auto">
+        {note.split("\n").map((line, i) =>
+          line.trim().endsWith(":") ? (
+            <p key={i} className={cn("text-sm font-medium text-ink", i > 0 && "mt-2.5")}>
+              {line}
+            </p>
+          ) : (
+            <p key={i} className="text-sm text-ink-dim leading-relaxed pl-3">
+              {line}
+            </p>
+          ),
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={async () => {
+          setCopied((await copyText(note)) ? "ok" : "failed")
+          setTimeout(() => setCopied("idle"), 2000)
+        }}
+        className={cn(
+          "w-full flex items-center justify-center gap-2 h-10 rounded-full text-sm font-medium",
+          "transition-colors duration-150 active:scale-[0.98]",
+          copied === "ok"
+            ? "bg-emerald-400/15 text-emerald-300 border border-emerald-400/30"
+            : copied === "failed"
+              ? "bg-red-400/15 text-red-300 border border-red-400/30"
+              : "bg-gradient-to-b from-cyan to-cyan-deep text-[#061018]",
+        )}
+      >
+        <ClipboardCopy className="w-4 h-4" strokeWidth={2} />
+        {copied === "ok" ? "Copied" : copied === "failed" ? "Copy failed" : "Copy visit note"}
+      </button>
     </div>
   )
 }
