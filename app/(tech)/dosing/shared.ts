@@ -42,6 +42,8 @@ export interface DosingRequest {
   requestedBy: string
   pool: { volumeGallons: number; sanitiser: Sanitiser }
   readings: Partial<Record<ReadingKey, number>>
+  /** "Algae present" toggle — re-calls the API, never simulated locally. */
+  algaeOrCloudy?: boolean
 }
 
 /**
@@ -73,11 +75,22 @@ export function sampleValue(s: Sample, key: string): number | null {
   return typeof v === "number" ? v : null
 }
 
+/** One stop on a dose's pour grid — the slider rows ARE the grid. */
+export interface SensitivityRow {
+  amount: number
+  unit: string
+  /** The default stop; its effects equal the dose's own effects. */
+  recommended?: boolean
+  effects: Record<string, number>
+}
+
 export interface DoseOption {
   product: string
   amount: number
   unit: string
   displayAmount: string
+  /** The dose slider stops; selecting one swaps this dose's effects. */
+  sensitivity?: SensitivityRow[]
   /** How to physically add this product. */
   instruction?: string
   /** Caution codes, e.g. "separate-pour". */
@@ -108,6 +121,8 @@ export interface DosingResponse {
   retest: string[]
   warnings: ApiWarning[]
   notes: string[]
+  /** Customer-facing treatment record. Render verbatim; never re-compose. */
+  visitNote?: string
 }
 
 /** The row order of the now / target / lands readout. */

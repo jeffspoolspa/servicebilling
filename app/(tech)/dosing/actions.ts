@@ -29,6 +29,7 @@ const schema = z.object({
     salt: z.number().nonnegative().optional(),
     waterTempF: z.number().optional(),
   }),
+  algaeOrCloudy: z.boolean().optional(),
 })
 
 export type DosingState =

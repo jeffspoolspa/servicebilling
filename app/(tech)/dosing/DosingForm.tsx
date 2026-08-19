@@ -37,6 +37,11 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   const [wheelFor, setWheelFor] = useState<ReadingKey | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<DosingResponse | null>(null)
+  // Bumped per response so the pour sheet remounts (dose selections must
+  // re-anchor to the new doses).
+  const [resultSeq, setResultSeq] = useState(0)
+  const [algae, setAlgae] = useState(false)
+  const [recalcError, setRecalcError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
   const { setAction } = useBottomBar()
 
@@ -58,6 +63,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
 
   const submit = () => {
     setError(null)
+    setRecalcError(null)
     startTransition(async () => {
       const res = await getRecommendation({
         ...(customerId ? { customerId } : {}),
@@ -65,10 +71,35 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
         readings: measured,
       })
       if (res.ok) {
+        setAlgae(false)
         setResult(res.data)
+        setResultSeq((n) => n + 1)
         window.scrollTo({ top: 0 })
       } else {
         setError(res.error)
+      }
+    })
+  }
+
+  // The chlorine card's "Algae present" toggle: same sample, re-called with
+  // the flag — the new response re-anchors doses and warnings. On failure
+  // the sheet stays and the toggle reverts.
+  const toggleAlgae = (next: boolean) => {
+    setAlgae(next)
+    setRecalcError(null)
+    startTransition(async () => {
+      const res = await getRecommendation({
+        ...(customerId ? { customerId } : {}),
+        pool: { volumeGallons: volumeNum, sanitiser },
+        readings: measured,
+        ...(next ? { algaeOrCloudy: true } : {}),
+      })
+      if (res.ok) {
+        setResult(res.data)
+        setResultSeq((n) => n + 1)
+      } else {
+        setAlgae(!next)
+        setRecalcError(res.error)
       }
     })
   }
@@ -95,6 +126,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   if (result)
     return (
       <PourSheet
+        key={resultSeq}
         result={result}
         customerName={customer?.customer_name}
         onNewSample={() => {
@@ -105,8 +137,14 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
           setSanitiser("tab")
           setCustomerId("")
           setError(null)
+          setAlgae(false)
+          setRecalcError(null)
         }}
         onEditSample={() => setResult(null)}
+        algae={algae}
+        onAlgaeChange={toggleAlgae}
+        recalcPending={pending}
+        recalcError={recalcError}
       />
     )
 
