@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
   ArrowDown,
@@ -432,6 +432,22 @@ export function PourSheet({
   // recommended stop. Cleared whenever the product choice changes.
   const [sens, setSens] = useState<Record<number, number | undefined>>({})
 
+  // A new response (algae toggle, resubmit) re-anchors the dose selections —
+  // and ONLY those. Lens, mode and scroll stay where the tech left them.
+  useEffect(() => {
+    setChoice({})
+    setSens({})
+  }, [result])
+
+  // The algae toggle only changes the engine's answer when chlorine is short
+  // of the minimum — above it the response is identical, so the checkbox
+  // would look dead. Keep it visible while checked so it can be untoggled.
+  const showAlgae =
+    algae ||
+    (samples.actual.freeChlorine != null &&
+      samples.actual.minimumFreeChlorine != null &&
+      samples.actual.freeChlorine < samples.actual.minimumFreeChlorine)
+
   const optionAt = (i: number) => {
     const d = doses[i]
     return [d, ...(d.alternatives ?? [])][choice[i] ?? 0] ?? d
@@ -790,7 +806,7 @@ export function PourSheet({
                       </span>
                     )}
                   </span>
-                  {isChlorine ? (
+                  {isChlorine && showAlgae ? (
                     // The algae check rides the right slot — where the pour
                     // instructions sit on the acid row.
                     <span
