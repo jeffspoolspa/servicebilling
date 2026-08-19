@@ -497,13 +497,10 @@ Inventory but keep Follow-Up and Dosing.
   `DOTNET_API_URL`) to the .NET Dosing API
   (`POST /maintenance/dosing/recommendations`) and renders the pour sheet:
   WHOOP-style Balance/Sanitation dials over the derived predicted sample
-  (actual + each dose's selected effects — product swap AND pour-grid
-  sensitivity slider — recalculated live; two simultaneous deviations shown
-  as approximate), coded warning cards with action checklists, retest chips,
-  an algae/cloudy toggle that re-calls the API, and a visit-note modal with
-  copy-to-clipboard. Absent reading = not measured, never 0; the API 400s
-  name `missing` required readings and the form highlights them. The only
-  API side effect is the append-only recommendation log row.
+  (actual + chosen dose options' effects, recalculated live on alternative
+  swap), coded warnings + retest modals, per-dose detail sheets (instruction,
+  effects, cautions). Absent reading = not measured, never 0. The only API
+  side effect is the append-only recommendation log row.
 
 **Database tables**:
 - `maintenance.truck_check_submissions` — currently empty; truck-check feature may not be in active use

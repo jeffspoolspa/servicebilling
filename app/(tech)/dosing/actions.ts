@@ -29,12 +29,11 @@ const schema = z.object({
     salt: z.number().nonnegative().optional(),
     waterTempF: z.number().optional(),
   }),
-  algaeOrCloudy: z.boolean().optional(),
 })
 
 export type DosingState =
   | { ok: true; data: DosingResponse }
-  | { ok: false; error: string; missing?: string[] }
+  | { ok: false; error: string }
 
 export async function getRecommendation(input: unknown): Promise<DosingState> {
   const employee = await getCurrentEmployee()
@@ -71,10 +70,9 @@ export async function getRecommendation(input: unknown): Promise<DosingState> {
   }
 
   if (!res.ok) {
-    // 400s carry the domain's own guard text verbatim, plus a `missing`
-    // array naming required readings — the form highlights exactly those.
+    // 400s carry the domain's own reading-guard text (WaterRuleException) —
+    // show it verbatim; anything else gets a generic message.
     let message = `Dosing service error (${res.status}).`
-    let missing: string[] | undefined
     try {
       const body = await res.json()
       const detail =
@@ -82,11 +80,10 @@ export async function getRecommendation(input: unknown): Promise<DosingState> {
           ? body
           : (body?.detail ?? body?.title ?? body?.error ?? body?.message)
       if (res.status === 400 && typeof detail === "string" && detail) message = detail
-      if (Array.isArray(body?.missing)) missing = body.missing.filter((m: unknown) => typeof m === "string")
     } catch {
       /* non-JSON error body — keep the generic message */
     }
-    return { ok: false, error: message, missing }
+    return { ok: false, error: message }
   }
 
   try {

@@ -36,14 +36,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   const [readings, setReadings] = useState<Partial<Record<ReadingKey, number>>>({})
   const [wheelFor, setWheelFor] = useState<ReadingKey | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // Readings the API's 400 named as missing — highlighted until set.
-  const [missing, setMissing] = useState<string[]>([])
   const [result, setResult] = useState<DosingResponse | null>(null)
-  // Bumped per response so the pour sheet remounts (its dose selections
-  // must re-anchor to the new doses).
-  const [resultSeq, setResultSeq] = useState(0)
-  const [algae, setAlgae] = useState(false)
-  const [recalcError, setRecalcError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
   const { setAction } = useBottomBar()
 
@@ -63,48 +56,19 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   )
   const canSubmit = volumeNum >= 1500 && requiredMet && !pending
 
-  const submit = (algaeFlag = false) => {
+  const submit = () => {
     setError(null)
-    setRecalcError(null)
     startTransition(async () => {
       const res = await getRecommendation({
         ...(customerId ? { customerId } : {}),
         pool: { volumeGallons: volumeNum, sanitiser },
         readings: measured,
-        ...(algaeFlag ? { algaeOrCloudy: true } : {}),
       })
       if (res.ok) {
-        setAlgae(algaeFlag)
-        setMissing([])
         setResult(res.data)
-        setResultSeq((n) => n + 1)
         window.scrollTo({ top: 0 })
       } else {
         setError(res.error)
-        setMissing(res.missing ?? [])
-      }
-    })
-  }
-
-  // The pour-sheet checkbox: same sample, re-called with the flag — the new
-  // response re-anchors doses, sliders, warnings and the visit note. On
-  // failure the sheet stays and the checkbox reverts.
-  const toggleAlgae = (next: boolean) => {
-    setAlgae(next)
-    setRecalcError(null)
-    startTransition(async () => {
-      const res = await getRecommendation({
-        ...(customerId ? { customerId } : {}),
-        pool: { volumeGallons: volumeNum, sanitiser },
-        readings: measured,
-        ...(next ? { algaeOrCloudy: true } : {}),
-      })
-      if (res.ok) {
-        setResult(res.data)
-        setResultSeq((n) => n + 1)
-      } else {
-        setAlgae(!next)
-        setRecalcError(res.error)
       }
     })
   }
@@ -118,7 +82,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
     } else if (canSubmit || pending) {
       setAction({
         label: pending ? "Calculating…" : "Get pour sheet",
-        onClick: () => submit(),
+        onClick: submit,
         disabled: pending,
       })
     } else {
@@ -131,7 +95,6 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   if (result)
     return (
       <PourSheet
-        key={resultSeq}
         result={result}
         customerName={customer?.customer_name}
         onNewSample={() => {
@@ -142,15 +105,8 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
           setSanitiser("tab")
           setCustomerId("")
           setError(null)
-          setAlgae(false)
-          setMissing([])
-          setRecalcError(null)
         }}
         onEditSample={() => setResult(null)}
-        algae={algae}
-        onAlgaeChange={toggleAlgae}
-        recalcPending={pending}
-        recalcError={recalcError}
       />
     )
 
@@ -260,7 +216,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
             const v = readings[f.key]
             return (
               <div key={f.key} className="flex items-center justify-between gap-3 pl-4 pr-3 py-2">
-                <span className={cn("text-sm", missing.includes(f.key) ? "text-red-400" : "text-ink-dim")}>
+                <span className="text-sm text-ink-dim">
                   {f.label}
                   {f.unit && <span className="text-ink-mute"> ({f.unit})</span>}
                   {"required" in f && f.required && <span className="text-cyan"> *</span>}
@@ -291,10 +247,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
             key={wheelFor}
             field={READING_FIELDS.find((f) => f.key === wheelFor)!}
             value={readings[wheelFor]}
-            onDone={(v) => {
-              setReadings((r) => ({ ...r, [wheelFor]: v }))
-              setMissing((m) => m.filter((k) => k !== wheelFor))
-            }}
+            onDone={(v) => setReadings((r) => ({ ...r, [wheelFor]: v }))}
             onClear={() =>
               setReadings((r) => {
                 const { [wheelFor]: _, ...rest } = r
