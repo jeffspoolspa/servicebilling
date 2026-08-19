@@ -37,9 +37,6 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   const [wheelFor, setWheelFor] = useState<ReadingKey | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<DosingResponse | null>(null)
-  // Bumped per response so the pour sheet remounts (dose selections must
-  // re-anchor to the new doses).
-  const [resultSeq, setResultSeq] = useState(0)
   const [algae, setAlgae] = useState(false)
   const [recalcError, setRecalcError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
@@ -73,7 +70,6 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
       if (res.ok) {
         setAlgae(false)
         setResult(res.data)
-        setResultSeq((n) => n + 1)
         window.scrollTo({ top: 0 })
       } else {
         setError(res.error)
@@ -96,7 +92,6 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
       })
       if (res.ok) {
         setResult(res.data)
-        setResultSeq((n) => n + 1)
       } else {
         setAlgae(!next)
         setRecalcError(res.error)
@@ -126,7 +121,6 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   if (result)
     return (
       <PourSheet
-        key={resultSeq}
         result={result}
         customerName={customer?.customer_name}
         onNewSample={() => {
