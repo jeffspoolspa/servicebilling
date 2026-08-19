@@ -777,8 +777,9 @@ export function PourSheet({
               const offGrid = rows && sensIdx != null && sensIdx !== recRow
               // "6 fl oz (~1.5s pour · ~5% of the jug)" → chip + hint; an
               // adjusted slider stop labels from its own amount + unit.
+              const rowScale = rows ? stopScale(rows) : null
               const [, main, hint] = offGrid
-                ? [undefined, `${rows[sensIdx]?.amount} ${chosen.unit === "flOz" ? "fl oz" : chosen.unit}`, undefined]
+                ? [undefined, `${trimNum((rows[sensIdx]?.amount ?? 0) / (rowScale?.div ?? 1))} ${rowScale?.label ?? ""}`, undefined]
                 : (chosen.displayAmount.match(/^([^(]+?)(?:\s*\((.+)\))?$/) ?? [])
               // The algae toggle lives on the chlorine card.
               const isChlorine = "freeChlorine" in (d.effects ?? {})
@@ -988,9 +989,10 @@ function DoseDetailSheet({
   const activeIdx = sensIdx ?? (recRow >= 0 ? recRow : 0)
   const onRec = rows.length === 0 || activeIdx === recRow
   const row = rows[activeIdx]
+  const rowScale = stopScale(rows)
   const shownAmount = onRec
     ? dose.displayAmount
-    : `${row?.amount} ${dose.unit === "flOz" ? "fl oz" : dose.unit}`
+    : `${trimNum((row?.amount ?? 0) / rowScale.div)} ${rowScale.label}`
   const shownEffects = onRec ? dose.effects : (row?.effects ?? dose.effects)
   const dismiss = () => {
     if (closing) return
