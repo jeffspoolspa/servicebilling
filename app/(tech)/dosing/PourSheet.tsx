@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
+import { Slider } from "@/components/ui/slider"
 import {
   ASSUMED_LABELS,
   READING_FIELDS,
@@ -788,47 +789,50 @@ export function PourSheet({
                         or {next.displayAmount.replace(/\s*\(.*\)$/, "")} {next.product}
                       </span>
                     )}
-                    {isChlorine && (
-                      <span
-                        role="checkbox"
-                        aria-checked={algae}
-                        tabIndex={0}
-                        onClick={(e) => {
+                  </span>
+                  {isChlorine ? (
+                    // The algae check rides the right slot — where the pour
+                    // instructions sit on the acid row.
+                    <span
+                      role="checkbox"
+                      aria-checked={algae}
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (!recalcPending) onAlgaeChange(!algae)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
                           e.stopPropagation()
                           if (!recalcPending) onAlgaeChange(!algae)
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.stopPropagation()
-                            if (!recalcPending) onAlgaeChange(!algae)
-                          }
-                        }}
+                        }
+                      }}
+                      className={cn(
+                        "shrink-0 flex items-center gap-1.5 text-[11px]",
+                        recalcPending ? "opacity-60" : "active:opacity-70",
+                        algae ? "text-cyan" : "text-ink-dim",
+                      )}
+                    >
+                      <span
                         className={cn(
-                          "mt-1 flex items-center gap-1.5 text-[11px]",
-                          recalcPending ? "opacity-60" : "active:opacity-70",
-                          algae ? "text-cyan" : "text-ink-dim",
+                          "w-4 h-4 rounded-[5px] border grid place-items-center transition-colors duration-150",
+                          algae ? "bg-cyan border-cyan text-[#061018]" : "border-line bg-black/20 text-transparent",
                         )}
                       >
-                        <span
-                          className={cn(
-                            "w-4 h-4 rounded-[5px] border grid place-items-center transition-colors duration-150",
-                            algae ? "bg-cyan border-cyan text-[#061018]" : "border-line bg-black/20 text-transparent",
-                          )}
-                        >
-                          <Check className="w-3 h-3" strokeWidth={3} />
-                        </span>
-                        {recalcPending ? "Recalculating…" : "Algae present"}
+                        <Check className="w-3 h-3" strokeWidth={3} />
                       </span>
-                    )}
-                  </span>
-                  {hint && (
-                    <span className="shrink-0 text-right text-[11px] text-ink-mute leading-tight max-w-[110px]">
-                      {hint.split("·").map((part, j) => (
-                        <span key={j} className="block truncate">
-                          {part.trim()}
-                        </span>
-                      ))}
+                      {recalcPending ? "Recalculating…" : "Algae present"}
                     </span>
+                  ) : (
+                    hint && (
+                      <span className="shrink-0 text-right text-[11px] text-ink-mute leading-tight max-w-[110px]">
+                        {hint.split("·").map((part, j) => (
+                          <span key={j} className="block truncate">
+                            {part.trim()}
+                          </span>
+                        ))}
+                      </span>
+                    )
                   )}
                 </button>
               )
@@ -998,15 +1002,13 @@ function DoseDetailSheet({
 
           {rows.length > 1 && (
             <div className="space-y-1">
-              <input
-                type="range"
+              <Slider
                 min={0}
                 max={rows.length - 1}
                 step={1}
-                value={activeIdx}
-                onChange={(e) => onSens(Number(e.target.value))}
+                value={[activeIdx]}
+                onValueChange={([v]) => onSens(v)}
                 aria-label={`${dose.product} dose`}
-                className="w-full accent-[#38bdf8]"
               />
               <div className="flex justify-between text-[10px] text-ink-mute tabular-nums">
                 <span>
