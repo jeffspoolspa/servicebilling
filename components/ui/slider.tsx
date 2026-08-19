@@ -21,15 +21,20 @@ export const Slider = React.forwardRef<
       )}
       {...props}
     >
-      <SliderPrimitive.Track className="relative h-1.5 w-full grow overflow-hidden rounded-full bg-black/40 border border-line-soft">
+      {/* touch-action must be killed on the track and thumb THEMSELVES —
+          mobile Safari doesn't reliably honour an ancestor's touch-none and
+          steals the gesture for scrolling, which reads as a dead slider. */}
+      <SliderPrimitive.Track className="relative h-1.5 w-full grow overflow-hidden rounded-full bg-black/40 border border-line-soft touch-none">
         <SliderPrimitive.Range className="absolute h-full bg-gradient-to-r from-cyan-deep to-cyan" />
       </SliderPrimitive.Track>
       <SliderPrimitive.Thumb
         className={cn(
-          "block h-5 w-5 rounded-full bg-white border-2 border-cyan",
+          "relative block h-5 w-5 rounded-full bg-white border-2 border-cyan touch-none",
           "shadow-[0_2px_8px_rgba(0,0,0,0.5)]",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40",
           "active:scale-110 transition-transform duration-100",
+          // widen the touch target without changing the visual
+          "after:absolute after:-inset-3 after:content-['']",
         )}
       />
     </SliderPrimitive.Root>
