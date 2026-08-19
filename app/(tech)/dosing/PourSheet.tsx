@@ -6,11 +6,13 @@ import {
   ArrowDown,
   ArrowLeftRight,
   ArrowUp,
-  Check,
   ChevronRight,
+  ClipboardCopy,
+  FileText,
   Info,
   PackageX,
   RotateCcw,
+  Square,
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
@@ -18,6 +20,8 @@ import {
   ASSUMED_LABELS,
   READING_FIELDS,
   sampleValue,
+  type ApiWarning,
+  type Dose,
   type DoseOption,
   type DosingResponse,
   type Sample,
@@ -47,6 +51,36 @@ function warningDatum(key: string, value: number) {
 
 const WARNING_TITLES: Record<string, string> = {
   "shock-fc-below-minimum": "Shock needed — FC below minimum",
+  "shock-combined-chlorine": "Shock needed — combined chlorine high",
+  "chlorine-acid-mix": "Chlorine + acid — never together",
+}
+
+/** Effect keys measured in ppm; everything else (ph, saturationIndex,
+ * driftCeilingPh) is unitless — never append "ppm" to those. */
+const PPM_EFFECT_KEYS = new Set([
+  "freeChlorine",
+  "totalAlkalinity",
+  "carbonateAlkalinity",
+  "cyanuricAcid",
+  "calciumHardness",
+  "salt",
+  "minimumFreeChlorine",
+])
+
+function fmtEffect(k: string, v: number): string {
+  const num =
+    k === "ph"
+      ? v.toFixed(1)
+      : k === "saturationIndex"
+        ? v.toFixed(2)
+        : k === "driftCeilingPh" || k === "minimumFreeChlorine"
+          ? v.toFixed(1)
+          : String(Math.round(v))
+  return `${v >= 0 ? "+" : ""}${num}${PPM_EFFECT_KEYS.has(k) ? " ppm" : ""}`
+}
+
+function unitLabel(u: string) {
+  return u === "flOz" ? "fl oz" : u
 }
 
 const CAUTION_LABELS: Record<string, string> = {
@@ -70,11 +104,13 @@ const LENS_METRICS: Record<Lens, { left: MetricRow[]; right: MetricRow[] }> = {
       // ⓘ shows this pool's pH drift ceiling.
       { key: "ph", label: "pH", digits: 1, info: "ph" },
       { key: "calciumHardness", label: "Calcium", digits: 0 },
+      { key: "cyanuricAcid", label: "CYA", digits: 0 },
     ],
     right: [
-      // The card shows CARBONATE alkalinity — the number the LSI actually
-      // uses. ⓘ breaks it down: measured total minus the cyanurate share.
-      { key: "carbonateAlkalinity", label: "Alk", digits: 0, info: "alk" },
+      // Measured alkalinity with corrected (carbonate) right beside it —
+      // the ⓘ explains that the engine bands on the corrected number.
+      { key: "totalAlkalinity", label: "Alk", digits: 0, info: "alk" },
+      { key: "carbonateAlkalinity", label: "Corrected Alk", digits: 0 },
       { key: "waterTempF", label: "Temp °F", digits: 0 },
     ],
   },
@@ -138,11 +174,14 @@ function Metric({
         <span
           className={cn(
             "text-2xl font-display tabular-nums leading-none",
-            isAssumed ? "text-orange-400" : "text-ink",
+            isAssumed ? "text-ink-mute italic" : "text-ink",
           )}
         >
           {fmt(value, row.digits)}
         </span>
+        {isAssumed && (
+          <span className="w-1.5 h-1.5 rounded-full bg-ink-mute self-center" aria-label="assumed" />
+        )}
         {Math.abs(delta) >= eps &&
           (delta > 0 ? (
             <ArrowUp className="w-3.5 h-3.5 text-cyan self-center" strokeWidth={2.5} />
@@ -154,7 +193,7 @@ function Metric({
         className={cn(
           "flex items-center gap-1 text-[10px] uppercase tracking-widest mt-1",
           align === "right" ? "justify-end" : "justify-start",
-          isAssumed ? "text-orange-400/60" : "text-ink-mute",
+          "text-ink-mute",
         )}
       >
         {row.label}
@@ -395,11 +434,39 @@ function SanitationDial({ fc, minFc }: { fc: number | null; minFc: number | null
   )
 }
 
+type DoseSel = { opt: number; sens: number }
+
+function recIdx(o: DoseOption): number {
+  const i = o.sensitivity?.findIndex((r) => r.recommended) ?? -1
+  return i
+}
+
+function defaultSel(d: Dose): DoseSel {
+  return { opt: 0, sens: recIdx(d) }
+}
+
+function optionOf(d: Dose, sel: DoseSel): DoseOption {
+  return [d, ...(d.alternatives ?? [])][sel.opt] ?? d
+}
+
+/** The ONE sanctioned operation: the selected stop's effects (or the
+ * option's own) — everything predicted is actual + these, keyed addition. */
+function effectsOf(d: Dose, sel: DoseSel): Record<string, number> {
+  const o = optionOf(d, sel)
+  const rows = o.sensitivity
+  if (rows && sel.sens >= 0 && rows[sel.sens]) return rows[sel.sens].effects ?? {}
+  return o.effects ?? {}
+}
+
 export function PourSheet({
   result,
   customerName,
   onNewSample,
   onEditSample,
+  algae,
+  onAlgaeChange,
+  recalcPending,
+  recalcError,
 }: {
   result: DosingResponse
   customerName?: string
@@ -407,29 +474,43 @@ export function PourSheet({
   onNewSample: () => void
   /** Back to the form with the submitted values still in place. */
   onEditSample: () => void
+  algae: boolean
+  /** Re-calls the API with the flag — the response re-anchors everything. */
+  onAlgaeChange: (next: boolean) => void
+  recalcPending: boolean
+  recalcError: string | null
 }) {
-  const { samples, doses, warnings, retest, unfilled } = result
+  const { pool, samples, doses, warnings, retest, unfilled, notes, visitNote } = result
   const [lens, setLens] = useState<Lens>("balance")
   // Predicted is the default view; the corner toggle flips back to the
   // measured sample. Target isn't relevant to the tech here.
   const [mode, setMode] = useState<"predicted" | "actual">("predicted")
-  const [detailFor, setDetailFor] = useState<number | null>(null)
-  // Per-dose product choice: index into [primary, ...alternatives].
-  const [choice, setChoice] = useState<Record<number, number>>({})
+  const [infoModal, setInfoModal] = useState<"alk" | "ph" | "visit" | null>(null)
+  // Per-dose selection: which product option, and which pour-grid stop.
+  const [sel, setSel] = useState<Record<number, DoseSel>>({})
+  const selOf = (i: number) => sel[i] ?? defaultSel(doses[i])
 
-  // Predicted is DERIVED: actual + the chosen option's effects per dose.
-  // Swapping an alternative recalculates it immediately.
+  // Predicted is DERIVED: actual + the selected effects of every dose —
+  // plain keyed addition over readings AND the derived stats, nothing else.
   const predicted: Sample = useMemo(() => {
     const base: Record<string, unknown> = { ...samples.actual }
     for (const [i, d] of doses.entries()) {
-      const opt = [d, ...(d.alternatives ?? [])][choice[i] ?? 0] ?? d
-      for (const [k, delta] of Object.entries(opt.effects ?? {})) {
+      for (const [k, delta] of Object.entries(effectsOf(d, sel[i] ?? defaultSel(d)))) {
         const cur = base[k]
         base[k] = Number(((typeof cur === "number" ? cur : 0) + delta).toFixed(2))
       }
     }
     return base as Sample
-  }, [samples.actual, doses, choice])
+  }, [samples.actual, doses, sel])
+
+  // Exact for the default basket or ONE deviation; two+ changed doses at
+  // once is approximate — say so, don't hide it.
+  const deviations = doses.filter((d, i) => {
+    const c = selOf(i)
+    const def = defaultSel(d)
+    return c.opt !== def.opt || c.sens !== def.sens
+  }).length
+  const approximate = deviations >= 2
 
   const sample: Sample = mode === "predicted" ? predicted : samples.actual
   const showArrows = mode === "predicted"
@@ -439,12 +520,18 @@ export function PourSheet({
   const minFc = sample.minimumFreeChlorine ?? null
   const fc = sample.freeChlorine ?? null
 
-  const [infoModal, setInfoModal] = useState<"warnings" | "retest" | "alk" | "ph" | null>(null)
-
   // Show the assumed-legend only when the current lens displays an assumed value.
   const anyAssumed = [...metrics.left, ...metrics.right].some((row) =>
     samples.actual.assumed?.includes(row.key),
   )
+
+  // The mix-safety warning pins above the pour list; the rest stack under
+  // the hero card.
+  const mixWarnings = warnings.filter((w) => w.code === "chlorine-acid-mix")
+  const otherWarnings = warnings.filter((w) => w.code !== "chlorine-acid-mix")
+
+  const sanitiserLabel =
+    pool.sanitiser === "tab" ? "Tabs" : pool.sanitiser === "liquid" ? "Liquid" : pool.sanitiser === "salt" ? "Salt" : pool.sanitiser
 
   return (
     <div className="space-y-5">
@@ -512,15 +599,18 @@ export function PourSheet({
                 : "bg-bg-elev border-line-soft text-ink-dim",
             )}
           >
-            {mode === "predicted" ? "Predicted" : "Measured"}
+            {mode === "predicted" ? (approximate ? "Predicted ≈" : "Predicted") : "Measured"}
           </button>
         </div>
 
-        {customerName && <p className="px-5 pt-3 text-xs text-ink-mute text-center">{customerName}</p>}
+        <p className="px-5 pt-3 text-xs text-ink-mute text-center">
+          {customerName ? `${customerName} · ` : ""}
+          {pool.volumeGallons.toLocaleString()} gal · {sanitiserLabel}
+        </p>
 
         {/* WHOOP-style readout: one dial per lens, flanked by only the
-            readings that drive it. Amber = assumed, not measured; arrows =
-            predicted direction vs measured. */}
+            readings that drive it. Muted-italic + dot = engine assumption;
+            arrows = predicted direction vs measured. */}
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-4 py-5">
           <div className="justify-self-end space-y-4">
             {metrics.left.map((row) => (
@@ -541,134 +631,79 @@ export function PourSheet({
 
         {anyAssumed && (
           <div className="flex items-center justify-center gap-1.5 pb-3 text-[10px] text-ink-mute">
-            <span className="w-2 h-2 rounded-full bg-orange-400" />
-            = assumed, no reading
+            <span className="w-1.5 h-1.5 rounded-full bg-ink-mute" />
+            = assumed by the engine, no reading
           </div>
         )}
       </section>
 
-      {/* ── Warning + retest bars, side by side; tap opens a small modal ── */}
-      {(warnings.length > 0 || retest.length > 0) && (
-        <div className="flex gap-2.5">
-          {warnings.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setInfoModal("warnings")}
-              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-amber-300 border border-amber-400/20 bg-amber-400/10 active:scale-[0.98] transition-transform duration-150"
+      {/* ── Visit note — the customer-facing record, behind its own button ── */}
+      {visitNote && (
+        <button
+          type="button"
+          onClick={() => setInfoModal("visit")}
+          className="w-full flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-ink border border-line-soft bg-bg-elev active:scale-[0.98] transition-transform duration-150"
+        >
+          <FileText className="w-4 h-4 shrink-0 text-cyan" strokeWidth={1.8} />
+          Visit note
+          <ChevronRight className="w-4 h-4 shrink-0 text-ink-mute" strokeWidth={2} />
+        </button>
+      )}
+
+      {/* ── Warnings — coded cards with their action checklists ── */}
+      {otherWarnings.map((w, i) => (
+        <WarningCard key={i} w={w} tone="amber" />
+      ))}
+
+      {/* ── Retest before leaving — chips ── */}
+      {retest.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap rounded-xl border border-cyan/20 bg-cyan/10 px-4 py-3">
+          <span className="flex items-center gap-2 text-sm font-medium text-cyan">
+            <RotateCcw className="w-4 h-4 shrink-0" strokeWidth={1.8} />
+            Retest before leaving:
+          </span>
+          {retest.map((k) => (
+            <span
+              key={k}
+              className="inline-flex items-center h-7 px-2.5 rounded-full text-xs font-medium bg-cyan/15 text-cyan"
             >
-              <AlertTriangle className="w-4 h-4 shrink-0" strokeWidth={1.8} />
-              {warnings.length === 1 ? "1 warning" : `${warnings.length} warnings`}
-            </button>
-          )}
-          {retest.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setInfoModal("retest")}
-              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-cyan border border-cyan/20 bg-cyan/10 active:scale-[0.98] transition-transform duration-150"
-            >
-              <RotateCcw className="w-4 h-4 shrink-0" strokeWidth={1.8} />
-              Retest · {retest.length}
-            </button>
-          )}
+              {LABEL_NAMES[k] ?? humanize(k)}
+            </span>
+          ))}
         </div>
       )}
 
-      {infoModal === "warnings" && (
-        <InfoModal title="Warnings" onClose={() => setInfoModal(null)}>
-          <div className="space-y-4">
-            {warnings.map((w, i) => {
-              // Everything besides code/actions is code-specific data.
-              const data = Object.entries(w).filter(
-                ([k, v]) => k !== "code" && k !== "actions" && typeof v === "number",
-              )
-              return (
-                <div key={i} className="space-y-1">
-                  <div className="text-sm font-medium text-amber-300 leading-snug">
-                    {WARNING_TITLES[w.code] ?? humanize(w.code)}
-                  </div>
-                  {data.length > 0 && (
-                    <div className="text-xs text-amber-300/70 tabular-nums">
-                      {data.map(([k, v]) => warningDatum(k, v as number)).join(" · ")}
-                    </div>
-                  )}
-                  {(w.actions ?? []).map((a, j) => (
-                    <div key={j} className="flex items-start gap-1.5 text-xs text-amber-200">
-                      <ChevronRight className="w-3 h-3 mt-0.5 shrink-0" strokeWidth={2.5} />
-                      {a}
-                    </div>
-                  ))}
-                </div>
-              )
-            })}
-          </div>
-        </InfoModal>
+      {/* ── Algae / cloudy water — re-anchors everything via the API ── */}
+      <label
+        className={cn(
+          "flex items-center gap-3 rounded-xl border border-line-soft bg-bg-elev px-4 py-3",
+          recalcPending && "opacity-60",
+        )}
+      >
+        <input
+          type="checkbox"
+          checked={algae}
+          disabled={recalcPending}
+          onChange={(e) => onAlgaeChange(e.target.checked)}
+          className="w-5 h-5 accent-[#0093E7]"
+        />
+        <span className="flex-1">
+          <span className="block text-sm font-medium text-ink">Algae / cloudy water</span>
+          <span className="block text-xs text-ink-mute">
+            {recalcPending ? "Recalculating…" : "Re-doses the visit for shock treatment"}
+          </span>
+        </span>
+      </label>
+      {recalcError && (
+        <p role="alert" className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3.5 py-2.5">
+          {recalcError}
+        </p>
       )}
 
-      {infoModal === "alk" && (
-        <InfoModal title="Alkalinity" onClose={() => setInfoModal(null)}>
-          <div className="space-y-2.5 text-sm text-ink-dim leading-relaxed">
-            <p>
-              The card shows <span className="text-ink">carbonate</span> alkalinity — the number
-              the LSI actually uses.
-            </p>
-            <div className="rounded-lg border border-line-soft bg-[#0E1C2A] px-3.5 py-2.5 text-sm tabular-nums space-y-1">
-              <div className="flex justify-between">
-                <span>Measured alkalinity</span>
-                <span className="text-ink">{fmt(sample.totalAlkalinity, 0)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>− cyanurate (from CYA {fmt(sample.cyanuricAcid, 0)})</span>
-                <span className="text-ink">
-                  {sample.totalAlkalinity != null && sample.carbonateAlkalinity != null
-                    ? `−${(sample.totalAlkalinity - sample.carbonateAlkalinity).toFixed(0)}`
-                    : "—"}
-                </span>
-              </div>
-              <div className="flex justify-between border-t border-line-soft pt-1">
-                <span className="text-ink">Carbonate alkalinity</span>
-                <span className="text-cyan">{fmt(sample.carbonateAlkalinity, 0)}</span>
-              </div>
-            </div>
-            <p className="text-ink-mute text-xs">
-              Part of measured alkalinity is CYA in its dissolved form; it does not buffer like
-              carbonate, so the engine subtracts it before balancing.
-            </p>
-          </div>
-        </InfoModal>
-      )}
-
-      {infoModal === "ph" && (
-        <InfoModal title="pH drift ceiling" onClose={() => setInfoModal(null)}>
-          <div className="space-y-2.5 text-sm text-ink-dim leading-relaxed">
-            <p>
-              This pool's pH drifts up between visits toward a ceiling set by its alkalinity:
-              <span className="text-cyan font-medium tabular-nums">
-                {" "}{fmt(sample.driftCeilingPh, 1)}
-              </span>
-            </p>
-            <p className="text-ink-mute text-xs">
-              If pH keeps escaping the band between visits, the fix is lowering alkalinity — the
-              ceiling comes down with it — not more acid.
-            </p>
-          </div>
-        </InfoModal>
-      )}
-
-      {infoModal === "retest" && (
-        <InfoModal title="Retest" onClose={() => setInfoModal(null)}>
-          <p className="text-xs text-ink-mute mb-3">
-            These readings change with this pour — retest before you leave.
-          </p>
-          <ul className="space-y-2">
-            {retest.map((k) => (
-              <li key={k} className="flex items-center gap-2 text-sm text-ink">
-                <RotateCcw className="w-3.5 h-3.5 text-cyan shrink-0" strokeWidth={2} />
-                {LABEL_NAMES[k] ?? humanize(k)}
-              </li>
-            ))}
-          </ul>
-        </InfoModal>
-      )}
+      {/* Safety warning pinned above the pour list */}
+      {mixWarnings.map((w, i) => (
+        <WarningCard key={i} w={w} tone="red" />
+      ))}
 
       {/* ── Pour list ── */}
       <section className="space-y-2.5">
@@ -680,66 +715,14 @@ export function PourSheet({
           </p>
         ) : (
           <div className="space-y-3">
-            {doses.map((d, i) => {
-              // The tech pours ONE of the options per demand; default is the
-              // API's primary, the swap link flips to what's on the truck.
-              const options = [d, ...(d.alternatives ?? [])]
-              const chosen = options[choice[i] ?? 0] ?? d
-              const next = options[((choice[i] ?? 0) + 1) % options.length]
-              // "6 fl oz (~1.5s pour · ~5% of the jug)" → chip + hint
-              const [, main, hint] = chosen.displayAmount.match(/^([^(]+?)(?:\s*\((.+)\))?$/) ?? []
-              return (
-                // WHOOP activity-row layout: dose chip | name | instructions.
-                // The whole row opens the detail sheet — nothing to select.
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => setDetailFor(i)}
-                  className={cn(
-                    "w-full flex items-center gap-3 rounded-xl border border-line-soft bg-bg-elev",
-                    "pl-2.5 pr-3.5 py-2.5 text-left transition-colors duration-150 active:bg-white/[0.03]",
-                  )}
-                >
-                  <span className="shrink-0 inline-flex items-center h-10 px-3 rounded-lg bg-cyan/20 text-cyan font-display font-bold text-base tabular-nums whitespace-nowrap">
-                    {(main ?? chosen.displayAmount).trim()}
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-sm font-semibold uppercase tracking-wide leading-snug">
-                      {chosen.product}
-                    </span>
-                    {options.length > 1 && (
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setChoice((c) => ({ ...c, [i]: ((c[i] ?? 0) + 1) % options.length }))
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.stopPropagation()
-                            setChoice((c) => ({ ...c, [i]: ((c[i] ?? 0) + 1) % options.length }))
-                          }
-                        }}
-                        className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-cyan active:opacity-70"
-                      >
-                        <ArrowLeftRight className="w-3 h-3" strokeWidth={2} />
-                        or {next.displayAmount.replace(/\s*\(.*\)$/, "")} {next.product}
-                      </span>
-                    )}
-                  </span>
-                  {hint && (
-                    <span className="shrink-0 text-right text-[11px] text-ink-mute leading-tight max-w-[110px]">
-                      {hint.split("·").map((part, j) => (
-                        <span key={j} className="block truncate">
-                          {part.trim()}
-                        </span>
-                      ))}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
+            {doses.map((d, i) => (
+              <DoseCard
+                key={i}
+                dose={d}
+                sel={selOf(i)}
+                onSel={(next) => setSel((c) => ({ ...c, [i]: next }))}
+              />
+            ))}
           </div>
         )}
       </section>
@@ -758,26 +741,283 @@ export function PourSheet({
         </div>
       )}
 
-      {detailFor != null &&
-        (() => {
-          const d = doses[detailFor]
-          const options = [d, ...(d.alternatives ?? [])]
-          const chosenIdx = choice[detailFor] ?? 0
-          return (
-            <DoseDetailSheet
-              dose={options[chosenIdx] ?? d}
-              options={options}
-              chosenIdx={chosenIdx}
-              onPick={(j) => setChoice((c) => ({ ...c, [detailFor]: j }))}
-              onClose={() => setDetailFor(null)}
-            />
-          )
-        })()}
+      {/* Internal staging notes — small print */}
+      {notes.length > 0 && (
+        <div className="space-y-1 px-1">
+          {notes.map((n, i) => (
+            <p key={i} className="text-xs text-ink-mute">
+              {n}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {infoModal === "visit" && (
+        <InfoModal title="Visit note" onClose={() => setInfoModal(null)}>
+          <VisitNoteBody note={visitNote} />
+        </InfoModal>
+      )}
+
+      {infoModal === "alk" && (
+        <InfoModal title="Alkalinity" onClose={() => setInfoModal(null)}>
+          <div className="space-y-2.5 text-sm text-ink-dim leading-relaxed">
+            <div className="rounded-lg border border-line-soft bg-[#0E1C2A] px-3.5 py-2.5 text-sm tabular-nums space-y-1">
+              <div className="flex justify-between">
+                <span>Measured alkalinity</span>
+                <span className="text-ink">{fmt(sample.totalAlkalinity, 0)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>− cyanurate (from CYA {fmt(sample.cyanuricAcid, 0)})</span>
+                <span className="text-ink">
+                  {sample.totalAlkalinity != null && sample.carbonateAlkalinity != null
+                    ? `−${(sample.totalAlkalinity - sample.carbonateAlkalinity).toFixed(0)}`
+                    : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between border-t border-line-soft pt-1">
+                <span className="text-ink">Corrected alkalinity</span>
+                <span className="text-cyan">{fmt(sample.carbonateAlkalinity, 0)}</span>
+              </div>
+            </div>
+            <p>
+              Part of measured alkalinity is claimed by stabiliser (cyanurate) and doesn&apos;t
+              buffer pH. The engine bands on the corrected number.
+            </p>
+          </div>
+        </InfoModal>
+      )}
+
+      {infoModal === "ph" && (
+        <InfoModal title="pH drift ceiling" onClose={() => setInfoModal(null)}>
+          <div className="space-y-2.5 text-sm text-ink-dim leading-relaxed">
+            <p>
+              This pool&apos;s pH drifts up between visits toward a ceiling set by its alkalinity:
+              <span className="text-cyan font-medium tabular-nums">
+                {" "}{fmt(sample.driftCeilingPh, 1)}
+              </span>
+            </p>
+            <p className="text-ink-mute text-xs">
+              If pH keeps escaping the band between visits, the fix is lowering alkalinity — the
+              ceiling comes down with it — not more acid.
+            </p>
+          </div>
+        </InfoModal>
+      )}
     </div>
   )
 }
 
-/** Small centred modal for the warning / retest summaries. */
+/** One dose: amount chip + product, verbatim instruction, the pour-grid
+ * slider, this dose's effect chips, and the alternative-product swap. */
+function DoseCard({
+  dose,
+  sel,
+  onSel,
+}: {
+  dose: Dose
+  sel: DoseSel
+  onSel: (next: DoseSel) => void
+}) {
+  const options = [dose, ...(dose.alternatives ?? [])]
+  const option = options[sel.opt] ?? dose
+  const rows = option.sensitivity ?? []
+  const rec = recIdx(option)
+  const onRec = rows.length === 0 || sel.sens === rec
+  const effects = effectsOf(dose, sel)
+  const next = options[(sel.opt + 1) % options.length]
+
+  // On the recommended stop the API's pour-sheet string (with pour-seconds)
+  // is the label; other stops are formatted from amount + unit — formatting
+  // only, never chemistry.
+  const [, main, hint] = onRec
+    ? (option.displayAmount.match(/^([^(]+?)(?:\s*\((.+)\))?$/) ?? [])
+    : [undefined, `${rows[sel.sens]?.amount ?? option.amount} ${unitLabel(rows[sel.sens]?.unit ?? option.unit)}`, undefined]
+
+  return (
+    <div className="rounded-xl border border-line-soft bg-bg-elev px-3.5 py-3 space-y-2.5">
+      <div className="flex items-center gap-3">
+        <span className="shrink-0 inline-flex items-center h-10 px-3 rounded-lg bg-cyan/20 text-cyan font-display font-bold text-base tabular-nums whitespace-nowrap">
+          {(main ?? option.displayAmount).trim()}
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="block text-sm font-semibold uppercase tracking-wide leading-snug">
+            {option.product}
+          </span>
+          {options.length > 1 && (
+            <button
+              type="button"
+              onClick={() => onSel({ opt: (sel.opt + 1) % options.length, sens: recIdx(next) })}
+              className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-cyan active:opacity-70"
+            >
+              <ArrowLeftRight className="w-3 h-3" strokeWidth={2} />
+              or {next.displayAmount.replace(/\s*\(.*\)$/, "")} {next.product}
+            </button>
+          )}
+        </span>
+        {hint && (
+          <span className="shrink-0 text-right text-[11px] text-ink-mute leading-tight max-w-[100px]">
+            {hint.split("·").map((part, j) => (
+              <span key={j} className="block truncate">
+                {part.trim()}
+              </span>
+            ))}
+          </span>
+        )}
+      </div>
+
+      {option.instruction && (
+        <p className="text-xs text-ink-dim leading-relaxed">{option.instruction}</p>
+      )}
+
+      {rows.length > 1 && (
+        <div className="space-y-1">
+          <input
+            type="range"
+            min={0}
+            max={rows.length - 1}
+            step={1}
+            value={sel.sens >= 0 ? sel.sens : rec}
+            onChange={(e) => onSel({ ...sel, sens: Number(e.target.value) })}
+            aria-label={`${option.product} dose`}
+            className="w-full accent-[#0093E7]"
+          />
+          <div className="flex justify-between text-[10px] text-ink-mute tabular-nums">
+            <span>{rows[0].amount} {unitLabel(rows[0].unit)}</span>
+            <span className={cn(onRec ? "text-cyan" : "text-ink-dim")}>
+              {onRec ? "recommended" : "adjusted"}
+            </span>
+            <span>{rows[rows.length - 1].amount} {unitLabel(rows[rows.length - 1].unit)}</span>
+          </div>
+        </div>
+      )}
+
+      {Object.keys(effects).length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {Object.entries(effects).map(([k, v]) => (
+            <span
+              key={k}
+              className={cn(
+                "inline-flex items-center h-6 px-2 rounded-md text-[11px] tabular-nums border",
+                v >= 0
+                  ? "text-emerald-300 border-emerald-400/25 bg-emerald-400/10"
+                  : "text-red-300 border-red-400/25 bg-red-400/10",
+              )}
+            >
+              {LABEL_NAMES[k] ?? humanize(k)} {fmtEffect(k, v)}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {(option.cautions ?? []).map((c, i) => (
+        <div
+          key={i}
+          className="flex gap-2 text-xs text-amber-300 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2"
+        >
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" strokeWidth={1.8} />
+          <span>{CAUTION_LABELS[c] ?? humanize(c)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Coded warning: headline from the copy map, its numbers, and the action
+ * checklist. `red` is the pinned safety tone. */
+function WarningCard({ w, tone }: { w: ApiWarning; tone: "amber" | "red" }) {
+  const data = Object.entries(w).filter(
+    ([k, v]) => k !== "code" && k !== "actions" && typeof v === "number",
+  )
+  const palette =
+    tone === "red"
+      ? "border-red-400/30 bg-red-400/10 text-red-300"
+      : "border-amber-400/20 bg-amber-400/10 text-amber-300"
+  return (
+    <div className={cn("rounded-xl border px-4 py-3 space-y-1.5", palette)}>
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <AlertTriangle className="w-4 h-4 shrink-0" strokeWidth={1.8} />
+        {WARNING_TITLES[w.code] ?? humanize(w.code)}
+      </div>
+      {data.length > 0 && (
+        <div className="text-xs opacity-70 tabular-nums pl-6">
+          {data.map(([k, v]) => warningDatum(k, v as number)).join(" · ")}
+        </div>
+      )}
+      {(w.actions ?? []).map((a, j) => (
+        <div key={j} className="flex items-start gap-2 text-xs pl-6 opacity-90">
+          <Square className="w-3 h-3 mt-0.5 shrink-0" strokeWidth={2} />
+          {a}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** The customer-facing record: header lines end with ":", everything else
+ * indents under them. Copy sends the RAW string — never re-composed. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    // Older WebViews / denied permission: legacy path.
+    try {
+      const ta = document.createElement("textarea")
+      ta.value = text
+      ta.style.position = "fixed"
+      ta.style.opacity = "0"
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand("copy")
+      ta.remove()
+      return ok
+    } catch {
+      return false
+    }
+  }
+}
+
+function VisitNoteBody({ note }: { note: string }) {
+  const [copied, setCopied] = useState<"idle" | "ok" | "failed">("idle")
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1 max-h-[50dvh] overflow-y-auto">
+        {note.split("\n").map((line, i) =>
+          line.trim().endsWith(":") ? (
+            <p key={i} className={cn("text-sm font-medium text-ink", i > 0 && "mt-2.5")}>
+              {line}
+            </p>
+          ) : (
+            <p key={i} className="text-sm text-ink-dim leading-relaxed pl-3">
+              {line}
+            </p>
+          ),
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={async () => {
+          setCopied((await copyText(note)) ? "ok" : "failed")
+          setTimeout(() => setCopied("idle"), 2000)
+        }}
+        className={cn(
+          "w-full flex items-center justify-center gap-2 h-10 rounded-full text-sm font-medium",
+          "transition-colors duration-150 active:scale-[0.98]",
+          copied === "ok"
+            ? "bg-emerald-400/15 text-emerald-300 border border-emerald-400/30"
+            : copied === "failed"
+              ? "bg-red-400/15 text-red-300 border border-red-400/30"
+              : "bg-gradient-to-b from-cyan to-cyan-deep text-[#061018]",
+        )}
+      >
+        <ClipboardCopy className="w-4 h-4" strokeWidth={2} />
+        {copied === "ok" ? "Copied" : copied === "failed" ? "Copy failed" : "Copy visit note"}
+      </button>
+    </div>
+  )
+}
+
+/** Small centred modal for the explainer / visit-note content. */
 function InfoModal({
   title,
   onClose,
@@ -805,7 +1045,7 @@ function InfoModal({
       />
       <div
         className={cn(
-          "relative w-full max-w-[320px] rounded-2xl border border-line bg-bg-elev p-5",
+          "relative w-full max-w-[340px] rounded-2xl border border-line bg-bg-elev p-5",
           "shadow-[0_16px_50px_-12px_rgba(0,0,0,0.6)]",
           "transition-[opacity,transform] duration-150 ease-out",
           closing ? "opacity-0 scale-95" : "opacity-100 scale-100 animate-[fade-in_150ms_ease-out_both]",
@@ -823,177 +1063,6 @@ function InfoModal({
           </button>
         </div>
         {children}
-      </div>
-    </div>
-  )
-}
-
-function DoseDetailSheet({
-  dose,
-  options,
-  chosenIdx,
-  onPick,
-  onClose,
-}: {
-  dose: DoseOption
-  options: DoseOption[]
-  chosenIdx: number
-  onPick: (i: number) => void
-  onClose: () => void
-}) {
-  const [closing, setClosing] = useState(false)
-  const dismiss = () => {
-    if (closing) return
-    setClosing(true)
-    setTimeout(onClose, 180)
-  }
-
-  return (
-    <div role="dialog" aria-modal="true" aria-label={dose.product} className="fixed inset-0 z-40">
-      <div
-        onClick={dismiss}
-        className={cn(
-          "absolute inset-0 bg-black/50 backdrop-blur-[2px]",
-          "transition-opacity duration-200 ease-out",
-          closing ? "opacity-0" : "opacity-100 animate-[fade-in_180ms_ease-out_both]",
-        )}
-      />
-      <div
-        className={cn(
-          "absolute bottom-0 left-0 right-0 pb-[calc(env(safe-area-inset-bottom)+20px)]",
-          "bg-bg-elev border-t border-line rounded-t-2xl shadow-[0_-12px_40px_-12px_rgba(0,0,0,0.5)]",
-          "transition-transform ease-[cubic-bezier(0.165,0.84,0.44,1)]",
-          closing
-            ? "translate-y-full duration-[180ms]"
-            : "translate-y-0 duration-[260ms] animate-[sheet-slide-up_260ms_cubic-bezier(0.165,0.84,0.44,1)_both]",
-        )}
-      >
-        <div className="w-10 h-1.5 rounded-full bg-line-soft mx-auto mt-2" />
-        <div className="flex items-center justify-between px-5 pt-3">
-          <h2 className="font-display text-base">{dose.product}</h2>
-          <button
-            type="button"
-            onClick={dismiss}
-            aria-label="Close"
-            className="w-9 h-9 grid place-items-center rounded-lg text-ink-dim active:text-ink"
-          >
-            <X className="w-5 h-5" strokeWidth={1.8} />
-          </button>
-        </div>
-
-        <div className="px-5 pt-3 pb-1 space-y-4">
-          <div className="text-2xl text-cyan font-display">{dose.displayAmount}</div>
-
-          {options.length > 1 && (
-            <div className="space-y-1.5">
-              <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
-                Fills the same demand — pour ONE
-              </h3>
-              {options.map((o, j) => (
-                <button
-                  key={j}
-                  type="button"
-                  onClick={() => onPick(j)}
-                  className={cn(
-                    "w-full min-h-11 px-3 flex items-center justify-between rounded-lg text-left text-sm",
-                    "border transition-colors duration-150 active:scale-[0.99]",
-                    j === chosenIdx
-                      ? "bg-cyan/10 border-cyan/40 text-ink"
-                      : "border-line-soft text-ink-dim",
-                  )}
-                >
-                  <span>
-                    <span className="font-medium">{o.displayAmount.replace(/\s*\(.*\)$/, "")}</span>{" "}
-                    {o.product}
-                  </span>
-                  {j === chosenIdx && <Check className="w-4 h-4 text-cyan" strokeWidth={2.2} />}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {dose.instruction && (
-            <div className="space-y-1.5">
-              <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
-                How to add it
-              </h3>
-              <p className="text-sm text-ink-dim leading-relaxed">{dose.instruction}</p>
-            </div>
-          )}
-
-          {dose.effects && Object.keys(dose.effects).length > 0 && (
-            <div className="space-y-2.5">
-              <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
-                What this dose does
-              </h3>
-              {/* Reading effects: pH to a tenth, everything else whole ppm */}
-              {Object.entries(dose.effects)
-                .filter(([k]) => k !== "saturationIndex" && k !== "minimumFreeChlorine")
-                .map(([k, delta]) => {
-                  const text =
-                    k === "ph"
-                      ? delta.toFixed(1)
-                      : `${Math.round(delta)} ppm`
-                  return (
-                    <div key={k} className="flex justify-between text-sm">
-                      <span className="text-ink-dim">{LABEL_NAMES[k] ?? humanize(k)}</span>
-                      <span className={cn("tabular-nums", delta >= 0 ? "text-emerald-300" : "text-red-300")}>
-                        {delta >= 0 ? "+" : ""}
-                        {text}
-                      </span>
-                    </div>
-                  )
-                })}
-              {/* Derived indicators get their own square tiles */}
-              {(dose.effects.saturationIndex != null || dose.effects.minimumFreeChlorine != null) && (
-                <div className="grid grid-cols-2 gap-2.5 pt-1">
-                  {dose.effects.saturationIndex != null && (
-                    <div className="rounded-xl border border-line-soft bg-[#0E1C2A] py-4 flex flex-col items-center gap-1">
-                      <span
-                        className={cn(
-                          "text-xl font-display tabular-nums",
-                          dose.effects.saturationIndex >= 0 ? "text-emerald-300" : "text-red-300",
-                        )}
-                      >
-                        {dose.effects.saturationIndex >= 0 ? "+" : ""}
-                        {dose.effects.saturationIndex.toFixed(2)}
-                      </span>
-                      <span className="text-[10px] uppercase tracking-widest text-ink-mute">LSI</span>
-                    </div>
-                  )}
-                  {dose.effects.minimumFreeChlorine != null && (
-                    <div className="rounded-xl border border-line-soft bg-[#0E1C2A] py-4 flex flex-col items-center gap-1">
-                      <span
-                        className={cn(
-                          "text-xl font-display tabular-nums",
-                          dose.effects.minimumFreeChlorine >= 0 ? "text-emerald-300" : "text-red-300",
-                        )}
-                      >
-                        {dose.effects.minimumFreeChlorine >= 0 ? "+" : ""}
-                        {dose.effects.minimumFreeChlorine.toFixed(1)} ppm
-                      </span>
-                      <span className="text-[10px] uppercase tracking-widest text-ink-mute">Min FC</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {(dose.cautions ?? []).length > 0 && (
-            <div className="space-y-2">
-              {(dose.cautions ?? []).map((c, i) => (
-                <div
-                  key={i}
-                  className="flex gap-2.5 text-sm text-amber-300 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3.5 py-2.5"
-                >
-                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" strokeWidth={1.8} />
-                  <span>{CAUTION_LABELS[c] ?? humanize(c)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   )
