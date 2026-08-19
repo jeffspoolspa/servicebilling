@@ -42,6 +42,8 @@ export interface DosingRequest {
   requestedBy: string
   pool: { volumeGallons: number; sanitiser: Sanitiser }
   readings: Partial<Record<ReadingKey, number>>
+  /** Pour-sheet checkbox; toggling re-calls the API (never simulated locally). */
+  algaeOrCloudy?: boolean
 }
 
 /**
@@ -73,17 +75,28 @@ export function sampleValue(s: Sample, key: string): number | null {
   return typeof v === "number" ? v : null
 }
 
+/** One stop on a dose's pour grid — the slider rows ARE the grid. */
+export interface SensitivityRow {
+  amount: number
+  unit: string
+  /** The default stop; its effects equal the dose's own effects. */
+  recommended?: boolean
+  effects: Record<string, number>
+}
+
 export interface DoseOption {
   product: string
   amount: number
   unit: string
   displayAmount: string
-  /** How to physically add this product. */
+  /** How to physically add this product — shown verbatim on the card. */
   instruction?: string
-  /** Caution codes, e.g. "separate-pour". */
+  /** Caution codes — empty today, reserved. */
   cautions?: string[]
   /** Reading deltas this option applies to the actual sample. */
   effects?: Record<string, number>
+  /** The dose slider stops; selecting one swaps this dose's effects. */
+  sensitivity?: SensitivityRow[]
 }
 
 export interface Dose extends DoseOption {
@@ -100,14 +113,19 @@ export interface ApiWarning {
 }
 
 export interface DosingResponse {
+  /** Request echo — shown in the pour-sheet header. */
+  pool: { volumeGallons: number; sanitiser: string }
   samples: { actual: Sample; recommended: Sample }
   doses: Dose[]
   demands: { chemical: string; ounces: number; for: string }[]
   unfilled: { chemical?: string; for?: string; [k: string]: unknown }[]
-  /** Reading keys the doses change — retest these next visit. */
+  /** Reading keys the doses change — "Retest before leaving" chips. */
   retest: string[]
   warnings: ApiWarning[]
+  /** Internal staging notes — small print. */
   notes: string[]
+  /** Customer-facing treatment record. Render verbatim; never re-compose. */
+  visitNote: string
 }
 
 /** The row order of the now / target / lands readout. */
