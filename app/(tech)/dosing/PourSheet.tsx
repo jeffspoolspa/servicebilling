@@ -16,7 +16,6 @@ import {
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
-import { Slider } from "@/components/ui/slider"
 import {
   ASSUMED_LABELS,
   READING_FIELDS,
@@ -52,9 +51,24 @@ const WARNING_TITLES: Record<string, string> = {
   "shock-fc-below-minimum": "Shock needed — FC below minimum",
 }
 
-// The dose slider is parked while we tune the touch feel — flip on to play
-// with it; the selection plumbing underneath stays live either way.
-const SHOW_DOSE_SLIDER = false
+// TEST BRANCH: dose stops as tappable keys instead of a slider.
+const SHOW_DOSE_SLIDER = true
+
+/**
+ * Stops arrive in the dose's RAW unit (flOz / lb) while displayAmount is
+ * humanized (gal). When every stop sits on the half-gallon grid, present
+ * the keys in gallons — formatting only, never chemistry.
+ */
+function stopScale(rows: { amount: number; unit: string }[]): { div: number; label: string } {
+  if (rows.length && rows[0].unit === "flOz" && rows.every((r) => r.amount % 64 === 0)) {
+    return { div: 128, label: "gal" }
+  }
+  return { div: 1, label: rows[0]?.unit === "flOz" ? "fl oz" : (rows[0]?.unit ?? "") }
+}
+
+function trimNum(n: number): string {
+  return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)))
+}
 
 const CAUTION_LABELS: Record<string, string> = {
   "separate-pour": "Pour this alone — circulate before adding anything else.",
@@ -1021,27 +1035,46 @@ function DoseDetailSheet({
           <div className="text-2xl text-cyan font-display">{shownAmount}</div>
 
           {SHOW_DOSE_SLIDER && rows.length > 1 && (
-            <div className="space-y-1">
-              <Slider
-                min={0}
-                max={rows.length - 1}
-                step={1}
-                value={[activeIdx]}
-                onValueChange={([v]) => onSens(v)}
-                aria-label={`${dose.product} dose`}
-              />
-              <div className="flex justify-between text-[10px] text-ink-mute tabular-nums">
-                <span>
-                  {rows[0].amount} {rows[0].unit === "flOz" ? "fl oz" : rows[0].unit}
-                </span>
-                <span className={cn(onRec ? "text-cyan" : "text-ink-dim")}>
-                  {onRec ? "recommended" : "adjusted"}
-                </span>
-                <span>
-                  {rows[rows.length - 1].amount}{" "}
-                  {rows[rows.length - 1].unit === "flOz" ? "fl oz" : rows[rows.length - 1].unit}
-                </span>
+            <div className="space-y-1.5">
+              <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
+                Adjust dose ({stopScale(rows).label})
+              </h3>
+              <div className="flex flex-wrap gap-1.5">
+                {rows.map((r, j) => {
+                  const scale = stopScale(rows)
+                  const selected = j === activeIdx
+                  const isRec = j === recRow
+                  return (
+                    <button
+                      key={j}
+                      type="button"
+                      onClick={() => onSens(j)}
+                      aria-pressed={selected}
+                      className={cn(
+                        "relative h-9 min-w-11 px-2.5 rounded-lg border text-sm tabular-nums",
+                        "transition-colors duration-150 active:scale-[0.96]",
+                        selected
+                          ? "bg-cyan/15 border-cyan/50 text-ink font-medium"
+                          : "border-line-soft bg-[#0E1C2A] text-ink-dim",
+                      )}
+                    >
+                      {trimNum(r.amount / scale.div)}
+                      {isRec && (
+                        <span
+                          className={cn(
+                            "absolute -top-1 -right-1 w-2 h-2 rounded-full",
+                            selected ? "bg-cyan" : "bg-cyan/50",
+                          )}
+                          aria-label="recommended"
+                        />
+                      )}
+                    </button>
+                  )
+                })}
               </div>
+              <p className={cn("text-[10px]", onRec ? "text-cyan" : "text-ink-dim")}>
+                {onRec ? "recommended dose" : "adjusted from recommended"}
+              </p>
             </div>
           )}
 
