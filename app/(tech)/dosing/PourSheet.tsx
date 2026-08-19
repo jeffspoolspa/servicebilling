@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
   ArrowDown,
@@ -174,6 +174,101 @@ function MiniFcDial({ fc, minFc }: { fc: number | null; minFc: number | null }) 
           {fc == null ? "—" : fc.toFixed(1)}
         </span>
       </div>
+    </div>
+  )
+}
+
+// Up to this many stops the grid renders as tappable keys; past it the
+// bar itself becomes the control (draggable, snapping to stops).
+const KEYS_MAX = 9
+
+/**
+ * The dose bar — gradient fill proportional to the selected stop, amount
+ * riding the end. Always draggable: pointer position snaps to the nearest
+ * grid stop. Fill animates on taps, tracks live while dragging.
+ */
+function DoseBar({
+  rows,
+  activeIdx,
+  recIdx,
+  onSens,
+}: {
+  rows: { amount: number; unit: string }[]
+  activeIdx: number
+  recIdx: number
+  onSens: (i: number) => void
+}) {
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [dragging, setDragging] = useState(false)
+  const scale = stopScale(rows)
+  const max = rows[rows.length - 1]?.amount ?? 0
+  const frac = max > 0 ? (rows[activeIdx]?.amount ?? 0) / max : 0
+  const recFrac = max > 0 ? (rows[recIdx]?.amount ?? 0) / max : 0
+
+  const pick = (clientX: number) => {
+    const r = trackRef.current?.getBoundingClientRect()
+    if (!r || r.width === 0 || max === 0) return
+    const f = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
+    let best = 0
+    let bd = Infinity
+    rows.forEach((row, i) => {
+      const d = Math.abs(row.amount / max - f)
+      if (d < bd) {
+        bd = d
+        best = i
+      }
+    })
+    onSens(best)
+  }
+
+  return (
+    <div className="flex items-center gap-3 pt-1">
+      <div
+        ref={trackRef}
+        role="slider"
+        aria-valuemin={0}
+        aria-valuemax={rows.length - 1}
+        aria-valuenow={activeIdx}
+        aria-label="Adjust dose"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowRight") onSens(Math.min(rows.length - 1, activeIdx + 1))
+          if (e.key === "ArrowLeft") onSens(Math.max(0, activeIdx - 1))
+        }}
+        onPointerDown={(e) => {
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId)
+          } catch {
+            /* synthetic events have no active pointer */
+          }
+          setDragging(true)
+          pick(e.clientX)
+        }}
+        onPointerMove={(e) => dragging && pick(e.clientX)}
+        onPointerUp={() => setDragging(false)}
+        onPointerCancel={() => setDragging(false)}
+        className="relative flex-1 py-3 -my-3 touch-none select-none cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40 rounded-full"
+      >
+        <div className="relative h-2.5 rounded-full bg-black/40 border border-line-soft overflow-hidden">
+          <div
+            className={cn(
+              "h-full rounded-full bg-gradient-to-r from-cyan-deep to-cyan ease-out",
+              dragging ? "" : "transition-[width] duration-500",
+            )}
+            style={{ width: `${frac * 100}%` }}
+          />
+        </div>
+        {/* recommended-stop tick, same language as the min-FC band */}
+        {recFrac > 0 && (
+          <span
+            className="absolute top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-full bg-white/60"
+            style={{ left: `${recFrac * 100}%` }}
+          />
+        )}
+      </div>
+      <span className="shrink-0 font-display text-lg text-cyan tabular-nums leading-none">
+        {trimNum((rows[activeIdx]?.amount ?? 0) / scale.div)} {scale.label}
+      </span>
     </div>
   )
 }
@@ -1156,55 +1251,42 @@ function DoseDetailSheet({
               <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
                 Adjust dose ({stopScale(rows).label})
               </h3>
-              <div className="flex flex-wrap gap-1.5">
-                {rows.map((r, j) => {
-                  const scale = stopScale(rows)
-                  const selected = j === activeIdx
-                  const isRec = j === recRow
-                  return (
-                    <button
-                      key={j}
-                      type="button"
-                      onClick={() => onSens(j)}
-                      aria-pressed={selected}
-                      className={cn(
-                        "relative h-9 min-w-11 px-2.5 rounded-lg border text-sm tabular-nums",
-                        "transition-colors duration-150 active:scale-[0.96]",
-                        selected
-                          ? "bg-cyan/15 border-cyan/50 text-ink font-medium"
-                          : "border-line-soft bg-[#0E1C2A] text-ink-dim",
-                      )}
-                    >
-                      {trimNum(r.amount / scale.div)}
-                      {isRec && (
-                        <span
-                          className={cn(
-                            "absolute -top-1 -right-1 w-2 h-2 rounded-full",
-                            selected ? "bg-cyan" : "bg-cyan/50",
-                          )}
-                          aria-label="recommended"
-                        />
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-              {/* The keys move the bar; the dose rides its end (Perfect
-                  Pools residential-page treatment). Fill is proportional to
-                  the largest stop on this product's grid. */}
-              <div className="flex items-center gap-3 pt-1">
-                <div className="flex-1 h-2.5 rounded-full bg-black/40 border border-line-soft overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-cyan-deep to-cyan transition-[width] duration-500 ease-out"
-                    style={{
-                      width: `${rows.length && rows[rows.length - 1].amount > 0 ? ((row?.amount ?? 0) / rows[rows.length - 1].amount) * 100 : 0}%`,
-                    }}
-                  />
+              {rows.length <= KEYS_MAX && (
+                <div className="flex flex-wrap gap-1.5">
+                  {rows.map((r, j) => {
+                    const scale = stopScale(rows)
+                    const selected = j === activeIdx
+                    const isRec = j === recRow
+                    return (
+                      <button
+                        key={j}
+                        type="button"
+                        onClick={() => onSens(j)}
+                        aria-pressed={selected}
+                        className={cn(
+                          "relative h-9 min-w-11 px-2.5 rounded-lg border text-sm tabular-nums",
+                          "transition-colors duration-150 active:scale-[0.96]",
+                          selected
+                            ? "bg-cyan/15 border-cyan/50 text-ink font-medium"
+                            : "border-line-soft bg-[#0E1C2A] text-ink-dim",
+                        )}
+                      >
+                        {trimNum(r.amount / scale.div)}
+                        {isRec && (
+                          <span
+                            className={cn(
+                              "absolute -top-1 -right-1 w-2 h-2 rounded-full",
+                              selected ? "bg-cyan" : "bg-cyan/50",
+                            )}
+                            aria-label="recommended"
+                          />
+                        )}
+                      </button>
+                    )
+                  })}
                 </div>
-                <span className="shrink-0 font-display text-lg text-cyan tabular-nums leading-none">
-                  {trimNum((row?.amount ?? 0) / rowScale.div)} {rowScale.label}
-                </span>
-              </div>
+              )}
+              <DoseBar rows={rows} activeIdx={activeIdx} recIdx={recRow} onSens={onSens} />
               <p className={cn("text-[10px]", onRec ? "text-cyan" : "text-ink-dim")}>
                 {onRec ? "recommended dose" : "adjusted from recommended"}
               </p>
@@ -1253,21 +1335,21 @@ function DoseDetailSheet({
               <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
                 What this dose does
               </h3>
-              {/* actual (this dose's change) → predicted, per reading */}
-              {Object.entries(shownEffects ?? {})
-                .filter(([k]) => k !== "saturationIndex" && k !== "minimumFreeChlorine")
-                .map(([k, delta]) => {
-                  const digits = k === "ph" ? 1 : 0
-                  const deltaText =
-                    k === "ph" ? delta.toFixed(1) : `${Math.round(delta)} ppm`
-                  return (
-                    <div key={k} className="flex items-center justify-between text-sm gap-2">
-                      <span className="text-ink-dim shrink-0">{LABEL_NAMES[k] ?? humanize(k)}</span>
-                      <span className="flex items-center gap-1.5 tabular-nums min-w-0">
-                        <span className="text-ink-mute">{fmt(sampleValue(actual, k), digits)}</span>
+              {/* actual (this dose's change) → predicted — table-aligned */}
+              <div className="grid grid-cols-[minmax(0,1fr)_max-content_max-content_max-content_max-content] items-center gap-x-2.5 gap-y-2">
+                {Object.entries(shownEffects ?? {})
+                  .filter(([k]) => k !== "saturationIndex" && k !== "minimumFreeChlorine")
+                  .map(([k, delta]) => {
+                    const digits = k === "ph" ? 1 : 0
+                    const deltaText =
+                      k === "ph" ? delta.toFixed(1) : `${Math.round(delta)} ppm`
+                    return (
+                      <div key={k} className="contents text-sm tabular-nums">
+                        <span className="text-ink-dim truncate">{LABEL_NAMES[k] ?? humanize(k)}</span>
+                        <span className="text-ink-mute text-right">{fmt(sampleValue(actual, k), digits)}</span>
                         <span
                           className={cn(
-                            "text-[11px]",
+                            "text-[11px] text-right",
                             delta >= 0 ? "text-emerald-300" : "text-red-300",
                           )}
                         >
@@ -1275,11 +1357,11 @@ function DoseDetailSheet({
                           {deltaText}
                         </span>
                         <span className="text-ink-mute">→</span>
-                        <span className="text-ink">{fmt(sampleValue(predicted, k), digits)}</span>
-                      </span>
-                    </div>
-                  )
-                })}
+                        <span className="text-ink text-right">{fmt(sampleValue(predicted, k), digits)}</span>
+                      </div>
+                    )
+                  })}
+              </div>
               {/* Derived indicators: mini dials showing where the water LANDS
                   (current selections), with this dose's contribution below */}
               {(shownEffects?.saturationIndex != null || shownEffects?.minimumFreeChlorine != null) && (
