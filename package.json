@@ -16,6 +16,7 @@
     "set-password": "tsx scripts/set-password.ts"
   },
   "dependencies": {
+    "@radix-ui/react-slider": "^1.4.7",
     "@ringcentral/sdk": "^5.0.11",
     "@sparticuz/chromium": "^147.0.0",
     "@supabase/ssr": "^0.5.2",
