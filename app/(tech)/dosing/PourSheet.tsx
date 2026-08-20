@@ -57,7 +57,8 @@ const WARNING_TITLES: Record<string, string> = {
   "shock-fc-below-minimum": "Shock needed — FC below minimum",
 }
 
-// TEST BRANCH: dose stops as tappable keys instead of a slider.
+// The Phantom-style dose picker (tape + Min/Max). Kill switch if a device
+// issue surfaces in the field.
 const SHOW_DOSE_SLIDER = true
 
 /**
