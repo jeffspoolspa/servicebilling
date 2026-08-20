@@ -70,205 +70,104 @@ function trimNum(n: number): string {
   return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)))
 }
 
-const MINI = { size: 68, r: 26, stroke: 6, sweep: 0.75, fcScale: 20 }
-
-/** Compact LSI scale — same zones/dot as the hero dial, tile-sized. */
-function MiniLsiDial({ lsi }: { lsi: number | null }) {
-  const { size, r, stroke, sweep } = MINI
-  const c = 2 * Math.PI * r
-  const frac = lsi == null ? 0 : (Math.max(-1, Math.min(1, lsi)) + 1) / 2
-  const state = lsi == null ? null : lsi < -0.3 ? "corrosive" : lsi > 0.3 ? "scaling" : "balanced"
-  const color =
-    state === "balanced" ? "#34d399" : state === "scaling" ? "#fbbf24" : state ? "#f87171" : "#64748b"
-  return (
-    <div className="relative" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <g transform={`rotate(135 ${size / 2} ${size / 2})`}>
-          {(
-            [
-              [0, 0.35, "#f87171"],
-              [0.35, 0.65, "#34d399"],
-              [0.65, 1, "#fbbf24"],
-            ] as const
-          ).map(([from, to, zone]) => (
-            <circle
-              key={zone}
-              cx={size / 2} cy={size / 2} r={r} fill="none"
-              stroke={zone} strokeWidth={stroke} strokeLinecap="butt"
-              strokeDasharray={`${(to - from) * sweep * c} ${c}`}
-              strokeDashoffset={-(from * sweep * c)}
-            />
-          ))}
-          {lsi != null && (
-            <g
-              style={{
-                transform: `rotate(${frac * sweep * 360}deg)`,
-                transformOrigin: "50% 50%",
-                transition: "transform 500ms cubic-bezier(0.4,0,0.2,1)",
-              }}
-            >
-              <circle cx={size / 2 + r} cy={size / 2} r={stroke / 2 + 1.5} fill="#ffffff" stroke="#0C1A28" strokeWidth={1.5} />
-            </g>
-          )}
-        </g>
-      </svg>
-      <div className="absolute inset-0 grid place-items-center">
-        <span className="text-xs font-display font-bold tabular-nums" style={{ color }}>
-          {lsi == null ? "—" : lsi.toFixed(2)}
-        </span>
-      </div>
-    </div>
-  )
-}
-
-/** Compact FC-vs-min ring — same semantics as the hero sanitation dial. */
-function MiniFcDial({ fc, minFc }: { fc: number | null; minFc: number | null }) {
-  const { size, r, stroke, fcScale } = MINI
-  const c = 2 * Math.PI * r
-  const cx = size / 2
-  const fcFrac = fc != null ? Math.max(0.02, Math.min(1, fc / fcScale)) : 0
-  const minFrac = minFc != null ? Math.min(1, minFc / fcScale) : null
-  const ok = fc != null && minFc != null && fc >= minFc
-  return (
-    <div className="relative" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <circle cx={cx} cy={cx} r={r} fill="none" stroke="#ffffff14" strokeWidth={stroke} />
-        {minFrac != null && minFrac > fcFrac && (
-          <path
-            d={(() => {
-              const a0 = -Math.PI / 2 + fcFrac * 2 * Math.PI
-              const a1 = -Math.PI / 2 + Math.min(0.999, minFrac) * 2 * Math.PI
-              const large = minFrac - fcFrac > 0.5 ? 1 : 0
-              return `M ${cx + r * Math.cos(a0)} ${cx + r * Math.sin(a0)} A ${r} ${r} 0 ${large} 1 ${cx + r * Math.cos(a1)} ${cx + r * Math.sin(a1)}`
-            })()}
-            fill="none" stroke="#3e4c5e" strokeWidth={stroke} strokeLinecap="butt"
-          />
-        )}
-        {fcFrac > 0 && (
-          <circle
-            cx={cx} cy={cx} r={r} fill="none"
-            stroke="#0093E7" strokeWidth={stroke}
-            strokeDasharray={`${fcFrac * c} ${c}`}
-            transform={`rotate(-90 ${cx} ${cx})`}
-            style={{ transition: "stroke-dasharray 500ms cubic-bezier(0.4,0,0.2,1)" }}
-          />
-        )}
-        {minFrac != null && minFrac > 0 && (
-          (() => {
-            const a = -Math.PI / 2 + minFrac * 2 * Math.PI
-            return (
-              <line
-                x1={cx + (r - stroke / 2) * Math.cos(a)} y1={cx + (r - stroke / 2) * Math.sin(a)}
-                x2={cx + (r + stroke / 2) * Math.cos(a)} y2={cx + (r + stroke / 2) * Math.sin(a)}
-                stroke="#e2e8f0" strokeWidth={2} strokeLinecap="butt"
-              />
-            )
-          })()
-        )}
-      </svg>
-      <div className="absolute inset-0 grid place-items-center">
-        <span
-          className="text-xs font-display font-bold tabular-nums"
-          style={{ color: fc == null ? "#64748b" : ok ? "#34d399" : "#f87171" }}
-        >
-          {fc == null ? "—" : fc.toFixed(1)}
-        </span>
-      </div>
-    </div>
-  )
-}
-
-// Up to this many stops the grid renders as tappable keys; past it the
-// bar itself becomes the control (draggable, snapping to stops).
-const KEYS_MAX = 9
-
 /**
- * The dose bar — gradient fill proportional to the selected stop, amount
- * riding the end. Always draggable: pointer position snaps to the nearest
- * grid stop. Fill animates on taps, tracks live while dragging.
+ * The dose picker — the Phantom leverage-picker layout: Min / big selected
+ * amount / Max, then a horizontal ruler with the amount ABOVE each tick.
+ * The selected stop hides behind the fixed centre line (the big value shows
+ * it); the recommended stop's tick is cyan. Native scroll with snap — the
+ * tape leads, state follows.
  */
-function DoseBar({
+const TAPE_ITEM = 56
+
+function DoseTape({
   rows,
   activeIdx,
   recIdx,
+  amountLabel,
   onSens,
 }: {
   rows: { amount: number; unit: string }[]
   activeIdx: number
   recIdx: number
+  amountLabel: string
   onSens: (i: number) => void
 }) {
-  const trackRef = useRef<HTMLDivElement>(null)
-  const [dragging, setDragging] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
   const scale = stopScale(rows)
-  const max = rows[rows.length - 1]?.amount ?? 0
-  const frac = max > 0 ? (rows[activeIdx]?.amount ?? 0) / max : 0
-  const recFrac = max > 0 ? (rows[recIdx]?.amount ?? 0) / max : 0
+  // Taps commit the stop directly — the smooth scroll is just the visual
+  // catch-up, so a swallowed scroll event can't strand the selection.
+  const jump = (i: number) => {
+    onSens(i)
+    ref.current?.scrollTo({ left: i * TAPE_ITEM, behavior: "smooth" })
+  }
 
-  const pick = (clientX: number) => {
-    const r = trackRef.current?.getBoundingClientRect()
-    if (!r || r.width === 0 || max === 0) return
-    const f = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
-    let best = 0
-    let bd = Infinity
-    rows.forEach((row, i) => {
-      const d = Math.abs(row.amount / max - f)
-      if (d < bd) {
-        bd = d
-        best = i
-      }
-    })
-    onSens(best)
+  // Centre the selected stop on mount only — after that the tape leads and
+  // state follows (the wheel-picker pattern, rotated 90 degrees).
+  useEffect(() => {
+    ref.current?.scrollTo({ left: activeIdx * TAPE_ITEM })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const onScroll = () => {
+    const el = ref.current
+    if (!el) return
+    const idx = Math.max(0, Math.min(rows.length - 1, Math.round(el.scrollLeft / TAPE_ITEM)))
+    if (idx !== activeIdx) onSens(idx)
   }
 
   return (
-    <div className="flex items-center gap-3 pt-1">
-      <div
-        ref={trackRef}
-        role="slider"
-        aria-valuemin={0}
-        aria-valuemax={rows.length - 1}
-        aria-valuenow={activeIdx}
-        aria-label="Adjust dose"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowRight") onSens(Math.min(rows.length - 1, activeIdx + 1))
-          if (e.key === "ArrowLeft") onSens(Math.max(0, activeIdx - 1))
-        }}
-        onPointerDown={(e) => {
-          try {
-            e.currentTarget.setPointerCapture(e.pointerId)
-          } catch {
-            /* synthetic events have no active pointer */
-          }
-          setDragging(true)
-          pick(e.clientX)
-        }}
-        onPointerMove={(e) => dragging && pick(e.clientX)}
-        onPointerUp={() => setDragging(false)}
-        onPointerCancel={() => setDragging(false)}
-        className="relative flex-1 py-3 -my-3 touch-none select-none cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40 rounded-full"
-      >
-        <div className="relative h-2.5 rounded-full bg-black/40 border border-line-soft overflow-hidden">
-          <div
-            className={cn(
-              "h-full rounded-full bg-gradient-to-r from-cyan-deep to-cyan ease-out",
-              dragging ? "" : "transition-[width] duration-500",
-            )}
-            style={{ width: `${frac * 100}%` }}
-          />
-        </div>
-        {/* recommended-stop tick, same language as the min-FC band */}
-        {recFrac > 0 && (
-          <span
-            className="absolute top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-full bg-white/60"
-            style={{ left: `${recFrac * 100}%` }}
-          />
-        )}
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => jump(0)}
+          className="px-4 py-2 rounded-xl bg-white/10 text-sm text-ink-dim active:scale-95 transition-transform"
+        >
+          Min
+        </button>
+        <span className="text-3xl font-display text-ink tabular-nums">{amountLabel}</span>
+        <button
+          type="button"
+          onClick={() => jump(rows.length - 1)}
+          className="px-4 py-2 rounded-xl bg-white/10 text-sm text-ink-dim active:scale-95 transition-transform"
+        >
+          Max
+        </button>
       </div>
-      <span className="shrink-0 font-display text-lg text-cyan tabular-nums leading-none">
-        {trimNum((rows[activeIdx]?.amount ?? 0) / scale.div)} {scale.label}
-      </span>
+      <div className="relative -mx-5">
+        <div
+          ref={ref}
+          onScroll={onScroll}
+          className="overflow-x-auto snap-x snap-mandatory flex touch-pan-x select-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          style={{ paddingLeft: `calc(50% - ${TAPE_ITEM / 2}px)`, paddingRight: `calc(50% - ${TAPE_ITEM / 2}px)` }}
+        >
+          {rows.map((r, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => jump(i)}
+              className={cn(
+                "snap-center shrink-0 flex flex-col items-center gap-1.5 pt-1 pb-1.5",
+                "transition-opacity duration-150",
+                i === activeIdx && "opacity-0",
+              )}
+              style={{ width: TAPE_ITEM }}
+            >
+              <span className="text-sm tabular-nums text-ink-mute">
+                {trimNum(r.amount / scale.div)}
+              </span>
+              <span
+                className={cn("w-px rounded-full", i === recIdx ? "h-4 bg-cyan" : "h-4 bg-white/20")}
+              />
+            </button>
+          ))}
+        </div>
+        {/* fixed centre indicator — stands in for the hidden selected stop */}
+        <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 inset-y-0 w-0.5 rounded-full bg-white" />
+        {/* edge fades */}
+        <span className="pointer-events-none absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-bg-elev to-transparent" />
+        <span className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-bg-elev to-transparent" />
+      </div>
     </div>
   )
 }
@@ -1200,10 +1099,17 @@ function DoseDetailSheet({
   const onRec = rows.length === 0 || activeIdx === recRow
   const row = rows[activeIdx]
   const rowScale = stopScale(rows)
-  const shownAmount = onRec
-    ? dose.displayAmount
-    : `${trimNum((row?.amount ?? 0) / rowScale.div)} ${rowScale.label}`
-  const shownEffects = onRec ? dose.effects : (row?.effects ?? dose.effects)
+  // "48 fl oz" / "0.5 gal" — no pour-time parenthetical here, the picker
+  // shows the bare amount (Phantom-style).
+  const shownAmount = row
+    ? `${trimNum(row.amount / rowScale.div)} ${rowScale.label}`
+    : dose.displayAmount.replace(/\s*\(.*\)$/, "")
+  // Row set comes from the dose's own effects (stable keys); the VALUES are
+  // the composed predicted sample, so the rows live-track the tape — and
+  // survive the 0-amount skip stop, whose effects are empty.
+  const effectKeys = Object.keys(dose.effects ?? {}).filter(
+    (k) => k !== "saturationIndex" && k !== "minimumFreeChlorine",
+  )
   const dismiss = () => {
     if (closing) return
     setClosing(true)
@@ -1244,52 +1150,50 @@ function DoseDetailSheet({
         </div>
 
         <div className="px-5 pt-3 pb-1 space-y-4">
-          <div className="text-2xl text-cyan font-display">{shownAmount}</div>
+          {SHOW_DOSE_SLIDER && rows.length > 1 ? (
+            <DoseTape
+              rows={rows}
+              activeIdx={activeIdx}
+              recIdx={recRow}
+              amountLabel={shownAmount}
+              onSens={onSens}
+            />
+          ) : (
+            <div className="text-2xl text-cyan font-display">{shownAmount}</div>
+          )}
 
-          {SHOW_DOSE_SLIDER && rows.length > 1 && (
-            <div className="space-y-1.5">
-              <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
-                Adjust dose ({stopScale(rows).label})
-              </h3>
-              {rows.length <= KEYS_MAX && (
-                <div className="flex flex-wrap gap-1.5">
-                  {rows.map((r, j) => {
-                    const scale = stopScale(rows)
-                    const selected = j === activeIdx
-                    const isRec = j === recRow
-                    return (
-                      <button
-                        key={j}
-                        type="button"
-                        onClick={() => onSens(j)}
-                        aria-pressed={selected}
-                        className={cn(
-                          "relative h-9 min-w-11 px-2.5 rounded-lg border text-sm tabular-nums",
-                          "transition-colors duration-150 active:scale-[0.96]",
-                          selected
-                            ? "bg-cyan/15 border-cyan/50 text-ink font-medium"
-                            : "border-line-soft bg-[#0E1C2A] text-ink-dim",
-                        )}
-                      >
-                        {trimNum(r.amount / scale.div)}
-                        {isRec && (
-                          <span
-                            className={cn(
-                              "absolute -top-1 -right-1 w-2 h-2 rounded-full",
-                              selected ? "bg-cyan" : "bg-cyan/50",
-                            )}
-                            aria-label="recommended"
-                          />
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-              <DoseBar rows={rows} activeIdx={activeIdx} recIdx={recRow} onSens={onSens} />
-              <p className={cn("text-[10px]", onRec ? "text-cyan" : "text-ink-dim")}>
-                {onRec ? "recommended dose" : "adjusted from recommended"}
-              </p>
+          {effectKeys.length > 0 && (
+            <div className="space-y-2">
+              {effectKeys.map((k) => {
+                const digits = k === "ph" ? 1 : 0
+                const delta =
+                  (onRec ? dose.effects : (row?.effects ?? {}))?.[k] ?? 0
+                return (
+                  <div
+                    key={k}
+                    className="grid grid-cols-[minmax(0,1fr)_3.25rem_3.25rem_3.25rem] items-center rounded-2xl bg-white/[0.06] px-4 py-3.5"
+                  >
+                    <span className="text-sm text-ink-dim truncate">
+                      {LABEL_NAMES[k] ?? humanize(k)}
+                    </span>
+                    <span className="text-sm text-ink-mute tabular-nums text-right">
+                      {fmt(sampleValue(actual, k), digits)}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-sm tabular-nums text-right",
+                        delta >= 0 ? "text-emerald-300" : "text-red-300",
+                      )}
+                    >
+                      {delta >= 0 ? "+" : ""}
+                      {k === "ph" ? delta.toFixed(1) : Math.round(delta)}
+                    </span>
+                    <span className="text-sm text-ink tabular-nums text-right">
+                      {fmt(sampleValue(predicted, k), digits)}
+                    </span>
+                  </div>
+                )
+              })}
             </div>
           )}
 
@@ -1318,91 +1222,6 @@ function DoseDetailSheet({
                   {j === chosenIdx && <Check className="w-4 h-4 text-cyan" strokeWidth={2.2} />}
                 </button>
               ))}
-            </div>
-          )}
-
-          {dose.instruction && (
-            <div className="space-y-1.5">
-              <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
-                How to add it
-              </h3>
-              <p className="text-sm text-ink-dim leading-relaxed">{dose.instruction}</p>
-            </div>
-          )}
-
-          {shownEffects && Object.keys(shownEffects).length > 0 && (
-            <div className="space-y-2.5">
-              <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
-                What this dose does
-              </h3>
-              {/* actual (this dose's change) → predicted — table-aligned */}
-              <div className="grid grid-cols-[minmax(0,1fr)_max-content_max-content_max-content_max-content] items-center gap-x-2.5 gap-y-2">
-                {Object.entries(shownEffects ?? {})
-                  .filter(([k]) => k !== "saturationIndex" && k !== "minimumFreeChlorine")
-                  .map(([k, delta]) => {
-                    const digits = k === "ph" ? 1 : 0
-                    const deltaText =
-                      k === "ph" ? delta.toFixed(1) : `${Math.round(delta)} ppm`
-                    return (
-                      <div key={k} className="contents text-sm tabular-nums">
-                        <span className="text-ink-dim truncate">{LABEL_NAMES[k] ?? humanize(k)}</span>
-                        <span className="text-ink-mute text-right">{fmt(sampleValue(actual, k), digits)}</span>
-                        <span
-                          className={cn(
-                            "text-[11px] text-right",
-                            delta >= 0 ? "text-emerald-300" : "text-red-300",
-                          )}
-                        >
-                          {delta >= 0 ? "+" : ""}
-                          {deltaText}
-                        </span>
-                        <span className="text-ink-mute">→</span>
-                        <span className="text-ink text-right">{fmt(sampleValue(predicted, k), digits)}</span>
-                      </div>
-                    )
-                  })}
-              </div>
-              {/* Derived indicators: mini dials showing where the water LANDS
-                  (current selections), with this dose's contribution below */}
-              {(shownEffects?.saturationIndex != null || shownEffects?.minimumFreeChlorine != null) && (
-                <div className="grid grid-cols-2 gap-2.5 pt-1">
-                  {shownEffects.saturationIndex != null && (
-                    <div className="rounded-xl border border-line-soft bg-[#0E1C2A] py-3 flex flex-col items-center gap-1">
-                      <MiniLsiDial lsi={predicted.saturationIndex ?? null} />
-                      <span
-                        className={cn(
-                          "text-[11px] tabular-nums",
-                          shownEffects.saturationIndex >= 0 ? "text-emerald-300" : "text-red-300",
-                        )}
-                      >
-                        {shownEffects.saturationIndex >= 0 ? "+" : ""}
-                        {shownEffects.saturationIndex.toFixed(2)} from this dose
-                      </span>
-                      <span className="text-[10px] uppercase tracking-widest text-ink-mute">LSI</span>
-                    </div>
-                  )}
-                  {shownEffects.minimumFreeChlorine != null && (
-                    <div className="rounded-xl border border-line-soft bg-[#0E1C2A] py-3 flex flex-col items-center gap-1">
-                      <MiniFcDial
-                        fc={predicted.freeChlorine ?? null}
-                        minFc={predicted.minimumFreeChlorine ?? null}
-                      />
-                      <span
-                        className={cn(
-                          "text-[11px] tabular-nums",
-                          shownEffects.minimumFreeChlorine >= 0 ? "text-emerald-300" : "text-red-300",
-                        )}
-                      >
-                        {shownEffects.minimumFreeChlorine >= 0 ? "+" : ""}
-                        {shownEffects.minimumFreeChlorine.toFixed(1)} min from this dose
-                      </span>
-                      <span className="text-[10px] uppercase tracking-widest text-ink-mute">
-                        FC {fmt(predicted.freeChlorine, 1)} · min {fmt(predicted.minimumFreeChlorine, 1)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           )}
 
