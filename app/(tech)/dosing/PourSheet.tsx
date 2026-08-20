@@ -1205,18 +1205,16 @@ function DoseDetailSheet({
                   >
                     <span className="text-sm text-ink-dim truncate">
                       {LABEL_NAMES[k] ?? humanize(k)}
+                      {UNIT_LABELS[k] && (
+                        <span className="text-[10px] text-ink-mute"> ({UNIT_LABELS[k]})</span>
+                      )}
                     </span>
                     {cells.map(([label, value, tone]) => (
                       <span key={label} className="flex flex-col items-center gap-0.5">
                         <span className="text-[9px] uppercase tracking-wide text-ink-mute">
                           {label}
                         </span>
-                        <span className={cn("text-sm tabular-nums", tone)}>
-                          {value}
-                          {UNIT_LABELS[k] && (
-                            <span className="text-[8px] text-ink-mute ml-0.5">{UNIT_LABELS[k]}</span>
-                          )}
-                        </span>
+                        <span className={cn("text-sm tabular-nums", tone)}>{value}</span>
                       </span>
                     ))}
                   </div>
