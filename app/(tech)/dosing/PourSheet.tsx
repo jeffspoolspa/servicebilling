@@ -34,6 +34,12 @@ const LABEL_NAMES: Record<string, string> = {
   carbonateAlkalinity: "Carb Alk",
 }
 
+/** Unit suffix per reading key — pH is unitless. */
+const UNIT_LABELS: Record<string, string> = {
+  ...Object.fromEntries(READING_FIELDS.map((f) => [f.key, f.unit])),
+  carbonateAlkalinity: "ppm",
+}
+
 /** "shock-fc-below-minimum" / "measuredPpm" → readable words — fallback for
  * codes we don't have friendlier copy for. */
 function humanize(code: string) {
@@ -1205,7 +1211,12 @@ function DoseDetailSheet({
                         <span className="text-[9px] uppercase tracking-wide text-ink-mute">
                           {label}
                         </span>
-                        <span className={cn("text-sm tabular-nums", tone)}>{value}</span>
+                        <span className={cn("text-sm tabular-nums", tone)}>
+                          {value}
+                          {UNIT_LABELS[k] && (
+                            <span className="text-[8px] text-ink-mute ml-0.5">{UNIT_LABELS[k]}</span>
+                          )}
+                        </span>
                       </span>
                     ))}
                   </div>
