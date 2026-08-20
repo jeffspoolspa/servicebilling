@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
   ArrowDown,
@@ -16,7 +16,6 @@ import {
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
-import { Slider } from "@/components/ui/slider"
 import {
   ASSUMED_LABELS,
   READING_FIELDS,
@@ -33,6 +32,12 @@ const LABEL_NAMES: Record<string, string> = {
   minimumFreeChlorine: "Min FC",
   driftCeilingPh: "pH drift ceiling",
   carbonateAlkalinity: "Carb Alk",
+}
+
+/** Unit suffix per reading key — pH is unitless. */
+const UNIT_LABELS: Record<string, string> = {
+  ...Object.fromEntries(READING_FIELDS.map((f) => [f.key, f.unit])),
+  carbonateAlkalinity: "ppm",
 }
 
 /** "shock-fc-below-minimum" / "measuredPpm" → readable words — fallback for
@@ -52,9 +57,145 @@ const WARNING_TITLES: Record<string, string> = {
   "shock-fc-below-minimum": "Shock needed — FC below minimum",
 }
 
-// The dose slider is parked while we tune the touch feel — flip on to play
-// with it; the selection plumbing underneath stays live either way.
-const SHOW_DOSE_SLIDER = false
+// The Phantom-style dose picker (tape + Min/Max). Kill switch if a device
+// issue surfaces in the field.
+const SHOW_DOSE_SLIDER = true
+
+/**
+ * Stops arrive in the dose's RAW unit (flOz / lb) while displayAmount is
+ * humanized (gal). When every stop sits on the half-gallon grid, present
+ * the keys in gallons — formatting only, never chemistry.
+ */
+function stopScale(rows: { amount: number; unit: string }[]): { div: number; label: string } {
+  if (rows.length && rows[0].unit === "flOz" && rows.every((r) => r.amount % 64 === 0)) {
+    return { div: 128, label: "gal" }
+  }
+  return { div: 1, label: rows[0]?.unit === "flOz" ? "fl oz" : (rows[0]?.unit ?? "") }
+}
+
+function trimNum(n: number): string {
+  return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)))
+}
+
+/**
+ * The dose picker — the Phantom leverage-picker layout: Min / big selected
+ * amount / Max, then a horizontal ruler with the amount ABOVE each tick.
+ * The selected stop hides behind the fixed centre line (the big value shows
+ * it); the recommended stop's tick is cyan. Native scroll with snap — the
+ * tape leads, state follows.
+ */
+const TAPE_ITEM = 56
+
+function DoseTape({
+  rows,
+  activeIdx,
+  recIdx,
+  amountLabel,
+  onSens,
+}: {
+  rows: { amount: number; unit: string }[]
+  activeIdx: number
+  recIdx: number
+  amountLabel: string
+  onSens: (i: number) => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const scale = stopScale(rows)
+  // Taps commit the stop directly — the smooth scroll is just the visual
+  // catch-up, so a swallowed scroll event can't strand the selection.
+  const jump = (i: number) => {
+    onSens(i)
+    ref.current?.scrollTo({ left: i * TAPE_ITEM, behavior: "smooth" })
+  }
+
+  // Centre the selected stop on mount only — after that the tape leads and
+  // state follows (the wheel-picker pattern, rotated 90 degrees).
+  useEffect(() => {
+    ref.current?.scrollTo({ left: activeIdx * TAPE_ITEM })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const onScroll = () => {
+    const el = ref.current
+    if (!el) return
+    const idx = Math.max(0, Math.min(rows.length - 1, Math.round(el.scrollLeft / TAPE_ITEM)))
+    if (idx !== activeIdx) onSens(idx)
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => jump(0)}
+          className="px-4 py-2 rounded-xl bg-white/10 text-sm text-ink-dim active:scale-95 transition-transform"
+        >
+          Min
+        </button>
+        <span className="flex flex-col items-center">
+          {/* kept in the layout when off-recommendation so the row doesn't jump */}
+          <span
+            className={cn(
+              "text-[10px] uppercase tracking-wide text-cyan transition-opacity duration-150",
+              activeIdx === recIdx ? "opacity-100" : "opacity-0",
+            )}
+          >
+            Recommended
+          </span>
+          <span
+            className={cn(
+              "text-3xl font-display tabular-nums transition-colors duration-150",
+              activeIdx === recIdx ? "text-cyan" : "text-ink",
+            )}
+          >
+            {amountLabel}
+          </span>
+        </span>
+        <button
+          type="button"
+          onClick={() => jump(rows.length - 1)}
+          className="px-4 py-2 rounded-xl bg-white/10 text-sm text-ink-dim active:scale-95 transition-transform"
+        >
+          Max
+        </button>
+      </div>
+      <div className="relative -mx-5">
+        <div
+          ref={ref}
+          onScroll={onScroll}
+          className="overflow-x-auto snap-x snap-mandatory flex touch-pan-x select-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          style={{ paddingLeft: `calc(50% - ${TAPE_ITEM / 2}px)`, paddingRight: `calc(50% - ${TAPE_ITEM / 2}px)` }}
+        >
+          {rows.map((r, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => jump(i)}
+              className={cn(
+                "snap-center shrink-0 flex flex-col items-center gap-1.5 pt-1 pb-1.5",
+                "transition-opacity duration-150",
+                i === activeIdx && "opacity-0",
+              )}
+              style={{ width: TAPE_ITEM }}
+            >
+              <span className="text-sm tabular-nums text-ink-mute">
+                {trimNum(r.amount / scale.div)}
+              </span>
+              <span
+                className={cn("w-px rounded-full", i === recIdx ? "h-4 bg-cyan" : "h-4 bg-white/20")}
+              />
+            </button>
+          ))}
+        </div>
+        {/* fixed centre indicator — stands in for the hidden selected stop */}
+        <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 inset-y-0 w-0.5 rounded-full bg-white" />
+        {/* edge fades */}
+        <span className="pointer-events-none absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-bg-elev to-transparent" />
+        <span className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-bg-elev to-transparent" />
+      </div>
+    </div>
+  )
+}
 
 const CAUTION_LABELS: Record<string, string> = {
   "separate-pour": "Pour this alone — circulate before adding anything else.",
@@ -763,8 +904,9 @@ export function PourSheet({
               const offGrid = rows && sensIdx != null && sensIdx !== recRow
               // "6 fl oz (~1.5s pour · ~5% of the jug)" → chip + hint; an
               // adjusted slider stop labels from its own amount + unit.
+              const rowScale = rows ? stopScale(rows) : null
               const [, main, hint] = offGrid
-                ? [undefined, `${rows[sensIdx]?.amount} ${chosen.unit === "flOz" ? "fl oz" : chosen.unit}`, undefined]
+                ? [undefined, `${trimNum((rows[sensIdx]?.amount ?? 0) / (rowScale?.div ?? 1))} ${rowScale?.label ?? ""}`, undefined]
                 : (chosen.displayAmount.match(/^([^(]+?)(?:\s*\((.+)\))?$/) ?? [])
               // The algae toggle lives on the chlorine card.
               const isChlorine = "freeChlorine" in (d.effects ?? {})
@@ -889,6 +1031,8 @@ export function PourSheet({
                 setChoice((c) => ({ ...c, [detailFor]: j }))
                 setSens((v) => ({ ...v, [detailFor]: undefined }))
               }}
+              actual={samples.actual}
+              predicted={predicted}
               sensIdx={SHOW_DOSE_SLIDER ? sens[detailFor] : undefined}
               onSens={(j) => setSens((v) => ({ ...v, [detailFor]: j }))}
               onClose={() => setDetailFor(null)}
@@ -955,6 +1099,8 @@ function DoseDetailSheet({
   options,
   chosenIdx,
   onPick,
+  actual,
+  predicted,
   sensIdx,
   onSens,
   onClose,
@@ -963,6 +1109,9 @@ function DoseDetailSheet({
   options: DoseOption[]
   chosenIdx: number
   onPick: (i: number) => void
+  /** Measured sample and the CURRENT derived predicted (all selections). */
+  actual: Sample
+  predicted: Sample
   /** Selected pour-grid stop (undefined = the recommended one). */
   sensIdx: number | undefined
   onSens: (i: number) => void
@@ -974,10 +1123,18 @@ function DoseDetailSheet({
   const activeIdx = sensIdx ?? (recRow >= 0 ? recRow : 0)
   const onRec = rows.length === 0 || activeIdx === recRow
   const row = rows[activeIdx]
-  const shownAmount = onRec
-    ? dose.displayAmount
-    : `${row?.amount} ${dose.unit === "flOz" ? "fl oz" : dose.unit}`
-  const shownEffects = onRec ? dose.effects : (row?.effects ?? dose.effects)
+  const rowScale = stopScale(rows)
+  // "48 fl oz" / "0.5 gal" — no pour-time parenthetical here, the picker
+  // shows the bare amount (Phantom-style).
+  const shownAmount = row
+    ? `${trimNum(row.amount / rowScale.div)} ${rowScale.label}`
+    : dose.displayAmount.replace(/\s*\(.*\)$/, "")
+  // Row set comes from the dose's own effects (stable keys); the VALUES are
+  // the composed predicted sample, so the rows live-track the tape — and
+  // survive the 0-amount skip stop, whose effects are empty.
+  const effectKeys = Object.keys(dose.effects ?? {}).filter(
+    (k) => k !== "saturationIndex" && k !== "minimumFreeChlorine",
+  )
   const dismiss = () => {
     if (closing) return
     setClosing(true)
@@ -1006,7 +1163,19 @@ function DoseDetailSheet({
       >
         <div className="w-10 h-1.5 rounded-full bg-line-soft mx-auto mt-2" />
         <div className="flex items-center justify-between px-5 pt-3">
-          <h2 className="font-display text-base">{dose.product}</h2>
+          <div className="min-w-0 flex items-center gap-2.5">
+            <h2 className="font-display text-base whitespace-nowrap">{dose.product}</h2>
+            {options.length > 1 && (
+              <button
+                type="button"
+                onClick={() => onPick((chosenIdx + 1) % options.length)}
+                className="inline-flex items-center gap-1 text-[11px] text-cyan active:opacity-70 min-w-0"
+              >
+                <ArrowLeftRight className="w-3 h-3 shrink-0" strokeWidth={2} />
+                <span className="truncate">or {options[(chosenIdx + 1) % options.length].product}</span>
+              </button>
+            )}
+          </div>
           <button
             type="button"
             onClick={dismiss}
@@ -1018,126 +1187,58 @@ function DoseDetailSheet({
         </div>
 
         <div className="px-5 pt-3 pb-1 space-y-4">
-          <div className="text-2xl text-cyan font-display">{shownAmount}</div>
-
-          {SHOW_DOSE_SLIDER && rows.length > 1 && (
-            <div className="space-y-1">
-              <Slider
-                min={0}
-                max={rows.length - 1}
-                step={1}
-                value={[activeIdx]}
-                onValueChange={([v]) => onSens(v)}
-                aria-label={`${dose.product} dose`}
-              />
-              <div className="flex justify-between text-[10px] text-ink-mute tabular-nums">
-                <span>
-                  {rows[0].amount} {rows[0].unit === "flOz" ? "fl oz" : rows[0].unit}
-                </span>
-                <span className={cn(onRec ? "text-cyan" : "text-ink-dim")}>
-                  {onRec ? "recommended" : "adjusted"}
-                </span>
-                <span>
-                  {rows[rows.length - 1].amount}{" "}
-                  {rows[rows.length - 1].unit === "flOz" ? "fl oz" : rows[rows.length - 1].unit}
-                </span>
-              </div>
-            </div>
+          {SHOW_DOSE_SLIDER && rows.length > 1 ? (
+            // Keyed by product: flipping to the alternative remounts the tape
+            // so it re-centres on that product's recommended stop.
+            <DoseTape
+              key={dose.product}
+              rows={rows}
+              activeIdx={activeIdx}
+              recIdx={recRow}
+              amountLabel={shownAmount}
+              onSens={onSens}
+            />
+          ) : (
+            <div className="text-2xl text-cyan font-display">{shownAmount}</div>
           )}
 
-          {options.length > 1 && (
-            <div className="space-y-1.5">
-              <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
-                Fills the same demand — pour ONE
-              </h3>
-              {options.map((o, j) => (
-                <button
-                  key={j}
-                  type="button"
-                  onClick={() => onPick(j)}
-                  className={cn(
-                    "w-full min-h-11 px-3 flex items-center justify-between rounded-lg text-left text-sm",
-                    "border transition-colors duration-150 active:scale-[0.99]",
-                    j === chosenIdx
-                      ? "bg-cyan/10 border-cyan/40 text-ink"
-                      : "border-line-soft text-ink-dim",
-                  )}
-                >
-                  <span>
-                    <span className="font-medium">{o.displayAmount.replace(/\s*\(.*\)$/, "")}</span>{" "}
-                    {o.product}
-                  </span>
-                  {j === chosenIdx && <Check className="w-4 h-4 text-cyan" strokeWidth={2.2} />}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {dose.instruction && (
-            <div className="space-y-1.5">
-              <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
-                How to add it
-              </h3>
-              <p className="text-sm text-ink-dim leading-relaxed">{dose.instruction}</p>
-            </div>
-          )}
-
-          {shownEffects && Object.keys(shownEffects).length > 0 && (
-            <div className="space-y-2.5">
-              <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
-                What this dose does
-              </h3>
-              {/* Reading effects: pH to a tenth, everything else whole ppm */}
-              {Object.entries(shownEffects ?? {})
-                .filter(([k]) => k !== "saturationIndex" && k !== "minimumFreeChlorine")
-                .map(([k, delta]) => {
-                  const text =
-                    k === "ph"
-                      ? delta.toFixed(1)
-                      : `${Math.round(delta)} ppm`
-                  return (
-                    <div key={k} className="flex justify-between text-sm">
-                      <span className="text-ink-dim">{LABEL_NAMES[k] ?? humanize(k)}</span>
-                      <span className={cn("tabular-nums", delta >= 0 ? "text-emerald-300" : "text-red-300")}>
-                        {delta >= 0 ? "+" : ""}
-                        {text}
+          {effectKeys.length > 0 && (
+            <div className="space-y-2">
+              {effectKeys.map((k) => {
+                const digits = k === "ph" ? 1 : 0
+                const delta =
+                  (onRec ? dose.effects : (row?.effects ?? {}))?.[k] ?? 0
+                const cells: [string, string, string][] = [
+                  ["Before", fmt(sampleValue(actual, k), digits), "text-ink-mute"],
+                  [
+                    "Change",
+                    `${delta >= 0 ? "+" : ""}${k === "ph" ? delta.toFixed(1) : Math.round(delta)}`,
+                    delta >= 0 ? "text-emerald-300" : "text-red-300",
+                  ],
+                  ["After", fmt(sampleValue(predicted, k), digits), "text-ink"],
+                ]
+                return (
+                  <div
+                    key={k}
+                    className="grid grid-cols-[minmax(0,1fr)_3.5rem_3.5rem_3.5rem] items-center rounded-2xl bg-white/[0.06] px-4 py-2.5"
+                  >
+                    <span className="text-sm text-ink-dim truncate">
+                      {LABEL_NAMES[k] ?? humanize(k)}
+                      {UNIT_LABELS[k] && (
+                        <span className="text-[10px] text-ink-mute"> ({UNIT_LABELS[k]})</span>
+                      )}
+                    </span>
+                    {cells.map(([label, value, tone]) => (
+                      <span key={label} className="flex flex-col items-center gap-0.5">
+                        <span className="text-[9px] uppercase tracking-wide text-ink-mute">
+                          {label}
+                        </span>
+                        <span className={cn("text-sm tabular-nums", tone)}>{value}</span>
                       </span>
-                    </div>
-                  )
-                })}
-              {/* Derived indicators get their own square tiles */}
-              {(shownEffects?.saturationIndex != null || shownEffects?.minimumFreeChlorine != null) && (
-                <div className="grid grid-cols-2 gap-2.5 pt-1">
-                  {shownEffects.saturationIndex != null && (
-                    <div className="rounded-xl border border-line-soft bg-[#0E1C2A] py-4 flex flex-col items-center gap-1">
-                      <span
-                        className={cn(
-                          "text-xl font-display tabular-nums",
-                          shownEffects.saturationIndex >= 0 ? "text-emerald-300" : "text-red-300",
-                        )}
-                      >
-                        {shownEffects.saturationIndex >= 0 ? "+" : ""}
-                        {shownEffects.saturationIndex.toFixed(2)}
-                      </span>
-                      <span className="text-[10px] uppercase tracking-widest text-ink-mute">LSI</span>
-                    </div>
-                  )}
-                  {shownEffects.minimumFreeChlorine != null && (
-                    <div className="rounded-xl border border-line-soft bg-[#0E1C2A] py-4 flex flex-col items-center gap-1">
-                      <span
-                        className={cn(
-                          "text-xl font-display tabular-nums",
-                          shownEffects.minimumFreeChlorine >= 0 ? "text-emerald-300" : "text-red-300",
-                        )}
-                      >
-                        {shownEffects.minimumFreeChlorine >= 0 ? "+" : ""}
-                        {shownEffects.minimumFreeChlorine.toFixed(1)} ppm
-                      </span>
-                      <span className="text-[10px] uppercase tracking-widest text-ink-mute">Min FC</span>
-                    </div>
-                  )}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )
+              })}
             </div>
           )}
 
