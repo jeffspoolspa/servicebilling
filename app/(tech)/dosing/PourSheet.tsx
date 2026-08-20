@@ -1138,7 +1138,19 @@ function DoseDetailSheet({
       >
         <div className="w-10 h-1.5 rounded-full bg-line-soft mx-auto mt-2" />
         <div className="flex items-center justify-between px-5 pt-3">
-          <h2 className="font-display text-base">{dose.product}</h2>
+          <div className="min-w-0 flex items-center gap-2.5">
+            <h2 className="font-display text-base whitespace-nowrap">{dose.product}</h2>
+            {options.length > 1 && (
+              <button
+                type="button"
+                onClick={() => onPick((chosenIdx + 1) % options.length)}
+                className="inline-flex items-center gap-1 text-[11px] text-cyan active:opacity-70 min-w-0"
+              >
+                <ArrowLeftRight className="w-3 h-3 shrink-0" strokeWidth={2} />
+                <span className="truncate">or {options[(chosenIdx + 1) % options.length].product}</span>
+              </button>
+            )}
+          </div>
           <button
             type="button"
             onClick={dismiss}
@@ -1151,7 +1163,10 @@ function DoseDetailSheet({
 
         <div className="px-5 pt-3 pb-1 space-y-4">
           {SHOW_DOSE_SLIDER && rows.length > 1 ? (
+            // Keyed by product: flipping to the alternative remounts the tape
+            // so it re-centres on that product's recommended stop.
             <DoseTape
+              key={dose.product}
               rows={rows}
               activeIdx={activeIdx}
               recIdx={recRow}
@@ -1168,60 +1183,34 @@ function DoseDetailSheet({
                 const digits = k === "ph" ? 1 : 0
                 const delta =
                   (onRec ? dose.effects : (row?.effects ?? {}))?.[k] ?? 0
+                const cells: [string, string, string][] = [
+                  ["Before", fmt(sampleValue(actual, k), digits), "text-ink-mute"],
+                  [
+                    "Change",
+                    `${delta >= 0 ? "+" : ""}${k === "ph" ? delta.toFixed(1) : Math.round(delta)}`,
+                    delta >= 0 ? "text-emerald-300" : "text-red-300",
+                  ],
+                  ["After", fmt(sampleValue(predicted, k), digits), "text-ink"],
+                ]
                 return (
                   <div
                     key={k}
-                    className="grid grid-cols-[minmax(0,1fr)_3.25rem_3.25rem_3.25rem] items-center rounded-2xl bg-white/[0.06] px-4 py-3.5"
+                    className="grid grid-cols-[minmax(0,1fr)_3.5rem_3.5rem_3.5rem] items-center rounded-2xl bg-white/[0.06] px-4 py-2.5"
                   >
                     <span className="text-sm text-ink-dim truncate">
                       {LABEL_NAMES[k] ?? humanize(k)}
                     </span>
-                    <span className="text-sm text-ink-mute tabular-nums text-right">
-                      {fmt(sampleValue(actual, k), digits)}
-                    </span>
-                    <span
-                      className={cn(
-                        "text-sm tabular-nums text-right",
-                        delta >= 0 ? "text-emerald-300" : "text-red-300",
-                      )}
-                    >
-                      {delta >= 0 ? "+" : ""}
-                      {k === "ph" ? delta.toFixed(1) : Math.round(delta)}
-                    </span>
-                    <span className="text-sm text-ink tabular-nums text-right">
-                      {fmt(sampleValue(predicted, k), digits)}
-                    </span>
+                    {cells.map(([label, value, tone]) => (
+                      <span key={label} className="flex flex-col items-center gap-0.5">
+                        <span className="text-[9px] uppercase tracking-wide text-ink-mute">
+                          {label}
+                        </span>
+                        <span className={cn("text-sm tabular-nums", tone)}>{value}</span>
+                      </span>
+                    ))}
                   </div>
                 )
               })}
-            </div>
-          )}
-
-          {options.length > 1 && (
-            <div className="space-y-1.5">
-              <h3 className="text-xs font-medium text-ink-mute uppercase tracking-wide">
-                Fills the same demand — pour ONE
-              </h3>
-              {options.map((o, j) => (
-                <button
-                  key={j}
-                  type="button"
-                  onClick={() => onPick(j)}
-                  className={cn(
-                    "w-full min-h-11 px-3 flex items-center justify-between rounded-lg text-left text-sm",
-                    "border transition-colors duration-150 active:scale-[0.99]",
-                    j === chosenIdx
-                      ? "bg-cyan/10 border-cyan/40 text-ink"
-                      : "border-line-soft text-ink-dim",
-                  )}
-                >
-                  <span>
-                    <span className="font-medium">{o.displayAmount.replace(/\s*\(.*\)$/, "")}</span>{" "}
-                    {o.product}
-                  </span>
-                  {j === chosenIdx && <Check className="w-4 h-4 text-cyan" strokeWidth={2.2} />}
-                </button>
-              ))}
             </div>
           )}
 
