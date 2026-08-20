@@ -567,6 +567,24 @@ export function PourSheet({
 }) {
   const { samples, doses, warnings, retest, unfilled, visitNote } = result
   const [lens, setLens] = useState<Lens>("balance")
+  // Tab-switch choreography: the old view eases out toward the travel
+  // direction (transition), then the new one mounts sliding in from the
+  // opposite side (keyed animation).
+  const [lensExit, setLensExit] = useState<"left" | "right" | null>(null)
+  const lensEnter = useRef("")
+  const switchLens = (next: Lens) => {
+    if (next === lens || lensExit) return
+    const forward =
+      LENSES.findIndex((t) => t.key === next) > LENSES.findIndex((t) => t.key === lens)
+    lensEnter.current = forward
+      ? "animate-[lens-in-right_200ms_ease-out_both]"
+      : "animate-[lens-in-left_200ms_ease-out_both]"
+    setLensExit(forward ? "left" : "right")
+    setTimeout(() => {
+      setLens(next)
+      setLensExit(null)
+    }, 150)
+  }
   // Predicted is the default view; the corner toggle flips back to the
   // measured sample. Target isn't relevant to the tech here.
   const [mode, setMode] = useState<"predicted" | "actual">("predicted")
@@ -677,7 +695,7 @@ export function PourSheet({
                 type="button"
                 role="tab"
                 aria-selected={lens === t.key}
-                onClick={() => setLens(t.key)}
+                onClick={() => switchLens(t.key)}
                 className={cn(
                   "flex-1 h-8 rounded-full text-xs font-medium transition-colors duration-150",
                   lens === t.key ? "bg-cyan/15 text-ink" : "text-ink-dim",
@@ -709,7 +727,16 @@ export function PourSheet({
         {/* WHOOP-style readout: one dial per lens, flanked by only the
             readings that drive it. Amber = assumed, not measured; arrows =
             predicted direction vs measured. */}
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-4 py-5">
+        <div
+          key={lens}
+          className={cn(
+            "grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-4 py-5",
+            "transition-[transform,opacity] duration-150 ease-in",
+            lensExit === "left" && "-translate-x-6 opacity-0",
+            lensExit === "right" && "translate-x-6 opacity-0",
+            !lensExit && lensEnter.current,
+          )}
+        >
           <div className="justify-self-end space-y-4">
             {metrics.left.map((row) => (
               <Metric key={row.key} row={row} sample={sample} actual={samples.actual} showArrows={showArrows} align="right" onInfo={(k) => setInfoModal(k)} />

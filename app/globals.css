@@ -248,6 +248,28 @@
     }
   }
 
+  /* Lens tab switch — new content slides in from the travel direction. */
+  @keyframes lens-in-left {
+    from {
+      transform: translateX(-24px);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+  @keyframes lens-in-right {
+    from {
+      transform: translateX(24px);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
   /* Respect user preferences — kill all motion. Instant state swaps only. */
   @media (prefers-reduced-motion: reduce) {
     .batch-active-shimmer,
@@ -262,7 +284,9 @@
       animation: none;
     }
     [style*="sheet-slide-up"],
-    [style*="sheet-fade-in"] {
+    [style*="sheet-fade-in"],
+    [class*="lens-in-left"],
+    [class*="lens-in-right"] {
       animation: none !important;
     }
   }
