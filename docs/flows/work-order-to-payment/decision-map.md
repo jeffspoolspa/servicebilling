@@ -121,6 +121,30 @@ delivered  =  invoice_emailed  OR  delivery_waived        [waiver arm pending]
 - Dropped wake → drain-until-empty + coalescing self-heal; CDC (15 min) is
   the entity-completeness backstop.
 
+## The manual send (the one human move out of needs_review)
+
+Two shapes sit in `needs_review` with nothing left for the engine to decide,
+because `state = paid` needs **settled AND sent** and they are only ever one
+of the two:
+
+- **Settled but never sent** — a credit paid the invoice during
+  pre-processing, so no charge ran and no copy was ever delivered.
+- **Card declined** — `attempts_ok` is false and no further automatic charge
+  should happen; the customer pays it themselves.
+
+`POST /api/billing/invoices/[id]/send` (button: "Send invoice" on the summary
+card's not-sent line) is the move for both. It adds no engine: when the
+balance is open it first flips the route to `email` via
+`set_preferred_payment_type` — otherwise `process_one.step()` would pick
+`charge` and re-run the dead card — then calls
+`f/service_billing/process_one` with `force=true`, which sends, bumps a
+past-due date, emits `invoice_emailed` and echoes the mirror.
+
+Afterwards the state derives, as always: settled + sent -> `paid`;
+open balance + sent -> `open_ar`. Nothing is stamped.
+
+Not offered on a voided invoice or one under an open hold.
+
 ## Invariants
 
 - `needs_review` holds an invoice out of the charge path until cleared.

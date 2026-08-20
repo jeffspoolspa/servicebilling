@@ -30,9 +30,12 @@ interface Props {
   bonus?: React.ReactNode
   /** Derived readiness row — inline indicators (subtotal mismatch dot). */
   state?: ServiceBillingState | null
+  /** Send action, rendered on the "not sent" line. Slot so this card stays
+   * a server component. */
+  send?: React.ReactNode
 }
 
-export function SummaryCard({ wo, invoice, pills, bonus, state }: Props) {
+export function SummaryCard({ wo, invoice, pills, bonus, state, send }: Props) {
   const hasInvoice = invoice != null
   const subtotal = hasInvoice ? Number(invoice!.subtotal ?? 0) : Number(wo.sub_total ?? 0)
   const total = hasInvoice ? Number(invoice!.total_amt ?? 0) : Number(wo.total_due ?? 0)
@@ -98,7 +101,10 @@ export function SummaryCard({ wo, invoice, pills, bonus, state }: Props) {
               {sent ? (
                 <span className="text-teal">sent</span>
               ) : (
-                <span className="text-ink-mute">not sent</span>
+                <>
+                  <span className="text-ink-mute">not sent</span>
+                  {send}
+                </>
               )}
               {(invoice!.payment_method || invoice!.preferred_payment_type) && (
                 <>

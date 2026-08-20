@@ -363,7 +363,7 @@ enter this stream.
 | `processing_enqueued` | `trg_log_queue_lifecycle` on queue INSERT | work was put on a queue. NOT shown in the UI — being queued is not something that happened to the invoice |
 | `processing_claimed` | same trigger, on `started_at` | a worker took the row. With no later `finished`/`failed` this is what the live "processing" pill reads |
 | `processing_failed` | same trigger, on a new `error` | the attempt failed; carries the error and attempt number. The ONLY durable record of a failure — job results live outside the system |
-| `processing_finished` | **the worker script, as its last act** | the stage completed. Deliberately NOT from the queue trigger: closing the row happens after the run, and `enrich`'s own write has by then already fired the NEXT stage's enqueue — so a later stage's event preceded this one. Emitted from the script, "after everything I did" is guaranteed by execution order. Carries `duration_s` |
+| `processing_finished` | **the worker script, as its last act** | the stage completed. Deliberately NOT from the queue trigger: closing the row happens after the run, and `enrich`'s own write has by then already fired the NEXT stage's enqueue — so a later stage's event preceded this one. Emitted from the script, "after everything I did" is guaranteed by execution order. Carries `duration_s`, and `reason` whenever the stage finished WITHOUT succeeding (`needs_human` / `error`) — a parked invoice must say why in the stream, not only in the worker's stdout |
 
 `claimed` and `finished` render as coloured **boundaries**, not rows: they bracket the events a workflow produced.
 

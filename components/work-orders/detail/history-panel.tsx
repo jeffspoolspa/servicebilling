@@ -240,15 +240,21 @@ function rowFor(e: InvoiceStreamEvent, invoiceId: string): Row | null {
       return null
     case "processing_claimed":
     case "processing_finished": {
-      const p = e.payload as { stage?: string; attempt?: number; duration_s?: number }
+      const p = e.payload as {
+        stage?: string
+        attempt?: number
+        duration_s?: number
+        reason?: string
+      }
       const stage = p?.stage === "charge" ? "charge" : "preprocess"
       const name = stage === "charge" ? "Processing" : "Pre-processing"
       const edge = e.type === "processing_claimed" ? "start" : "end"
+      // The reason outranks the duration: a stage that finished without doing
+      // its job is the one thing this marker must not swallow — an invoice
+      // parked in needs_review used to end on a silent "PROCESSING DONE".
       const detail =
         edge === "end"
-          ? p?.duration_s != null
-            ? `${p.duration_s}s`
-            : ""
+          ? (p?.reason ?? (p?.duration_s != null ? `${p.duration_s}s` : ""))
           : p?.attempt && p.attempt > 1
             ? `attempt ${p.attempt}`
             : ""
