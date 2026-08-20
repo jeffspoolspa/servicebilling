@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
   ArrowDown,
@@ -23,6 +23,7 @@ import {
   type DoseOption,
   type DosingResponse,
   type Sample,
+  type SensitivityRow,
 } from "./shared"
 
 const LABEL_NAMES: Record<string, string> = {
@@ -101,6 +102,11 @@ function DoseTape({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const scale = stopScale(rows)
+  // iOS Safari wedges a mandatory-snap scroller that's positioned
+  // programmatically (stuck at 0, dead to touch) — so snap turns on only
+  // AFTER the centring assignment lands.
+  const [snapOn, setSnapOn] = useState(false)
+  const touched = useRef(false)
   // Taps commit the stop directly — the smooth scroll is just the visual
   // catch-up, so a swallowed scroll event can't strand the selection.
   const jump = (i: number) => {
@@ -110,8 +116,21 @@ function DoseTape({
 
   // Centre the selected stop on mount only — after that the tape leads and
   // state follows (the wheel-picker pattern, rotated 90 degrees).
-  useEffect(() => {
-    ref.current?.scrollTo({ left: activeIdx * TAPE_ITEM })
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.scrollLeft = activeIdx * TAPE_ITEM
+    const raf = requestAnimationFrame(() => setSnapOn(true))
+    // The sheet's slide-up transform can swallow the first assignment on
+    // WebKit — re-assert once the entrance settles, unless the tech has
+    // already put a finger on it.
+    const t = setTimeout(() => {
+      if (!touched.current) el.scrollLeft = activeIdx * TAPE_ITEM
+    }, 320)
+    return () => {
+      cancelAnimationFrame(raf)
+      clearTimeout(t)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -163,7 +182,12 @@ function DoseTape({
         <div
           ref={ref}
           onScroll={onScroll}
-          className="overflow-x-auto snap-x snap-mandatory flex touch-pan-x select-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          onPointerDown={() => (touched.current = true)}
+          onTouchStart={() => (touched.current = true)}
+          className={cn(
+            "overflow-x-auto flex touch-pan-x select-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+            snapOn && "snap-x snap-mandatory",
+          )}
           style={{ paddingLeft: `calc(50% - ${TAPE_ITEM / 2}px)`, paddingRight: `calc(50% - ${TAPE_ITEM / 2}px)` }}
         >
           {rows.map((r, i) => (
@@ -572,6 +596,18 @@ export function PourSheet({
   // opposite side (keyed animation).
   const [lensExit, setLensExit] = useState<"left" | "right" | null>(null)
   const lensEnter = useRef("")
+  // The two lenses differ in height — a measured wrapper eases between them
+  // instead of snapping. ResizeObserver keeps the px height honest through
+  // remounts and content changes.
+  const lensInnerRef = useRef<HTMLDivElement>(null)
+  const [lensH, setLensH] = useState<number>()
+  useEffect(() => {
+    const el = lensInnerRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setLensH(el.offsetHeight))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [lens])
   const switchLens = (next: Lens) => {
     if (next === lens || lensExit) return
     const forward =
@@ -728,7 +764,12 @@ export function PourSheet({
             readings that drive it. Amber = assumed, not measured; arrows =
             predicted direction vs measured. */}
         <div
+          style={lensH !== undefined ? { height: lensH } : undefined}
+          className="overflow-hidden transition-[height] duration-200 ease-in-out"
+        >
+        <div
           key={lens}
+          ref={lensInnerRef}
           className={cn(
             "grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-4 py-5",
             "transition-[transform,opacity] duration-100 ease-in-out",
@@ -752,6 +793,7 @@ export function PourSheet({
               <Metric key={row.key} row={row} sample={sample} actual={samples.actual} showArrows={showArrows} align="left" onInfo={(k) => setInfoModal(k)} />
             ))}
           </div>
+        </div>
         </div>
 
         {anyAssumed && (
@@ -1145,7 +1187,11 @@ function DoseDetailSheet({
   onClose: () => void
 }) {
   const [closing, setClosing] = useState(false)
-  const rows = dose.sensitivity ?? []
+  // A dose with no pour grid (API gap: alternatives ship no sensitivity[])
+  // still gets the dial — one recommended stop, nothing to adjust yet.
+  const rows: SensitivityRow[] = dose.sensitivity?.length
+    ? dose.sensitivity
+    : [{ amount: dose.amount, unit: dose.unit, recommended: true, effects: dose.effects ?? {} }]
   const recRow = rows.findIndex((r) => r.recommended)
   const activeIdx = sensIdx ?? (recRow >= 0 ? recRow : 0)
   const onRec = rows.length === 0 || activeIdx === recRow
@@ -1214,7 +1260,7 @@ function DoseDetailSheet({
         </div>
 
         <div className="px-5 pt-3 pb-1 space-y-4">
-          {SHOW_DOSE_SLIDER && rows.length > 1 ? (
+          {SHOW_DOSE_SLIDER ? (
             // Keyed by product: flipping to the alternative remounts the tape
             // so it re-centres on that product's recommended stop.
             <DoseTape
