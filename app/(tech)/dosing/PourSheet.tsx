@@ -577,13 +577,13 @@ export function PourSheet({
     const forward =
       LENSES.findIndex((t) => t.key === next) > LENSES.findIndex((t) => t.key === lens)
     lensEnter.current = forward
-      ? "animate-[lens-in-right_200ms_ease-out_both]"
-      : "animate-[lens-in-left_200ms_ease-out_both]"
+      ? "animate-[lens-in-right_140ms_ease-in-out_both]"
+      : "animate-[lens-in-left_140ms_ease-in-out_both]"
     setLensExit(forward ? "left" : "right")
     setTimeout(() => {
       setLens(next)
       setLensExit(null)
-    }, 150)
+    }, 60)
   }
   // Predicted is the default view; the corner toggle flips back to the
   // measured sample. Target isn't relevant to the tech here.
@@ -731,7 +731,7 @@ export function PourSheet({
           key={lens}
           className={cn(
             "grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-4 py-5",
-            "transition-[transform,opacity] duration-150 ease-in",
+            "transition-[transform,opacity] duration-100 ease-in-out",
             lensExit === "left" && "-translate-x-6 opacity-0",
             lensExit === "right" && "translate-x-6 opacity-0",
             !lensExit && lensEnter.current,
