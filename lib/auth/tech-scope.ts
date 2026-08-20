@@ -5,7 +5,7 @@ import { createSupabaseServer } from "@/lib/supabase/server"
  * (truck-check / sign-out), just the Field Follow-Up form. RH + Savannah run
  * their own inventory process outside this app.
  */
-const FOLLOW_UP_ONLY_BRANCHES = ["Richmond Hill, GA", "Savannah, GA"]
+const FOLLOW_UP_ONLY_BRANCHES = ["Richmond Hill, GA", "Savannah, GA", "Saint Marys, GA"]
 
 export async function isFollowUpOnly(
   employee: { branch_id: string | null } | null,
