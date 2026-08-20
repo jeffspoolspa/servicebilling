@@ -131,7 +131,25 @@ function DoseTape({
         >
           Min
         </button>
-        <span className="text-3xl font-display text-ink tabular-nums">{amountLabel}</span>
+        <span className="flex flex-col items-center">
+          {/* kept in the layout when off-recommendation so the row doesn't jump */}
+          <span
+            className={cn(
+              "text-[10px] uppercase tracking-wide text-cyan transition-opacity duration-150",
+              activeIdx === recIdx ? "opacity-100" : "opacity-0",
+            )}
+          >
+            Recommended
+          </span>
+          <span
+            className={cn(
+              "text-3xl font-display tabular-nums transition-colors duration-150",
+              activeIdx === recIdx ? "text-cyan" : "text-ink",
+            )}
+          >
+            {amountLabel}
+          </span>
+        </span>
         <button
           type="button"
           onClick={() => jump(rows.length - 1)}
