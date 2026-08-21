@@ -139,7 +139,8 @@ export function WeatherPourSheet({
       {/* ── Readings card: Predicted/Measured radio top-right; predicted
              rows carry a direction arrow vs the measured sample ── */}
       <section className={cn(CARD, "px-4 pb-1")}>
-        <div className="flex items-center justify-between pt-2.5">
+        {/* Header row: label + sample radio, ruled off from the table */}
+        <div className="flex items-center justify-between py-2.5 border-b border-line-soft/60">
           <h3 className="text-[10px] uppercase tracking-wide text-ink-mute">Readings</h3>
           <div role="radiogroup" aria-label="Sample" className="flex p-0.5 gap-0.5 rounded-full bg-black/25">
             {(
