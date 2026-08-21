@@ -3,7 +3,7 @@
 import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LogOut } from "lucide-react"
+import { LogOut, Menu } from "lucide-react"
 import { Sheet } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils/cn"
 import { visibleModules } from "./nav"
@@ -40,9 +40,9 @@ export function TechMenu({
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Open menu"
-        className="w-7 h-7 shrink-0 rounded-[7px] grid place-items-center bg-gradient-to-b from-cyan to-cyan-deep text-[#061018] font-display font-bold text-sm active:scale-95 transition-transform"
+        className="w-7 h-7 shrink-0 rounded-[7px] grid place-items-center text-ink active:scale-95 transition-transform"
       >
-        J
+        <Menu className="w-5 h-5" strokeWidth={2} />
       </button>
       <Sheet open={open} onClose={() => setOpen(false)} side="left" title="Field" className="max-w-[280px]">
         <div className="flex flex-col h-full min-h-[70dvh]">

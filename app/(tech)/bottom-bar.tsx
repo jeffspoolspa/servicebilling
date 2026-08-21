@@ -17,17 +17,24 @@ export interface PrimaryAction {
 interface BottomBarValue {
   action: PrimaryAction | null
   setAction: (a: PrimaryAction | null) => void
+  /** A page can suppress the bar entirely (nav included) — e.g. the pour
+   * sheet carries its own in-flow actions and long scrolls hate overlap. */
+  suppressed: boolean
+  setSuppressed: (s: boolean) => void
 }
 
 const BottomBarContext = createContext<BottomBarValue>({
   action: null,
   setAction: () => {},
+  suppressed: false,
+  setSuppressed: () => {},
 })
 
 export function BottomBarProvider({ children }: { children: React.ReactNode }) {
   const [action, setAction] = useState<PrimaryAction | null>(null)
+  const [suppressed, setSuppressed] = useState(false)
   return (
-    <BottomBarContext.Provider value={{ action, setAction }}>
+    <BottomBarContext.Provider value={{ action, setAction, suppressed, setSuppressed }}>
       {children}
     </BottomBarContext.Provider>
   )

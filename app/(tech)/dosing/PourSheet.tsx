@@ -577,12 +577,21 @@ export function SanitationDial({ fc, minFc }: { fc: number | null; minFc: number
   const { size, r, stroke, fcScale } = DIAL
   const c = 2 * Math.PI * r
   const cx = size / 2
-  const fcFrac = fc != null ? Math.max(0.02, Math.min(1, fc / fcScale)) : 0
+  // Lap 1 covers 0-20 ppm; past 20 the bar double-wraps (Apple Fitness move
+  // ring) with a brighter lap on top, pinned full at 40.
+  const lap1 = fc != null ? Math.max(0.02, Math.min(1, fc / fcScale)) : 0
+  const lap2 = fc != null && fc > fcScale ? Math.min(1, (fc - fcScale) / fcScale) : 0
   const minFrac = minFc != null ? Math.min(1, minFc / fcScale) : null
+  const short = fc != null && minFc != null && fc < minFc
+  // Sequence the laps: growing, lap 2 waits for lap 1 to finish its sweep
+  // to the top; shrinking, lap 2 retracts first and lap 1 waits for it.
+  const prevLap2 = useRef(lap2)
+  const lap2Growing = lap2 > prevLap2.current
+  const lap2Leaving = lap2 < prevLap2.current
+  useEffect(() => {
+    prevLap2.current = lap2
+  })
 
-  // Dash-based arcs animate their sweep along the ring (like the LSI dot's
-  // rotation) — stroke-dasharray/offset are transitionable where path shapes
-  // are not.
   const arcAnim = {
     transition:
       "stroke-dasharray 500ms cubic-bezier(0.4,0,0.2,1), stroke-dashoffset 500ms cubic-bezier(0.4,0,0.2,1)",
@@ -592,32 +601,42 @@ export function SanitationDial({ fc, minFc }: { fc: number | null; minFc: number
     <div className="flex flex-col items-center">
       <div className="relative" style={{ width: size, height: size }}>
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-          {/* ONE bar, segment tones change: faint remainder ring under solid
-              blue (0 → FC) and a muted deficit segment (FC → min). Same
-              thickness everywhere, butt caps, so it reads as one bar. */}
           <circle cx={cx} cy={cx} r={r} fill="none" stroke="#ffffff14" strokeWidth={stroke} />
           {minFrac != null && (
             <circle
               cx={cx} cy={cx} r={r} fill="none"
               stroke={WHOOP.need} strokeWidth={stroke}
-              strokeDasharray={`${Math.max(0, minFrac - fcFrac) * c} ${c}`}
-              strokeDashoffset={-(fcFrac * c)}
+              strokeDasharray={`${Math.max(0, minFrac - lap1) * c} ${c}`}
+              strokeDashoffset={-(lap1 * c)}
               transform={`rotate(-90 ${cx} ${cx})`}
               style={arcAnim}
             />
           )}
-          {fcFrac > 0 && (
+          {lap1 > 0 && (
             <circle
               cx={cx} cy={cx} r={r} fill="none"
               stroke={WHOOP.blue} strokeWidth={stroke}
-              strokeDasharray={`${fcFrac * c} ${c}`}
+              strokeDasharray={`${lap1 * c} ${c}`}
               transform={`rotate(-90 ${cx} ${cx})`}
-              style={arcAnim}
+              style={{
+                transition: `stroke-dasharray 500ms cubic-bezier(0.4,0,0.2,1) ${lap2Leaving ? 400 : 0}ms, stroke-dashoffset 500ms cubic-bezier(0.4,0,0.2,1)`,
+              }}
             />
           )}
+          {/* Second lap rides on top in a brighter blue — 20-40 ppm. Always
+              mounted so the sweep ANIMATES from zero when FC crosses 20;
+              opacity hides the round cap's dot while empty. */}
+          <circle
+            cx={cx} cy={cx} r={r} fill="none"
+            stroke="#4FC3FF" strokeWidth={stroke} strokeLinecap="round"
+            strokeDasharray={`${lap2 * c} ${c}`}
+            transform={`rotate(-90 ${cx} ${cx})`}
+            style={{
+              transition: `stroke-dasharray ${lap2Growing ? "600ms" : "400ms"} cubic-bezier(0.4,0,0.2,1) ${lap2Growing ? 500 : 0}ms, opacity 150ms ${lap2Growing ? 500 : 0}ms`,
+              opacity: lap2 > 0 ? 1 : 0,
+            }}
+          />
           {minFrac != null && minFrac > 0 && (
-            // The stopping point rides the ring like the LSI dot: drawn at
-            // 12 o'clock and rotated into place, so it animates along the arc.
             <g
               style={{
                 transform: `rotate(${minFrac * 360}deg)`,
@@ -641,22 +660,13 @@ export function SanitationDial({ fc, minFc }: { fc: number | null; minFc: number
           <div className="text-center">
             <div
               className="text-[32px] font-display font-bold tabular-nums leading-none"
-              style={{ color: fc == null ? "#64748b" : WHOOP.blue }}
+              style={{ color: minFc == null ? "#64748b" : short ? "#f87171" : "#34d399" }}
             >
-              {fc == null ? "—" : fc.toFixed(1)}
+              {minFc == null ? "—" : minFc.toFixed(1)}
             </div>
             <div className="text-[10px] uppercase tracking-[0.2em] text-ink-mute mt-1.5">
-              Free Cl
+              Min FC
             </div>
-            {minFc != null && (
-              // Green when FC clears the min, red when it's short.
-              <div
-                className="text-[11px] tabular-nums font-medium mt-1"
-                style={{ color: fc != null && fc >= minFc ? "#34d399" : "#f87171" }}
-              >
-                min {minFc.toFixed(1)}
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -664,10 +674,6 @@ export function SanitationDial({ fc, minFc }: { fc: number | null; minFc: number
   )
 }
 
-// RETIRED 2026-08-21: the Weather-card layout (WeatherSheet.tsx) is the live
-// pour sheet; this component is kept briefly for reference while the new one
-// bakes in the field. Delete it (plus Metric/LENSES/DoseDetailSheet) once
-// Carter calls the bake done.
 export function PourSheet({
   result,
   customerName,

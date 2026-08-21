@@ -14,13 +14,14 @@ import { visibleModules } from "./nav"
  */
 export function BottomNav({ hideInventory = false }: { hideInventory?: boolean }) {
   const pathname = usePathname()
-  const { action } = useBottomBar()
+  const { action, suppressed } = useBottomBar()
 
   const visible = visibleModules(hideInventory)
+  if (suppressed) return null
   if (!action && visible.length < 2) return null
 
   return (
-    <div className="fixed bottom-0 inset-x-0 z-20 pb-[env(safe-area-inset-bottom)] pointer-events-none">
+    <div className="fixed bottom-0 inset-x-0 z-20 pb-[env(safe-area-inset-bottom)] pointer-events-none transform-gpu">
       <div className="max-w-md mx-auto px-4 pb-3">
         {action ? (
           // The page's primary action owns the bar.
@@ -47,7 +48,9 @@ export function BottomNav({ hideInventory = false }: { hideInventory?: boolean }
             aria-label="Quick access"
             className={cn(
               "pointer-events-auto flex items-center gap-1 p-1.5 rounded-full",
-              "bg-bg-elev/90 backdrop-blur-md border border-line-soft",
+              // solid ground — backdrop-blur on a fixed bar re-blurs every
+              // scrolled frame on iOS and stutters fast flings
+              "bg-[#0E1C2A] border border-line-soft",
               "shadow-[0_8px_30px_-10px_rgba(0,0,0,0.6)]",
             )}
           >
