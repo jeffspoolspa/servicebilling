@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils/cn"
 import { useTopBar } from "./top-bar"
 
 const PILL =
-  "pointer-events-auto flex items-center rounded-full bg-[#0A141E]/95 backdrop-blur-md border border-line-soft shadow-[0_4px_16px_-6px_rgba(0,0,0,0.5)]"
+  "pointer-events-auto flex items-center rounded-full bg-[#1B3B58]/95 backdrop-blur-md border border-line-soft shadow-[0_4px_16px_-6px_rgba(0,0,0,0.5)]"
 
 /**
  * The floating top row (ruled 2026-08-21, Robinhood-style): no header strip —
