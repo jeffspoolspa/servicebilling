@@ -8,7 +8,7 @@
 // space.
 
 import { useEffect, useMemo, useState } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, Check, FileText, Pencil } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, FileText, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { sampleValue, type DosingResponse, type Sample, type SensitivityRow } from "./shared"
 import {
@@ -259,11 +259,52 @@ export function WeatherPourSheet({
         </div>
       </section>
 
-      {/* ── Pour sheet: no header. Selecting a chemical collapses the other
-             rows away — the selected label glides to the top of the card as
-             they fold — and its tape expands to fill the card. Tap the label
-             again to return to the list. ── */}
-      <section className={cn(CARD, "px-4 py-1")}>
+      {/* ── What To Add: ruled header (label + water-condition toggle that
+             survives focus), then the dose rows. Selecting a chemical
+             collapses the others — its label glides to the top — and its
+             tape expands in place. Tap the label again to return. ── */}
+      <section className={cn(CARD, "px-4 pb-1")}>
+        <div className="flex items-center justify-between py-2 border-b border-line-soft/60">
+          <h3 className="text-[10px] uppercase tracking-wide text-ink-mute">What To Add</h3>
+          {/* Clear (default, blue) vs Algae (green) — only when FC is short
+              of min, or while set to Algae so it can be flipped back. */}
+          {(algae ||
+            (samples.actual.freeChlorine != null &&
+              samples.actual.minimumFreeChlorine != null &&
+              samples.actual.freeChlorine < samples.actual.minimumFreeChlorine)) && (
+            <div
+              role="radiogroup"
+              aria-label="Water condition"
+              className={cn(
+                "flex p-0.5 gap-0.5 rounded-full bg-black/25",
+                recalcPending && "opacity-60 pointer-events-none",
+              )}
+            >
+              {(
+                [
+                  [false, "Clear", "bg-cyan/20 text-cyan"],
+                  [true, "Algae", "bg-emerald-400/20 text-emerald-300"],
+                ] as const
+              ).map(([value, label, activeTone]) => (
+                <button
+                  key={label}
+                  type="button"
+                  role="radio"
+                  aria-checked={algae === value}
+                  onClick={() => {
+                    if (!recalcPending && algae !== value) onAlgaeChange(value)
+                  }}
+                  className={cn(
+                    "h-7 px-3 rounded-full text-[11px] font-medium transition-colors duration-150",
+                    algae === value ? activeTone : "text-ink-dim",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {doses.map((d, i) => {
           const o = optionAt(i)
           const options = [d, ...(d.alternatives ?? [])]
@@ -312,62 +353,17 @@ export function WeatherPourSheet({
                         </span>
                       )}
                     </span>
-                    {/* Right column: dose on top, algae check beneath — the
-                        middle of the row stays clear for the focus tap. */}
-                    <span className="shrink-0 flex flex-col items-end gap-1">
-                      {/* the tape's own big amount takes over while focused */}
-                      {!focused && (
-                        <span
-                          className={cn(
-                            "text-lg font-display tabular-nums transition-colors duration-150",
-                            activeIdx === recRow ? "text-cyan" : "text-ink",
-                          )}
-                        >
-                          {amount}
-                        </span>
-                      )}
-                      {/* Shown only when FC is short of min (or while
-                          checked, so it can be untoggled) — above min the
-                          engine's answer doesn't change. */}
-                      {"freeChlorine" in (d.effects ?? {}) &&
-                        (algae ||
-                          (samples.actual.freeChlorine != null &&
-                            samples.actual.minimumFreeChlorine != null &&
-                            samples.actual.freeChlorine < samples.actual.minimumFreeChlorine)) && (
-                        <span
-                          role="checkbox"
-                          aria-checked={algae}
-                          tabIndex={0}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            if (!recalcPending) onAlgaeChange(!algae)
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.stopPropagation()
-                              if (!recalcPending) onAlgaeChange(!algae)
-                            }
-                          }}
-                          className={cn(
-                            "flex items-center gap-1.5 text-[11px]",
-                            recalcPending ? "opacity-60" : "active:opacity-70",
-                            algae ? "text-cyan" : "text-ink-dim",
-                          )}
-                        >
-                          <span
-                            className={cn(
-                              "w-4 h-4 rounded-[5px] border grid place-items-center transition-colors duration-150",
-                              algae
-                                ? "bg-cyan border-cyan text-[#061018]"
-                                : "border-line bg-black/20 text-transparent",
-                            )}
-                          >
-                            <Check className="w-3 h-3" strokeWidth={3} />
-                          </span>
-                          {recalcPending ? "Recalculating…" : "Algae present"}
-                        </span>
-                      )}
-                    </span>
+                    {/* the tape's own big amount takes over while focused */}
+                    {!focused && (
+                      <span
+                        className={cn(
+                          "shrink-0 text-lg font-display tabular-nums transition-colors duration-150",
+                          activeIdx === recRow ? "text-cyan" : "text-ink",
+                        )}
+                      >
+                        {amount}
+                      </span>
+                    )}
                   </button>
                   {/* Tape stays mounted; its own grid row expands into the
                       space the sibling rows give up. */}
