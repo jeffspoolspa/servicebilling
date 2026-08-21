@@ -143,14 +143,7 @@ function DoseTape({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => jump(0)}
-          className="px-4 py-2 rounded-xl bg-white/10 text-sm text-ink-dim active:scale-95 transition-transform"
-        >
-          Min
-        </button>
+      <div className="relative flex justify-center">
         <span className="flex flex-col items-center">
           {/* kept in the layout when off-recommendation so the row doesn't jump */}
           <span
@@ -170,12 +163,19 @@ function DoseTape({
             {amountLabel}
           </span>
         </span>
+        {/* rolls the tape back to the recommended stop */}
         <button
           type="button"
-          onClick={() => jump(rows.length - 1)}
-          className="px-4 py-2 rounded-xl bg-white/10 text-sm text-ink-dim active:scale-95 transition-transform"
+          onClick={() => recIdx >= 0 && jump(recIdx)}
+          disabled={recIdx < 0 || activeIdx === recIdx}
+          aria-label="Back to recommended dose"
+          className={cn(
+            "absolute right-0 top-1/2 -translate-y-1/2 w-10 h-10 grid place-items-center rounded-full",
+            "bg-white/10 text-ink-dim active:scale-95 transition-[transform,opacity] duration-150",
+            (recIdx < 0 || activeIdx === recIdx) && "opacity-30",
+          )}
         >
-          Max
+          <RotateCcw className="w-4 h-4" strokeWidth={2} />
         </button>
       </div>
       <div className="relative -mx-5">
@@ -185,7 +185,11 @@ function DoseTape({
           onPointerDown={() => (touched.current = true)}
           onTouchStart={() => (touched.current = true)}
           className={cn(
-            "overflow-x-auto flex touch-pan-x select-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+            // overscroll-x-contain keeps the rubber-band local: short tapes
+            // (3 stops) still stretch and bounce at the ends instead of
+            // handing the gesture to the page.
+            "overflow-x-auto flex touch-pan-x select-none overscroll-x-contain",
+            "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
             snapOn && "snap-x snap-mandatory",
           )}
           style={{ paddingLeft: `calc(50% - ${TAPE_ITEM / 2}px)`, paddingRight: `calc(50% - ${TAPE_ITEM / 2}px)` }}
