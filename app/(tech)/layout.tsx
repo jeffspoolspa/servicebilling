@@ -27,6 +27,7 @@ export default async function TechLayout({ children }: { children: React.ReactNo
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 58px)" }}
       >
         <TopPills
+          techName={techName}
           menu={
             <TechMenu
               techName={techName}
