@@ -9,7 +9,7 @@
 // bars the predicted-readings card above moves live.
 
 import { useEffect, useMemo, useState } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, Pencil, Plus } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { sampleValue, type DosingResponse, type Sample, type SensitivityRow } from "./shared"
 import {
@@ -92,26 +92,27 @@ export function WeatherPourSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [samples.actual, doses, choice, sens])
 
+  const SANI_LABEL: Record<string, string> = { tab: "Tablet", liquid: "Liquid", salt: "Salt" }
+  const subtitle = [
+    result.pool?.volumeGallons != null ? `${result.pool.volumeGallons.toLocaleString()} gal` : null,
+    result.pool?.sanitiser ? (SANI_LABEL[result.pool.sanitiser] ?? result.pool.sanitiser) : null,
+  ].filter(Boolean)
+
   return (
     <div className="space-y-4">
-      <div className="flex gap-2.5">
-        <button
-          type="button"
-          onClick={onNewSample}
-          className="flex-1 h-10 rounded-full text-sm font-medium border border-cyan/40 bg-cyan/10 text-cyan active:scale-[0.98] transition-transform duration-150"
-        >
-          New sample
-        </button>
-        <button
-          type="button"
-          onClick={onEditSample}
-          className="flex-1 h-10 rounded-full text-sm font-medium border border-line-soft bg-bg-elev text-ink-dim active:scale-[0.98] transition-transform duration-150"
-        >
-          Edit sample
-        </button>
-      </div>
-
-      {customerName && <p className="text-xs text-ink-mute text-center">{customerName}</p>}
+      {/* ── Weather-style header: who, then the pool underneath ── */}
+      <header className="text-center pt-1">
+        <h1 className="font-display text-2xl text-ink leading-tight">
+          {customerName ?? "Sample"}
+        </h1>
+        {subtitle.length > 0 && (
+          <p className="text-sm text-ink-dim mt-0.5">
+            {subtitle[0]}
+            {subtitle.length > 1 && <span className="text-ink-mute px-1.5">|</span>}
+            {subtitle[1]}
+          </p>
+        )}
+      </header>
 
       {/* ── Dials side by side, no flanking readings ── */}
       <div className="grid grid-cols-2 gap-3">
@@ -307,6 +308,26 @@ export function WeatherPourSheet({
           )
         })}
       </section>
+
+      {/* ── Weather-style bottom icons: edit the sample, start a new one ── */}
+      <div className="flex justify-between px-4 pt-1">
+        <button
+          type="button"
+          onClick={onEditSample}
+          aria-label="Edit sample"
+          className="w-12 h-12 grid place-items-center rounded-full bg-bg-elev border border-line-soft text-ink-dim active:scale-95 transition-transform duration-150"
+        >
+          <Pencil className="w-5 h-5" strokeWidth={1.8} />
+        </button>
+        <button
+          type="button"
+          onClick={onNewSample}
+          aria-label="New sample"
+          className="w-12 h-12 grid place-items-center rounded-full bg-bg-elev border border-line-soft text-cyan active:scale-95 transition-transform duration-150"
+        >
+          <Plus className="w-5 h-5" strokeWidth={2} />
+        </button>
+      </div>
 
       {recalcError && (
         <p role="alert" className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3.5 py-2.5">

@@ -119,6 +119,8 @@ export interface ApiWarning {
 }
 
 export interface DosingResponse {
+  /** Echo of the request's pool block (v3 contract). */
+  pool?: { volumeGallons?: number; sanitiser?: string }
   samples: { actual: Sample; recommended: Sample }
   doses: Dose[]
   demands: { chemical: string; ounces: number; for: string }[]
