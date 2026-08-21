@@ -43,7 +43,7 @@ export const UNIT_LABELS: Record<string, string> = {
 
 /** "shock-fc-below-minimum" / "measuredPpm" → readable words — fallback for
  * codes we don't have friendlier copy for. */
-function humanize(code: string) {
+export function humanize(code: string) {
   const s = code.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/-/g, " ").toLowerCase()
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
@@ -1210,7 +1210,7 @@ export function PourSheet({
 }
 
 /** Small centred modal for the warning / retest summaries. */
-function InfoModal({
+export function InfoModal({
   title,
   onClose,
   children,
@@ -1455,7 +1455,7 @@ async function copyText(text: string): Promise<boolean> {
 
 /** The customer-facing record: header lines end with ":", everything else
  * indents under them. Copy sends the RAW string — never re-composed. */
-function VisitNoteBody({ note }: { note: string }) {
+export function VisitNoteBody({ note }: { note: string }) {
   const [copied, setCopied] = useState<"idle" | "ok" | "failed">("idle")
   return (
     <div className="space-y-3">

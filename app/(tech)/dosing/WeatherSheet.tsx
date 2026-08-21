@@ -9,17 +9,20 @@
 // bars the predicted-readings card above moves live.
 
 import { useEffect, useMemo, useState } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, Pencil, Plus } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, FileText, Pencil, Plus, RotateCcw } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { sampleValue, type DosingResponse, type Sample, type SensitivityRow } from "./shared"
 import {
   BalanceDial,
   DoseTape,
+  humanize,
+  InfoModal,
   LABEL_NAMES,
   SanitationDial,
   stopScale,
   trimNum,
   UNIT_LABELS,
+  VisitNoteBody,
 } from "./PourSheet"
 
 // FC is in the sanitation dial, LSI/minFC in the balance dial — the card
@@ -62,6 +65,8 @@ export function WeatherPourSheet({
   // sees the whole pour list first.
   const [focus, setFocus] = useState<number | null>(null)
   const [mode, setMode] = useState<"predicted" | "actual">("predicted")
+  const [noteOpen, setNoteOpen] = useState(false)
+  const [retestOpen, setRetestOpen] = useState(false)
 
   useEffect(() => {
     setChoice({})
@@ -335,6 +340,52 @@ export function WeatherPourSheet({
           )
         })}
       </section>
+
+      {/* ── Visit note + retest, side by side; both open small modals ── */}
+      {(result.visitNote || result.retest.length > 0) && (
+        <div className="flex gap-2.5">
+          {result.visitNote && (
+            <button
+              type="button"
+              onClick={() => setNoteOpen(true)}
+              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-ink border border-line-soft bg-bg-elev active:scale-[0.98] transition-transform duration-150"
+            >
+              <FileText className="w-4 h-4 shrink-0 text-cyan" strokeWidth={1.8} />
+              Visit note
+            </button>
+          )}
+          {result.retest.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setRetestOpen(true)}
+              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-cyan border border-cyan/20 bg-cyan/10 active:scale-[0.98] transition-transform duration-150"
+            >
+              <RotateCcw className="w-4 h-4 shrink-0" strokeWidth={1.8} />
+              Retest · {result.retest.length}
+            </button>
+          )}
+        </div>
+      )}
+      {retestOpen && (
+        <InfoModal title="Retest" onClose={() => setRetestOpen(false)}>
+          <p className="text-xs text-ink-mute mb-3">
+            These readings change with this pour — retest before you leave.
+          </p>
+          <ul className="space-y-2">
+            {result.retest.map((k) => (
+              <li key={k} className="flex items-center gap-2 text-sm text-ink">
+                <RotateCcw className="w-3.5 h-3.5 text-cyan shrink-0" strokeWidth={2} />
+                {LABEL_NAMES[k] ?? humanize(k)}
+              </li>
+            ))}
+          </ul>
+        </InfoModal>
+      )}
+      {noteOpen && result.visitNote && (
+        <InfoModal title="Visit note" onClose={() => setNoteOpen(false)}>
+          <VisitNoteBody note={result.visitNote} />
+        </InfoModal>
+      )}
 
       {recalcError && (
         <p role="alert" className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3.5 py-2.5">
