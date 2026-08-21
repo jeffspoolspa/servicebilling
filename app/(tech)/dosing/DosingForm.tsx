@@ -137,12 +137,25 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
     }
   }
 
-  // The bottom nav morphs into the primary action once the form is
-  // submittable (same pattern as follow-up); until then the tabs stay.
+  // New = a different sample: wipe everything, back to a blank form.
+  const newSample = () => {
+    setResult(null)
+    setReadings({})
+    setVolume(null)
+    setSanitiser("tab")
+    setCustomerId("")
+    setError(null)
+    setAlgae(false)
+    setRecalcError(null)
+    setSavedConfig(null)
+    setConfigEditing(false)
+  }
+
+  // The bottom bar is the page's primary action: submit while filling the
+  // form, New sample while the pour sheet is up.
   useEffect(() => {
     if (result) {
-      // The pour sheet carries its own action buttons; the nav tabs return.
-      setAction(null)
+      setAction({ label: "New sample", onClick: newSample })
     } else if (canSubmit || pending) {
       setAction({
         label: pending ? "Calculating…" : "Get pour sheet",
@@ -161,19 +174,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
       <PourSheet
         result={result}
         customerName={customer?.customer_name}
-        onNewSample={() => {
-          // New = a different sample: wipe everything, back to a blank form.
-          setResult(null)
-          setReadings({})
-          setVolume(null)
-          setSanitiser("tab")
-          setCustomerId("")
-          setError(null)
-          setAlgae(false)
-          setRecalcError(null)
-          setSavedConfig(null)
-          setConfigEditing(false)
-        }}
+        onNewSample={newSample}
         onEditSample={() => setResult(null)}
         algae={algae}
         onAlgaeChange={toggleAlgae}
