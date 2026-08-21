@@ -41,11 +41,12 @@ export function BottomNav({ hideInventory = false }: { hideInventory?: boolean }
             {action.label}
           </button>
         ) : (
-          // Idle: compact icon quick-access — full names live in the drawer.
+          // Idle: full-width quick access with names (ruled 2026-08-21 —
+          // the compact icon-only row read too cryptic).
           <nav
             aria-label="Quick access"
             className={cn(
-              "pointer-events-auto flex items-center gap-1 p-1 rounded-full w-fit mx-auto",
+              "pointer-events-auto flex items-center gap-1 p-1.5 rounded-full",
               "bg-bg-elev/90 backdrop-blur-md border border-line-soft",
               "shadow-[0_8px_30px_-10px_rgba(0,0,0,0.6)]",
             )}
@@ -58,17 +59,17 @@ export function BottomNav({ hideInventory = false }: { hideInventory?: boolean }
                   key={m.href}
                   href={m.href as never}
                   prefetch
-                  aria-label={m.label}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "grid place-items-center w-12 h-12 rounded-full",
-                    "transition-colors duration-150 ease-out active:scale-[0.95]",
+                    "flex-1 flex flex-col items-center gap-0.5 py-2 rounded-full min-h-14",
+                    "transition-colors duration-150 ease-out active:scale-[0.98]",
                     active
-                      ? "bg-cyan/10 text-cyan"
+                      ? "bg-cyan/10 text-ink"
                       : "text-ink-dim hover:text-ink hover:bg-white/[0.03]",
                   )}
                 >
-                  <Icon className="w-5 h-5" strokeWidth={active ? 2.2 : 1.8} />
+                  <Icon className={cn("w-5 h-5", active ? "text-cyan" : "")} strokeWidth={active ? 2.2 : 1.8} />
+                  <span className="text-xs font-medium">{m.label}</span>
                 </Link>
               )
             })}
