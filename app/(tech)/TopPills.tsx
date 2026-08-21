@@ -20,12 +20,14 @@ export function TopPills({ menu, techName }: { menu: React.ReactNode; techName?:
   const pathname = usePathname()
   // The login screen stands alone — no chrome.
   if (pathname.startsWith("/tech-login")) return null
-  // Truly pinned (ruled 2026-08-21) — no scroll-away animation.
+  // Truly pinned (ruled 2026-08-21) — no scroll-away animation. The band
+  // behind the pills is its own solid tone so scrolled content never shows
+  // through the row.
   return (
-    <div className="fixed inset-x-0 top-0 z-30 pointer-events-none">
+    <div className="fixed inset-x-0 top-0 z-30 pointer-events-none bg-[#12283C] border-b border-line-soft">
       <div
         className="max-w-md mx-auto px-4 flex items-center justify-between gap-2"
-        style={{ paddingTop: "calc(env(safe-area-inset-top) + 10px)" }}
+        style={{ paddingTop: "calc(env(safe-area-inset-top) + 8px)", paddingBottom: "8px" }}
       >
         {/* menu + connectivity cluster left; right side = page-claimed
             content when set, else the clock + signed-in user */}
