@@ -59,7 +59,6 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   // customer pick; when present and untouched, the volume+chlorination rows
   // collapse to a summary with an Edit button.
   const [savedConfig, setSavedConfig] = useState<PoolConfig | null>(null)
-  const [configEditing, setConfigEditing] = useState(false)
   const [savePending, setSavePending] = useState(false)
   const [pending, startTransition] = useTransition()
   const { setAction } = useBottomBar()
@@ -131,7 +130,6 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
     setSavePending(false)
     if (res.ok) {
       setSavedConfig({ volumeGallons: volume, sanitiser })
-      setConfigEditing(false)
     } else {
       setError(res.error ?? "Could not save.")
     }
@@ -148,7 +146,6 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
     setAlgae(false)
     setRecalcError(null)
     setSavedConfig(null)
-    setConfigEditing(false)
   }
 
   // The bottom bar is the page's primary action: submit while filling the
@@ -188,72 +185,72 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
       {/* ── Form header ── */}
       <h1 className="font-display text-xl text-ink">New sample</h1>
 
-      {/* Customer (optional) — compact inline picker trigger */}
-      <section className="flex items-center justify-between gap-3">
-        <label className="text-base font-medium text-ink-dim shrink-0">
-          Customer <span className="text-ink-mute font-normal">(optional)</span>
-        </label>
-        <button
-          type="button"
-          onClick={() => setPickerOpen(true)}
-          aria-haspopup="dialog"
-          className={cn(
-            "flex items-center gap-1.5 h-10 px-4 rounded-full text-base max-w-[55%]",
-            "border transition-colors duration-150 active:scale-[0.98]",
-            customer
-              ? "bg-cyan/10 border-cyan/40 text-ink"
-              : "bg-black/25 border-line-soft text-ink-dim",
-          )}
-        >
-          <span className="truncate">{customer ? customer.customer_name : "Select"}</span>
-          <ChevronDown className="w-3.5 h-3.5 text-cyan shrink-0" strokeWidth={2.2} />
-        </button>
-        {pickerOpen && (
-          <CustomerSelectSheet
-            customers={customers}
-            value={customerId}
-            onPick={(id) => {
-              setCustomerId(String(id))
-              setPickerOpen(false)
-              setSavedConfig(null)
-              setConfigEditing(false)
-              void getPoolConfig(String(id)).then((cfg) => {
-                if (!cfg) return
-                setSavedConfig(cfg)
-                setVolume(cfg.volumeGallons)
-                setSanitiser(cfg.sanitiser)
-              })
-            }}
-            onClose={() => setPickerOpen(false)}
-          />
-        )}
-      </section>
-
-      {customer && savedConfig && !configEditing ? (
-        /* Saved pool config — one summary row; Edit expands the controls */
-        <section className="flex items-center justify-between gap-3">
-          <label className="text-base font-medium text-ink-dim shrink-0">Pool</label>
-          <div className="flex items-center gap-2">
-            <span className="text-base tabular-nums text-ink">
-              {savedConfig.volumeGallons.toLocaleString()} gal · {SANI_LABEL[savedConfig.sanitiser]}
-            </span>
+      {/* ── Customer + pool: one cohesive unit. Picking a customer with a
+          saved config populates the volume/chlorination cards directly;
+          Save persists the current pair to the customer. ── */}
+      <div className="grid grid-cols-2 gap-3 items-stretch">
+        <section className="col-span-2 rounded-xl border border-line-soft bg-bg-elev px-3.5 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[10px] uppercase tracking-wide text-ink shrink-0">
+              Customer <span className="text-ink-mute">(optional)</span>
+            </div>
             <button
               type="button"
-              onClick={() => setConfigEditing(true)}
-              className="h-8 px-3 rounded-full text-sm border border-line-soft text-ink-dim active:scale-[0.97] transition-transform"
+              onClick={() => setPickerOpen(true)}
+              aria-haspopup="dialog"
+              className={cn(
+                "h-11 px-4 flex items-center justify-between gap-2 rounded-full text-lg max-w-[60%] min-w-0",
+                "border transition-colors duration-150 active:scale-[0.98]",
+                customer
+                  ? "bg-cyan/10 border-cyan/40 text-ink"
+                  : "bg-black/25 border-line-soft text-ink-dim",
+              )}
             >
-              Edit
+              <span className="truncate">{customer ? customer.customer_name : "Select"}</span>
+              <ChevronDown className="w-4 h-4 text-cyan shrink-0" strokeWidth={2.2} />
             </button>
           </div>
+          {customer && (
+            <div className="mt-2 flex items-center justify-start gap-2">
+              {savedConfig && !configDirty ? (
+                <span className="text-sm text-ink-mute">Saved to customer</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={saveConfig}
+                  disabled={savePending || volume == null}
+                  className={cn(
+                    "h-9 px-4 rounded-full text-sm font-medium border border-cyan/40 text-cyan",
+                    "active:scale-[0.97] transition-transform",
+                    (savePending || volume == null) && "opacity-50",
+                  )}
+                >
+                  {savePending ? "Saving…" : "Save to customer"}
+                </button>
+              )}
+            </div>
+          )}
+          {pickerOpen && (
+            <CustomerSelectSheet
+              customers={customers}
+              value={customerId}
+              onPick={(id) => {
+                setCustomerId(String(id))
+                setPickerOpen(false)
+                setSavedConfig(null)
+                void getPoolConfig(String(id)).then((cfg) => {
+                  if (!cfg) return
+                  setSavedConfig(cfg)
+                  setVolume(cfg.volumeGallons)
+                  setSanitiser(cfg.sanitiser)
+                })
+              }}
+              onClose={() => setPickerOpen(false)}
+            />
+          )}
         </section>
-      ) : (
-        <>
-      {/* Pool volume + chlorination side by side — headers in line, the
-          selectors below them, each in its own card (same label idiom as
-          the pour sheet's customer card). */}
-      <div className="grid grid-cols-2 gap-3 items-stretch">
         <section className="rounded-xl border border-line-soft bg-bg-elev px-3.5 py-3">
-          <div className="text-[10px] uppercase tracking-wide text-ink-mute">Volume (gal)</div>
+          <div className="text-[10px] uppercase tracking-wide text-ink">Volume (gal)</div>
           <button
             type="button"
             onClick={() => setVolumeOpen(true)}
@@ -283,7 +280,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
           )}
         </section>
         <section className="rounded-xl border border-line-soft bg-bg-elev px-3.5 py-3">
-          <div className="text-[10px] uppercase tracking-wide text-ink-mute">Chlorination</div>
+          <div className="text-[10px] uppercase tracking-wide text-ink">Chlorination</div>
           <div
             role="radiogroup"
             aria-label="Chlorination type"
@@ -308,59 +305,10 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
         </section>
       </div>
 
-      {customer && savedConfig && configEditing && (
-        /* Editing a saved config: Cancel reverts and collapses, Save persists */
-        <section className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setVolume(savedConfig.volumeGallons)
-              setSanitiser(savedConfig.sanitiser)
-              setConfigEditing(false)
-            }}
-            disabled={savePending}
-            className="h-9 px-4 rounded-full text-sm border border-line-soft text-ink-dim active:scale-[0.97] transition-transform"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={saveConfig}
-            disabled={savePending || !configDirty || volume == null}
-            className={cn(
-              "h-9 px-4 rounded-full text-sm font-medium border border-cyan/40 text-cyan",
-              "active:scale-[0.97] transition-transform",
-              (savePending || !configDirty || volume == null) && "opacity-50",
-            )}
-          >
-            {savePending ? "Saving…" : "Save"}
-          </button>
-        </section>
-      )}
-      {customer && !savedConfig && volume != null && (
-        /* First save: persist volume+chlorination to the customer */
-        <section className="flex justify-end">
-          <button
-            type="button"
-            onClick={saveConfig}
-            disabled={savePending}
-            className={cn(
-              "h-9 px-4 rounded-full text-sm font-medium border border-cyan/40 text-cyan",
-              "active:scale-[0.97] transition-transform",
-              savePending && "opacity-60",
-            )}
-          >
-            {savePending ? "Saving…" : "Save to customer"}
-          </button>
-        </section>
-      )}
-        </>
-      )}
-
       {/* Readings */}
       <section className="space-y-2">
         <div className="flex items-baseline justify-between">
-          <label className="text-base font-medium text-ink-dim">Readings</label>
+          <label className="text-base font-medium text-ink">Readings</label>
           <span className="text-xs text-ink-mute">* required readings</span>
         </div>
         <div className="divide-y divide-line-soft/50 rounded-xl border border-line-soft bg-bg-elev">
@@ -368,7 +316,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
             const v = readings[f.key]
             return (
               <div key={f.key} className="flex items-center justify-between gap-3 pl-4 pr-3 py-2.5">
-                <span className="text-base text-ink-dim">
+                <span className="text-base text-ink">
                   {f.label}
                   {f.unit && <span className="text-ink-mute"> ({f.unit})</span>}
                   {"required" in f && f.required && <span className="text-cyan"> *</span>}
