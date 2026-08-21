@@ -298,8 +298,37 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
         </div>
       </section>
 
-      {customer && volume != null && configDirty && (
-        /* Persist volume+chlorination to the customer for next time */
+      {customer && savedConfig && configEditing && (
+        /* Editing a saved config: Cancel reverts and collapses, Save persists */
+        <section className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setVolume(savedConfig.volumeGallons)
+              setSanitiser(savedConfig.sanitiser)
+              setConfigEditing(false)
+            }}
+            disabled={savePending}
+            className="h-9 px-4 rounded-full text-sm border border-line-soft text-ink-dim active:scale-[0.97] transition-transform"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={saveConfig}
+            disabled={savePending || !configDirty || volume == null}
+            className={cn(
+              "h-9 px-4 rounded-full text-sm font-medium border border-cyan/40 text-cyan",
+              "active:scale-[0.97] transition-transform",
+              (savePending || !configDirty || volume == null) && "opacity-50",
+            )}
+          >
+            {savePending ? "Saving…" : "Save"}
+          </button>
+        </section>
+      )}
+      {customer && !savedConfig && volume != null && (
+        /* First save: persist volume+chlorination to the customer */
         <section className="flex justify-end">
           <button
             type="button"
