@@ -185,9 +185,12 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
 
   return (
     <div className="space-y-6">
+      {/* ── Form header ── */}
+      <h1 className="font-display text-xl text-ink">New sample</h1>
+
       {/* Customer (optional) — compact inline picker trigger */}
       <section className="flex items-center justify-between gap-3">
-        <label className="text-sm font-medium text-ink-dim shrink-0">
+        <label className="text-base font-medium text-ink-dim shrink-0">
           Customer <span className="text-ink-mute font-normal">(optional)</span>
         </label>
         <button
@@ -195,7 +198,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
           onClick={() => setPickerOpen(true)}
           aria-haspopup="dialog"
           className={cn(
-            "flex items-center gap-1.5 h-9 px-3.5 rounded-full text-sm max-w-[55%]",
+            "flex items-center gap-1.5 h-10 px-4 rounded-full text-base max-w-[55%]",
             "border transition-colors duration-150 active:scale-[0.98]",
             customer
               ? "bg-cyan/10 border-cyan/40 text-ink"
@@ -229,7 +232,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
       {customer && savedConfig && !configEditing ? (
         /* Saved pool config — one summary row; Edit expands the controls */
         <section className="flex items-center justify-between gap-3">
-          <label className="text-sm font-medium text-ink-dim shrink-0">Pool</label>
+          <label className="text-base font-medium text-ink-dim shrink-0">Pool</label>
           <div className="flex items-center gap-2">
             <span className="text-base tabular-nums text-ink">
               {savedConfig.volumeGallons.toLocaleString()} gal · {SANI_LABEL[savedConfig.sanitiser]}
@@ -247,7 +250,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
         <>
       {/* Pool volume — wheel select, 5k–40k in 2.5k steps */}
       <section className="flex items-center justify-between gap-3">
-        <label className="text-sm font-medium text-ink-dim shrink-0">
+        <label className="text-base font-medium text-ink-dim shrink-0">
           Pool volume <span className="text-ink-mute font-normal">(gal)</span>
         </label>
         <button
@@ -255,7 +258,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
           onClick={() => setVolumeOpen(true)}
           aria-haspopup="dialog"
           className={cn(
-            "flex items-center gap-1.5 h-10 px-4 rounded-full text-base tabular-nums",
+            "flex items-center gap-1.5 h-11 px-5 rounded-full text-lg tabular-nums",
             "border transition-colors duration-150 active:scale-[0.98]",
             volume != null
               ? "bg-cyan/10 border-cyan/40 text-ink"
@@ -281,7 +284,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
 
       {/* Chlorination — inline horizontal radio group */}
       <section className="flex items-center justify-between gap-3">
-        <label className="text-sm font-medium text-ink-dim shrink-0">Chlorination type</label>
+        <label className="text-base font-medium text-ink-dim shrink-0">Chlorination type</label>
         <div role="radiogroup" aria-label="Chlorination type" className="flex p-1 gap-1 rounded-full bg-black/25">
           {SANITISER_OPTIONS.map((o) => (
             <button
@@ -291,7 +294,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
               aria-checked={sanitiser === o.value}
               onClick={() => setSanitiser(o.value as Sanitiser)}
               className={cn(
-                "h-9 px-4 rounded-full text-sm font-medium transition-colors duration-150",
+                "h-10 px-5 rounded-full text-base font-medium transition-colors duration-150",
                 sanitiser === o.value ? "bg-cyan/15 text-ink" : "text-ink-dim",
               )}
             >
@@ -353,7 +356,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
       {/* Readings */}
       <section className="space-y-2">
         <div className="flex items-baseline justify-between">
-          <label className="text-sm font-medium text-ink-dim">Readings</label>
+          <label className="text-base font-medium text-ink-dim">Readings</label>
           <span className="text-xs text-ink-mute">* required readings</span>
         </div>
         <div className="divide-y divide-line-soft/50 rounded-xl border border-line-soft bg-bg-elev">
@@ -361,7 +364,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
             const v = readings[f.key]
             return (
               <div key={f.key} className="flex items-center justify-between gap-3 pl-4 pr-3 py-2.5">
-                <span className="text-sm text-ink-dim">
+                <span className="text-base text-ink-dim">
                   {f.label}
                   {f.unit && <span className="text-ink-mute"> ({f.unit})</span>}
                   {"required" in f && f.required && <span className="text-cyan"> *</span>}
@@ -371,7 +374,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
                   onClick={() => setWheelFor(f.key)}
                   aria-haspopup="dialog"
                   className={cn(
-                    "flex items-center gap-1.5 h-10 px-4 rounded-full text-base tabular-nums",
+                    "flex items-center gap-1.5 h-11 px-5 rounded-full text-lg tabular-nums",
                     "border transition-colors duration-150 active:scale-[0.98]",
                     v != null
                       ? "bg-cyan/10 border-cyan/40 text-ink"
