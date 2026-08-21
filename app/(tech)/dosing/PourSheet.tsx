@@ -79,13 +79,18 @@ function trimNum(n: number): string {
 }
 
 /**
- * The dose picker — the Phantom leverage-picker layout: Min / big selected
- * amount / Max, then a horizontal ruler with the amount ABOVE each tick.
- * The selected stop hides behind the fixed centre line (the big value shows
- * it); the recommended stop's tick is cyan. Native scroll with snap — the
- * tape leads, state follows.
+ * The dose picker — the Phantom leverage-picker layout: the big selected
+ * amount over a horizontal ruler with the amount ABOVE each tick. The
+ * selected stop hides behind the fixed centre line; the recommended tick is
+ * cyan. The tape is a spring-driven drag surface (NOT native scroll — that
+ * wedges on iOS and feels dead at 3 stops): swipe anywhere in the band,
+ * drag past the ends and it stretches and springs back, release and it
+ * springs to the nearest stop carrying your velocity.
  */
 const TAPE_ITEM = 56
+// Damping ratio ~0.88 — a whisper of overshoot, right for a drag surface.
+const SPRING = { stiffness: 220, damping: 26 }
+const RUBBER = 0.35
 
 function DoseTape({
   rows,
@@ -100,45 +105,117 @@ function DoseTape({
   amountLabel: string
   onSens: (i: number) => void
 }) {
-  const ref = useRef<HTMLDivElement>(null)
+  const n = rows.length
   const scale = stopScale(rows)
-  // iOS Safari wedges a mandatory-snap scroller that's positioned
-  // programmatically (stuck at 0, dead to touch) — so snap turns on only
-  // AFTER the centring assignment lands.
-  const [snapOn, setSnapOn] = useState(false)
-  const touched = useRef(false)
-  // Taps commit the stop directly — the smooth scroll is just the visual
-  // catch-up, so a swallowed scroll event can't strand the selection.
-  const jump = (i: number) => {
-    onSens(i)
-    ref.current?.scrollTo({ left: i * TAPE_ITEM, behavior: "smooth" })
+  const track = useRef<HTMLDivElement>(null)
+  // All motion lives in refs and writes transforms directly — a re-render
+  // per frame would drop frames.
+  const pos = useRef(activeIdx) // displayed stop index (float)
+  const vel = useRef(0) // stops/second
+  const raf = useRef(0)
+  const lastIdx = useRef(activeIdx)
+  const drag = useRef<{ id: number; raw: number; x: number; t: number } | null>(null)
+  // Survives past pointerup so the click that follows a drag doesn't jump.
+  const moved = useRef(false)
+
+  const render = () => {
+    if (track.current) track.current.style.transform = `translate3d(${-pos.current * TAPE_ITEM}px,0,0)`
+  }
+  const clampIdx = (i: number) => Math.max(0, Math.min(n - 1, i))
+  // Past either end the tape moves at a fraction of the finger — the stretch.
+  const rubber = (raw: number) =>
+    raw < 0 ? raw * RUBBER : raw > n - 1 ? n - 1 + (raw - (n - 1)) * RUBBER : raw
+  const commit = (i: number) => {
+    if (i !== lastIdx.current) {
+      lastIdx.current = i
+      onSens(i)
+    }
   }
 
-  // Centre the selected stop on mount only — after that the tape leads and
-  // state follows (the wheel-picker pattern, rotated 90 degrees).
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.scrollLeft = activeIdx * TAPE_ITEM
-    const raf = requestAnimationFrame(() => setSnapOn(true))
-    // The sheet's slide-up transform can swallow the first assignment on
-    // WebKit — re-assert once the entrance settles, unless the tech has
-    // already put a finger on it.
-    const t = setTimeout(() => {
-      if (!touched.current) el.scrollLeft = activeIdx * TAPE_ITEM
-    }, 320)
-    return () => {
-      cancelAnimationFrame(raf)
-      clearTimeout(t)
+  const springTo = (target: number) => {
+    cancelAnimationFrame(raf.current)
+    if (typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      pos.current = target
+      vel.current = 0
+      render()
+      return
     }
+    let last = performance.now()
+    const step = (now: number) => {
+      const dt = Math.min(32, now - last) / 1000
+      last = now
+      vel.current += (-SPRING.stiffness * (pos.current - target) - SPRING.damping * vel.current) * dt
+      pos.current += vel.current * dt
+      if (Math.abs(pos.current - target) < 0.002 && Math.abs(vel.current) < 0.02) {
+        pos.current = target
+        vel.current = 0
+        render()
+        return
+      }
+      render()
+      raf.current = requestAnimationFrame(step)
+    }
+    raf.current = requestAnimationFrame(step)
+  }
+
+  const jump = (i: number) => {
+    commit(i)
+    springTo(i)
+  }
+
+  // Mount + external re-anchors (product flip remount, result refresh).
+  useLayoutEffect(() => {
+    pos.current = activeIdx
+    lastIdx.current = activeIdx
+    render()
+    return () => cancelAnimationFrame(raf.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  useEffect(() => {
+    if (activeIdx !== lastIdx.current) {
+      lastIdx.current = activeIdx
+      springTo(activeIdx)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIdx])
 
-  const onScroll = () => {
-    const el = ref.current
-    if (!el) return
-    const idx = Math.max(0, Math.min(rows.length - 1, Math.round(el.scrollLeft / TAPE_ITEM)))
-    if (idx !== activeIdx) onSens(idx)
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    cancelAnimationFrame(raf.current)
+    // Can throw if the pointer already lifted — capture is best-effort.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      /* keep the drag; move/up still bubble to the band */
+    }
+    // Un-rubber the current position so the finger picks up where it looks.
+    drag.current = { id: e.pointerId, raw: pos.current, x: e.clientX, t: performance.now() }
+    moved.current = false
+    vel.current = 0
+  }
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current
+    if (!d || e.pointerId !== d.id) return
+    const dx = e.clientX - d.x
+    const now = performance.now()
+    const dt = Math.max(1, now - d.t) / 1000
+    const dIdx = -dx / TAPE_ITEM
+    if (Math.abs(dx) > 4) moved.current = true
+    vel.current = dIdx / dt
+    d.raw += dIdx
+    d.x = e.clientX
+    d.t = now
+    pos.current = rubber(d.raw)
+    render()
+    commit(Math.round(clampIdx(d.raw)))
+  }
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current
+    if (!d || e.pointerId !== d.id) return
+    drag.current = null
+    // A short velocity projection picks the stop a flick was headed for.
+    const target = clampIdx(Math.round(d.raw + vel.current * 0.12))
+    commit(target)
+    springTo(target)
   }
 
   return (
@@ -178,29 +255,29 @@ function DoseTape({
           <RotateCcw className="w-4 h-4" strokeWidth={2} />
         </button>
       </div>
-      <div className="relative -mx-5">
+      {/* The whole band is the drag surface — touch-none on the element
+          itself (iOS ignores an ancestor's), overflow hidden clips the strip. */}
+      <div
+        className="relative -mx-5 overflow-hidden touch-none select-none cursor-grab active:cursor-grabbing"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
         <div
-          ref={ref}
-          onScroll={onScroll}
-          onPointerDown={() => (touched.current = true)}
-          onTouchStart={() => (touched.current = true)}
-          className={cn(
-            // overscroll-x-contain keeps the rubber-band local: short tapes
-            // (3 stops) still stretch and bounce at the ends instead of
-            // handing the gesture to the page.
-            "overflow-x-auto flex touch-pan-x select-none overscroll-x-contain",
-            "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-            snapOn && "snap-x snap-mandatory",
-          )}
-          style={{ paddingLeft: `calc(50% - ${TAPE_ITEM / 2}px)`, paddingRight: `calc(50% - ${TAPE_ITEM / 2}px)` }}
+          ref={track}
+          className="flex will-change-transform"
+          style={{ marginLeft: `calc(50% - ${TAPE_ITEM / 2}px)` }}
         >
           {rows.map((r, i) => (
             <button
               key={i}
               type="button"
-              onClick={() => jump(i)}
+              onClick={() => {
+                if (!moved.current) jump(i)
+              }}
               className={cn(
-                "snap-center shrink-0 flex flex-col items-center gap-1.5 pt-1 pb-1.5",
+                "shrink-0 flex flex-col items-center gap-1.5 pt-1 pb-1.5",
                 "transition-opacity duration-150",
                 i === activeIdx && "opacity-0",
               )}
