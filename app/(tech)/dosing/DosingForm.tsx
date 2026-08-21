@@ -248,61 +248,65 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
         </section>
       ) : (
         <>
-      {/* Pool volume — wheel select, 5k–40k in 2.5k steps */}
-      <section className="flex items-center justify-between gap-3">
-        <label className="text-base font-medium text-ink-dim shrink-0">
-          Pool volume <span className="text-ink-mute font-normal">(gal)</span>
-        </label>
-        <button
-          type="button"
-          onClick={() => setVolumeOpen(true)}
-          aria-haspopup="dialog"
-          className={cn(
-            "flex items-center gap-1.5 h-11 px-5 rounded-full text-lg tabular-nums",
-            "border transition-colors duration-150 active:scale-[0.98]",
-            volume != null
-              ? "bg-cyan/10 border-cyan/40 text-ink"
-              : "bg-black/25 border-line-soft text-ink-mute",
+      {/* Pool volume + chlorination side by side — headers in line, the
+          selectors below them, each in its own card (same label idiom as
+          the pour sheet's customer card). */}
+      <div className="grid grid-cols-2 gap-3 items-stretch">
+        <section className="rounded-xl border border-line-soft bg-bg-elev px-3.5 py-3">
+          <div className="text-[10px] uppercase tracking-wide text-ink-mute">Volume (gal)</div>
+          <button
+            type="button"
+            onClick={() => setVolumeOpen(true)}
+            aria-haspopup="dialog"
+            className={cn(
+              "mt-2 w-full h-11 px-4 flex items-center justify-between rounded-full text-lg tabular-nums",
+              "border transition-colors duration-150 active:scale-[0.98]",
+              volume != null
+                ? "bg-cyan/10 border-cyan/40 text-ink"
+                : "bg-black/25 border-line-soft text-ink-mute",
+            )}
+          >
+            {volume != null ? volume.toLocaleString() : "Set"}
+            <ChevronDown className="w-4 h-4 text-cyan shrink-0" strokeWidth={2.2} />
+          </button>
+          {volumeOpen && (
+            <ReadingWheelSheet
+              key="volume"
+              field={VOLUME_WHEEL}
+              value={volume ?? undefined}
+              onDone={(v) => setVolume(v)}
+              onClear={() => setVolume(null)}
+              onClose={() => setVolumeOpen(false)}
+              clearLabel="Clear"
+              presets={VOLUME_PRESETS}
+            />
           )}
-        >
-          {volume != null ? volume.toLocaleString() : "Set"}
-          <ChevronDown className="w-3.5 h-3.5 text-cyan shrink-0" strokeWidth={2.2} />
-        </button>
-        {volumeOpen && (
-          <ReadingWheelSheet
-            key="volume"
-            field={VOLUME_WHEEL}
-            value={volume ?? undefined}
-            onDone={(v) => setVolume(v)}
-            onClear={() => setVolume(null)}
-            onClose={() => setVolumeOpen(false)}
-            clearLabel="Clear"
-            presets={VOLUME_PRESETS}
-          />
-        )}
-      </section>
-
-      {/* Chlorination — inline horizontal radio group */}
-      <section className="flex items-center justify-between gap-3">
-        <label className="text-base font-medium text-ink-dim shrink-0">Chlorination type</label>
-        <div role="radiogroup" aria-label="Chlorination type" className="flex p-1 gap-1 rounded-full bg-black/25">
-          {SANITISER_OPTIONS.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              role="radio"
-              aria-checked={sanitiser === o.value}
-              onClick={() => setSanitiser(o.value as Sanitiser)}
-              className={cn(
-                "h-10 px-5 rounded-full text-base font-medium transition-colors duration-150",
-                sanitiser === o.value ? "bg-cyan/15 text-ink" : "text-ink-dim",
-              )}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      </section>
+        </section>
+        <section className="rounded-xl border border-line-soft bg-bg-elev px-3.5 py-3">
+          <div className="text-[10px] uppercase tracking-wide text-ink-mute">Chlorination</div>
+          <div
+            role="radiogroup"
+            aria-label="Chlorination type"
+            className="mt-2 flex p-1 gap-1 rounded-full bg-black/25"
+          >
+            {SANITISER_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={sanitiser === o.value}
+                onClick={() => setSanitiser(o.value as Sanitiser)}
+                className={cn(
+                  "flex-1 h-9 rounded-full text-base font-medium transition-colors duration-150",
+                  sanitiser === o.value ? "bg-cyan/15 text-ink" : "text-ink-dim",
+                )}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
 
       {customer && savedConfig && configEditing && (
         /* Editing a saved config: Cancel reverts and collapses, Save persists */
