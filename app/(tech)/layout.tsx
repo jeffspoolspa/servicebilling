@@ -17,15 +17,12 @@ export default async function TechLayout({ children }: { children: React.ReactNo
     ? [employee.first_name, employee.last_name].filter(Boolean).join(" ") || null
     : null
 
-  // No header row at all (ruled 2026-08-21): frosted pills float over the
-  // content — drawer trigger left, page-claimed context centre, live
-  // connectivity right. The column pads under them + the iOS safe-area.
+  // Header band with pills (ruled 2026-08-21): drawer trigger + connectivity
+  // left, clock/user (or page-claimed context) right. In normal flow — it
+  // scrolls away with the page; the band itself owns the top safe-area.
   return (
     <TopBarProvider>
-      <div
-        className="min-h-screen flex flex-col"
-        style={{ paddingTop: "calc(env(safe-area-inset-top) + 58px)" }}
-      >
+      <div className="min-h-screen flex flex-col">
         <TopPills
           techName={techName}
           menu={
@@ -40,11 +37,11 @@ export default async function TechLayout({ children }: { children: React.ReactNo
           <BottomBarProvider>
             <ModuleTabs />
             {/* pb leaves room for the fixed bottom action bar */}
-            <main className="flex-1 w-full max-w-md mx-auto px-5 pt-1 pb-28">{children}</main>
+            <main className="flex-1 w-full max-w-md mx-auto px-5 pt-5 pb-28">{children}</main>
             <BottomNav hideInventory={followUpOnly} />
           </BottomBarProvider>
         ) : (
-          <main className="flex-1 w-full max-w-md mx-auto px-5 pt-1 pb-6">{children}</main>
+          <main className="flex-1 w-full max-w-md mx-auto px-5 pt-5 pb-6">{children}</main>
         )}
       </div>
     </TopBarProvider>
