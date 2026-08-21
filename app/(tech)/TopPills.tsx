@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { usePathname } from "next/navigation"
 import { Wifi, WifiOff } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { useTopBar } from "./top-bar"
@@ -16,6 +17,7 @@ const PILL =
  */
 export function TopPills({ menu, techName }: { menu: React.ReactNode; techName?: string | null }) {
   const { content } = useTopBar()
+  const pathname = usePathname()
   // Slide away while scrolling down, return on scroll-up or near the top —
   // the pills float over content, so they get out of the way of reading.
   const [hidden, setHidden] = useState(false)
@@ -29,6 +31,8 @@ export function TopPills({ menu, techName }: { menu: React.ReactNode; techName?:
     window.addEventListener("scroll", onScroll, { passive: true })
     return () => window.removeEventListener("scroll", onScroll)
   }, [])
+  // The login screen stands alone — no chrome.
+  if (pathname.startsWith("/tech-login")) return null
   return (
     <div
       className={cn(
