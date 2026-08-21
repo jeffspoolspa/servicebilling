@@ -326,7 +326,14 @@ export function WeatherPourSheet({
                           {amount}
                         </span>
                       )}
-                      {"freeChlorine" in (d.effects ?? {}) && (
+                      {/* Shown only when FC is short of min (or while
+                          checked, so it can be untoggled) — above min the
+                          engine's answer doesn't change. */}
+                      {"freeChlorine" in (d.effects ?? {}) &&
+                        (algae ||
+                          (samples.actual.freeChlorine != null &&
+                            samples.actual.minimumFreeChlorine != null &&
+                            samples.actual.freeChlorine < samples.actual.minimumFreeChlorine)) && (
                         <span
                           role="checkbox"
                           aria-checked={algae}
