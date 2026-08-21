@@ -14,7 +14,7 @@ const PILL =
  * (passed in so the server layout can compose it), centre pill = the page's
  * claimed top-bar content, right pill = live connectivity.
  */
-export function TopPills({ menu }: { menu: React.ReactNode }) {
+export function TopPills({ menu, techName }: { menu: React.ReactNode; techName?: string | null }) {
   const { content } = useTopBar()
   return (
     <div className="fixed inset-x-0 top-0 z-30 pointer-events-none">
@@ -22,16 +22,46 @@ export function TopPills({ menu }: { menu: React.ReactNode }) {
         className="max-w-md mx-auto px-4 flex items-center justify-between gap-2"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 10px)" }}
       >
-        {/* menu + connectivity cluster left; the right side stays blank
-            until a page claims it */}
+        {/* menu + connectivity cluster left; right side = page-claimed
+            content when set, else the clock + signed-in user */}
         <div className="flex items-center gap-2">
           <div className={cn(PILL, "p-1")}>{menu}</div>
           <ConnectivityPill />
         </div>
-        {content != null && (
+        {content != null ? (
           <div className={cn(PILL, "min-w-0 h-9 px-4 text-sm text-ink")}>{content}</div>
+        ) : (
+          <ClockPill techName={techName} />
         )}
       </div>
+    </div>
+  )
+}
+
+/** Time + who's signed in — first name and last initial, minute-fresh. */
+function ClockPill({ techName }: { techName?: string | null }) {
+  const [now, setNow] = useState<Date | null>(null)
+  useEffect(() => {
+    setNow(new Date())
+    const id = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(id)
+  }, [])
+  if (!now) return null
+  const time = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+  const short = techName
+    ? techName.split(/\s+/).length > 1
+      ? `${techName.split(/\s+/)[0]} ${techName.split(/\s+/)[1][0]}.`
+      : techName
+    : null
+  return (
+    <div className={cn(PILL, "h-9 px-3.5 gap-1.5 shrink-0 text-xs tabular-nums text-ink-dim")}>
+      <span className="text-ink">{time}</span>
+      {short && (
+        <>
+          <span className="text-ink-mute">·</span>
+          <span className="truncate max-w-[96px]">{short}</span>
+        </>
+      )}
     </div>
   )
 }
