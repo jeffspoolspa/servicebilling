@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils/cn"
 import { useTopBar } from "./top-bar"
 
 const PILL =
-  "pointer-events-auto flex items-center rounded-full bg-bg-elev/85 backdrop-blur-md border border-line-soft shadow-[0_4px_16px_-6px_rgba(0,0,0,0.5)]"
+  "pointer-events-auto flex items-center rounded-full bg-[#0A141E]/95 backdrop-blur-md border border-line-soft shadow-[0_4px_16px_-6px_rgba(0,0,0,0.5)]"
 
 /**
  * The floating top row (ruled 2026-08-21, Robinhood-style): no header strip —
@@ -16,8 +16,27 @@ const PILL =
  */
 export function TopPills({ menu, techName }: { menu: React.ReactNode; techName?: string | null }) {
   const { content } = useTopBar()
+  // Slide away while scrolling down, return on scroll-up or near the top —
+  // the pills float over content, so they get out of the way of reading.
+  const [hidden, setHidden] = useState(false)
+  useEffect(() => {
+    let last = window.scrollY
+    const onScroll = () => {
+      const y = window.scrollY
+      setHidden(y > last && y > 24)
+      last = y
+    }
+    window.addEventListener("scroll", onScroll, { passive: true })
+    return () => window.removeEventListener("scroll", onScroll)
+  }, [])
   return (
-    <div className="fixed inset-x-0 top-0 z-30 pointer-events-none">
+    <div
+      className={cn(
+        "fixed inset-x-0 top-0 z-30 pointer-events-none",
+        "transition-[transform,opacity] duration-200 ease-in-out",
+        hidden && "-translate-y-full opacity-0",
+      )}
+    >
       <div
         className="max-w-md mx-auto px-4 flex items-center justify-between gap-2"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 10px)" }}
