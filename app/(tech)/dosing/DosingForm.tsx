@@ -182,9 +182,6 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
 
   return (
     <div className="space-y-6">
-      {/* ── Form header ── */}
-      <h1 className="font-display text-xl text-ink">New sample</h1>
-
       {/* ── Customer + pool: one cohesive unit. Picking a customer with a
           saved config populates the volume/chlorination cards directly;
           Save persists the current pair to the customer. ── */}
