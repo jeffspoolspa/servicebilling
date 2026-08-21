@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState, useTransition } from "react"
-import { Check, ChevronDown } from "lucide-react"
+import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import type { ActiveCustomer } from "@/lib/entities/follow-up/shared"
 import { CustomerSelectSheet } from "../follow-up/CustomerPicker"
@@ -11,19 +11,25 @@ import { PourSheet } from "./PourSheet"
 import { ReadingWheelSheet } from "./ReadingWheel"
 import {
   READING_FIELDS,
-  SANITISERS,
   type DosingResponse,
   type ReadingKey,
   type Sanitiser,
 } from "./shared"
+
+// The form offers only the two chlorination types the branches actually run
+// (ruled 2026-08-21); the API's "liquid" stays reachable via the contract.
+const SANITISER_OPTIONS = [
+  { value: "tab", label: "Tablet" },
+  { value: "salt", label: "Salt" },
+] as const
 
 const VOLUME_WHEEL = {
   label: "Pool volume",
   unit: "gal",
   min: 5000,
   max: 40000,
-  step: 1000,
-  start: 12000,
+  step: 2500,
+  start: 12500,
 }
 
 export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
@@ -32,7 +38,6 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   const [volume, setVolume] = useState<number | null>(null)
   const [volumeOpen, setVolumeOpen] = useState(false)
   const [sanitiser, setSanitiser] = useState<Sanitiser>("tab")
-  const [sanitiserOpen, setSanitiserOpen] = useState(false)
   const [readings, setReadings] = useState<Partial<Record<ReadingKey, number>>>({})
   const [wheelFor, setWheelFor] = useState<ReadingKey | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -158,7 +163,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
             "border transition-colors duration-150 active:scale-[0.98]",
             customer
               ? "bg-cyan/10 border-cyan/40 text-ink"
-              : "bg-bg-elev border-line-soft text-ink-dim",
+              : "bg-black/25 border-line-soft text-ink-dim",
           )}
         >
           <span className="truncate">{customer ? customer.customer_name : "Select"}</span>
@@ -177,7 +182,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
         )}
       </section>
 
-      {/* Pool volume — wheel select, 5k–40k in 1k steps */}
+      {/* Pool volume — wheel select, 5k–40k in 2.5k steps */}
       <section className="flex items-center justify-between gap-3">
         <label className="text-sm font-medium text-ink-dim shrink-0">
           Pool volume <span className="text-ink-mute font-normal">(gal)</span>
@@ -187,11 +192,11 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
           onClick={() => setVolumeOpen(true)}
           aria-haspopup="dialog"
           className={cn(
-            "flex items-center gap-1.5 h-9 px-3.5 rounded-full text-sm tabular-nums",
+            "flex items-center gap-1.5 h-10 px-4 rounded-full text-base tabular-nums",
             "border transition-colors duration-150 active:scale-[0.98]",
             volume != null
               ? "bg-cyan/10 border-cyan/40 text-ink"
-              : "bg-bg-elev border-line-soft text-ink-mute",
+              : "bg-black/25 border-line-soft text-ink-mute",
           )}
         >
           {volume != null ? volume.toLocaleString() : "Set"}
@@ -210,31 +215,26 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
         )}
       </section>
 
-      {/* Chlorination — row trigger opening a bottom-sheet select */}
+      {/* Chlorination — inline horizontal radio group */}
       <section className="flex items-center justify-between gap-3">
         <label className="text-sm font-medium text-ink-dim shrink-0">Chlorination type</label>
-        <button
-          type="button"
-          onClick={() => setSanitiserOpen(true)}
-          aria-haspopup="dialog"
-          className={cn(
-            "flex items-center gap-1.5 h-9 px-3.5 rounded-full text-sm",
-            "bg-cyan/10 border border-cyan/40 text-ink",
-            "transition-colors duration-150 active:scale-[0.98]",
-          )}
-        >
-          {SANITISERS.find((s) => s.value === sanitiser)!.label}
-          <ChevronDown className="w-3.5 h-3.5 text-cyan shrink-0" strokeWidth={2.2} />
-        </button>
-        {sanitiserOpen && (
-          <OptionSheet
-            title="Chlorination type"
-            options={SANITISERS}
-            value={sanitiser}
-            onPick={(v) => setSanitiser(v as Sanitiser)}
-            onClose={() => setSanitiserOpen(false)}
-          />
-        )}
+        <div role="radiogroup" aria-label="Chlorination type" className="flex p-1 gap-1 rounded-full bg-black/25">
+          {SANITISER_OPTIONS.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="radio"
+              aria-checked={sanitiser === o.value}
+              onClick={() => setSanitiser(o.value as Sanitiser)}
+              className={cn(
+                "h-9 px-4 rounded-full text-sm font-medium transition-colors duration-150",
+                sanitiser === o.value ? "bg-cyan/15 text-ink" : "text-ink-dim",
+              )}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
       </section>
 
       {/* Readings */}
@@ -247,7 +247,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
           {visibleFields.map((f) => {
             const v = readings[f.key]
             return (
-              <div key={f.key} className="flex items-center justify-between gap-3 pl-4 pr-3 py-2">
+              <div key={f.key} className="flex items-center justify-between gap-3 pl-4 pr-3 py-2.5">
                 <span className="text-sm text-ink-dim">
                   {f.label}
                   {f.unit && <span className="text-ink-mute"> ({f.unit})</span>}
@@ -258,11 +258,11 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
                   onClick={() => setWheelFor(f.key)}
                   aria-haspopup="dialog"
                   className={cn(
-                    "flex items-center gap-1.5 h-9 px-3.5 rounded-full text-sm tabular-nums",
+                    "flex items-center gap-1.5 h-10 px-4 rounded-full text-base tabular-nums",
                     "border transition-colors duration-150 active:scale-[0.98]",
                     v != null
                       ? "bg-cyan/10 border-cyan/40 text-ink"
-                      : "bg-transparent border-line-soft text-ink-mute",
+                      : "bg-black/25 border-line-soft text-ink-mute",
                   )}
                 >
                   {v != null ? (f.step < 1 ? v.toFixed(1) : v) : "Set"}
@@ -298,73 +298,6 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
           {error}
         </p>
       )}
-    </div>
-  )
-}
-
-/** Small bottom-sheet single-select (same chrome as the wheel/customer sheets). */
-function OptionSheet({
-  title,
-  options,
-  value,
-  onPick,
-  onClose,
-}: {
-  title: string
-  options: readonly { value: string; label: string }[]
-  value: string
-  onPick: (v: string) => void
-  onClose: () => void
-}) {
-  const [closing, setClosing] = useState(false)
-  const dismiss = (after?: () => void) => {
-    if (closing) return
-    setClosing(true)
-    setTimeout(() => {
-      onClose()
-      after?.()
-    }, 180)
-  }
-  return (
-    <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-40">
-      <div
-        onClick={() => dismiss()}
-        className={cn(
-          "absolute inset-0 bg-black/50 backdrop-blur-[2px]",
-          "transition-opacity duration-200 ease-out",
-          closing ? "opacity-0" : "opacity-100 animate-[fade-in_180ms_ease-out_both]",
-        )}
-      />
-      <div
-        className={cn(
-          "absolute bottom-0 left-0 right-0 pb-[calc(env(safe-area-inset-bottom)+16px)]",
-          "bg-bg-elev border-t border-line rounded-t-2xl shadow-[0_-12px_40px_-12px_rgba(0,0,0,0.5)]",
-          "transition-transform ease-[cubic-bezier(0.165,0.84,0.44,1)]",
-          closing
-            ? "translate-y-full duration-[180ms]"
-            : "translate-y-0 duration-[260ms] animate-[sheet-slide-up_260ms_cubic-bezier(0.165,0.84,0.44,1)_both]",
-        )}
-      >
-        <div className="w-10 h-1.5 rounded-full bg-line-soft mx-auto mt-2" />
-        <h2 className="font-display text-base px-5 pt-3 pb-1">{title}</h2>
-        <div className="px-3">
-          {options.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              onClick={() => dismiss(() => onPick(o.value))}
-              className={cn(
-                "w-full min-h-12 px-3 flex items-center justify-between rounded-lg text-left text-base",
-                "transition-colors duration-150 active:scale-[0.99]",
-                o.value === value ? "bg-cyan/10 text-ink" : "text-ink hover:bg-white/[0.04]",
-              )}
-            >
-              {o.label}
-              {o.value === value && <Check className="w-4 h-4 text-cyan" strokeWidth={2.2} />}
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
