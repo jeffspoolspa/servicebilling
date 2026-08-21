@@ -9,7 +9,7 @@
 // bars the predicted-readings card above moves live.
 
 import { useEffect, useMemo, useState } from "react"
-import { ArrowLeftRight } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { sampleValue, type DosingResponse, type Sample, type SensitivityRow } from "./shared"
 import {
@@ -61,6 +61,7 @@ export function WeatherPourSheet({
   // Opens in list mode — focusing a chemical hides the others, so the tech
   // sees the whole pour list first.
   const [focus, setFocus] = useState<number | null>(null)
+  const [mode, setMode] = useState<"predicted" | "actual">("predicted")
 
   useEffect(() => {
     setChoice({})
@@ -135,14 +136,46 @@ export function WeatherPourSheet({
         </section>
       </div>
 
-      {/* ── Predicted readings, stacked — moves live as doses adjust ── */}
+      {/* ── Readings card: Predicted/Measured radio top-right; predicted
+             rows carry a direction arrow vs the measured sample ── */}
       <section className={cn(CARD, "px-4 pb-1")}>
-        <h3 className="pt-3 text-[10px] uppercase tracking-wide text-ink-mute">Predicted</h3>
+        <div className="flex items-center justify-between pt-2.5">
+          <h3 className="text-[10px] uppercase tracking-wide text-ink-mute">Readings</h3>
+          <div role="radiogroup" aria-label="Sample" className="flex p-0.5 gap-0.5 rounded-full bg-black/25">
+            {(
+              [
+                ["predicted", "Predicted"],
+                ["actual", "Measured"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="radio"
+                aria-checked={mode === key}
+                onClick={() => setMode(key)}
+                className={cn(
+                  "h-6 px-2.5 rounded-full text-[10px] font-medium transition-colors duration-150",
+                  mode === key ? "bg-cyan/15 text-ink" : "text-ink-dim",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-x-8">
           {(() => {
             const shown = READING_ROWS.filter((r) => sampleValue(samples.actual, r.key) != null)
+            const sample = mode === "predicted" ? predicted : samples.actual
             return shown.map((r, i) => {
               const assumed = samples.actual.assumed?.includes(r.key)
+              const value = sampleValue(sample, r.key)
+              const delta =
+                mode === "predicted" && !assumed
+                  ? (sampleValue(predicted, r.key) ?? 0) - (sampleValue(samples.actual, r.key) ?? 0)
+                  : 0
+              const eps = r.digits === 1 ? 0.05 : 0.5
               // divider on every cell except the last grid row's
               const lastRow = i >= shown.length - (shown.length % 2 === 0 ? 2 : 1)
               return (
@@ -159,13 +192,21 @@ export function WeatherPourSheet({
                       <span className="text-[10px] text-ink-mute"> (ppm)</span>
                     )}
                   </span>
-                  <span
-                    className={cn(
-                      "text-base tabular-nums transition-colors duration-300",
-                      assumed ? "text-orange-400 italic" : "text-ink",
-                    )}
-                  >
-                    {fmt(sampleValue(predicted, r.key), r.digits)}
+                  <span className="flex items-center gap-1">
+                    {Math.abs(delta) >= eps &&
+                      (delta > 0 ? (
+                        <ArrowUp className="w-3.5 h-3.5 text-cyan" strokeWidth={2.5} />
+                      ) : (
+                        <ArrowDown className="w-3.5 h-3.5 text-cyan" strokeWidth={2.5} />
+                      ))}
+                    <span
+                      className={cn(
+                        "text-base tabular-nums transition-colors duration-300",
+                        assumed ? "text-orange-400 italic" : "text-ink",
+                      )}
+                    >
+                      {fmt(value, r.digits)}
+                    </span>
                   </span>
                 </div>
               )
