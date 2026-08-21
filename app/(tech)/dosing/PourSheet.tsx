@@ -98,12 +98,15 @@ export function DoseTape({
   recIdx,
   amountLabel,
   onSens,
+  onDone,
 }: {
   rows: { amount: number; unit: string }[]
   activeIdx: number
   recIdx: number
   amountLabel: string
   onSens: (i: number) => void
+  /** Renders a done button mirroring the reset one — closes the picker. */
+  onDone?: () => void
 }) {
   const n = rows.length
   const scale = stopScale(rows)
@@ -221,6 +224,19 @@ export function DoseTape({
   return (
     <div className="space-y-3">
       <div className="relative flex justify-center">
+        {onDone && (
+          <button
+            type="button"
+            onClick={onDone}
+            aria-label="Done adjusting"
+            className={cn(
+              "absolute left-0 top-1/2 -translate-y-1/2 w-10 h-10 grid place-items-center rounded-full",
+              "bg-white/10 text-cyan active:scale-95 transition-transform duration-150",
+            )}
+          >
+            <Check className="w-4 h-4" strokeWidth={2.2} />
+          </button>
+        )}
         <span className="flex flex-col items-center">
           {/* kept in the layout when off-recommendation so the row doesn't jump */}
           <span

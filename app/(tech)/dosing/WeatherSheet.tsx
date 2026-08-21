@@ -254,6 +254,7 @@ export function WeatherPourSheet({
                           recIdx={recRow}
                           amountLabel={amount}
                           onSens={(j) => setSens((v) => ({ ...v, [i]: j }))}
+                          onDone={() => setFocus(null)}
                         />
                       </div>
                     </div>
