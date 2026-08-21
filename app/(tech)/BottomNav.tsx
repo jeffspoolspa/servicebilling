@@ -2,50 +2,28 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Package, ClipboardList, FlaskConical } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { useBottomBar } from "./bottom-bar"
+import { visibleModules } from "./nav"
 
-// Bottom nav = the two modules. Each module's default landing route + the
-// prefixes that count as "inside" it (so the tab stays active across sub-pages).
-const modules = [
-  {
-    href: "/truck-check",
-    label: "Inventory",
-    icon: Package,
-    match: ["/truck-check", "/sign-out"],
-  },
-  {
-    href: "/follow-up",
-    label: "Follow-Up",
-    icon: ClipboardList,
-    match: ["/follow-up"],
-  },
-  {
-    href: "/dosing",
-    label: "Dosing",
-    icon: FlaskConical,
-    match: ["/dosing"],
-  },
-] as const
-
+/**
+ * The bottom strip is the ACTION BAR (ruled 2026-08-21): a page's primary
+ * action owns it whenever one is set. Module NAVIGATION lives in the side
+ * drawer (TechMenu); while the bar is idle it shows compact icon quick-access
+ * to the modules so switching stays one tap.
+ */
 export function BottomNav({ hideInventory = false }: { hideInventory?: boolean }) {
   const pathname = usePathname()
   const { action } = useBottomBar()
 
-  // Follow-up-only techs (RH/Savannah) get no Inventory module — but Dosing
-  // is for every tech, every branch. With a single module the switcher is
-  // noise — render only the morphed action button.
-  const visible = hideInventory
-    ? modules.filter((m) => m.href !== "/truck-check")
-    : modules
+  const visible = visibleModules(hideInventory)
   if (!action && visible.length < 2) return null
 
   return (
     <div className="fixed bottom-0 inset-x-0 z-20 pb-[env(safe-area-inset-bottom)] pointer-events-none">
       <div className="max-w-md mx-auto px-4 pb-3">
         {action ? (
-          // Morphed state: the nav has become the page's primary action.
+          // The page's primary action owns the bar.
           <button
             type="button"
             onClick={action.onClick}
@@ -63,39 +41,34 @@ export function BottomNav({ hideInventory = false }: { hideInventory?: boolean }
             {action.label}
           </button>
         ) : (
-          // Default state: module switcher.
+          // Idle: compact icon quick-access — full names live in the drawer.
           <nav
-            aria-label="Modules"
+            aria-label="Quick access"
             className={cn(
-              "pointer-events-auto flex items-center gap-1 p-1.5 rounded-full",
+              "pointer-events-auto flex items-center gap-1 p-1 rounded-full w-fit mx-auto",
               "bg-bg-elev/90 backdrop-blur-md border border-line-soft",
               "shadow-[0_8px_30px_-10px_rgba(0,0,0,0.6)]",
             )}
           >
             {visible.map((m) => {
-              const active = m.match.some(
-                (p) => pathname === p || pathname.startsWith(p + "/"),
-              )
+              const active = m.match.some((p) => pathname === p || pathname.startsWith(p + "/"))
               const Icon = m.icon
               return (
                 <Link
                   key={m.href}
                   href={m.href as never}
                   prefetch
+                  aria-label={m.label}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex-1 flex flex-col items-center gap-0.5 py-2 rounded-full min-h-14",
-                    "transition-colors duration-150 ease-out active:scale-[0.98]",
+                    "grid place-items-center w-12 h-12 rounded-full",
+                    "transition-colors duration-150 ease-out active:scale-[0.95]",
                     active
-                      ? "bg-cyan/10 text-ink"
+                      ? "bg-cyan/10 text-cyan"
                       : "text-ink-dim hover:text-ink hover:bg-white/[0.03]",
                   )}
                 >
-                  <Icon
-                    className={cn("w-5 h-5", active ? "text-cyan" : "")}
-                    strokeWidth={active ? 2.2 : 1.8}
-                  />
-                  <span className="text-xs font-medium">{m.label}</span>
+                  <Icon className="w-5 h-5" strokeWidth={active ? 2.2 : 1.8} />
                 </Link>
               )
             })}
