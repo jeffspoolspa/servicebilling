@@ -128,23 +128,36 @@ export function WeatherPourSheet({
             </div>
           </div>
         </section>
+        {/* Retest + visit note ride the right quarter, stacked */}
         <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={onEditSample}
-            aria-label="Edit sample"
-            className={cn(CARD, "flex-1 grid place-items-center text-ink-dim active:scale-95 transition-transform duration-150")}
-          >
-            <Pencil className="w-4 h-4" strokeWidth={1.8} />
-          </button>
-          <button
-            type="button"
-            onClick={onNewSample}
-            aria-label="New sample"
-            className={cn(CARD, "flex-1 grid place-items-center text-cyan active:scale-95 transition-transform duration-150")}
-          >
-            <Plus className="w-5 h-5" strokeWidth={2} />
-          </button>
+          {result.retest.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setRetestOpen(true)}
+              className={cn(
+                CARD,
+                "flex-1 flex flex-col items-center justify-center gap-0.5 text-cyan",
+                "!border-cyan/20 !bg-cyan/10 active:scale-95 transition-transform duration-150",
+              )}
+            >
+              <RotateCcw className="w-4 h-4" strokeWidth={1.8} />
+              <span className="text-[10px] font-medium">Retest · {result.retest.length}</span>
+            </button>
+          )}
+          {result.visitNote && (
+            <button
+              type="button"
+              onClick={() => setNoteOpen(true)}
+              className={cn(
+                CARD,
+                "flex-1 flex flex-col items-center justify-center gap-0.5 text-ink-dim",
+                "active:scale-95 transition-transform duration-150",
+              )}
+            >
+              <FileText className="w-4 h-4 text-cyan" strokeWidth={1.8} />
+              <span className="text-[10px] font-medium">Visit note</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -380,31 +393,25 @@ export function WeatherPourSheet({
         })}
       </section>
 
-      {/* ── Retest + visit note in line (warnings parked, ruled 2026-08-21) ── */}
-      {(result.retest.length > 0 || result.visitNote) && (
-        <div className="flex gap-2.5">
-          {result.retest.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setRetestOpen(true)}
-              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-cyan border border-cyan/20 bg-cyan/10 active:scale-[0.98] transition-transform duration-150"
-            >
-              <RotateCcw className="w-4 h-4 shrink-0" strokeWidth={1.8} />
-              Retest · {result.retest.length}
-            </button>
-          )}
-          {result.visitNote && (
-            <button
-              type="button"
-              onClick={() => setNoteOpen(true)}
-              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-ink border border-line-soft bg-bg-elev active:scale-[0.98] transition-transform duration-150"
-            >
-              <FileText className="w-4 h-4 shrink-0 text-cyan" strokeWidth={1.8} />
-              Visit note
-            </button>
-          )}
-        </div>
-      )}
+      {/* ── Sample actions at the bottom, written out with their icons ── */}
+      <div className="flex gap-2.5">
+        <button
+          type="button"
+          onClick={onEditSample}
+          className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-ink-dim border border-line-soft bg-bg-elev active:scale-[0.98] transition-transform duration-150"
+        >
+          <Pencil className="w-4 h-4 shrink-0" strokeWidth={1.8} />
+          Edit sample
+        </button>
+        <button
+          type="button"
+          onClick={onNewSample}
+          className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-cyan border border-cyan/40 bg-cyan/10 active:scale-[0.98] transition-transform duration-150"
+        >
+          <Plus className="w-4 h-4 shrink-0" strokeWidth={2} />
+          New sample
+        </button>
+      </div>
       {recalcError && (
         <p role="alert" className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3.5 py-2.5">
           {recalcError}
