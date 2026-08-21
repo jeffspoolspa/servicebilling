@@ -33,7 +33,7 @@ export function ModuleTabs() {
     <nav
       role="tablist"
       aria-label="Module sections"
-      className="sticky top-0 z-10 bg-bg/80 backdrop-blur-md border-b border-line-soft"
+      className="sticky top-0 z-10 bg-bg border-b border-line-soft"
     >
       <div className="max-w-md mx-auto flex">
         {set.tabs.map((t) => {

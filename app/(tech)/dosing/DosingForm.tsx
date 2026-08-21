@@ -61,7 +61,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   const [savedConfig, setSavedConfig] = useState<PoolConfig | null>(null)
   const [savePending, setSavePending] = useState(false)
   const [pending, startTransition] = useTransition()
-  const { setAction } = useBottomBar()
+  const { setAction, setSuppressed } = useBottomBar()
 
   const customer = customers.find((c) => String(c.customer_id) === customerId)
   const volumeNum = volume ?? 0
@@ -152,17 +152,25 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   // form, New sample while the pour sheet is up.
   useEffect(() => {
     if (result) {
-      setAction({ label: "New sample", onClick: newSample })
+      // The pour sheet carries its own in-flow New sample button; the fixed
+      // bar would overlap the scrolled sheet.
+      setAction(null)
+      setSuppressed(true)
     } else if (canSubmit || pending) {
+      setSuppressed(false)
       setAction({
         label: pending ? "Calculating…" : "Get pour sheet",
         onClick: submit,
         disabled: pending,
       })
     } else {
+      setSuppressed(false)
       setAction(null)
     }
-    return () => setAction(null)
+    return () => {
+      setAction(null)
+      setSuppressed(false)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result, pending, canSubmit, volume, sanitiser, readings, customerId])
 

@@ -22,7 +22,7 @@ export default async function TechLayout({ children }: { children: React.ReactNo
   // scrolls away with the page; the band itself owns the top safe-area.
   return (
     <TopBarProvider>
-      <div className="min-h-screen flex flex-col">
+      <div className="min-h-dvh flex flex-col">
         <TopPills
           techName={techName}
           menu={

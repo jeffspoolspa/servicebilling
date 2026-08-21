@@ -22,15 +22,29 @@ import {
   VisitNoteBody,
 } from "./PourSheet"
 
-// FC is in the sanitation dial, LSI/minFC in the balance dial — the card
-// stacks everything else the engine works from.
+// The card stacks every reading; the sanitation dial centres MIN FC with
+// its bar driven by FC (double-wraps past 20 like the Fitness move ring).
+// Margin of error around the target value per reading (ruled 2026-08-21) —
+// sized to field-test precision (≈ the entry wheel's step). Tune here.
+const RANGE_MARGINS: Record<string, number> = {
+  ph: 0.2,
+  totalAlkalinity: 20,
+  carbonateAlkalinity: 20,
+  cyanuricAcid: 10,
+  calciumHardness: 50,
+  salt: 200,
+  totalChlorine: 0.5,
+}
+
 const READING_ROWS: { key: string; label: string; digits: number }[] = [
+  { key: "freeChlorine", label: "Free Cl", digits: 1 },
+  { key: "totalChlorine", label: "Total Cl", digits: 1 },
   { key: "ph", label: "pH", digits: 1 },
   { key: "carbonateAlkalinity", label: "Carb Alk", digits: 0 },
   { key: "totalAlkalinity", label: "Alkalinity", digits: 0 },
   { key: "cyanuricAcid", label: "CYA", digits: 0 },
   { key: "calciumHardness", label: "Calcium", digits: 0 },
-  { key: "waterTempF", label: "Temp °F", digits: 0 },
+  { key: "salt", label: "Salt", digits: 0 },
 ]
 
 function fmt(v: number | null, digits: number) {
@@ -42,6 +56,7 @@ const CARD = "rounded-2xl border border-line-soft bg-gradient-to-b from-[#12283C
 export function WeatherPourSheet({
   result,
   customerName,
+  onNewSample,
   onEditSample,
   algae,
   onAlgaeChange,
@@ -63,7 +78,7 @@ export function WeatherPourSheet({
   // Opens in list mode — focusing a chemical hides the others, so the tech
   // sees the whole pour list first.
   const [focus, setFocus] = useState<number | null>(null)
-  const [mode, setMode] = useState<"predicted" | "actual">("predicted")
+  const [mode, setMode] = useState<"predicted" | "actual" | "target">("predicted")
   const [noteOpen, setNoteOpen] = useState(false)
 
   useEffect(() => {
@@ -96,9 +111,13 @@ export function WeatherPourSheet({
   }, [samples.actual, doses, choice, sens])
 
   const SANI_LABEL: Record<string, string> = { tab: "Tablet", liquid: "Liquid", salt: "Salt" }
+  const anyAssumed = READING_ROWS.some(
+    (r) => sampleValue(samples.actual, r.key) != null && samples.actual.assumed?.includes(r.key),
+  )
   // The Predicted|Measured radio drives the dials and the readings card
   // together — one lens over the whole sample.
-  const shown = mode === "predicted" ? predicted : samples.actual
+  const shown =
+    mode === "predicted" ? predicted : mode === "target" ? samples.recommended : samples.actual
 
   return (
     <div className="space-y-4">
@@ -170,9 +189,17 @@ export function WeatherPourSheet({
           </div>
         </section>
         <section className={cn(CARD, "flex flex-col items-center pt-2.5 pb-1 overflow-hidden")}>
-          <h3 className="self-start px-3.5 text-[10px] uppercase tracking-wide text-ink-mute">
-            Sanitation
-          </h3>
+          <div className="self-stretch flex items-center justify-between px-3.5">
+            <h3 className="text-[10px] uppercase tracking-wide text-ink-mute">Sanitation</h3>
+            {/* legend: the bar is the FC level (current lens) */}
+            <span
+              className="flex items-center gap-1 text-[10px] tabular-nums font-medium"
+              style={{ color: "#0093E7" }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#0093E7" }} />
+              FC {shown.freeChlorine != null ? shown.freeChlorine.toFixed(1) : "—"}
+            </span>
+          </div>
           <div className="scale-[0.82] -my-3">
             <SanitationDial
               fc={shown.freeChlorine ?? null}
@@ -193,6 +220,7 @@ export function WeatherPourSheet({
               [
                 ["predicted", "Predicted"],
                 ["actual", "Measured"],
+                ["target", "Target"],
               ] as const
             ).map(([key, label]) => (
               <button
@@ -222,6 +250,21 @@ export function WeatherPourSheet({
                   ? (sampleValue(predicted, r.key) ?? 0) - (sampleValue(samples.actual, r.key) ?? 0)
                   : 0
               const eps = r.digits === 1 ? 0.05 : 0.5
+              // Ranges come from the TARGET sample (ruled 2026-08-21):
+              // FC uses its explicit band floor (minimumFreeChlorine — the
+              // engine sanctions overshoot, so no upper bound); the rest
+              // compare to the target value within display rounding.
+              // Comparison only — never client chemistry.
+              const inRange = (() => {
+                // the target IS the reference — no self-comparison colours
+                if (mode === "target" || assumed || value == null) return null
+                if (r.key === "freeChlorine") {
+                  const min = sampleValue(samples.recommended, "minimumFreeChlorine")
+                  return min != null ? value >= min - 0.05 : null
+                }
+                const rec = sampleValue(samples.recommended, r.key)
+                return rec != null ? Math.abs(value - rec) <= (RANGE_MARGINS[r.key] ?? eps) : null
+              })()
               // divider on every cell except the last grid row's
               const lastRow = i >= visibleRows.length - (visibleRows.length % 2 === 0 ? 2 : 1)
               return (
@@ -248,7 +291,13 @@ export function WeatherPourSheet({
                     <span
                       className={cn(
                         "text-base tabular-nums transition-colors duration-300",
-                        assumed ? "text-orange-400 italic" : "text-ink",
+                        assumed
+                          ? "text-orange-400 italic"
+                          : inRange == null
+                            ? "text-ink"
+                            : inRange
+                              ? "text-emerald-300"
+                              : "text-red-300",
                       )}
                     >
                       {fmt(value, r.digits)}
@@ -258,6 +307,22 @@ export function WeatherPourSheet({
               )
             })
           })()}
+        </div>
+        <div className="flex items-center justify-center gap-3.5 py-2 text-[10px] text-ink-mute">
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-emerald-300" />
+            in range
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-red-300" />
+            out of range
+          </span>
+          {anyAssumed && (
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-orange-400" />
+              assumed
+            </span>
+          )}
         </div>
       </section>
 
@@ -400,6 +465,19 @@ export function WeatherPourSheet({
           )
         })}
       </section>
+
+      {/* ── In-flow primary action: the fixed bar is suppressed here ── */}
+      <button
+        type="button"
+        onClick={onNewSample}
+        className={cn(
+          "w-full h-12 rounded-full text-base font-medium",
+          "bg-gradient-to-b from-cyan to-cyan-deep text-[#061018]",
+          "active:scale-[0.98] transition-transform duration-150",
+        )}
+      >
+        New sample
+      </button>
 
       {noteOpen && result.visitNote && (
         <InfoModal title="Visit note" onClose={() => setNoteOpen(false)}>
