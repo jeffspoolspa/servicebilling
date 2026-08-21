@@ -498,14 +498,18 @@ Inventory but keep Follow-Up and Dosing.
   (`POST /maintenance/dosing/recommendations`) and renders the pour sheet:
   WHOOP-style Balance/Sanitation dials over the derived predicted sample
   (actual + chosen dose options' effects, recalculated live on alternative
-  swap), coded warnings + retest modals, per-dose detail sheets (instruction,
-  effects, cautions). Absent reading = not measured, never 0. The only API
-  side effect is the append-only recommendation log row.
+  swap), coded warnings + retest modals, per-dose detail sheets (spring-drag
+  dose tape, effect bars, cautions). Absent reading = not measured, never 0.
+  API side effect: the append-only recommendation log row. App side effect:
+  per-customer volume+chlorination defaults saved to
+  `maintenance.pool_configs` ([pool-config](entities/pool-config.md)) and
+  auto-loaded on customer pick.
 
 **Database tables**:
 - `maintenance.truck_check_submissions` — currently empty; truck-check feature may not be in active use
 - `public.inventory_sign_outs` (when tech signs out equipment)
 - `maintenance.follow_ups` — field follow-up tickets (media in storage bucket `follow-ups`)
+- `maintenance.pool_configs` — per-customer dosing defaults ([pool-config](entities/pool-config.md))
 
 ---
 
