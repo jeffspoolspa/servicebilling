@@ -8,15 +8,13 @@
 // space.
 
 import { useEffect, useMemo, useState } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, Check, FileText, Pencil, Plus, RotateCcw } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, Check, FileText, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { sampleValue, type DosingResponse, type Sample, type SensitivityRow } from "./shared"
 import {
   BalanceDial,
   DoseTape,
-  humanize,
   InfoModal,
-  LABEL_NAMES,
   SanitationDial,
   stopScale,
   trimNum,
@@ -44,7 +42,6 @@ const CARD = "rounded-2xl border border-line-soft bg-gradient-to-b from-[#12283C
 export function WeatherPourSheet({
   result,
   customerName,
-  onNewSample,
   onEditSample,
   algae,
   onAlgaeChange,
@@ -68,7 +65,6 @@ export function WeatherPourSheet({
   const [focus, setFocus] = useState<number | null>(null)
   const [mode, setMode] = useState<"predicted" | "actual">("predicted")
   const [noteOpen, setNoteOpen] = useState(false)
-  const [retestOpen, setRetestOpen] = useState(false)
 
   useEffect(() => {
     setChoice({})
@@ -128,36 +124,35 @@ export function WeatherPourSheet({
             </div>
           </div>
         </section>
-        {/* Retest + visit note ride the right quarter, stacked */}
+        {/* Visit note + edit sample ride the right column, stacked
+            (retest + new-sample killed, ruled 2026-08-21) */}
         <div className="flex flex-col gap-2">
-          {result.retest.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setRetestOpen(true)}
-              className={cn(
-                CARD,
-                "flex-1 flex flex-col items-center justify-center gap-0.5 text-cyan",
-                "!border-cyan/20 !bg-cyan/10 active:scale-95 transition-transform duration-150",
-              )}
-            >
-              <RotateCcw className="w-4 h-4" strokeWidth={1.8} />
-              <span className="text-[10px] font-medium">Retest · {result.retest.length}</span>
-            </button>
-          )}
           {result.visitNote && (
             <button
               type="button"
               onClick={() => setNoteOpen(true)}
               className={cn(
                 CARD,
-                "flex-1 flex flex-col items-center justify-center gap-0.5 text-ink-dim",
+                "flex-1 flex items-center justify-center gap-1.5 text-ink-dim",
                 "active:scale-95 transition-transform duration-150",
               )}
             >
-              <FileText className="w-4 h-4 text-cyan" strokeWidth={1.8} />
-              <span className="text-[10px] font-medium">Visit note</span>
+              <FileText className="w-4 h-4 shrink-0" strokeWidth={1.8} />
+              <span className="text-xs font-medium">Visit note</span>
             </button>
           )}
+          <button
+            type="button"
+            onClick={onEditSample}
+            className={cn(
+              CARD,
+              "flex-1 flex items-center justify-center gap-1.5 text-ink-dim",
+              "active:scale-95 transition-transform duration-150",
+            )}
+          >
+            <Pencil className="w-4 h-4 shrink-0" strokeWidth={1.8} />
+            <span className="text-xs font-medium">Edit sample</span>
+          </button>
         </div>
       </div>
 
@@ -182,26 +177,6 @@ export function WeatherPourSheet({
             />
           </div>
         </section>
-      </div>
-
-      {/* ── Sample actions, written out with their icons ── */}
-      <div className="flex gap-2.5">
-        <button
-          type="button"
-          onClick={onEditSample}
-          className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-ink-dim border border-line-soft bg-bg-elev active:scale-[0.98] transition-transform duration-150"
-        >
-          <Pencil className="w-4 h-4 shrink-0" strokeWidth={1.8} />
-          Edit sample
-        </button>
-        <button
-          type="button"
-          onClick={onNewSample}
-          className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-cyan border border-cyan/40 bg-cyan/10 active:scale-[0.98] transition-transform duration-150"
-        >
-          <Plus className="w-4 h-4 shrink-0" strokeWidth={2} />
-          New sample
-        </button>
       </div>
 
       {/* ── Readings card: Predicted/Measured radio top-right; predicted
@@ -337,54 +312,55 @@ export function WeatherPourSheet({
                         </span>
                       )}
                     </span>
-                    {/* Algae check rides the gap between label and dose —
-                        always on chlorine rows (ruled 2026-08-21, supersedes
-                        the hide-above-min rule). */}
-                    {"freeChlorine" in (d.effects ?? {}) && (
-                      <span
-                        role="checkbox"
-                        aria-checked={algae}
-                        tabIndex={0}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          if (!recalcPending) onAlgaeChange(!algae)
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.stopPropagation()
-                            if (!recalcPending) onAlgaeChange(!algae)
-                          }
-                        }}
-                        className={cn(
-                          "shrink-0 flex items-center gap-1.5 text-[11px]",
-                          recalcPending ? "opacity-60" : "active:opacity-70",
-                          algae ? "text-cyan" : "text-ink-dim",
-                        )}
-                      >
+                    {/* Right column: dose on top, algae check beneath — the
+                        middle of the row stays clear for the focus tap. */}
+                    <span className="shrink-0 flex flex-col items-end gap-1">
+                      {/* the tape's own big amount takes over while focused */}
+                      {!focused && (
                         <span
                           className={cn(
-                            "w-4 h-4 rounded-[5px] border grid place-items-center transition-colors duration-150",
-                            algae
-                              ? "bg-cyan border-cyan text-[#061018]"
-                              : "border-line bg-black/20 text-transparent",
+                            "text-lg font-display tabular-nums transition-colors duration-150",
+                            activeIdx === recRow ? "text-cyan" : "text-ink",
                           )}
                         >
-                          <Check className="w-3 h-3" strokeWidth={3} />
+                          {amount}
                         </span>
-                        {recalcPending ? "Recalculating…" : "Algae present"}
-                      </span>
-                    )}
-                    {/* the tape's own big amount takes over while focused */}
-                    {!focused && (
-                      <span
-                        className={cn(
-                          "shrink-0 text-lg font-display tabular-nums transition-colors duration-150",
-                          activeIdx === recRow ? "text-cyan" : "text-ink",
-                        )}
-                      >
-                        {amount}
-                      </span>
-                    )}
+                      )}
+                      {"freeChlorine" in (d.effects ?? {}) && (
+                        <span
+                          role="checkbox"
+                          aria-checked={algae}
+                          tabIndex={0}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (!recalcPending) onAlgaeChange(!algae)
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.stopPropagation()
+                              if (!recalcPending) onAlgaeChange(!algae)
+                            }
+                          }}
+                          className={cn(
+                            "flex items-center gap-1.5 text-[11px]",
+                            recalcPending ? "opacity-60" : "active:opacity-70",
+                            algae ? "text-cyan" : "text-ink-dim",
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "w-4 h-4 rounded-[5px] border grid place-items-center transition-colors duration-150",
+                              algae
+                                ? "bg-cyan border-cyan text-[#061018]"
+                                : "border-line bg-black/20 text-transparent",
+                            )}
+                          >
+                            <Check className="w-3 h-3" strokeWidth={3} />
+                          </span>
+                          {recalcPending ? "Recalculating…" : "Algae present"}
+                        </span>
+                      )}
+                    </span>
                   </button>
                   {/* Tape stays mounted; its own grid row expands into the
                       space the sibling rows give up. */}
@@ -412,6 +388,12 @@ export function WeatherPourSheet({
           )
         })}
       </section>
+
+      {noteOpen && result.visitNote && (
+        <InfoModal title="Visit note" onClose={() => setNoteOpen(false)}>
+          <VisitNoteBody note={result.visitNote} />
+        </InfoModal>
+      )}
 
       {recalcError && (
         <p role="alert" className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3.5 py-2.5">
