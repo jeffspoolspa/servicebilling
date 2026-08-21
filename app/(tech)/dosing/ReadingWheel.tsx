@@ -33,6 +33,7 @@ export function ReadingWheelSheet({
   onClear,
   onClose,
   clearLabel = "Not measured",
+  presets,
 }: {
   field: WheelSpec
   value: number | undefined
@@ -40,6 +41,8 @@ export function ReadingWheelSheet({
   onClear: () => void
   onClose: () => void
   clearLabel?: string
+  /** Quick-pick pills above the wheel; tapping rolls the wheel there. */
+  presets?: { label: string; value: number }[]
 }) {
   const [closing, setClosing] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
@@ -125,6 +128,34 @@ export function ReadingWheelSheet({
             {clearLabel}
           </button>
         </div>
+
+        {presets && presets.length > 0 && (
+          <div className="flex gap-2 px-5 pt-2">
+            {presets.map((p) => {
+              const active = values[index] === p.value
+              return (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => {
+                    const i = values.indexOf(p.value)
+                    if (i >= 0) listRef.current?.scrollTo({ top: i * ROW, behavior: "smooth" })
+                  }}
+                  className={cn(
+                    "flex-1 flex flex-col items-center py-1.5 rounded-xl border",
+                    "transition-colors duration-150 active:scale-[0.97]",
+                    active
+                      ? "bg-cyan/10 border-cyan/40 text-ink"
+                      : "bg-black/25 border-line-soft text-ink-dim",
+                  )}
+                >
+                  <span className="text-[10px] uppercase tracking-wide text-ink-mute">{p.label}</span>
+                  <span className="text-sm tabular-nums">{p.value.toLocaleString()}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
 
         {/* The wheel */}
         <div className="relative mx-5 my-2" style={{ height: ROW * VISIBLE }}>

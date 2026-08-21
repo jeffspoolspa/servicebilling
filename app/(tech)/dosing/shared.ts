@@ -10,6 +10,12 @@ export const SANITISERS = [
 
 export type Sanitiser = (typeof SANITISERS)[number]["value"]
 
+/** Saved per-customer dosing defaults (maintenance.pool_configs). */
+export interface PoolConfig {
+  volumeGallons: number
+  sanitiser: Sanitiser
+}
+
 /**
  * Readings the tech can enter. Absent means NOT MEASURED — never send 0.
  * min/max/step define the wheel-picker grid; `start` is where an unset wheel

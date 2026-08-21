@@ -6,12 +6,13 @@ import { cn } from "@/lib/utils/cn"
 import type { ActiveCustomer } from "@/lib/entities/follow-up/shared"
 import { CustomerSelectSheet } from "../follow-up/CustomerPicker"
 import { useBottomBar } from "../bottom-bar"
-import { getRecommendation } from "./actions"
+import { getPoolConfig, getRecommendation, savePoolConfig } from "./actions"
 import { PourSheet } from "./PourSheet"
 import { ReadingWheelSheet } from "./ReadingWheel"
 import {
   READING_FIELDS,
   type DosingResponse,
+  type PoolConfig,
   type ReadingKey,
   type Sanitiser,
 } from "./shared"
@@ -32,6 +33,14 @@ const VOLUME_WHEEL = {
   start: 12500,
 }
 
+// Quick-pick pills on the volume wheel — common sizes on the 2,500 grid.
+const VOLUME_PRESETS = [
+  { label: "Small", value: 7500 },
+  { label: "Mid", value: 12500 },
+  { label: "Average", value: 15000 },
+  { label: "Large", value: 25000 },
+]
+
 export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   const [customerId, setCustomerId] = useState("")
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -44,6 +53,12 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   const [result, setResult] = useState<DosingResponse | null>(null)
   const [algae, setAlgae] = useState(false)
   const [recalcError, setRecalcError] = useState<string | null>(null)
+  // Saved per-customer dosing defaults (maintenance.pool_configs): loaded on
+  // customer pick; when present and untouched, the volume+chlorination rows
+  // collapse to a summary with an Edit button.
+  const [savedConfig, setSavedConfig] = useState<PoolConfig | null>(null)
+  const [configEditing, setConfigEditing] = useState(false)
+  const [savePending, setSavePending] = useState(false)
   const [pending, startTransition] = useTransition()
   const { setAction } = useBottomBar()
 
@@ -104,6 +119,22 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
     })
   }
 
+  const SANI_LABEL: Record<string, string> = { tab: "Tablet", liquid: "Liquid", salt: "Salt" }
+  const configDirty =
+    !savedConfig || savedConfig.volumeGallons !== volume || savedConfig.sanitiser !== sanitiser
+  const saveConfig = async () => {
+    if (volume == null || !customerId || savePending) return
+    setSavePending(true)
+    const res = await savePoolConfig({ customerId, volumeGallons: volume, sanitiser })
+    setSavePending(false)
+    if (res.ok) {
+      setSavedConfig({ volumeGallons: volume, sanitiser })
+      setConfigEditing(false)
+    } else {
+      setError(res.error ?? "Could not save.")
+    }
+  }
+
   // The bottom nav morphs into the primary action once the form is
   // submittable (same pattern as follow-up); until then the tabs stay.
   useEffect(() => {
@@ -138,6 +169,8 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
           setError(null)
           setAlgae(false)
           setRecalcError(null)
+          setSavedConfig(null)
+          setConfigEditing(false)
         }}
         onEditSample={() => setResult(null)}
         algae={algae}
@@ -176,12 +209,39 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
             onPick={(id) => {
               setCustomerId(String(id))
               setPickerOpen(false)
+              setSavedConfig(null)
+              setConfigEditing(false)
+              void getPoolConfig(String(id)).then((cfg) => {
+                if (!cfg) return
+                setSavedConfig(cfg)
+                setVolume(cfg.volumeGallons)
+                setSanitiser(cfg.sanitiser)
+              })
             }}
             onClose={() => setPickerOpen(false)}
           />
         )}
       </section>
 
+      {customer && savedConfig && !configEditing ? (
+        /* Saved pool config — one summary row; Edit expands the controls */
+        <section className="flex items-center justify-between gap-3">
+          <label className="text-sm font-medium text-ink-dim shrink-0">Pool</label>
+          <div className="flex items-center gap-2">
+            <span className="text-base tabular-nums text-ink">
+              {savedConfig.volumeGallons.toLocaleString()} gal · {SANI_LABEL[savedConfig.sanitiser]}
+            </span>
+            <button
+              type="button"
+              onClick={() => setConfigEditing(true)}
+              className="h-8 px-3 rounded-full text-sm border border-line-soft text-ink-dim active:scale-[0.97] transition-transform"
+            >
+              Edit
+            </button>
+          </div>
+        </section>
+      ) : (
+        <>
       {/* Pool volume — wheel select, 5k–40k in 2.5k steps */}
       <section className="flex items-center justify-between gap-3">
         <label className="text-sm font-medium text-ink-dim shrink-0">
@@ -211,6 +271,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
             onClear={() => setVolume(null)}
             onClose={() => setVolumeOpen(false)}
             clearLabel="Clear"
+            presets={VOLUME_PRESETS}
           />
         )}
       </section>
@@ -236,6 +297,26 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
           ))}
         </div>
       </section>
+
+      {customer && volume != null && configDirty && (
+        /* Persist volume+chlorination to the customer for next time */
+        <section className="flex justify-end">
+          <button
+            type="button"
+            onClick={saveConfig}
+            disabled={savePending}
+            className={cn(
+              "h-9 px-4 rounded-full text-sm font-medium border border-cyan/40 text-cyan",
+              "active:scale-[0.97] transition-transform",
+              savePending && "opacity-60",
+            )}
+          >
+            {savePending ? "Saving…" : "Save to customer"}
+          </button>
+        </section>
+      )}
+        </>
+      )}
 
       {/* Readings */}
       <section className="space-y-2">

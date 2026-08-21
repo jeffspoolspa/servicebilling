@@ -3,7 +3,8 @@
 import { z } from "zod"
 import { getCurrentEmployee } from "@/lib/auth/require-role"
 import { canUseTechApp } from "@/lib/auth/tech-app"
-import type { DosingResponse } from "./shared"
+import { createSupabaseServer } from "@/lib/supabase/server"
+import type { DosingResponse, PoolConfig } from "./shared"
 
 // Accept the env URL with or without a scheme ("host.app" or "https://host.app").
 const rawBase = process.env.DOTNET_API_URL ?? "jpsinternal-production.up.railway.app"
@@ -92,4 +93,50 @@ export async function getRecommendation(input: unknown): Promise<DosingState> {
   } catch {
     return { ok: false, error: "Unexpected response from the dosing service." }
   }
+}
+
+/** Saved per-customer dosing defaults — maintenance.pool_configs, one row
+ * per customer. Missing row is a normal answer, not an error. */
+export async function getPoolConfig(customerId: string): Promise<PoolConfig | null> {
+  const employee = await getCurrentEmployee()
+  if (!employee || !(await canUseTechApp(employee))) return null
+  const supabase = await createSupabaseServer()
+  const { data } = await supabase
+    .schema("maintenance")
+    .from("pool_configs")
+    .select("volume_gallons, sanitiser")
+    .eq("customer_id", customerId)
+    .maybeSingle()
+  if (!data) return null
+  return { volumeGallons: data.volume_gallons, sanitiser: data.sanitiser }
+}
+
+const poolConfigSchema = z.object({
+  customerId: z.string().min(1),
+  volumeGallons: z.number().int().min(1500),
+  sanitiser: z.enum(["tab", "liquid", "salt"]),
+})
+
+export async function savePoolConfig(input: unknown): Promise<{ ok: boolean; error?: string }> {
+  const employee = await getCurrentEmployee()
+  if (!employee || !(await canUseTechApp(employee))) {
+    return { ok: false, error: "Not signed in to the field app." }
+  }
+  const parsed = poolConfigSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: "Invalid pool configuration." }
+  const supabase = await createSupabaseServer()
+  const { error } = await supabase
+    .schema("maintenance")
+    .from("pool_configs")
+    .upsert(
+      {
+        customer_id: Number(parsed.data.customerId),
+        volume_gallons: parsed.data.volumeGallons,
+        sanitiser: parsed.data.sanitiser,
+        last_set_by: employee.id,
+      },
+      { onConflict: "customer_id" },
+    )
+  if (error) return { ok: false, error: "Could not save — check signal and retry." }
+  return { ok: true }
 }
