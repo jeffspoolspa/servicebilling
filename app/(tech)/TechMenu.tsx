@@ -40,7 +40,7 @@ export function TechMenu({
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Open menu"
-        className="w-8 h-8 rounded-[8px] grid place-items-center bg-gradient-to-b from-cyan to-cyan-deep text-[#061018] font-display font-bold active:scale-95 transition-transform"
+        className="w-7 h-7 shrink-0 rounded-[7px] grid place-items-center bg-gradient-to-b from-cyan to-cyan-deep text-[#061018] font-display font-bold text-sm active:scale-95 transition-transform"
       >
         J
       </button>
