@@ -96,6 +96,9 @@ export function WeatherPourSheet({
   }, [samples.actual, doses, choice, sens])
 
   const SANI_LABEL: Record<string, string> = { tab: "Tablet", liquid: "Liquid", salt: "Salt" }
+  // The Predicted|Measured radio drives the dials and the readings card
+  // together — one lens over the whole sample.
+  const shown = mode === "predicted" ? predicted : samples.actual
 
   return (
     <div className="space-y-4">
@@ -163,7 +166,7 @@ export function WeatherPourSheet({
             Balance
           </h3>
           <div className="scale-[0.82] -my-3">
-            <BalanceDial lsi={predicted.saturationIndex ?? null} />
+            <BalanceDial lsi={shown.saturationIndex ?? null} />
           </div>
         </section>
         <section className={cn(CARD, "flex flex-col items-center pt-2.5 pb-1 overflow-hidden")}>
@@ -172,8 +175,8 @@ export function WeatherPourSheet({
           </h3>
           <div className="scale-[0.82] -my-3">
             <SanitationDial
-              fc={predicted.freeChlorine ?? null}
-              minFc={predicted.minimumFreeChlorine ?? null}
+              fc={shown.freeChlorine ?? null}
+              minFc={shown.minimumFreeChlorine ?? null}
             />
           </div>
         </section>
@@ -210,18 +213,17 @@ export function WeatherPourSheet({
         </div>
         <div className="grid grid-cols-2 gap-x-8">
           {(() => {
-            const shown = READING_ROWS.filter((r) => sampleValue(samples.actual, r.key) != null)
-            const sample = mode === "predicted" ? predicted : samples.actual
-            return shown.map((r, i) => {
+            const visibleRows = READING_ROWS.filter((r) => sampleValue(samples.actual, r.key) != null)
+            return visibleRows.map((r, i) => {
               const assumed = samples.actual.assumed?.includes(r.key)
-              const value = sampleValue(sample, r.key)
+              const value = sampleValue(shown, r.key)
               const delta =
                 mode === "predicted" && !assumed
                   ? (sampleValue(predicted, r.key) ?? 0) - (sampleValue(samples.actual, r.key) ?? 0)
                   : 0
               const eps = r.digits === 1 ? 0.05 : 0.5
               // divider on every cell except the last grid row's
-              const lastRow = i >= shown.length - (shown.length % 2 === 0 ? 2 : 1)
+              const lastRow = i >= visibleRows.length - (visibleRows.length % 2 === 0 ? 2 : 1)
               return (
                 <div
                   key={r.key}
