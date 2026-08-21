@@ -8,7 +8,7 @@
 // space.
 
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, Check, ChevronRight, FileText, Pencil, Plus, RotateCcw } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, Check, FileText, Pencil, Plus, RotateCcw } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { sampleValue, type DosingResponse, type Sample, type SensitivityRow } from "./shared"
 import {
@@ -16,8 +16,6 @@ import {
   DoseTape,
   humanize,
   InfoModal,
-  warningDatum,
-  WARNING_TITLES,
   LABEL_NAMES,
   SanitationDial,
   stopScale,
@@ -71,7 +69,6 @@ export function WeatherPourSheet({
   const [mode, setMode] = useState<"predicted" | "actual">("predicted")
   const [noteOpen, setNoteOpen] = useState(false)
   const [retestOpen, setRetestOpen] = useState(false)
-  const [warningsOpen, setWarningsOpen] = useState(false)
 
   useEffect(() => {
     setChoice({})
@@ -306,45 +303,44 @@ export function WeatherPourSheet({
                           or {options[((choice[i] ?? 0) + 1) % options.length].product}
                         </span>
                       )}
-                      {"freeChlorine" in (d.effects ?? {}) &&
-                        (algae ||
-                          (samples.actual.freeChlorine != null &&
-                            samples.actual.minimumFreeChlorine != null &&
-                            samples.actual.freeChlorine < samples.actual.minimumFreeChlorine)) && (
-                          <span
-                            role="checkbox"
-                            aria-checked={algae}
-                            tabIndex={0}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              if (!recalcPending) onAlgaeChange(!algae)
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.stopPropagation()
-                                if (!recalcPending) onAlgaeChange(!algae)
-                              }
-                            }}
-                            className={cn(
-                              "mt-1 flex w-fit items-center gap-1.5 text-[11px]",
-                              recalcPending ? "opacity-60" : "active:opacity-70",
-                              algae ? "text-cyan" : "text-ink-dim",
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                "w-4 h-4 rounded-[5px] border grid place-items-center transition-colors duration-150",
-                                algae
-                                  ? "bg-cyan border-cyan text-[#061018]"
-                                  : "border-line bg-black/20 text-transparent",
-                              )}
-                            >
-                              <Check className="w-3 h-3" strokeWidth={3} />
-                            </span>
-                            {recalcPending ? "Recalculating…" : "Algae present"}
-                          </span>
-                        )}
                     </span>
+                    {/* Algae check rides the gap between label and dose —
+                        always on chlorine rows (ruled 2026-08-21, supersedes
+                        the hide-above-min rule). */}
+                    {"freeChlorine" in (d.effects ?? {}) && (
+                      <span
+                        role="checkbox"
+                        aria-checked={algae}
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!recalcPending) onAlgaeChange(!algae)
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.stopPropagation()
+                            if (!recalcPending) onAlgaeChange(!algae)
+                          }
+                        }}
+                        className={cn(
+                          "shrink-0 flex items-center gap-1.5 text-[11px]",
+                          recalcPending ? "opacity-60" : "active:opacity-70",
+                          algae ? "text-cyan" : "text-ink-dim",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "w-4 h-4 rounded-[5px] border grid place-items-center transition-colors duration-150",
+                            algae
+                              ? "bg-cyan border-cyan text-[#061018]"
+                              : "border-line bg-black/20 text-transparent",
+                          )}
+                        >
+                          <Check className="w-3 h-3" strokeWidth={3} />
+                        </span>
+                        {recalcPending ? "Recalculating…" : "Algae present"}
+                      </span>
+                    )}
                     {/* the tape's own big amount takes over while focused */}
                     {!focused && (
                       <span
@@ -384,19 +380,9 @@ export function WeatherPourSheet({
         })}
       </section>
 
-      {/* ── Warnings + retest side by side, visit note beneath ── */}
-      {(result.warnings.length > 0 || result.retest.length > 0) && (
+      {/* ── Retest + visit note in line (warnings parked, ruled 2026-08-21) ── */}
+      {(result.retest.length > 0 || result.visitNote) && (
         <div className="flex gap-2.5">
-          {result.warnings.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setWarningsOpen(true)}
-              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-amber-300 border border-amber-400/20 bg-amber-400/10 active:scale-[0.98] transition-transform duration-150"
-            >
-              <AlertTriangle className="w-4 h-4 shrink-0" strokeWidth={1.8} />
-              {result.warnings.length === 1 ? "1 warning" : `${result.warnings.length} warnings`}
-            </button>
-          )}
           {result.retest.length > 0 && (
             <button
               type="button"
@@ -407,69 +393,18 @@ export function WeatherPourSheet({
               Retest · {result.retest.length}
             </button>
           )}
+          {result.visitNote && (
+            <button
+              type="button"
+              onClick={() => setNoteOpen(true)}
+              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-ink border border-line-soft bg-bg-elev active:scale-[0.98] transition-transform duration-150"
+            >
+              <FileText className="w-4 h-4 shrink-0 text-cyan" strokeWidth={1.8} />
+              Visit note
+            </button>
+          )}
         </div>
       )}
-      {result.visitNote && (
-        <button
-          type="button"
-          onClick={() => setNoteOpen(true)}
-          className="w-full flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-ink border border-line-soft bg-bg-elev active:scale-[0.98] transition-transform duration-150"
-        >
-          <FileText className="w-4 h-4 shrink-0 text-cyan" strokeWidth={1.8} />
-          Visit note
-        </button>
-      )}
-      {warningsOpen && (
-        <InfoModal title="Warnings" onClose={() => setWarningsOpen(false)}>
-          <div className="space-y-4">
-            {result.warnings.map((w, i) => {
-              // Everything besides code/actions is code-specific data.
-              const data = Object.entries(w).filter(
-                ([k, v]) => k !== "code" && k !== "actions" && typeof v === "number",
-              )
-              return (
-                <div key={i} className="space-y-1">
-                  <div className="text-sm font-medium text-amber-300 leading-snug">
-                    {WARNING_TITLES[w.code] ?? humanize(w.code)}
-                  </div>
-                  {data.length > 0 && (
-                    <div className="text-xs text-amber-300/70 tabular-nums">
-                      {data.map(([k, v]) => warningDatum(k, v as number)).join(" · ")}
-                    </div>
-                  )}
-                  {(w.actions ?? []).map((a, j) => (
-                    <div key={j} className="flex items-start gap-1.5 text-xs text-amber-200">
-                      <ChevronRight className="w-3 h-3 mt-0.5 shrink-0" strokeWidth={2.5} />
-                      {a}
-                    </div>
-                  ))}
-                </div>
-              )
-            })}
-          </div>
-        </InfoModal>
-      )}
-      {retestOpen && (
-        <InfoModal title="Retest" onClose={() => setRetestOpen(false)}>
-          <p className="text-xs text-ink-mute mb-3">
-            These readings change with this pour — retest before you leave.
-          </p>
-          <ul className="space-y-2">
-            {result.retest.map((k) => (
-              <li key={k} className="flex items-center gap-2 text-sm text-ink">
-                <RotateCcw className="w-3.5 h-3.5 text-cyan shrink-0" strokeWidth={2} />
-                {LABEL_NAMES[k] ?? humanize(k)}
-              </li>
-            ))}
-          </ul>
-        </InfoModal>
-      )}
-      {noteOpen && result.visitNote && (
-        <InfoModal title="Visit note" onClose={() => setNoteOpen(false)}>
-          <VisitNoteBody note={result.visitNote} />
-        </InfoModal>
-      )}
-
       {recalcError && (
         <p role="alert" className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3.5 py-2.5">
           {recalcError}
