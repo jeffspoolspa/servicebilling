@@ -7,7 +7,9 @@ import type { ActiveCustomer } from "@/lib/entities/follow-up/shared"
 import { CustomerSelectSheet } from "../follow-up/CustomerPicker"
 import { useBottomBar } from "../bottom-bar"
 import { getPoolConfig, getRecommendation, savePoolConfig } from "./actions"
-import { PourSheet } from "./PourSheet"
+// EXPERIMENT branch: the Apple-Weather-card pour sheet stands in for the
+// production sheet. Do not merge — swap back to ./PourSheet to compare.
+import { WeatherPourSheet as PourSheet } from "./WeatherSheet"
 import { ReadingWheelSheet } from "./ReadingWheel"
 import {
   READING_FIELDS,

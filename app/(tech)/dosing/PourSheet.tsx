@@ -26,7 +26,7 @@ import {
   type SensitivityRow,
 } from "./shared"
 
-const LABEL_NAMES: Record<string, string> = {
+export const LABEL_NAMES: Record<string, string> = {
   ...Object.fromEntries(READING_FIELDS.map((f) => [f.key, f.label])),
   ...ASSUMED_LABELS,
   saturationIndex: "LSI",
@@ -36,25 +36,25 @@ const LABEL_NAMES: Record<string, string> = {
 }
 
 /** Unit suffix per reading key — pH is unitless. */
-const UNIT_LABELS: Record<string, string> = {
+export const UNIT_LABELS: Record<string, string> = {
   ...Object.fromEntries(READING_FIELDS.map((f) => [f.key, f.unit])),
   carbonateAlkalinity: "ppm",
 }
 
 /** "shock-fc-below-minimum" / "measuredPpm" → readable words — fallback for
  * codes we don't have friendlier copy for. */
-function humanize(code: string) {
+export function humanize(code: string) {
   const s = code.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/-/g, " ").toLowerCase()
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
 /** One coded-warning data field, e.g. ["measuredPpm", 3] → "measured 3 ppm". */
-function warningDatum(key: string, value: number) {
+export function warningDatum(key: string, value: number) {
   if (key.endsWith("Ppm")) return `${humanize(key.slice(0, -3)).toLowerCase()} ${value} ppm`
   return `${humanize(key).toLowerCase()} ${value}`
 }
 
-const WARNING_TITLES: Record<string, string> = {
+export const WARNING_TITLES: Record<string, string> = {
   "shock-fc-below-minimum": "Shock needed — FC below minimum",
 }
 
@@ -67,14 +67,14 @@ const SHOW_DOSE_SLIDER = true
  * humanized (gal). When every stop sits on the half-gallon grid, present
  * the keys in gallons — formatting only, never chemistry.
  */
-function stopScale(rows: { amount: number; unit: string }[]): { div: number; label: string } {
+export function stopScale(rows: { amount: number; unit: string }[]): { div: number; label: string } {
   if (rows.length && rows[0].unit === "flOz" && rows.every((r) => r.amount % 64 === 0)) {
     return { div: 128, label: "gal" }
   }
   return { div: 1, label: rows[0]?.unit === "flOz" ? "fl oz" : (rows[0]?.unit ?? "") }
 }
 
-function trimNum(n: number): string {
+export function trimNum(n: number): string {
   return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)))
 }
 
@@ -92,18 +92,21 @@ const TAPE_ITEM = 56
 const SPRING = { stiffness: 220, damping: 26 }
 const RUBBER = 0.35
 
-function DoseTape({
+export function DoseTape({
   rows,
   activeIdx,
   recIdx,
   amountLabel,
   onSens,
+  onDone,
 }: {
   rows: { amount: number; unit: string }[]
   activeIdx: number
   recIdx: number
   amountLabel: string
   onSens: (i: number) => void
+  /** Renders a done button mirroring the reset one — closes the picker. */
+  onDone?: () => void
 }) {
   const n = rows.length
   const scale = stopScale(rows)
@@ -221,6 +224,19 @@ function DoseTape({
   return (
     <div className="space-y-3">
       <div className="relative flex justify-center">
+        {onDone && (
+          <button
+            type="button"
+            onClick={onDone}
+            aria-label="Done adjusting"
+            className={cn(
+              "absolute left-0 top-1/2 -translate-y-1/2 w-10 h-10 grid place-items-center rounded-full",
+              "bg-white/10 text-cyan active:scale-95 transition-transform duration-150",
+            )}
+          >
+            <Check className="w-4 h-4" strokeWidth={2.2} />
+          </button>
+        )}
         <span className="flex flex-col items-center">
           {/* kept in the layout when off-recommendation so the row doesn't jump */}
           <span
@@ -493,7 +509,7 @@ function tick(radius: number, frac: number) {
 
 /** Balance lens: fixed LSI scale (-1...+1, zero tick at top) — red corrosive
  * zone, green +/-0.3 band, amber scaling zone — with a dot for this water. */
-function BalanceDial({ lsi }: { lsi: number | null }) {
+export function BalanceDial({ lsi }: { lsi: number | null }) {
   const { size, r, stroke, sweep } = DIAL
   const c = 2 * Math.PI * r
   const frac = lsi == null ? 0 : (Math.max(-1, Math.min(1, lsi)) + 1) / 2
@@ -557,7 +573,7 @@ const WHOOP = { blue: "#0093E7", need: "#3e4c5e" }
  * keeps the exact number); dashed grey arc = where it should be (min FC).
  * When FC is short of min, the grey dashes run on past the blue.
  */
-function SanitationDial({ fc, minFc }: { fc: number | null; minFc: number | null }) {
+export function SanitationDial({ fc, minFc }: { fc: number | null; minFc: number | null }) {
   const { size, r, stroke, fcScale } = DIAL
   const c = 2 * Math.PI * r
   const cx = size / 2
@@ -648,6 +664,10 @@ function SanitationDial({ fc, minFc }: { fc: number | null; minFc: number | null
   )
 }
 
+// RETIRED 2026-08-21: the Weather-card layout (WeatherSheet.tsx) is the live
+// pour sheet; this component is kept briefly for reference while the new one
+// bakes in the field. Delete it (plus Metric/LENSES/DoseDetailSheet) once
+// Carter calls the bake done.
 export function PourSheet({
   result,
   customerName,
@@ -1194,7 +1214,7 @@ export function PourSheet({
 }
 
 /** Small centred modal for the warning / retest summaries. */
-function InfoModal({
+export function InfoModal({
   title,
   onClose,
   children,
@@ -1439,7 +1459,7 @@ async function copyText(text: string): Promise<boolean> {
 
 /** The customer-facing record: header lines end with ":", everything else
  * indents under them. Copy sends the RAW string — never re-composed. */
-function VisitNoteBody({ note }: { note: string }) {
+export function VisitNoteBody({ note }: { note: string }) {
   const [copied, setCopied] = useState<"idle" | "ok" | "failed">("idle")
   return (
     <div className="space-y-3">
