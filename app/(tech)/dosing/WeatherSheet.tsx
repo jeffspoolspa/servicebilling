@@ -172,80 +172,105 @@ export function WeatherPourSheet({
         </div>
       </section>
 
-      {/* ── Pour sheet: one card, stacked dose rows; focused row opens its tape ── */}
-      <section className={cn(CARD, "px-4 pb-1")}>
-        <h3 className="pt-3 text-[10px] uppercase tracking-wide text-ink-mute">Pour sheet</h3>
-        <div className="divide-y divide-line-soft/40">
-          {doses.map((d, i) => {
-            const o = optionAt(i)
-            const options = [d, ...(d.alternatives ?? [])]
-            const rows: SensitivityRow[] = o.sensitivity?.length
-              ? o.sensitivity
-              : [{ amount: o.amount, unit: o.unit, recommended: true, effects: o.effects ?? {} }]
-            const recRow = rows.findIndex((r) => r.recommended)
-            const activeIdx = sens[i] ?? (recRow >= 0 ? recRow : 0)
-            const row = rows[activeIdx]
-            const scale = stopScale(rows)
-            const amount = row
-              ? `${trimNum(row.amount / scale.div)} ${scale.label}`
-              : o.displayAmount.replace(/\s*\(.*\)$/, "")
-            const focused = focus === i
-            return (
-              <div key={i} className="py-1">
-                <button
-                  type="button"
-                  onClick={() => setFocus(focused ? null : i)}
-                  className="w-full flex items-center justify-between gap-3 py-2 text-left"
-                >
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold uppercase tracking-wide truncate">
-                      {o.product}
-                    </span>
-                    {options.length > 1 && (
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setChoice((c) => ({ ...c, [i]: ((c[i] ?? 0) + 1) % options.length }))
-                          setSens((v) => ({ ...v, [i]: undefined }))
-                        }}
-                        className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-cyan active:opacity-70"
-                      >
-                        <ArrowLeftRight className="w-3 h-3" strokeWidth={2} />
-                        or {options[((choice[i] ?? 0) + 1) % options.length].product}
-                      </span>
-                    )}
-                  </span>
-                  {/* the tape's own big amount takes over while focused */}
-                  {!focused && (
-                    <span
-                      className={cn(
-                        "shrink-0 text-lg font-display tabular-nums transition-colors duration-150",
-                        activeIdx === recRow ? "text-cyan" : "text-ink",
-                      )}
+      {/* ── Pour sheet rows left; a dedicated dial card right adjusts the
+             selected chemical ── */}
+      {(() => {
+        const doseView = (i: number) => {
+          const d = doses[i]
+          const o = optionAt(i)
+          const options = [d, ...(d.alternatives ?? [])]
+          const rows: SensitivityRow[] = o.sensitivity?.length
+            ? o.sensitivity
+            : [{ amount: o.amount, unit: o.unit, recommended: true, effects: o.effects ?? {} }]
+          const recRow = rows.findIndex((r) => r.recommended)
+          const activeIdx = sens[i] ?? (recRow >= 0 ? recRow : 0)
+          const row = rows[activeIdx]
+          const scale = stopScale(rows)
+          const amount = row
+            ? `${trimNum(row.amount / scale.div)} ${scale.label}`
+            : o.displayAmount.replace(/\s*\(.*\)$/, "")
+          return { o, options, rows, recRow, activeIdx, amount }
+        }
+        const focused = focus != null ? doseView(focus) : null
+        return (
+          <div className="grid grid-cols-[1.1fr_1fr] gap-3 items-stretch">
+            <section className={cn(CARD, "px-3.5 pb-1")}>
+              <h3 className="pt-3 text-[10px] uppercase tracking-wide text-ink-mute">
+                Pour sheet
+              </h3>
+              <div className="divide-y divide-line-soft/40">
+                {doses.map((_, i) => {
+                  const v = doseView(i)
+                  const isFocus = focus === i
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setFocus(i)}
+                      className="w-full flex items-center gap-2 py-2.5 text-left"
                     >
-                      {amount}
-                    </span>
-                  )}
-                </button>
-                {focused && (
-                  <div className="pb-2 px-1">
-                    <DoseTape
-                      key={`${i}-${o.product}`}
-                      rows={rows}
-                      activeIdx={activeIdx}
-                      recIdx={recRow}
-                      amountLabel={amount}
-                      onSens={(j) => setSens((v) => ({ ...v, [i]: j }))}
-                    />
-                  </div>
-                )}
+                      <span
+                        className={cn(
+                          "shrink-0 inline-flex items-center h-8 px-2 rounded-lg font-display font-bold text-xs tabular-nums whitespace-nowrap",
+                          isFocus ? "bg-cyan/20 text-cyan" : "bg-white/[0.06] text-ink-dim",
+                        )}
+                      >
+                        {v.amount}
+                      </span>
+                      <span className="min-w-0">
+                        <span
+                          className={cn(
+                            "block text-[11px] font-semibold uppercase tracking-wide leading-snug",
+                            isFocus ? "text-ink" : "text-ink-dim",
+                          )}
+                        >
+                          {v.o.product}
+                        </span>
+                        {v.options.length > 1 && (
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setChoice((c) => ({ ...c, [i]: ((c[i] ?? 0) + 1) % v.options.length }))
+                              setSens((s) => ({ ...s, [i]: undefined }))
+                            }}
+                            className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-cyan active:opacity-70"
+                          >
+                            <ArrowLeftRight className="w-2.5 h-2.5" strokeWidth={2} />
+                            or {v.options[((choice[i] ?? 0) + 1) % v.options.length].product}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
-            )
-          })}
-        </div>
-      </section>
+            </section>
+            <section className={cn(CARD, "px-5 pb-2 flex flex-col overflow-hidden")}>
+              <h3 className="pt-3 -ml-1.5 text-[10px] uppercase tracking-wide text-ink-mute truncate">
+                {focused ? focused.o.product : "Dose"}
+              </h3>
+              {focused && focus != null ? (
+                <div className="flex-1 flex flex-col justify-center">
+                  <DoseTape
+                    key={`${focus}-${focused.o.product}`}
+                    rows={focused.rows}
+                    activeIdx={focused.activeIdx}
+                    recIdx={focused.recRow}
+                    amountLabel={focused.amount}
+                    onSens={(j) => setSens((s) => ({ ...s, [focus]: j }))}
+                  />
+                </div>
+              ) : (
+                <p className="flex-1 grid place-items-center text-xs text-ink-mute">
+                  Tap a chemical
+                </p>
+              )}
+            </section>
+          </div>
+        )
+      })()}
 
       {recalcError && (
         <p role="alert" className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3.5 py-2.5">
