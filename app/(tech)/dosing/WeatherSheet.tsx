@@ -1,15 +1,14 @@
 "use client"
 
-// EXPERIMENT (branch test/weather-sheet, ruled "play, don't push"): the
-// Apple-Weather-card take on the pour sheet. Both dials side by side up top
-// (no flanking readings; FC lives inside the sanitation dial), all other
-// readings stacked in their own card showing the LIVE predicted values, and
-// the pour sheet as ONE card of stacked dose rows — the focused row opens
-// the dose tape in place (the "moon" slot), and instead of per-dose effect
-// bars the predicted-readings card above moves live.
+// The pour sheet (Apple-Weather-card layout, promoted 2026-08-21): customer
+// card + stacked sample actions, both dials side by side (FC lives in the
+// sanitation dial), a Predicted|Measured readings card whose values move
+// LIVE as doses adjust (no per-dose effect bars), and the pour card where
+// the focused chemical folds the others away and its spring tape fills the
+// space.
 
 import { useEffect, useMemo, useState } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, FileText, Pencil, Plus, RotateCcw } from "lucide-react"
+import { AlertTriangle, ArrowDown, ArrowLeftRight, ArrowUp, Check, ChevronRight, FileText, Pencil, Plus, RotateCcw } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { sampleValue, type DosingResponse, type Sample, type SensitivityRow } from "./shared"
 import {
@@ -17,6 +16,8 @@ import {
   DoseTape,
   humanize,
   InfoModal,
+  warningDatum,
+  WARNING_TITLES,
   LABEL_NAMES,
   SanitationDial,
   stopScale,
@@ -47,6 +48,9 @@ export function WeatherPourSheet({
   customerName,
   onNewSample,
   onEditSample,
+  algae,
+  onAlgaeChange,
+  recalcPending,
   recalcError,
 }: {
   result: DosingResponse
@@ -67,6 +71,7 @@ export function WeatherPourSheet({
   const [mode, setMode] = useState<"predicted" | "actual">("predicted")
   const [noteOpen, setNoteOpen] = useState(false)
   const [retestOpen, setRetestOpen] = useState(false)
+  const [warningsOpen, setWarningsOpen] = useState(false)
 
   useEffect(() => {
     setChoice({})
@@ -301,6 +306,44 @@ export function WeatherPourSheet({
                           or {options[((choice[i] ?? 0) + 1) % options.length].product}
                         </span>
                       )}
+                      {"freeChlorine" in (d.effects ?? {}) &&
+                        (algae ||
+                          (samples.actual.freeChlorine != null &&
+                            samples.actual.minimumFreeChlorine != null &&
+                            samples.actual.freeChlorine < samples.actual.minimumFreeChlorine)) && (
+                          <span
+                            role="checkbox"
+                            aria-checked={algae}
+                            tabIndex={0}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (!recalcPending) onAlgaeChange(!algae)
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.stopPropagation()
+                                if (!recalcPending) onAlgaeChange(!algae)
+                              }
+                            }}
+                            className={cn(
+                              "mt-1 flex w-fit items-center gap-1.5 text-[11px]",
+                              recalcPending ? "opacity-60" : "active:opacity-70",
+                              algae ? "text-cyan" : "text-ink-dim",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "w-4 h-4 rounded-[5px] border grid place-items-center transition-colors duration-150",
+                                algae
+                                  ? "bg-cyan border-cyan text-[#061018]"
+                                  : "border-line bg-black/20 text-transparent",
+                              )}
+                            >
+                              <Check className="w-3 h-3" strokeWidth={3} />
+                            </span>
+                            {recalcPending ? "Recalculating…" : "Algae present"}
+                          </span>
+                        )}
                     </span>
                     {/* the tape's own big amount takes over while focused */}
                     {!focused && (
@@ -341,17 +384,17 @@ export function WeatherPourSheet({
         })}
       </section>
 
-      {/* ── Visit note + retest, side by side; both open small modals ── */}
-      {(result.visitNote || result.retest.length > 0) && (
+      {/* ── Warnings + retest side by side, visit note beneath ── */}
+      {(result.warnings.length > 0 || result.retest.length > 0) && (
         <div className="flex gap-2.5">
-          {result.visitNote && (
+          {result.warnings.length > 0 && (
             <button
               type="button"
-              onClick={() => setNoteOpen(true)}
-              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-ink border border-line-soft bg-bg-elev active:scale-[0.98] transition-transform duration-150"
+              onClick={() => setWarningsOpen(true)}
+              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-amber-300 border border-amber-400/20 bg-amber-400/10 active:scale-[0.98] transition-transform duration-150"
             >
-              <FileText className="w-4 h-4 shrink-0 text-cyan" strokeWidth={1.8} />
-              Visit note
+              <AlertTriangle className="w-4 h-4 shrink-0" strokeWidth={1.8} />
+              {result.warnings.length === 1 ? "1 warning" : `${result.warnings.length} warnings`}
             </button>
           )}
           {result.retest.length > 0 && (
@@ -365,6 +408,46 @@ export function WeatherPourSheet({
             </button>
           )}
         </div>
+      )}
+      {result.visitNote && (
+        <button
+          type="button"
+          onClick={() => setNoteOpen(true)}
+          className="w-full flex items-center justify-center gap-2 h-11 rounded-xl text-sm font-medium text-ink border border-line-soft bg-bg-elev active:scale-[0.98] transition-transform duration-150"
+        >
+          <FileText className="w-4 h-4 shrink-0 text-cyan" strokeWidth={1.8} />
+          Visit note
+        </button>
+      )}
+      {warningsOpen && (
+        <InfoModal title="Warnings" onClose={() => setWarningsOpen(false)}>
+          <div className="space-y-4">
+            {result.warnings.map((w, i) => {
+              // Everything besides code/actions is code-specific data.
+              const data = Object.entries(w).filter(
+                ([k, v]) => k !== "code" && k !== "actions" && typeof v === "number",
+              )
+              return (
+                <div key={i} className="space-y-1">
+                  <div className="text-sm font-medium text-amber-300 leading-snug">
+                    {WARNING_TITLES[w.code] ?? humanize(w.code)}
+                  </div>
+                  {data.length > 0 && (
+                    <div className="text-xs text-amber-300/70 tabular-nums">
+                      {data.map(([k, v]) => warningDatum(k, v as number)).join(" · ")}
+                    </div>
+                  )}
+                  {(w.actions ?? []).map((a, j) => (
+                    <div key={j} className="flex items-start gap-1.5 text-xs text-amber-200">
+                      <ChevronRight className="w-3 h-3 mt-0.5 shrink-0" strokeWidth={2.5} />
+                      {a}
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
+          </div>
+        </InfoModal>
       )}
       {retestOpen && (
         <InfoModal title="Retest" onClose={() => setRetestOpen(false)}>

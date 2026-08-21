@@ -49,12 +49,12 @@ export function humanize(code: string) {
 }
 
 /** One coded-warning data field, e.g. ["measuredPpm", 3] → "measured 3 ppm". */
-function warningDatum(key: string, value: number) {
+export function warningDatum(key: string, value: number) {
   if (key.endsWith("Ppm")) return `${humanize(key.slice(0, -3)).toLowerCase()} ${value} ppm`
   return `${humanize(key).toLowerCase()} ${value}`
 }
 
-const WARNING_TITLES: Record<string, string> = {
+export const WARNING_TITLES: Record<string, string> = {
   "shock-fc-below-minimum": "Shock needed — FC below minimum",
 }
 
@@ -664,6 +664,10 @@ export function SanitationDial({ fc, minFc }: { fc: number | null; minFc: number
   )
 }
 
+// RETIRED 2026-08-21: the Weather-card layout (WeatherSheet.tsx) is the live
+// pour sheet; this component is kept briefly for reference while the new one
+// bakes in the field. Delete it (plus Metric/LENSES/DoseDetailSheet) once
+// Carter calls the bake done.
 export function PourSheet({
   result,
   customerName,

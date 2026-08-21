@@ -495,11 +495,13 @@ Inventory but keep Follow-Up and Dosing.
 - Dosing module: `/dosing` — water-sample wheel-picker form (FC/pH/CYA/Alk
   required) that proxies via server action (`DOTNET_API_SECRET` +
   `DOTNET_API_URL`) to the .NET Dosing API
-  (`POST /maintenance/dosing/recommendations`) and renders the pour sheet:
-  WHOOP-style Balance/Sanitation dials over the derived predicted sample
-  (actual + chosen dose options' effects, recalculated live on alternative
-  swap), coded warnings + retest modals, per-dose detail sheets (spring-drag
-  dose tape, effect bars, cautions). Absent reading = not measured, never 0.
+  (`POST /maintenance/dosing/recommendations`) and renders the pour sheet
+  (Weather-card layout, 2026-08-21): customer card + sample actions,
+  side-by-side Balance/Sanitation dials over the derived predicted sample
+  (actual + chosen dose options' effects, live), a Predicted|Measured
+  readings card, a pour card whose focused chemical opens its spring-drag
+  dose tape in place, and warnings / retest / visit-note modals. Absent
+  reading = not measured, never 0.
   API side effect: the append-only recommendation log row. App side effect:
   per-customer volume+chlorination defaults saved to
   `maintenance.pool_configs` ([pool-config](entities/pool-config.md)) and
