@@ -20,6 +20,8 @@ export default async function TechLayout({ children }: { children: React.ReactNo
               ? [employee.first_name, employee.last_name].filter(Boolean).join(" ") || null
               : null
           }
+          showModules={isAuthedMaintenance}
+          hideInventory={followUpOnly}
         />
         <div className="font-display text-lg tracking-tight">Field</div>
       </header>
