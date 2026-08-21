@@ -22,11 +22,15 @@ export function TopPills({ menu }: { menu: React.ReactNode }) {
         className="max-w-md mx-auto px-4 flex items-center justify-between gap-2"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 10px)" }}
       >
-        <div className={cn(PILL, "p-1")}>{menu}</div>
+        {/* menu + connectivity cluster left; the right side stays blank
+            until a page claims it */}
+        <div className="flex items-center gap-2">
+          <div className={cn(PILL, "p-1")}>{menu}</div>
+          <ConnectivityPill />
+        </div>
         {content != null && (
           <div className={cn(PILL, "min-w-0 h-9 px-4 text-sm text-ink")}>{content}</div>
         )}
-        <ConnectivityPill />
       </div>
     </div>
   )
