@@ -93,26 +93,53 @@ export function WeatherPourSheet({
   }, [samples.actual, doses, choice, sens])
 
   const SANI_LABEL: Record<string, string> = { tab: "Tablet", liquid: "Liquid", salt: "Salt" }
-  const subtitle = [
-    result.pool?.volumeGallons != null ? `${result.pool.volumeGallons.toLocaleString()} gal` : null,
-    result.pool?.sanitiser ? (SANI_LABEL[result.pool.sanitiser] ?? result.pool.sanitiser) : null,
-  ].filter(Boolean)
 
   return (
     <div className="space-y-4">
-      {/* ── Weather-style header: who, then the pool underneath ── */}
-      <header className="text-center pt-1">
-        <h1 className="font-display text-2xl text-ink leading-tight">
-          {customerName ?? "Sample"}
-        </h1>
-        {subtitle.length > 0 && (
-          <p className="text-sm text-ink-dim mt-0.5">
-            {subtitle[0]}
-            {subtitle.length > 1 && <span className="text-ink-mute px-1.5">|</span>}
-            {subtitle[1]}
-          </p>
-        )}
-      </header>
+      {/* ── Customer card (75%) + stacked sample actions (25%) ── */}
+      <div className="grid grid-cols-[3fr_1fr] gap-3 items-stretch">
+        <section className={cn(CARD, "px-4 py-3 min-w-0")}>
+          <div className="font-display text-lg text-ink leading-tight truncate">
+            {customerName ?? "Sample"}
+          </div>
+          <div className="flex gap-8 mt-2.5">
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-ink-mute">Volume</div>
+              <div className="text-sm tabular-nums text-ink mt-0.5">
+                {result.pool?.volumeGallons != null
+                  ? `${result.pool.volumeGallons.toLocaleString()} gal`
+                  : "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-ink-mute">Chlorination</div>
+              <div className="text-sm text-ink mt-0.5">
+                {result.pool?.sanitiser
+                  ? (SANI_LABEL[result.pool.sanitiser] ?? result.pool.sanitiser)
+                  : "—"}
+              </div>
+            </div>
+          </div>
+        </section>
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={onEditSample}
+            aria-label="Edit sample"
+            className={cn(CARD, "flex-1 grid place-items-center text-ink-dim active:scale-95 transition-transform duration-150")}
+          >
+            <Pencil className="w-4 h-4" strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            onClick={onNewSample}
+            aria-label="New sample"
+            className={cn(CARD, "flex-1 grid place-items-center text-cyan active:scale-95 transition-transform duration-150")}
+          >
+            <Plus className="w-5 h-5" strokeWidth={2} />
+          </button>
+        </div>
+      </div>
 
       {/* ── Dials side by side, no flanking readings ── */}
       <div className="grid grid-cols-2 gap-3">
@@ -308,26 +335,6 @@ export function WeatherPourSheet({
           )
         })}
       </section>
-
-      {/* ── Weather-style bottom icons: edit the sample, start a new one ── */}
-      <div className="flex justify-between px-4 pt-1">
-        <button
-          type="button"
-          onClick={onEditSample}
-          aria-label="Edit sample"
-          className="w-12 h-12 grid place-items-center rounded-full bg-bg-elev border border-line-soft text-ink-dim active:scale-95 transition-transform duration-150"
-        >
-          <Pencil className="w-5 h-5" strokeWidth={1.8} />
-        </button>
-        <button
-          type="button"
-          onClick={onNewSample}
-          aria-label="New sample"
-          className="w-12 h-12 grid place-items-center rounded-full bg-bg-elev border border-line-soft text-cyan active:scale-95 transition-transform duration-150"
-        >
-          <Plus className="w-5 h-5" strokeWidth={2} />
-        </button>
-      </div>
 
       {recalcError && (
         <p role="alert" className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3.5 py-2.5">
