@@ -8,7 +8,7 @@
 // space.
 
 import { useEffect, useMemo, useState } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, FileText, Pencil } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, FileText, Pencil, SlidersHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import { sampleValue, type DosingResponse, type Sample, type SensitivityRow } from "./shared"
 import {
@@ -355,6 +355,13 @@ export function WeatherPourSheet({
                         </span>
                       )}
                     </span>
+                    {/* mid-row hint: the row opens the dose dial */}
+                    {!focused && (
+                      <span className="shrink-0 flex items-center gap-1 text-[10px] uppercase tracking-wide text-ink-mute">
+                        <SlidersHorizontal className="w-3.5 h-3.5" strokeWidth={1.8} />
+                        Adjust
+                      </span>
+                    )}
                     {/* the tape's own big amount takes over while focused */}
                     {!focused && (
                       <span
