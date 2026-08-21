@@ -134,30 +134,41 @@ export function WeatherPourSheet({
       </div>
 
       {/* ── Predicted readings, stacked — moves live as doses adjust ── */}
-      <section className={cn(CARD, "px-4")}>
+      <section className={cn(CARD, "px-4 pb-1")}>
         <h3 className="pt-3 text-[10px] uppercase tracking-wide text-ink-mute">Predicted</h3>
-        <div className="divide-y divide-line-soft/40">
-          {READING_ROWS.filter((r) => sampleValue(samples.actual, r.key) != null).map((r) => {
-            const assumed = samples.actual.assumed?.includes(r.key)
-            return (
-              <div key={r.key} className="flex items-center justify-between py-2.5">
-                <span className="text-sm text-ink-dim">
-                  {r.label}
-                  {UNIT_LABELS[r.key] === "ppm" && (
-                    <span className="text-[10px] text-ink-mute"> (ppm)</span>
-                  )}
-                </span>
-                <span
+        <div className="grid grid-cols-2 gap-x-8">
+          {(() => {
+            const shown = READING_ROWS.filter((r) => sampleValue(samples.actual, r.key) != null)
+            return shown.map((r, i) => {
+              const assumed = samples.actual.assumed?.includes(r.key)
+              // divider on every cell except the last grid row's
+              const lastRow = i >= shown.length - (shown.length % 2 === 0 ? 2 : 1)
+              return (
+                <div
+                  key={r.key}
                   className={cn(
-                    "text-base tabular-nums transition-colors duration-300",
-                    assumed ? "text-orange-400 italic" : "text-ink",
+                    "flex items-center justify-between py-2.5",
+                    !lastRow && "border-b border-line-soft/40",
                   )}
                 >
-                  {fmt(sampleValue(predicted, r.key), r.digits)}
-                </span>
-              </div>
-            )
-          })}
+                  <span className="text-sm text-ink-dim">
+                    {r.label}
+                    {UNIT_LABELS[r.key] === "ppm" && (
+                      <span className="text-[10px] text-ink-mute"> (ppm)</span>
+                    )}
+                  </span>
+                  <span
+                    className={cn(
+                      "text-base tabular-nums transition-colors duration-300",
+                      assumed ? "text-orange-400 italic" : "text-ink",
+                    )}
+                  >
+                    {fmt(sampleValue(predicted, r.key), r.digits)}
+                  </span>
+                </div>
+              )
+            })
+          })()}
         </div>
       </section>
 
