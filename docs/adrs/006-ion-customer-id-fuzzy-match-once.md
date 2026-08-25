@@ -85,9 +85,16 @@ So the match rule is:
    customers. Validated against the 683 known pairs: of the 571 that the name+phone-unique gate
    matched, **all 571 reproduced the known id, 0 mismatches**. The repeatable procedure is in
    [ion-cust-id-bulk-ingest](../operations/ion-cust-id-bulk-ingest.md). **Done (2026-06-17).**
-3. **`api_fuzzy` — scheduled + manual API reconciler** — `f/ION/reconcile_ion_cust_id` finds
-   `Customers` missing `ion_cust_id`, searches ION (`customerlist.cfm?search=<name>`), matches,
-   and persists high-confidence hits / queues the rest. Manual-only for now (no schedule).
+3. **`api_fuzzy` — scheduled + manual API reconciler** — `LinkIonService` finds `Customers`
+   missing `ion_cust_id` but holding a `qbo_customer_id` (state "awaiting"), searches ION
+   (`customerlist.cfm?search=<name>`), matches, and persists high-confidence hits / surfaces the
+   ambiguous ones. Two callers, one service: the per-customer button
+   `POST /api/customers/[id]/link-ion` (skips the 20h window — a person clicking is better
+   information than a clock) and the daily sweep `POST /api/customers/link-ion/sweep`, fired by the
+   pg_cron job `ion-link-sweep-daily` at 03:40 ET. **Scheduled since 2026-08-25** — before that the
+   sweep method existed with no caller, so `ion_cust_id` was only ever written as a side effect of
+   the visit ingester and a customer stayed unlinked until their first service. See
+   [task-record-linkage](../operations/task-record-linkage.md).
 4. **Manual** — a human sets/corrects it in the UI.
 
 After sources 1–3, ion_cust_id coverage is **8,359 / 8,917 (94%)**. The remaining ~558 are
