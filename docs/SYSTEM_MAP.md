@@ -214,6 +214,18 @@ Pool maintenance: scheduled visits, technician routes, chemistry readings, consu
 **Windmill scripts**:
 - ION flows: `f/ION/visits`, `f/ION/work_orders`, `f/ION/consumables_usage`, `f/ION/refresh_stale_work_orders`
 - `f/ION/_lib/*` — shared session, parser, normalize, upsert
+
+**ION daily clocks** (pg_cron, not Windmill — migration `20260825194111_ion_daily_clocks`):
+- `ion-link-sweep-daily` — 03:40 ET, POSTs `/api/customers/link-ion/sweep`: resolves `Customers.ion_cust_id`
+  for everyone still awaiting ION (ADR 006 fuzzy-match-once, `LinkIonService.linkDue`).
+- `ion-recurring-tasks-daily` — 04:00 ET, runs the Windmill flow `f/ION/recurring_tasks` with
+  `dry_run:false`: ION's active recurring tasks → `maintenance.tasks` / `task_schedules`.
+- **Link first, sync second.** `upsert_tasks` drops any ION task whose `ionCustId` does not resolve to a
+  `Customers` row (`unresolved_new`), so the link has to exist before the task sync asks.
+- Both clocks live in pg_cron because the Windmill schedules for these stopped firing 2026-07-24 with no
+  alarm, and the API token available to automation is `jobs:run`-scoped (403 on `schedules:read`), so a
+  Windmill schedule can be neither inspected nor repaired from code. `f/ION/schedule_slots` died the same
+  day and is **still unscheduled** — `[drift]`, not yet moved.
 - `f/ION/_discover/*` — diagnostic probes (consider archiving)
 - `f/google_maps/geocode_service_locations` — geocodes the pool address onto `public.service_locations`, validating each result against the SE-GA/NE-FL service bbox (rejects/flags out-of-area geocodes). Source of truth for route geocoding. **A city is required** (ADR 007 §7): a city-less street is flagged `needs_review`, never bounds-bias-guessed to a wrong major-GA city; billing is never used as a geocode hint.
 - `f/ION/reconcile_service_addresses` — lands ION's `recurring_tasks` city/state/zip onto `service_locations` (ION is the address authority, ADR 007 §7): fills null cities, and corrects rows whose stored ZIP-region + city both disagree with ION (re-queues geocode). Scheduled; runs before the geocode so street-only rows get a real city first.

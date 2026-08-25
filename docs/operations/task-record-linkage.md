@@ -74,7 +74,8 @@ resolved later from its customer's confirmed address (`reconcile_visit_locations
 invariant: **a task must have no visits after its end date** (a task still being serviced cannot have
 a past end date). Two scheduled scripts implement closure, split by where the end date comes from:
 
-- **In-report tasks** — `f/ION/_lib/upsert_tasks` (recurring_tasks.flow, daily 4am ET). Every task in
+- **In-report tasks** — `f/ION/_lib/upsert_tasks` (recurring_tasks.flow, daily 4am ET, fired by the
+  pg_cron job `ion-recurring-tasks-daily` — the Windmill schedule died 2026-07-24). Every task in
   ION's "Active Only" report is upserted active under the new data model (its own row keyed 1:1 by
   `ion_task_id`; `customer_id` from `ion_cust_id` → `Customers.ion_cust_id`, not the location owner).
   It closes a task only when its `task_end` is past AND no visit falls after it; it **never** closes a
@@ -110,7 +111,8 @@ whole app keys "active customer" off `maintenance.tasks.status`, so this is what
 
 ## How the links get set (ION ingestion) — CURRENT
 
-The live recurring-task sync `f/ION/_lib/upsert_tasks.py` (recurring_tasks flow, daily 4am) sets
+The live recurring-task sync `f/ION/_lib/upsert_tasks.py` (recurring_tasks flow, daily 4am, pg_cron
+`ion-recurring-tasks-daily`) sets
 **`task.customer_id` from ION's own customer id**: `ion_cust_id` -> `Customers.ion_cust_id` (ADR 006,
 the authoritative per-task owner). A task carries **no `service_location_id`** (dropped 2026-06-22,
 ADR 007 §9); the visit's location is resolved from the customer's confirmed address by
