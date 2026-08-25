@@ -17,10 +17,23 @@ export interface Caller {
   viaToken: boolean
 }
 
+/**
+ * The machine credentials, in the order this codebase already established.
+ * WINDMILL_TOKEN is the last of them because /api/billing/tick already trusts
+ * it and BOTH sides hold it: Vercel as an env var, Supabase as the vault
+ * secret `windmill_token`. A scheduler therefore needs no secret of its own —
+ * which is the point. A token that only one side has is a token that silently
+ * rots, which is exactly how OPERATOR_TOKEN drifted out of sync.
+ *
+ * This grants no new reach: anyone holding the Windmill token can already run
+ * every ION and billing job in the workspace.
+ */
+const machineTokens = () =>
+  [process.env.OPERATOR_TOKEN, process.env.CRON_SECRET, process.env.WINDMILL_TOKEN].filter(Boolean)
+
 export async function authorize(req: Request): Promise<Caller | null> {
-  const token = process.env.OPERATOR_TOKEN ?? process.env.CRON_SECRET
   const auth = req.headers.get("authorization")
-  if (token && auth === `Bearer ${token}`) return { id: "operator", viaToken: true }
+  if (auth && machineTokens().some((t) => auth === `Bearer ${t}`)) return { id: "operator", viaToken: true }
 
   const sb = await createSupabaseServer()
   const { data: { user } } = await sb.auth.getUser()

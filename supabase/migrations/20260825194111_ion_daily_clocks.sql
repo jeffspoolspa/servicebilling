@@ -22,6 +22,10 @@
 -- have run before the task sync asks the question.
 
 -- 03:40 ET -- resolve ION ids for everyone still awaiting (ADR 006, fuzzy-match-once).
+-- Authenticated with the vault's `windmill_token`, which is byte-identical to the
+-- app's WINDMILL_TOKEN env var and is what /api/billing/tick already accepts. Using
+-- a secret BOTH sides already hold is the whole point: OPERATOR_TOKEN was set on
+-- only one side and had silently drifted out of sync by the time anything used it.
 select cron.unschedule('ion-link-sweep-daily')
 where exists (select 1 from cron.job where jobname = 'ion-link-sweep-daily');
 
@@ -30,7 +34,7 @@ select cron.schedule('ion-link-sweep-daily', '40 7 * * *', $job$
     url     := 'https://internal.jeffspoolspa.com/api/customers/link-ion/sweep',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
-      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'routing_operator_token' limit 1)
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'windmill_token' limit 1)
     ),
     body    := '{"dryRun": false}'::jsonb,
     timeout_milliseconds := 300000
