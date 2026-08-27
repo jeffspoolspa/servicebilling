@@ -162,9 +162,15 @@ export class SupabaseCustomerRepository implements CustomerRepository {
    */
   async dueForIonLink(now: Date, limit = 500): Promise<Customer[]> {
     const { data, error } = await (this.table("Customers").select(COLS) as unknown as {
-      is(c: string, v: null): { not(c2: string, op: string, v2: null): { lt(c3: string, v3: number): { order(c4: string, o: { ascending: boolean }): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } } } }
+      is(c: string, v: null): { eq(c5: string, v5: boolean): { not(c2: string, op: string, v2: null): { lt(c3: string, v3: number): { order(c4: string, o: { ascending: boolean }): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } } } } }
     })
       .is("ion_cust_id", null)
+      // Deactivated accounts are owed nothing. They are also where the QBO
+      // duplicates live -- the "(deleted)" twin of a real customer -- and a
+      // twin necessarily matches the ION customer its live sibling already
+      // holds, so sweeping them manufactures the exact collision that
+      // uq_customers_ion_cust_id exists to refuse. 14 of the 619 due.
+      .eq("is_active", true)
       .not("qbo_customer_id", "is", null)
       .lt("ion_link_attempts", Customer.ION_LINK_TRIES)
       .order("created_at", { ascending: false })

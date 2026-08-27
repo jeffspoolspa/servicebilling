@@ -19,6 +19,13 @@ export interface LinkReport {
   linked: { accountId: number; displayName: string; ionCustId: string; confidence: string }[]
   ambiguous: { accountId: number; displayName: string; candidates: { ionCustId: string; rowText: string }[] }[]
   notFound: { accountId: number; displayName: string; attempts: number; exhausted: boolean }[]
+  /**
+   * One customer we could not finish — most often a COLLISION: this account
+   * matched an ION customer that another account already holds
+   * (uq_customers_ion_cust_id), which is a duplicate in QBO wearing two names.
+   * Reported, never thrown: see linkThese.
+   */
+  failed: { accountId: number; displayName: string; error: string }[]
 }
 
 export class LinkIonService {
@@ -47,12 +54,35 @@ export class LinkIonService {
     return this.linkThese(await this.customers.awaitingIon(accountIds), opts)
   }
 
+  /**
+   * ONE CUSTOMER'S FAILURE IS NOT THE SWEEP'S FAILURE. These are independent
+   * attempts sharing a loop, so a throw on customer 33 must not discard the
+   * 500 behind it. It did: a QBO duplicate matched an ION customer another
+   * account already held, uq_customers_ion_cust_id rejected the write, and the
+   * exception took the whole run with it every single night.
+   *
+   * That collision is not an outage, it is a FINDING — two QBO rows are the
+   * same person — and the report is where findings belong. Same instinct as
+   * ADR 006's ambiguity rule: surface it for a human, never guess, never let
+   * it stop the work that would otherwise succeed.
+   */
   private async linkThese(awaiting: Customer[], opts: { dryRun: boolean }): Promise<LinkReport> {
-    const report: LinkReport = { linked: [], ambiguous: [], notFound: [] }
+    const report: LinkReport = { linked: [], ambiguous: [], notFound: [], failed: [] }
 
     for (const c of awaiting) {
-      const match = await this.directory.identify(c)
       const accountId = Number(c.id)
+      try {
+        await this.attempt(c, accountId, opts, report)
+      } catch (err) {
+        report.failed.push({ accountId, displayName: c.displayName, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    return report
+  }
+
+  private async attempt(c: Customer, accountId: number, opts: { dryRun: boolean }, report: LinkReport): Promise<void> {
+    {
+      const match = await this.directory.identify(c)
       if (match.kind === "linked") {
         // The aggregate records the match (and refuses a re-fuzz); we save it.
         if (!opts.dryRun) await this.customers.save(c.linkIon({ ionCustId: match.id, method: match.method, confidence: match.confidence }))
@@ -75,6 +105,5 @@ export class LinkIonService {
         report.notFound.push({ accountId, displayName: c.displayName, attempts: (tried.ion as { attempts: number }).attempts, exhausted: tried.ionLinkExhausted })
       }
     }
-    return report
   }
 }
