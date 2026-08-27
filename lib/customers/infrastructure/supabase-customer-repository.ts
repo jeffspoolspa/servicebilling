@@ -146,13 +146,28 @@ export class SupabaseCustomerRepository implements CustomerRepository {
    * The sweep's question: who is still owed an ION link attempt? Answered by
    * a state query, not by a subscription — a dropped signal costs latency,
    * never correctness. The aggregate decides "due"; this narrows the scan.
+   *
+   * NEWEST FIRST, AND ONLY THE UNEXHAUSTED. The scan is capped, so its order
+   * decides who is reachable at all — and an unordered cap starves exactly the
+   * customer this sweep exists for. ADR 006's premise is that a link is
+   * pending because the QBO -> ION sync has not run YET, which is a statement
+   * about recent onboards; a five-month-old billing-only customer who is not
+   * in ION at all has no better chance tonight than last night. So the newly
+   * onboarded are attempted first.
+   *
+   * The give-up count is applied HERE and not only in the aggregate, because
+   * a row filtered in JS has already spent its slot in the cap: leaving
+   * exhausted rows in the query means they crowd out live ones forever. The
+   * aggregate still owns the rule -- this only keeps the scan honest about it.
    */
   async dueForIonLink(now: Date, limit = 500): Promise<Customer[]> {
     const { data, error } = await (this.table("Customers").select(COLS) as unknown as {
-      is(c: string, v: null): { not(c2: string, op: string, v2: null): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } }
+      is(c: string, v: null): { not(c2: string, op: string, v2: null): { lt(c3: string, v3: number): { order(c4: string, o: { ascending: boolean }): { range(a: number, b: number): PromiseLike<{ data: unknown[] | null; error: unknown }> } } } }
     })
       .is("ion_cust_id", null)
       .not("qbo_customer_id", "is", null)
+      .lt("ion_link_attempts", Customer.ION_LINK_TRIES)
+      .order("created_at", { ascending: false })
       .range(0, limit - 1)
     if (error) throw new Error(`due-for-ion-link scan failed: ${JSON.stringify(error).slice(0, 200)}`)
     return (data ?? []).map((r) => toCustomer(r as CustomerRow)).filter((c) => c.ionLinkDue(now))
