@@ -45,7 +45,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       dryRun,
       limit,
-      counts: { linked: report.linked.length, ambiguous: report.ambiguous.length, notFound: report.notFound.length },
+      counts: { linked: report.linked.length, ambiguous: report.ambiguous.length, notFound: report.notFound.length, failed: report.failed.length },
       ...report,
     })
   } catch (err) {
