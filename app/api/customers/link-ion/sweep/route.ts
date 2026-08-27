@@ -25,7 +25,11 @@ export const maxDuration = 300
 export async function POST(req: Request) {
   if (!(await authorize(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
-  const { dryRun = false } = (await req.json().catch(() => ({}))) as { dryRun?: boolean }
+  // ~0.4s of ION per customer, so 120 is roughly a minute of work — short
+  // enough that the caller's connection is still there when we answer, which
+  // pg_cron's was not at 500. The queue is newest-first, so a night's slice is
+  // always the customers most likely to have just synced.
+  const { dryRun = false, limit = 120 } = (await req.json().catch(() => ({}))) as { dryRun?: boolean; limit?: number }
 
   const service = new LinkIonService(
     new SupabaseCustomerRepository(createSupabaseAdmin() as unknown as ConstructorParameters<typeof SupabaseCustomerRepository>[0]),
@@ -37,13 +41,10 @@ export async function POST(req: Request) {
   )
 
   try {
-    // ponytail: unbounded loop over the due set (one ION search each). A run
-    // cut short by maxDuration keeps every link it already persisted and the
-    // rest come back due tomorrow — add a wall-clock budget like the routing
-    // drain if the backlog ever outgrows one invocation.
-    const report = await service.linkDue(new Date(), { dryRun })
+    const report = await service.linkDue(new Date(), { dryRun, limit })
     return NextResponse.json({
       dryRun,
+      limit,
       counts: { linked: report.linked.length, ambiguous: report.ambiguous.length, notFound: report.notFound.length },
       ...report,
     })
