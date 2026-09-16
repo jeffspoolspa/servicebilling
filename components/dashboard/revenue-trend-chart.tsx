@@ -7,7 +7,6 @@ import {
   ChartLegend,
   ChartLegendContent,
   ChartTooltip,
-  ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart"
 import { formatCompactCurrency, formatCurrency } from "@/lib/utils/format"
@@ -43,6 +42,8 @@ interface Sample {
   ahead: [number, number] | null
   behind: [number, number] | null
   isAnchor: boolean
+  cumCurrent: number | null             // year-to-date through this day
+  cumPrior: number                      // same day last year
 }
 
 export function RevenueTrendChart({ data, today }: { data: TrendPoint[]; today: string }) {
@@ -129,27 +130,31 @@ export function RevenueTrendChart({ data, today }: { data: TrendPoint[]; today: 
             />
             <ChartTooltip
               cursor={{ stroke: "rgb(var(--line))", strokeWidth: 1 }}
-              content={
-                <ChartTooltipContent
-                  labelFormatter={(v) =>
-                    typeof v === "string" ? monthLabel(v) : String(v ?? "")
-                  }
-                  formatter={(value, name) => name === "ahead" || name === "behind" ? null : (
-                    <div className="flex items-center justify-between gap-4 flex-1">
-                      <span className="flex items-center gap-1.5 text-ink-dim">
-                        <span
-                          className="inline-block w-2.5 h-2.5 rounded-[2px]"
-                          style={{ background: name === "current" ? CURRENT : PRIOR }}
-                        />
-                        {name === "current" ? year : priorYear}
-                      </span>
-                      <span className="font-mono tabular-nums text-ink">
-                        {formatCurrency(Number(value))}
-                      </span>
+              content={({ active, payload }) => {
+                const s = payload?.[0]?.payload as Sample | undefined
+                if (!active || !s) return null
+                const diff = s.cumCurrent != null && s.cumPrior > 0
+                  ? ((s.cumCurrent - s.cumPrior) / s.cumPrior) * 100
+                  : null
+                const tone = diff == null ? "text-ink-mute" : diff >= 0 ? "text-grass" : "text-coral"
+                return (
+                  <div className="rounded-lg border border-line bg-bg-elev px-3 py-2 text-[11px] shadow-xl min-w-[200px]">
+                    <div className="text-ink font-medium mb-1.5">{dayLabel(s.day)}</div>
+                    <Row swatch={CURRENT} label={`${year} monthly pace`} value={s.current} />
+                    <Row swatch={PRIOR} label={`${priorYear} monthly pace`} value={s.prior} />
+                    <div className="border-t border-line-soft mt-1.5 pt-1.5">
+                      <Row label={`${year} to date`} value={s.cumCurrent} />
+                      <Row label={`${priorYear} to date`} value={s.cumPrior} />
+                      <div className="flex justify-between gap-4 mt-1">
+                        <span className="text-ink-dim">YTD vs {priorYear}</span>
+                        <span className={`font-mono tabular-nums ${tone}`}>
+                          {diff == null ? "—" : `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`}
+                        </span>
+                      </div>
                     </div>
-                  )}
-                />
-              }
+                  </div>
+                )
+              }}
             />
             <ChartLegend content={<ChartLegendContent />} />
             <Area type="linear" dataKey="base" stroke="none" fill="url(#revenueFill)"
@@ -214,6 +219,28 @@ function easeByDay(data: TrendPoint[], year: number): Sample[] {
   const current = interpolate(anchorX, data.map((p) => p.current), days.length)
   const prior = interpolate(anchorX, data.map((p) => p.prior), days.length)
 
+  // Year-to-date through each day: full months before it plus the current
+  // month's total pro-rated by day of month. The chart only knows monthly
+  // totals, so mid-month is an even split, not the real daily ledger.
+  const cumCurrent: Array<number | null> = []
+  const cumPrior: number[] = []
+  let doneCurrent = 0
+  let donePrior = 0
+  let lastMonth = -1
+  for (const day of days) {
+    const m = Number(day.slice(5, 7)) - 1
+    if (m !== lastMonth && lastMonth >= 0) {
+      doneCurrent += data[lastMonth].current ?? 0
+      donePrior += data[lastMonth].prior ?? 0
+    }
+    lastMonth = m
+    const dom = Number(day.slice(8, 10))
+    const dim = new Date(Date.UTC(year, m + 1, 0)).getUTCDate()
+    const share = dom / dim
+    cumCurrent.push(data[m].current == null ? null : doneCurrent + data[m].current! * share)
+    cumPrior.push(donePrior + (data[m].prior ?? 0) * share)
+  }
+
   return days.map((day, i) => {
     const c = current[i]
     const p = prior[i]
@@ -226,6 +253,8 @@ function easeByDay(data: TrendPoint[], year: number): Sample[] {
       ahead: both ? [p, Math.max(c, p)] : null,
       behind: both ? [Math.min(c, p), p] : null,
       isAnchor: anchorX.includes(i),
+      cumCurrent: c == null ? null : cumCurrent[i],
+      cumPrior: cumPrior[i],
     }
   })
 }
@@ -271,6 +300,18 @@ function interpolate(xs: number[], ys: Array<number | null>, n: number): Array<n
   return out
 }
 
+function Row({ swatch, label, value }: { swatch?: string; label: string; value: number | null }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <span className="flex items-center gap-1.5 text-ink-dim">
+        {swatch && <span className="inline-block w-2.5 h-2.5 rounded-[2px]" style={{ background: swatch }} />}
+        {label}
+      </span>
+      <span className="font-mono tabular-nums text-ink">{value == null ? "—" : formatCurrency(value)}</span>
+    </div>
+  )
+}
+
 function anchorDot(props: { cx?: number; cy?: number; index?: number }, samples: Sample[]) {
   const s = props.index != null ? samples[props.index] : undefined
   if (!s?.isAnchor || s.current == null || props.cx == null || props.cy == null) return <g key={props.index} />
@@ -288,7 +329,7 @@ function shortMonth(iso: string): string {
   return d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })
 }
 
-function monthLabel(iso: string): string {
+function dayLabel(iso: string): string {
   const d = new Date(iso + "T00:00:00Z")
-  return d.toLocaleString("en-US", { month: "long", timeZone: "UTC" })
+  return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })
 }
