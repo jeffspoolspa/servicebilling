@@ -144,11 +144,21 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
                   ? ((s.cumCurrent - s.cumPrior) / s.cumPrior) * 100
                   : null
                 const tone = diff == null ? "text-ink-mute" : diff >= 0 ? "text-grass" : "text-coral"
+                const paceDiff = s.current != null && s.prior != null && s.prior > 0
+                  ? ((s.current - s.prior) / s.prior) * 100
+                  : null
+                const paceTone = paceDiff == null ? "text-ink-mute" : paceDiff >= 0 ? "text-grass" : "text-coral"
                 return (
                   <div className="rounded-lg border border-line bg-bg-elev px-3 py-2 text-[11px] shadow-xl min-w-[200px]">
                     <div className="text-ink font-medium mb-1.5">{dayLabel(s.day)}</div>
                     <Row swatch={CURRENT} label={`${year} monthly pace`} value={s.current} />
                     <Row swatch={PRIOR} label={`${priorYear} monthly pace`} value={s.prior} />
+                    <div className="flex justify-between gap-4 mt-1">
+                      <span className="text-ink-dim">Pace vs {priorYear}</span>
+                      <span className={`font-mono tabular-nums ${paceTone}`}>
+                        {paceDiff == null ? "—" : `${paceDiff >= 0 ? "+" : ""}${paceDiff.toFixed(1)}%`}
+                      </span>
+                    </div>
                     <div className="border-t border-line-soft mt-1.5 pt-1.5">
                       <Row label={`${year} to date`} value={s.cumCurrent} />
                       <Row label={`${priorYear} to date`} value={s.cumPrior} />
