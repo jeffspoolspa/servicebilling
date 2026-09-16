@@ -14,16 +14,15 @@ import { formatCurrency } from "@/lib/utils/format"
 import type { TrendPoint } from "@/lib/queries/revenue"
 
 /**
- * Monthly revenue, this year against last year, January to December.
- * Two lines on one calendar axis so the same month lines up vertically,
- * a soft fill under this year, and the gap between the lines tinted green
- * where this year is ahead and red where it is behind. Months after today
- * carry no point for the current year.
+ * Year-to-date revenue by day, this year against last year, Jan 1..Dec 31.
+ * One point per day, so the curves are smooth. Fills are exclusive: blue
+ * under the lower of the two lines, then green for the gap where this
+ * year is ahead or red where it is behind, so any vertical slice is one
+ * of blue, green, or red. Days after today carry no point.
  *
- * The gap fills are range areas ([low, high] per point). Each is zero-height
- * on the months where the other applies, so the polygons stay continuous
- * across a crossover. Everything is linear so the fill edges sit exactly on
- * the lines.
+ * The gap fills are range areas ([low, high] per point), each zero-height
+ * where the other applies so the polygons stay continuous across a
+ * crossover. Everything is linear so the fill edges sit on the lines.
  *
  * Built on shadcn/ui chart primitives over Recharts.
  */
@@ -44,35 +43,37 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
     )
   }
 
-  const year = data[0].month.slice(0, 4)
+  const year = data[0].day.slice(0, 4)
   const priorYear = String(Number(year) - 1)
   const config: ChartConfig = {
     current: { label: year, color: CURRENT },
     prior: { label: priorYear, color: PRIOR },
   }
 
-  const thisMonth = new Date().toISOString().slice(0, 7)
   const chartData = data.map((p) => {
-    const current = p.month.slice(0, 7) <= thisMonth ? p.current_revenue : null
-    const prior = p.prior_year_revenue
-    const both = current != null && prior != null
+    const both = p.current != null && p.prior != null
     return {
-      month: p.month,
-      current,
-      prior,
-      ahead: both ? [prior, Math.max(current, prior)] : null,
-      behind: both ? [Math.min(current, prior), prior] : null,
+      day: p.day,
+      current: p.current,
+      prior: p.prior,
+      base: both ? Math.min(p.current!, p.prior!) : p.current,
+      ahead: both ? [p.prior, Math.max(p.current!, p.prior!)] : null,
+      behind: both ? [Math.min(p.current!, p.prior!), p.prior] : null,
     }
   })
 
-  const currentTotal = data.reduce((a, p) => a + p.current_revenue, 0)
-  const priorTotal = data.reduce((a, p) => a + (p.prior_year_revenue ?? 0), 0)
+  const lastCurrent = [...data].reverse().find((p) => p.current != null)
+  const currentTotal = lastCurrent?.current ?? 0
+  const priorSameDay = lastCurrent?.prior ?? 0
+  const priorTotal = data[data.length - 1].prior ?? 0
+  const gap = priorSameDay > 0 ? ((currentTotal - priorSameDay) / priorSameDay) * 100 : null
+  const gapTone = gap == null ? "text-ink-mute" : gap >= 0 ? "text-grass" : "text-coral"
 
   return (
     <Card>
       <div className="flex items-center gap-3 px-5 py-2.5 border-b border-line-soft text-[11px]">
         <span className="uppercase tracking-[0.14em] text-ink-mute font-medium">
-          Monthly Revenue
+          Revenue to date
         </span>
         <span className="text-ink-dim">
           {year} vs {priorYear}
@@ -80,8 +81,14 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
         <span className="ml-auto font-mono tabular-nums text-ink">
           {formatCurrency(currentTotal)} {year}
         </span>
+        {gap != null && (
+          <span className={`font-mono tabular-nums ${gapTone}`}>
+            {gap >= 0 ? "+" : ""}
+            {gap.toFixed(1)}% vs same day
+          </span>
+        )}
         <span className="font-mono tabular-nums text-ink-mute">
-          {formatCurrency(priorTotal)} {priorYear}
+          {formatCurrency(priorTotal)} full {priorYear}
         </span>
       </div>
 
@@ -104,12 +111,14 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
               stroke="rgb(var(--line-soft))"
             />
             <XAxis
-              dataKey="month"
+              dataKey="day"
               tickLine={false}
               axisLine={false}
               tickMargin={10}
               fontSize={11}
+              ticks={chartData.filter((p) => p.day.endsWith("-01")).map((p) => p.day)}
               tickFormatter={shortMonth}
+              interval={0}
             />
             <YAxis
               tickLine={false}
@@ -125,7 +134,7 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
               content={
                 <ChartTooltipContent
                   labelFormatter={(v) =>
-                    typeof v === "string" ? shortMonth(v) : String(v ?? "")
+                    typeof v === "string" ? dayLabel(v) : String(v ?? "")
                   }
                   formatter={(value, name) => name === "ahead" || name === "behind" ? null : (
                     <div className="flex items-center justify-between gap-4 flex-1">
@@ -134,7 +143,7 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
                           className="inline-block w-2.5 h-2.5 rounded-[2px]"
                           style={{ background: name === "current" ? CURRENT : PRIOR }}
                         />
-                        {name === "current" ? year : priorYear}
+                        {name === "current" ? year : priorYear} to date
                       </span>
                       <span className="font-mono tabular-nums text-ink">
                         {formatCurrency(Number(value))}
@@ -147,7 +156,7 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
             <ChartLegend content={<ChartLegendContent />} />
             <Area
               type="linear"
-              dataKey="current"
+              dataKey="base"
               stroke="none"
               fill="url(#revenueFill)"
               isAnimationActive={false}
@@ -182,16 +191,17 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
               strokeDasharray="4 3"
               dot={false}
               activeDot={{ r: 4, strokeWidth: 0 }}
-              connectNulls={false}
+              isAnimationActive={false}
             />
             <Line
               type="linear"
               dataKey="current"
               stroke={CURRENT}
               strokeWidth={2}
-              dot={{ fill: CURRENT, r: 2.5 }}
+              dot={false}
               activeDot={{ r: 4, strokeWidth: 0 }}
               connectNulls={false}
+              isAnimationActive={false}
             />
           </ComposedChart>
         </ChartContainer>
@@ -209,4 +219,9 @@ function compactCurrency(n: number): string {
 function shortMonth(iso: string): string {
   const d = new Date(iso + "T00:00:00Z")
   return d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })
+}
+
+function dayLabel(iso: string): string {
+  const d = new Date(iso + "T00:00:00Z")
+  return d.toLocaleString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
 }

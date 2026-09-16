@@ -115,37 +115,57 @@ export async function getRevenueBreakdown(opts: {
   return { months, rows: pivotRows, monthTotals, grandTotal }
 }
 
-// ── Trend (with YoY overlay) ─────────────────────────────────────────────
+// ── Trend: cumulative revenue by day, this year vs last ─────────────────
 
 export interface TrendPoint {
-  month: string                         // 'YYYY-MM-01'
-  current_revenue: number
-  prior_year_revenue: number | null     // null when no data for that prior month
+  day: string                           // 'YYYY-MM-DD' in the current year
+  current: number | null                // running total through this day; null after today
+  prior: number | null                  // running total through the same day last year
 }
 
-export async function getRevenueTrend(opts: {
-  startMonth: string
-  endMonth: string
-}): Promise<TrendPoint[]> {
-  // Fetch a year back for YoY overlay.
-  const priorStart = shiftYearBack(opts.startMonth)
-  const rows = await fetchViewRows({
-    fromMonth: priorStart,
-    toMonthExclusive: opts.endMonth,
+/**
+ * One point per calendar day, Jan 1..Dec 31 of `year`, each carrying the
+ * year-to-date running total for that year and for the year before, keyed
+ * by month-day so the same date lines up. Feb 29 in a leap year folds into
+ * Feb 28 of the other year (carry-forward keeps the totals right).
+ */
+export async function getRevenueTrend(
+  year: number,
+  today: Date = new Date(),
+): Promise<TrendPoint[]> {
+  const rows = await fetchViewRowsByCompleted({
+    fromCompleted: `${year - 1}-01-01`,
+    toCompletedExclusive: `${year + 1}-01-01`,
   })
-
-  const monthTotals = new Map<string, number>()
+  const byDay = new Map<string, number>()
   for (const r of rows) {
-    monthTotals.set(r.month, (monthTotals.get(r.month) ?? 0) + Number(r.sub_total ?? 0))
+    byDay.set(r.completed, (byDay.get(r.completed) ?? 0) + Number(r.sub_total ?? 0))
   }
 
-  return generateMonths(opts.startMonth, opts.endMonth).map((m) => ({
-    month: m,
-    current_revenue: monthTotals.get(m) ?? 0,
-    prior_year_revenue: monthTotals.has(shiftYearBack(m))
-      ? monthTotals.get(shiftYearBack(m))!
-      : null,
-  }))
+  const todayIso = isoDate(today)
+  const out: TrendPoint[] = []
+  let cur = 0
+  let prev = 0
+  const cursor = new Date(Date.UTC(year, 0, 1))
+  const priorCursor = new Date(Date.UTC(year - 1, 0, 1))
+  // Walk last year's Feb 29 (if any) into the next day's prior total.
+  const priorEnd = new Date(Date.UTC(year, 0, 1))
+  while (cursor.getUTCFullYear() === year) {
+    const day = isoDate(cursor)
+    cur += byDay.get(day) ?? 0
+    // Advance the prior-year cursor to the same month-day, absorbing
+    // any extra day (Feb 29) it passes along the way.
+    while (priorCursor < priorEnd && (priorCursor.getUTCMonth() < cursor.getUTCMonth() ||
+           (priorCursor.getUTCMonth() === cursor.getUTCMonth() && priorCursor.getUTCDate() <= cursor.getUTCDate()))) {
+      prev += byDay.get(isoDate(priorCursor)) ?? 0
+      priorCursor.setUTCDate(priorCursor.getUTCDate() + 1)
+    }
+    out.push({ day, current: day <= todayIso ? cur : null, prior: prev })
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+  // A Feb 29 in the current year past today's date is already null; one
+  // before today simply adds to the running total like any other day.
+  return out
 }
 
 // ── KPIs (MTD / QTD / YTD + YoY) ─────────────────────────────────────────
