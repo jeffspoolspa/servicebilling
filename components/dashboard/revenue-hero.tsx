@@ -44,7 +44,7 @@ function Tile({ label, year, bucket }: { label: string; year: number; bucket: Kp
         <div className="text-[11px] uppercase tracking-[0.14em] text-ink-mute">
           {label}
         </div>
-        <div className="flex items-end justify-between gap-4 mt-2">
+        <div className="flex items-end justify-between gap-6 mt-2">
           <div>
             <div className="font-sans num text-[34px] font-semibold tracking-tight text-ink leading-none">
               {formatCompactCurrency(bucket.revenue)}
@@ -55,13 +55,13 @@ function Tile({ label, year, bucket }: { label: string; year: number; bucket: Kp
                 : `${sign}${yoy.toFixed(1)}% YoY pace`}
             </div>
           </div>
-          <dl className="grid grid-cols-[auto_auto] gap-x-2 gap-y-0.5 text-[10px] font-mono tabular-nums text-right shrink-0">
-            <dt className="text-ink-mute uppercase tracking-[0.1em]">Workdays</dt>
-            <dd className="text-ink-dim">{bucket.workdays_elapsed} / {bucket.workdays_total}</dd>
-            <dt className="text-ink-mute uppercase tracking-[0.1em]">{year} $/day</dt>
-            <dd className="text-ink">{formatCompactCurrency(bucket.per_workday)}</dd>
-            <dt className="text-ink-mute uppercase tracking-[0.1em]">{year - 1} $/day</dt>
-            <dd className="text-ink-dim">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[11px] font-mono tabular-nums shrink-0 min-w-[150px]">
+            <dt className="text-ink-mute">Workdays</dt>
+            <dd className="text-right text-ink-dim">{bucket.workdays_elapsed} of {bucket.workdays_total}</dd>
+            <dt className="text-ink-mute">{year} / day</dt>
+            <dd className="text-right text-ink font-medium">{formatCompactCurrency(bucket.per_workday)}</dd>
+            <dt className="text-ink-mute">{year - 1} / day</dt>
+            <dd className="text-right text-ink-dim">
               {bucket.prior_per_workday != null ? formatCompactCurrency(bucket.prior_per_workday) : "—"}
             </dd>
           </dl>
