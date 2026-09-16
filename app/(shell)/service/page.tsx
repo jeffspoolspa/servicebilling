@@ -1,9 +1,10 @@
 import { ObjectHeader } from "@/components/shell/object-header"
 import { BarChart3 } from "lucide-react"
 import {
-  getRevenueKpis,
-  getRevenueTrend,
-  getDailyRevenue,
+  getServiceDaily,
+  revenueKpis,
+  revenueTrend,
+  dailyMap,
   getRevenueBreakdown,
 } from "@/lib/queries/revenue"
 import {
@@ -35,10 +36,8 @@ export default async function ServicePage() {
   const now = new Date()
   const initialBonusMonth = currentMonthIso(now)
 
-  const [kpis, trend, daily, initialBreakdown, initialBonuses] = await Promise.all([
-    getRevenueKpis(now),
-    getRevenueTrend(now.getUTCFullYear(), now),
-    getDailyRevenue(now.getUTCFullYear()),
+  const [ledger, initialBreakdown, initialBonuses] = await Promise.all([
+    getServiceDaily(now.getUTCFullYear()),
     getRevenueBreakdown({
       dimension: "location",
       measure: "revenue",
@@ -46,6 +45,10 @@ export default async function ServicePage() {
     }),
     getMonthlyBonuses(initialBonusMonth),
   ])
+  // One daily ledger feeds the tiles, the trend, and the hover.
+  const kpis = revenueKpis(ledger, now)
+  const trend = revenueTrend(ledger, now.getUTCFullYear(), now)
+  const daily = dailyMap(ledger)
 
   return (
     <>

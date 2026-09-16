@@ -118,6 +118,46 @@ export async function getRevenueBreakdown(opts: {
   return { months, rows: pivotRows, monthTotals, grandTotal }
 }
 
+// ── Daily ledger: the one surface the tiles, trend, hover, and table use ─
+
+export interface DailyRow {
+  day: string                           // 'YYYY-MM-DD'
+  year: number
+  revenue: number                       // Service-class revenue completed that day
+  cumulative: number                    // running total within the year
+}
+
+/** Every day of `year` and the year before from v_service_revenue_daily. */
+export async function getServiceDaily(year: number): Promise<DailyRow[]> {
+  const sb = createAnon("public")
+  const out: DailyRow[] = []
+  let offset = 0
+  while (true) {
+    const { data, error } = await sb
+      .from("v_service_revenue_daily")
+      .select("day, year, revenue, cumulative")
+      .gte("day", `${year - 1}-01-01`)
+      .lt("day", `${year + 1}-01-01`)
+      .order("day")
+      .range(offset, offset + PAGE - 1)
+    if (error) throw new Error(`v_service_revenue_daily: ${error.message}`)
+    if (!data || data.length === 0) break
+    for (const r of data as Array<Record<string, unknown>>) {
+      out.push({ day: String(r.day), year: Number(r.year), revenue: Number(r.revenue ?? 0), cumulative: Number(r.cumulative ?? 0) })
+    }
+    if (data.length < PAGE) break
+    offset += PAGE
+  }
+  return out
+}
+
+/** { 'YYYY-MM-DD': revenue } for the hover's exact to-date sums. */
+export function dailyMap(rows: DailyRow[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const r of rows) out[r.day] = r.revenue
+  return out
+}
+
 // ── Trend: monthly revenue, this year vs last ───────────────────────────
 
 export interface TrendPoint {
@@ -130,31 +170,25 @@ export interface TrendPoint {
 
 /**
  * Twelve points, Jan..Dec of `year`, each with this year's and last year's
- * monthly total. The month in progress is plotted at its full-month
- * run-rate (booked so far / workdays elapsed x workdays in the month), the
- * same arithmetic as the MTD tile, so it sits next to last year's full
- * month on equal footing. Flagged `projected` so the chart can draw it as
- * a forecast.
+ * monthly total, summed from the daily ledger. The month in progress is
+ * plotted at its full-month run-rate (booked so far / workdays elapsed x
+ * workdays in the month), the same arithmetic as the MTD tile, so it sits
+ * next to last year's full month on equal footing. Flagged `projected` so
+ * the chart can draw it as a forecast.
  */
-export async function getRevenueTrend(
-  year: number,
-  today: Date = new Date(),
-): Promise<TrendPoint[]> {
-  const rows = await fetchViewRows({
-    fromMonth: `${year - 1}-01-01`,
-    toMonthExclusive: `${year + 1}-01-01`,
-  })
+export function revenueTrend(rows: DailyRow[], year: number, today: Date = new Date()): TrendPoint[] {
   const totals = new Map<string, number>()
   for (const r of rows) {
-    totals.set(r.month, (totals.get(r.month) ?? 0) + Number(r.sub_total ?? 0))
+    const m = r.day.slice(0, 7)
+    totals.set(m, (totals.get(m) ?? 0) + r.revenue)
   }
   const todayIso = isoDate(today)
   const thisMonth = todayIso.slice(0, 7)
   return generateMonths(`${year}-01-01`, `${year + 1}-01-01`).map((m) => {
     const ym = m.slice(0, 7)
-    const prior = totals.get(shiftYearBack(m)) ?? 0
+    const prior = totals.get(shiftYearBack(m).slice(0, 7)) ?? 0
     if (ym > thisMonth) return { month: m, current: null, prior, projected: false, current_actual: null }
-    const actual = totals.get(m) ?? 0
+    const actual = totals.get(ym) ?? 0
     if (ym < thisMonth) return { month: m, current: actual, prior, projected: false, current_actual: actual }
     const [start, end] = periodRange(today, "month")
     const elapsed = workdays(start, isoDate(addDays(today, 1)))
@@ -164,23 +198,12 @@ export async function getRevenueTrend(
   })
 }
 
-/** Revenue per completed day for `year` and the year before: { 'YYYY-MM-DD': subtotal }. */
-export async function getDailyRevenue(year: number): Promise<Record<string, number>> {
-  const rows = await fetchViewRowsByCompleted({
-    fromCompleted: `${year - 1}-01-01`,
-    toCompletedExclusive: `${year + 1}-01-01`,
-  })
-  const out: Record<string, number> = {}
-  for (const r of rows) out[r.completed] = (out[r.completed] ?? 0) + Number(r.sub_total ?? 0)
-  return out
-}
-
 // ── KPIs (MTD / QTD / YTD, YoY by workday pace) ──────────────────────────
 
 export interface KpiBucket {
   revenue: number                       // this period through today
-  workdays_elapsed: number              // Mon..Fri days in the period through today
-  workdays_total: number                // Mon..Fri days in the whole period
+  workdays_elapsed: number              // workdays in the period through today
+  workdays_total: number                // workdays in the whole period
   per_workday: number
   prior_year: number | null             // last year's period through the same day
   prior_workdays: number
@@ -199,32 +222,22 @@ export interface RevenueKpis {
  * Each tile compares this period's revenue per workday (through today)
  * with last year's revenue per workday over the SAME period through the
  * same day. Ruled 2026-09-16: the baseline is where we were a year ago,
- * not last year's full-period average (a weak prior Q4 made the two
- * disagree by 12 points on the same day). Per workday rather than raw
- * totals so a Sunday or a holiday shift does not read as a swing.
+ * not last year's full-period average. Per workday (Mon..Fri less
+ * holidays) rather than raw totals so a weekend or holiday shift does not
+ * read as a swing. Sums come straight from the daily ledger.
  */
-export async function getRevenueKpis(
-  referenceDate: Date = new Date(),
-): Promise<RevenueKpis> {
+export function revenueKpis(rows: DailyRow[], referenceDate: Date = new Date()): RevenueKpis {
   const ref = new Date(Date.UTC(
     referenceDate.getUTCFullYear(),
     referenceDate.getUTCMonth(),
     referenceDate.getUTCDate(),
   ))
-
-  // Fetch from last year's Jan 1 through the end of this year: the prior
-  // full period can run past today's month-day.
-  const rows = await fetchViewRowsByCompleted({
-    fromCompleted: `${ref.getUTCFullYear() - 1}-01-01`,
-    toCompletedExclusive: `${ref.getUTCFullYear() + 1}-01-01`,
-  })
+  const byDay = dailyMap(rows)
 
   function sumRange(startIso: string, endIsoExclusive: string): number {
     let total = 0
-    for (const r of rows) {
-      if (r.completed >= startIso && r.completed < endIsoExclusive) {
-        total += Number(r.sub_total ?? 0)
-      }
+    for (const [day, v] of Object.entries(byDay)) {
+      if (day >= startIso && day < endIsoExclusive) total += v
     }
     return total
   }
@@ -286,31 +299,6 @@ async function fetchViewRows(opts: {
       // Paging without an ORDER BY is undefined in PostgREST: pages can
       // overlap or skip once the view is large (it did after the 2019-2025
       // history backfill: MTD/QTD read $0). wo_number is the view's key.
-      .order("wo_number")
-      .range(offset, offset + PAGE - 1)
-    if (error) throw new Error(`v_revenue_by_month: ${error.message}`)
-    if (!data || data.length === 0) break
-    all.push(...(data as ViewRow[]))
-    if (data.length < PAGE) break
-    offset += PAGE
-  }
-  return all
-}
-
-async function fetchViewRowsByCompleted(opts: {
-  fromCompleted: string
-  toCompletedExclusive: string
-}): Promise<ViewRow[]> {
-  const sb = createAnon("public")
-  const all: ViewRow[] = []
-  let offset = 0
-  while (true) {
-    const { data, error } = await sb
-      .from("v_revenue_by_month")
-      .select("sub_total, completed, month")
-      .eq("revenue_class", "Service")
-      .gte("completed", opts.fromCompleted)
-      .lt("completed", opts.toCompletedExclusive)
       .order("wo_number")
       .range(offset, offset + PAGE - 1)
     if (error) throw new Error(`v_revenue_by_month: ${error.message}`)
