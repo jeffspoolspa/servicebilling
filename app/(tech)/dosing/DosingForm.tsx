@@ -1,14 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
 import type { ActiveCustomer } from "@/lib/entities/follow-up/shared"
 import { CustomerSelectSheet } from "../follow-up/CustomerPicker"
 import { useBottomBar } from "../bottom-bar"
 import { getPoolConfig, getRecommendation, savePoolConfig } from "./actions"
-// EXPERIMENT branch: the Apple-Weather-card pour sheet stands in for the
-// production sheet. Do not merge — swap back to ./PourSheet to compare.
+// The production pour sheet (Weather-card layout, promoted 2026-08-21).
 import { WeatherPourSheet as PourSheet } from "./WeatherSheet"
 import { ReadingWheelSheet } from "./ReadingWheel"
 import {
@@ -56,10 +55,11 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   const [algae, setAlgae] = useState(false)
   const [recalcError, setRecalcError] = useState<string | null>(null)
   // Saved per-customer dosing defaults (maintenance.pool_configs): loaded on
-  // customer pick; when present and untouched, the volume+chlorination rows
-  // collapse to a summary with an Edit button.
+  // customer pick into the always-editable volume/chlorination cards.
   const [savedConfig, setSavedConfig] = useState<PoolConfig | null>(null)
   const [savePending, setSavePending] = useState(false)
+  // customer id of the in-flight pool-config fetch (guards stale responses)
+  const configReq = useRef("")
   const [pending, startTransition] = useTransition()
   const { setAction, setSuppressed } = useBottomBar()
 
@@ -242,9 +242,15 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
               onPick={(id) => {
                 setCustomerId(String(id))
                 setPickerOpen(false)
+                // Reset FIRST: a customer with nothing saved must show a
+                // blank pool, never the previous customer's values.
                 setSavedConfig(null)
+                setVolume(null)
+                setSanitiser("tab")
+                configReq.current = String(id)
                 void getPoolConfig(String(id)).then((cfg) => {
-                  if (!cfg) return
+                  // ignore a slow response for a customer no longer selected
+                  if (configReq.current !== String(id) || !cfg) return
                   setSavedConfig(cfg)
                   setVolume(cfg.volumeGallons)
                   setSanitiser(cfg.sanitiser)
