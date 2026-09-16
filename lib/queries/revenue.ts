@@ -2,7 +2,9 @@ import { createAnon } from "@/lib/supabase/anon"
 import { workdays } from "@/lib/utils/workdays"
 
 /**
- * Revenue dashboard data layer.
+ * Revenue dashboard data layer. SERVICE revenue only: every fetch filters
+ * `revenue_class = 'Service'` (QBO invoice class, or the pipeline's
+ * mechanical rule for history rows without an invoice).
  *
  * Backed by `public.v_revenue_by_month` — one row per (month × work_order),
  * with location / tech / department resolved via employees + departments.
@@ -278,6 +280,7 @@ async function fetchViewRows(opts: {
       .select(
         "wo_number, month, completed, location, tech, department, customer, wo_type, sub_total, total_due, qbo_invoice_id, employee_id",
       )
+      .eq("revenue_class", "Service")
       .gte("month", opts.fromMonth)
       .lt("month", opts.toMonthExclusive)
       // Paging without an ORDER BY is undefined in PostgREST: pages can
@@ -305,6 +308,7 @@ async function fetchViewRowsByCompleted(opts: {
     const { data, error } = await sb
       .from("v_revenue_by_month")
       .select("sub_total, completed, month")
+      .eq("revenue_class", "Service")
       .gte("completed", opts.fromCompleted)
       .lt("completed", opts.toCompletedExclusive)
       .order("wo_number")
@@ -361,20 +365,4 @@ function shiftYearBack(iso: string): string {
 
 function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10)
-}
-
-// ─── Presets used by both the server initial render + the API route ─────
-
-export function defaultDateRange(
-  referenceDate: Date = new Date(),
-): { startMonth: string; endMonth: string } {
-  const ref = new Date(referenceDate)
-  // Last 6 months, inclusive of the current month. endMonth is exclusive so
-  // it points to the first of next month.
-  const endMonth = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() + 1, 1))
-  const startMonth = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() - 5, 1))
-  return {
-    startMonth: isoDate(startMonth),
-    endMonth: isoDate(endMonth),
-  }
 }

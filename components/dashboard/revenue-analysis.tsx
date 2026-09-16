@@ -6,11 +6,13 @@ import type {
   Measure,
   PivotResult,
 } from "@/lib/queries/revenue"
-import { RevenuePivot, type Preset } from "./revenue-pivot"
+import { RevenuePivot } from "./revenue-pivot"
+import { yearRange } from "@/lib/utils/year-range"
 
 /**
  * Thin client wrapper that owns the pivot's filter state (dimension,
- * measure, date range) and re-fetches the pivot on change.
+ * measure, year) and re-fetches the pivot on change. A year is always
+ * the full Jan..Dec range; months not yet reached simply have no rows.
  *
  * The trend chart used to live here too but now sits as its own card on
  * the dashboard, decoupled from the pivot's dimension/measure controls.
@@ -20,18 +22,20 @@ interface Props {
   initialPivot: PivotResult
   initialDimension: Dimension
   initialMeasure: Measure
-  initialRange: { startMonth: string; endMonth: string; preset: Preset }
+  initialYear: number
+  years: number[]
 }
 
 export function RevenueAnalysis({
   initialPivot,
   initialDimension,
   initialMeasure,
-  initialRange,
+  initialYear,
+  years,
 }: Props) {
   const [dimension, setDimension] = useState<Dimension>(initialDimension)
   const [measure, setMeasure] = useState<Measure>(initialMeasure)
-  const [range, setRange] = useState(initialRange)
+  const [year, setYear] = useState(initialYear)
   const [pivot, setPivot] = useState<PivotResult>(initialPivot)
   const [pending, startTransition] = useTransition()
 
@@ -58,28 +62,17 @@ export function RevenueAnalysis({
 
   const handleDimension = (d: Dimension) => {
     setDimension(d)
-    refetch({
-      dimension: d,
-      measure,
-      startMonth: range.startMonth,
-      endMonth: range.endMonth,
-    })
+    refetch({ dimension: d, measure, ...yearRange(year) })
   }
 
   const handleMeasure = (m: Measure) => {
     setMeasure(m)
-    refetch({
-      dimension,
-      measure: m,
-      startMonth: range.startMonth,
-      endMonth: range.endMonth,
-    })
+    refetch({ dimension, measure: m, ...yearRange(year) })
   }
 
-  const handlePreset = (preset: Preset) => {
-    const { startMonth, endMonth } = computeRangeFromPreset(preset)
-    setRange({ startMonth, endMonth, preset })
-    refetch({ dimension, measure, startMonth, endMonth })
+  const handleYear = (y: number) => {
+    setYear(y)
+    refetch({ dimension, measure, ...yearRange(y) })
   }
 
   return (
@@ -87,31 +80,12 @@ export function RevenueAnalysis({
       result={pivot}
       dimension={dimension}
       measure={measure}
-      range={range}
+      year={year}
+      years={years}
       pending={pending}
       onDimensionChange={handleDimension}
       onMeasureChange={handleMeasure}
-      onPresetChange={handlePreset}
+      onYearChange={handleYear}
     />
   )
-}
-
-function computeRangeFromPreset(
-  preset: Preset,
-  ref: Date = new Date(),
-): { startMonth: string; endMonth: string } {
-  const endMonth = new Date(
-    Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() + 1, 1),
-  )
-  const start = (() => {
-    if (preset === "ytd") return new Date(Date.UTC(ref.getUTCFullYear(), 0, 1))
-    const n = preset === "3m" ? 3 : preset === "6m" ? 6 : 12
-    return new Date(
-      Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() - (n - 1), 1),
-    )
-  })()
-  return {
-    startMonth: start.toISOString().slice(0, 10),
-    endMonth: endMonth.toISOString().slice(0, 10),
-  }
 }
