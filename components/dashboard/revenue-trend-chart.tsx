@@ -42,6 +42,9 @@ interface Sample {
   ahead: [number, number] | null
   behind: [number, number] | null
   isAnchor: boolean
+  projected: boolean                    // on or after the last booked anchor: a run-rate, not booked
+  currentBooked: number | null          // solid line: through the last complete month
+  currentProjected: number | null       // dashed line: last complete month -> run-rate anchor
   cumCurrent: number | null             // year-to-date through this day
   cumPrior: number                      // same day last year
 }
@@ -65,13 +68,14 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
   const year = Number(data[0].month.slice(0, 4))
   const priorYear = String(year - 1)
   const config: ChartConfig = {
-    current: { label: String(year), color: CURRENT },
+    currentBooked: { label: String(year), color: CURRENT },
+    currentProjected: { label: `${year} projected`, color: CURRENT },
     prior: { label: priorYear, color: PRIOR },
   }
 
   const samples = easeByDay(data, daily, year, today)
 
-  const currentTotal = data.reduce((a, p) => a + (p.current ?? 0), 0)
+  const currentTotal = data.reduce((a, p) => a + (p.current_actual ?? 0), 0)
   const priorTotal = data.reduce((a, p) => a + (p.prior ?? 0), 0)
 
   // The table's year rows are the YTD tile's numbers (exact daily ledger,
@@ -151,7 +155,7 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
                 return (
                   <div className="rounded-lg border border-line bg-bg-elev px-3 py-2 text-[11px] shadow-xl min-w-[200px]">
                     <div className="text-ink font-medium mb-1.5">{dayLabel(s.day)}</div>
-                    <Row swatch={CURRENT} label={`${year} monthly pace`} value={s.current} />
+                    <Row swatch={CURRENT} label={`${year} monthly pace${s.projected ? " (projected)" : ""}`} value={s.current} />
                     <Row swatch={PRIOR} label={`${priorYear} monthly pace`} value={s.prior} />
                     <div className="flex justify-between gap-4 mt-1">
                       <span className="text-ink-dim">Pace vs {priorYear}</span>
@@ -182,9 +186,12 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
               isAnimationActive={false} legendType="none" tooltipType="none" />
             <Line type="linear" dataKey="prior" stroke={PRIOR} strokeWidth={2} strokeDasharray="4 3"
               dot={false} activeDot={false} isAnimationActive={false} />
-            <Line type="linear" dataKey="current" stroke={CURRENT} strokeWidth={2}
+            <Line type="linear" dataKey="currentBooked" stroke={CURRENT} strokeWidth={2}
               dot={(props) => anchorDot(props, samples)} activeDot={false}
               connectNulls={false} isAnimationActive={false} />
+            <Line type="linear" dataKey="currentProjected" stroke={CURRENT} strokeWidth={2}
+              strokeDasharray="4 3" dot={(props) => anchorDot(props, samples)} activeDot={false}
+              connectNulls={false} isAnimationActive={false} legendType="none" />
           </ComposedChart>
         </ChartContainer>
       </div>
@@ -253,10 +260,16 @@ function easeByDay(data: TrendPoint[], daily: Record<string, number>, year: numb
     cumPrior.push(runPrior)
   }
 
+  // The projected month starts at the last booked anchor (the previous
+  // month's 15th): solid up to there, dashed from there to the run-rate.
+  const projectedIdx = data.findIndex((p) => p.projected)
+  const projectedFrom = projectedIdx > 0 ? anchorX[projectedIdx - 1] : projectedIdx === 0 ? 0 : Infinity
+
   return days.map((day, i) => {
     const c = current[i]
     const p = prior[i]
     const both = c != null && p != null
+    const projected = i >= projectedFrom && c != null
     return {
       day,
       current: c,
@@ -265,6 +278,9 @@ function easeByDay(data: TrendPoint[], daily: Record<string, number>, year: numb
       ahead: both ? [p, Math.max(c, p)] : null,
       behind: both ? [Math.min(c, p), p] : null,
       isAnchor: anchorX.includes(i),
+      projected: i > projectedFrom && c != null,
+      currentBooked: i <= projectedFrom ? c : null,
+      currentProjected: projected ? c : null,
       cumCurrent: cumCurrent[i],
       cumPrior: cumPrior[i],
     }
@@ -324,9 +340,17 @@ function Row({ swatch, label, value }: { swatch?: string; label: string; value: 
   )
 }
 
-function anchorDot(props: { cx?: number; cy?: number; index?: number }, samples: Sample[]) {
+function anchorDot(props: { cx?: number; cy?: number; index?: number; dataKey?: unknown }, samples: Sample[]) {
   const s = props.index != null ? samples[props.index] : undefined
   if (!s?.isAnchor || s.current == null || props.cx == null || props.cy == null) return <g key={props.index} />
+  // Each line draws its own anchors: the booked line the solid ones, the
+  // projected line the hollow run-rate dot. The shared boundary anchor
+  // belongs to the booked line.
+  if (String(props.dataKey) === "currentBooked" && s.projected) return <g key={props.index} />
+  if (String(props.dataKey) === "currentProjected" && !s.projected) return <g key={props.index} />
+  if (s.projected) {
+    return <circle key={props.index} cx={props.cx} cy={props.cy} r={3} fill="rgb(var(--bg-elev))" stroke={CURRENT} strokeWidth={1.5} />
+  }
   return <circle key={props.index} cx={props.cx} cy={props.cy} r={2.5} fill={CURRENT} />
 }
 

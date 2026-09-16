@@ -122,9 +122,18 @@ export interface TrendPoint {
   month: string                         // 'YYYY-MM-01' in the current year
   current: number | null                // this year's total for the month; null after the current month
   prior: number | null                  // last year's total for the same month
+  projected: boolean                    // current month: `current` is the full-month run-rate
+  current_actual: number | null         // current month: revenue booked so far
 }
 
-/** Twelve points, Jan..Dec of `year`, each with this year's and last year's monthly total. */
+/**
+ * Twelve points, Jan..Dec of `year`, each with this year's and last year's
+ * monthly total. The month in progress is plotted at its full-month
+ * run-rate (booked so far / workdays elapsed x workdays in the month), the
+ * same arithmetic as the MTD tile, so it sits next to last year's full
+ * month on equal footing. Flagged `projected` so the chart can draw it as
+ * a forecast.
+ */
 export async function getRevenueTrend(
   year: number,
   today: Date = new Date(),
@@ -137,12 +146,20 @@ export async function getRevenueTrend(
   for (const r of rows) {
     totals.set(r.month, (totals.get(r.month) ?? 0) + Number(r.sub_total ?? 0))
   }
-  const thisMonth = isoDate(today).slice(0, 7)
-  return generateMonths(`${year}-01-01`, `${year + 1}-01-01`).map((m) => ({
-    month: m,
-    current: m.slice(0, 7) <= thisMonth ? totals.get(m) ?? 0 : null,
-    prior: totals.get(shiftYearBack(m)) ?? 0,
-  }))
+  const todayIso = isoDate(today)
+  const thisMonth = todayIso.slice(0, 7)
+  return generateMonths(`${year}-01-01`, `${year + 1}-01-01`).map((m) => {
+    const ym = m.slice(0, 7)
+    const prior = totals.get(shiftYearBack(m)) ?? 0
+    if (ym > thisMonth) return { month: m, current: null, prior, projected: false, current_actual: null }
+    const actual = totals.get(m) ?? 0
+    if (ym < thisMonth) return { month: m, current: actual, prior, projected: false, current_actual: actual }
+    const [start, end] = periodRange(today, "month")
+    const elapsed = workdays(start, isoDate(addDays(today, 1)))
+    const total = workdays(start, end)
+    const runRate = elapsed > 0 ? (actual / elapsed) * total : actual
+    return { month: m, current: runRate, prior, projected: true, current_actual: actual }
+  })
 }
 
 /** Revenue per completed day for `year` and the year before: { 'YYYY-MM-DD': subtotal }. */
