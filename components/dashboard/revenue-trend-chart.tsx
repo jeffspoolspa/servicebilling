@@ -10,7 +10,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart"
-import { formatCurrency } from "@/lib/utils/format"
+import { formatCompactCurrency, formatCurrency } from "@/lib/utils/format"
 import type { TrendPoint } from "@/lib/queries/revenue"
 import { nextDay, workdays } from "@/lib/utils/workdays"
 
@@ -180,18 +180,18 @@ export function RevenueTrendChart({ data, today }: { data: TrendPoint[]; today: 
         <tbody className="font-mono tabular-nums">
           <tr>
             <td className="px-5 py-1.5 text-ink">{year}</td>
-            <td className="px-3 py-1.5 text-right text-ink">{millions(currentTotal)}</td>
+            <td className="px-3 py-1.5 text-right text-ink">{formatCompactCurrency(currentTotal)}</td>
             <td className="px-3 py-1.5 text-right text-ink-dim">{workdaysSoFar} of {workdaysThisYear}</td>
-            <td className="px-3 py-1.5 text-right text-ink">{formatCurrency(currentRate)}</td>
+            <td className="px-3 py-1.5 text-right text-ink">{formatCompactCurrency(currentRate)}</td>
             <td className={`px-5 py-1.5 text-right ${paceTone}`}>
               {paceYoy == null ? "—" : `${paceYoy >= 0 ? "+" : ""}${paceYoy.toFixed(1)}%`}
             </td>
           </tr>
           <tr>
             <td className="px-5 py-1.5 pb-3 text-ink-dim">{priorYear}</td>
-            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{millions(priorTotal)}</td>
+            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{formatCompactCurrency(priorTotal)}</td>
             <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{workdaysPrior} of {workdaysPrior}</td>
-            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{formatCurrency(priorRate)}</td>
+            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{formatCompactCurrency(priorRate)}</td>
             <td className="px-5 py-1.5 pb-3 text-right text-ink-mute">baseline</td>
           </tr>
         </tbody>
@@ -275,10 +275,6 @@ function anchorDot(props: { cx?: number; cy?: number; index?: number }, samples:
   const s = props.index != null ? samples[props.index] : undefined
   if (!s?.isAnchor || s.current == null || props.cx == null || props.cy == null) return <g key={props.index} />
   return <circle key={props.index} cx={props.cx} cy={props.cy} r={2.5} fill={CURRENT} />
-}
-
-function millions(n: number): string {
-  return `$${(n / 1_000_000).toFixed(2)}M`
 }
 
 function compactCurrency(n: number): string {

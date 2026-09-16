@@ -1,5 +1,5 @@
 import { Card, CardBody } from "@/components/ui/card"
-import { formatCurrency } from "@/lib/utils/format"
+import { formatCompactCurrency } from "@/lib/utils/format"
 import type { RevenueKpis, KpiBucket } from "@/lib/queries/revenue"
 
 /**
@@ -47,7 +47,7 @@ function Tile({ label, year, bucket }: { label: string; year: number; bucket: Kp
         <div className="flex items-end justify-between gap-4 mt-2">
           <div>
             <div className="font-sans num text-[34px] font-semibold tracking-tight text-ink leading-none">
-              {formatCurrency(bucket.revenue)}
+              {formatCompactCurrency(bucket.revenue)}
             </div>
             <div className={`font-mono text-[11px] mt-2 ${tone}`}>
               {yoy == null
@@ -59,10 +59,10 @@ function Tile({ label, year, bucket }: { label: string; year: number; bucket: Kp
             <dt className="text-ink-mute uppercase tracking-[0.1em]">Workdays</dt>
             <dd className="text-ink-dim">{bucket.workdays_elapsed} / {bucket.workdays_total}</dd>
             <dt className="text-ink-mute uppercase tracking-[0.1em]">{year} $/day</dt>
-            <dd className="text-ink">{formatCurrency(bucket.per_workday)}</dd>
+            <dd className="text-ink">{formatCompactCurrency(bucket.per_workday)}</dd>
             <dt className="text-ink-mute uppercase tracking-[0.1em]">{year - 1} $/day</dt>
             <dd className="text-ink-dim">
-              {bucket.prior_per_workday != null ? formatCurrency(bucket.prior_per_workday) : "—"}
+              {bucket.prior_per_workday != null ? formatCompactCurrency(bucket.prior_per_workday) : "—"}
             </dd>
           </dl>
         </div>
