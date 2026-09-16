@@ -1,4 +1,5 @@
 import { createAnon } from "@/lib/supabase/anon"
+import { workdays } from "@/lib/utils/workdays"
 
 /**
  * Revenue dashboard data layer.
@@ -144,12 +145,17 @@ export async function getRevenueTrend(
   }))
 }
 
-// ── KPIs (MTD / QTD / YTD + YoY) ─────────────────────────────────────────
+// ── KPIs (MTD / QTD / YTD, YoY by workday pace) ──────────────────────────
 
 export interface KpiBucket {
-  revenue: number
-  prior_year: number | null
-  yoy_pct: number | null
+  revenue: number                       // this period through today
+  workdays_elapsed: number              // Mon..Fri days in the period through today
+  workdays_total: number                // Mon..Fri days in the whole period
+  per_workday: number
+  prior_year: number | null             // last year's FULL period
+  prior_workdays: number
+  prior_per_workday: number | null
+  yoy_pct: number | null                // per-workday pace vs last year's full period
 }
 
 export interface RevenueKpis {
@@ -159,6 +165,12 @@ export interface RevenueKpis {
   reference_date: string
 }
 
+/**
+ * Each tile compares this period's revenue per workday (through today)
+ * with last year's revenue per workday over the whole equivalent period.
+ * Comparing a half month with a full month would always read as a drop;
+ * per workday puts both on the same footing.
+ */
 export async function getRevenueKpis(
   referenceDate: Date = new Date(),
 ): Promise<RevenueKpis> {
@@ -168,17 +180,12 @@ export async function getRevenueKpis(
     referenceDate.getUTCDate(),
   ))
 
-  // Fetch everything from 2 years back (covers YoY for YTD).
-  const fromMonth = `${ref.getUTCFullYear() - 1}-01-01`
-  const toExclusive = isoDate(addDays(ref, 1))
+  // Fetch from last year's Jan 1 through the end of this year: the prior
+  // full period can run past today's month-day.
   const rows = await fetchViewRowsByCompleted({
-    fromCompleted: fromMonth,
-    toCompletedExclusive: toExclusive,
+    fromCompleted: `${ref.getUTCFullYear() - 1}-01-01`,
+    toCompletedExclusive: `${ref.getUTCFullYear() + 1}-01-01`,
   })
-
-  const [mtdStart, mtdEnd] = periodRange(ref, "month")
-  const [qtdStart, qtdEnd] = periodRange(ref, "quarter")
-  const [ytdStart, ytdEnd] = periodRange(ref, "year")
 
   function sumRange(startIso: string, endIsoExclusive: string): number {
     let total = 0
@@ -190,20 +197,34 @@ export async function getRevenueKpis(
     return total
   }
 
-  function bucket(startIso: string, endIsoExclusive: string): KpiBucket {
-    const cur = sumRange(startIso, endIsoExclusive)
-    const prior = sumRange(shiftYearBack(startIso), shiftYearBack(endIsoExclusive))
+  function bucket(kind: "month" | "quarter" | "year"): KpiBucket {
+    const [start, fullEnd] = periodRange(ref, kind)
+    const throughToday = isoDate(addDays(ref, 1))
+    const revenue = sumRange(start, throughToday)
+    const workdaysElapsed = workdays(start, throughToday)
+    const workdaysTotal = workdays(start, fullEnd)
+    const priorStart = shiftYearBack(start)
+    const priorEnd = shiftYearBack(fullEnd)
+    const prior = sumRange(priorStart, priorEnd)
+    const priorWorkdays = workdays(priorStart, priorEnd)
+    const perWorkday = workdaysElapsed > 0 ? revenue / workdaysElapsed : 0
+    const priorPerWorkday = prior > 0 && priorWorkdays > 0 ? prior / priorWorkdays : null
     return {
-      revenue: cur,
+      revenue,
+      workdays_elapsed: workdaysElapsed,
+      workdays_total: workdaysTotal,
+      per_workday: perWorkday,
       prior_year: prior > 0 ? prior : null,
-      yoy_pct: prior > 0 ? ((cur - prior) / prior) * 100 : null,
+      prior_workdays: priorWorkdays,
+      prior_per_workday: priorPerWorkday,
+      yoy_pct: priorPerWorkday ? ((perWorkday - priorPerWorkday) / priorPerWorkday) * 100 : null,
     }
   }
 
   return {
-    mtd: bucket(mtdStart, mtdEnd),
-    qtd: bucket(qtdStart, qtdEnd),
-    ytd: bucket(ytdStart, ytdEnd),
+    mtd: bucket("month"),
+    qtd: bucket("quarter"),
+    ytd: bucket("year"),
     reference_date: isoDate(ref),
   }
 }
@@ -289,19 +310,13 @@ function periodRange(ref: Date, bucket: "month" | "quarter" | "year"): [string, 
   const y = ref.getUTCFullYear()
   const m = ref.getUTCMonth()
   if (bucket === "month") {
-    const start = new Date(Date.UTC(y, m, 1))
-    const end = addDays(ref, 1)
-    return [isoDate(start), isoDate(end)]
+    return [isoDate(new Date(Date.UTC(y, m, 1))), isoDate(new Date(Date.UTC(y, m + 1, 1)))]
   }
   if (bucket === "quarter") {
     const qMonth = Math.floor(m / 3) * 3
-    const start = new Date(Date.UTC(y, qMonth, 1))
-    const end = addDays(ref, 1)
-    return [isoDate(start), isoDate(end)]
+    return [isoDate(new Date(Date.UTC(y, qMonth, 1))), isoDate(new Date(Date.UTC(y, qMonth + 3, 1)))]
   }
-  const start = new Date(Date.UTC(y, 0, 1))
-  const end = addDays(ref, 1)
-  return [isoDate(start), isoDate(end)]
+  return [`${y}-01-01`, `${y + 1}-01-01`]
 }
 
 function addDays(d: Date, n: number): Date {

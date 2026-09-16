@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/chart"
 import { formatCurrency } from "@/lib/utils/format"
 import type { TrendPoint } from "@/lib/queries/revenue"
+import { nextDay, workdays } from "@/lib/utils/workdays"
 
 /**
  * Monthly revenue, this year against last year, January to December.
@@ -44,7 +45,7 @@ interface Sample {
   isAnchor: boolean
 }
 
-export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
+export function RevenueTrendChart({ data, today }: { data: TrendPoint[]; today: string }) {
   if (data.length === 0) {
     return (
       <Card>
@@ -67,6 +68,17 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
   const currentTotal = data.reduce((a, p) => a + (p.current ?? 0), 0)
   const priorTotal = data.reduce((a, p) => a + (p.prior ?? 0), 0)
 
+  // Pace: revenue per workday (Mon..Fri), this year through today against
+  // last year in full. The YoY on a raw total would compare 8.5 months to
+  // 12; per workday puts both years on the same footing.
+  const workdaysThisYear = workdays(`${year}-01-01`, `${year + 1}-01-01`)
+  const workdaysSoFar = workdays(`${year}-01-01`, nextDay(today))
+  const workdaysPrior = workdays(`${year - 1}-01-01`, `${year}-01-01`)
+  const currentRate = workdaysSoFar > 0 ? currentTotal / workdaysSoFar : 0
+  const priorRate = workdaysPrior > 0 ? priorTotal / workdaysPrior : 0
+  const paceYoy = priorRate > 0 ? ((currentRate - priorRate) / priorRate) * 100 : null
+  const paceTone = paceYoy == null ? "text-ink-mute" : paceYoy >= 0 ? "text-grass" : "text-coral"
+
   return (
     <Card>
       <div className="flex items-center gap-3 px-5 py-2.5 border-b border-line-soft text-[11px]">
@@ -75,12 +87,6 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
         </span>
         <span className="text-ink-dim">
           {year} vs {priorYear}
-        </span>
-        <span className="ml-auto font-mono tabular-nums text-ink">
-          {formatCurrency(currentTotal)} {year}
-        </span>
-        <span className="font-mono tabular-nums text-ink-mute">
-          {formatCurrency(priorTotal)} {priorYear}
         </span>
       </div>
 
@@ -160,6 +166,36 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
           </ComposedChart>
         </ChartContainer>
       </div>
+
+      <table className="w-full text-[11px] border-t border-line-soft">
+        <thead>
+          <tr className="text-ink-mute uppercase tracking-[0.12em] text-[10px]">
+            <th className="text-left font-medium px-5 py-2">Year</th>
+            <th className="text-right font-medium px-3 py-2">Total</th>
+            <th className="text-right font-medium px-3 py-2">Workdays</th>
+            <th className="text-right font-medium px-3 py-2">Per workday</th>
+            <th className="text-right font-medium px-5 py-2">YoY pace</th>
+          </tr>
+        </thead>
+        <tbody className="font-mono tabular-nums">
+          <tr>
+            <td className="px-5 py-1.5 text-ink">{year}</td>
+            <td className="px-3 py-1.5 text-right text-ink">{millions(currentTotal)}</td>
+            <td className="px-3 py-1.5 text-right text-ink-dim">{workdaysSoFar} of {workdaysThisYear}</td>
+            <td className="px-3 py-1.5 text-right text-ink">{formatCurrency(currentRate)}</td>
+            <td className={`px-5 py-1.5 text-right ${paceTone}`}>
+              {paceYoy == null ? "—" : `${paceYoy >= 0 ? "+" : ""}${paceYoy.toFixed(1)}%`}
+            </td>
+          </tr>
+          <tr>
+            <td className="px-5 py-1.5 pb-3 text-ink-dim">{priorYear}</td>
+            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{millions(priorTotal)}</td>
+            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{workdaysPrior} of {workdaysPrior}</td>
+            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{formatCurrency(priorRate)}</td>
+            <td className="px-5 py-1.5 pb-3 text-right text-ink-mute">baseline</td>
+          </tr>
+        </tbody>
+      </table>
     </Card>
   )
 }
@@ -239,6 +275,10 @@ function anchorDot(props: { cx?: number; cy?: number; index?: number }, samples:
   const s = props.index != null ? samples[props.index] : undefined
   if (!s?.isAnchor || s.current == null || props.cx == null || props.cy == null) return <g key={props.index} />
   return <circle key={props.index} cx={props.cx} cy={props.cy} r={2.5} fill={CURRENT} />
+}
+
+function millions(n: number): string {
+  return `$${(n / 1_000_000).toFixed(2)}M`
 }
 
 function compactCurrency(n: number): string {

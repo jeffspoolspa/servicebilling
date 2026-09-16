@@ -3,8 +3,9 @@ import { formatCurrency } from "@/lib/utils/format"
 import type { RevenueKpis, KpiBucket } from "@/lib/queries/revenue"
 
 /**
- * Hero row of three KPI tiles — MTD / QTD / YTD revenue with YoY percent
- * where prior-year data exists. Rendered server-side with pre-fetched KPIs.
+ * Hero row of three KPI tiles — MTD / QTD / YTD revenue. YoY is PACE: this
+ * period's revenue per workday so far against last year's full period per
+ * workday, so a half month is never compared to a whole one.
  *
  * YoY formatting:
  *   - null prior period → no YoY line (data not yet deep enough)
@@ -40,7 +41,13 @@ function Tile({ label, bucket }: { label: string; bucket: KpiBucket }) {
         <div className={`font-mono text-[11px] mt-1.5 ${tone}`}>
           {yoy == null
             ? "no prior-year baseline"
-            : `${sign}${yoy.toFixed(1)}% YoY · prior ${formatCurrency(bucket.prior_year ?? 0)}`}
+            : `${sign}${yoy.toFixed(1)}% YoY pace`}
+        </div>
+        <div className="font-mono text-[11px] mt-1 text-ink-mute">
+          {formatCurrency(bucket.per_workday)}/workday · {bucket.workdays_elapsed} of {bucket.workdays_total}
+          {bucket.prior_per_workday != null && (
+            <> · prior {formatCurrency(bucket.prior_per_workday)}/workday</>
+          )}
         </div>
       </CardBody>
     </Card>
