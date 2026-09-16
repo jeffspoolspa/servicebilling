@@ -58,7 +58,7 @@ export default async function ServicePage() {
         <RevenueHero kpis={kpis} />
 
         <div className="grid grid-cols-2 gap-5">
-          <RevenueTrendChart data={trend} today={now.toISOString().slice(0, 10)} />
+          <RevenueTrendChart data={trend} today={now.toISOString().slice(0, 10)} ytd={kpis.ytd} />
           <MonthlyBonusesCard initial={initialBonuses} />
         </div>
 

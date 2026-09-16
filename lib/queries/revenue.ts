@@ -152,10 +152,10 @@ export interface KpiBucket {
   workdays_elapsed: number              // Mon..Fri days in the period through today
   workdays_total: number                // Mon..Fri days in the whole period
   per_workday: number
-  prior_year: number | null             // last year's FULL period
+  prior_year: number | null             // last year's period through the same day
   prior_workdays: number
   prior_per_workday: number | null
-  yoy_pct: number | null                // per-workday pace vs last year's full period
+  yoy_pct: number | null                // per-workday pace vs the same period last year
 }
 
 export interface RevenueKpis {
@@ -167,9 +167,11 @@ export interface RevenueKpis {
 
 /**
  * Each tile compares this period's revenue per workday (through today)
- * with last year's revenue per workday over the whole equivalent period.
- * Comparing a half month with a full month would always read as a drop;
- * per workday puts both on the same footing.
+ * with last year's revenue per workday over the SAME period through the
+ * same day. Ruled 2026-09-16: the baseline is where we were a year ago,
+ * not last year's full-period average (a weak prior Q4 made the two
+ * disagree by 12 points on the same day). Per workday rather than raw
+ * totals so a Sunday or a holiday shift does not read as a swing.
  */
 export async function getRevenueKpis(
   referenceDate: Date = new Date(),
@@ -204,7 +206,7 @@ export async function getRevenueKpis(
     const workdaysElapsed = workdays(start, throughToday)
     const workdaysTotal = workdays(start, fullEnd)
     const priorStart = shiftYearBack(start)
-    const priorEnd = shiftYearBack(fullEnd)
+    const priorEnd = shiftYearBack(throughToday)
     const prior = sumRange(priorStart, priorEnd)
     const priorWorkdays = workdays(priorStart, priorEnd)
     const perWorkday = workdaysElapsed > 0 ? revenue / workdaysElapsed : 0

@@ -10,8 +10,8 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart"
 import { formatCompactCurrency, formatCurrency } from "@/lib/utils/format"
-import type { TrendPoint } from "@/lib/queries/revenue"
-import { nextDay, workdays } from "@/lib/utils/workdays"
+import type { KpiBucket, TrendPoint } from "@/lib/queries/revenue"
+import { workdays } from "@/lib/utils/workdays"
 
 /**
  * Monthly revenue, this year against last year, January to December.
@@ -46,7 +46,7 @@ interface Sample {
   cumPrior: number                      // same day last year
 }
 
-export function RevenueTrendChart({ data, today }: { data: TrendPoint[]; today: string }) {
+export function RevenueTrendChart({ data, today, ytd }: { data: TrendPoint[]; today: string; ytd: KpiBucket }) {
   if (data.length === 0) {
     return (
       <Card>
@@ -69,15 +69,17 @@ export function RevenueTrendChart({ data, today }: { data: TrendPoint[]; today: 
   const currentTotal = data.reduce((a, p) => a + (p.current ?? 0), 0)
   const priorTotal = data.reduce((a, p) => a + (p.prior ?? 0), 0)
 
-  // Pace: revenue per workday (Mon..Fri), this year through today against
-  // last year in full. The YoY on a raw total would compare 8.5 months to
-  // 12; per workday puts both years on the same footing.
-  const workdaysThisYear = workdays(`${year}-01-01`, `${year + 1}-01-01`)
-  const workdaysSoFar = workdays(`${year}-01-01`, nextDay(today))
+  // The table's year rows are the YTD tile's numbers (exact daily ledger,
+  // same period last year, per workday) so the two never disagree. The
+  // hover pro-rates from monthly totals and can differ by a point.
+  const workdaysThisYear = ytd.workdays_total
+  const workdaysSoFar = ytd.workdays_elapsed
+  const workdaysPriorSameDay = ytd.prior_workdays
   const workdaysPrior = workdays(`${year - 1}-01-01`, `${year}-01-01`)
-  const currentRate = workdaysSoFar > 0 ? currentTotal / workdaysSoFar : 0
-  const priorRate = workdaysPrior > 0 ? priorTotal / workdaysPrior : 0
-  const paceYoy = priorRate > 0 ? ((currentRate - priorRate) / priorRate) * 100 : null
+  const priorSameDay = ytd.prior_year ?? 0
+  const currentRate = ytd.per_workday
+  const priorRate = ytd.prior_per_workday ?? 0
+  const paceYoy = ytd.yoy_pct
   const paceTone = paceYoy == null ? "text-ink-mute" : paceYoy >= 0 ? "text-grass" : "text-coral"
 
   return (
@@ -176,7 +178,8 @@ export function RevenueTrendChart({ data, today }: { data: TrendPoint[]; today: 
         <thead>
           <tr className="text-ink-mute uppercase tracking-[0.12em] text-[10px]">
             <th className="text-left font-medium px-5 py-2">Year</th>
-            <th className="text-right font-medium px-3 py-2">Total</th>
+            <th className="text-right font-medium px-3 py-2">To date</th>
+            <th className="text-right font-medium px-3 py-2">Full year</th>
             <th className="text-right font-medium px-3 py-2">Workdays</th>
             <th className="text-right font-medium px-3 py-2">Per workday</th>
             <th className="text-right font-medium px-5 py-2">YoY pace</th>
@@ -186,6 +189,7 @@ export function RevenueTrendChart({ data, today }: { data: TrendPoint[]; today: 
           <tr>
             <td className="px-5 py-1.5 text-ink">{year}</td>
             <td className="px-3 py-1.5 text-right text-ink">{formatCompactCurrency(currentTotal)}</td>
+            <td className="px-3 py-1.5 text-right text-ink-mute">—</td>
             <td className="px-3 py-1.5 text-right text-ink-dim">{workdaysSoFar} of {workdaysThisYear}</td>
             <td className="px-3 py-1.5 text-right text-ink">{formatCompactCurrency(currentRate)}</td>
             <td className={`px-5 py-1.5 text-right ${paceTone}`}>
@@ -194,8 +198,9 @@ export function RevenueTrendChart({ data, today }: { data: TrendPoint[]; today: 
           </tr>
           <tr>
             <td className="px-5 py-1.5 pb-3 text-ink-dim">{priorYear}</td>
+            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{formatCompactCurrency(priorSameDay)}</td>
             <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{formatCompactCurrency(priorTotal)}</td>
-            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{workdaysPrior} of {workdaysPrior}</td>
+            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{workdaysPriorSameDay} of {workdaysPrior}</td>
             <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{formatCompactCurrency(priorRate)}</td>
             <td className="px-5 py-1.5 pb-3 text-right text-ink-mute">baseline</td>
           </tr>
