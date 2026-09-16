@@ -16,6 +16,7 @@ import {
   type PoolConfig,
   type ReadingKey,
   type Sanitiser,
+  type SelectedDose,
 } from "./shared"
 
 // The form offers only the two chlorination types the branches actually run
@@ -61,6 +62,11 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   // customer id of the in-flight pool-config fetch (guards stale responses)
   const configReq = useRef("")
   const [pending, startTransition] = useTransition()
+  // Bumped on every FRESH recommendation (submit, algae toggle) — the sheet
+  // resets its slot roster then. Selection re-posts keep the epoch, so the
+  // sheet merges instead (a dropped product must stay scrub-back-able).
+  const [resultEpoch, setResultEpoch] = useState(0)
+  const repostSeq = useRef(0)
   const { setAction, setSuppressed } = useBottomBar()
 
   const customer = customers.find((c) => String(c.customer_id) === customerId)
@@ -91,9 +97,34 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
       if (res.ok) {
         setAlgae(false)
         setResult(res.data)
+        setResultEpoch((e) => e + 1)
         window.scrollTo({ top: 0 })
       } else {
         setError(res.error)
+      }
+    })
+  }
+
+  // The technician's basket changed (slider row picked, product dropped or
+  // swapped): re-post the SAME request with selectedDoses — the server
+  // recomputes doses/effects/retest/visitNote wholesale (ruled 2026-09-15).
+  // Sequence-guarded: only the latest response lands.
+  const repostSelection = (selectedDoses: SelectedDose[]) => {
+    const seq = ++repostSeq.current
+    setRecalcError(null)
+    startTransition(async () => {
+      const res = await getRecommendation({
+        ...(customerId ? { customerId } : {}),
+        pool: { volumeGallons: volumeNum, sanitiser },
+        readings: measured,
+        ...(algae ? { algaeOrCloudy: true } : {}),
+        selectedDoses,
+      })
+      if (seq !== repostSeq.current) return
+      if (res.ok) {
+        setResult(res.data)
+      } else {
+        setRecalcError(res.error)
       }
     })
   }
@@ -113,6 +144,7 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
       })
       if (res.ok) {
         setResult(res.data)
+        setResultEpoch((e) => e + 1)
       } else {
         setAlgae(!next)
         setRecalcError(res.error)
@@ -178,6 +210,8 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
     return (
       <PourSheet
         result={result}
+        resultEpoch={resultEpoch}
+        onSelect={repostSelection}
         customerName={customer?.customer_name}
         onNewSample={newSample}
         onEditSample={() => setResult(null)}

@@ -1467,25 +1467,30 @@ async function copyText(text: string): Promise<boolean> {
  * indents under them. Copy sends the RAW string — never re-composed. */
 export function VisitNoteBody({ note }: { note: string }) {
   const [copied, setCopied] = useState<"idle" | "ok" | "failed">("idle")
+  // Plain sentences now (ruled 2026-09-15, reverses the header-row format):
+  // render VERBATIM in an editable textarea — newlines kept (a blank line
+  // separates the sanitizer group from the balance group), no markdown, no
+  // client-side composition. Edits stay local; the API never reads the note.
+  // Copy takes the CURRENT text so a tech can tweak before pasting into ION.
+  const noteRef = useRef<HTMLTextAreaElement>(null)
   return (
     <div className="space-y-3">
-      <div className="space-y-1 max-h-[50dvh] overflow-y-auto">
-        {note.split("\n").map((line, i) =>
-          line.trim().endsWith(":") ? (
-            <p key={i} className={cn("text-sm font-medium text-ink", i > 0 && "mt-2.5")}>
-              {line}
-            </p>
-          ) : (
-            <p key={i} className="text-sm text-ink-dim leading-relaxed pl-3">
-              {line}
-            </p>
-          ),
+      <textarea
+        ref={noteRef}
+        key={note}
+        defaultValue={note}
+        rows={10}
+        spellCheck={false}
+        className={cn(
+          "w-full max-h-[50dvh] resize-y rounded-lg border border-line-soft bg-black/25",
+          "px-3 py-2.5 text-sm text-ink leading-relaxed whitespace-pre-wrap",
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40",
         )}
-      </div>
+      />
       <button
         type="button"
         onClick={async () => {
-          setCopied((await copyText(note)) ? "ok" : "failed")
+          setCopied((await copyText(noteRef.current?.value ?? note)) ? "ok" : "failed")
           setTimeout(() => setCopied("idle"), 2000)
         }}
         className={cn(

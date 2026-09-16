@@ -43,6 +43,14 @@ export const ASSUMED_LABELS: Record<string, string> = {
 
 export type ReadingKey = (typeof READING_FIELDS)[number]["key"]
 
+/** One basket entry — amount/unit copied EXACTLY from the chosen
+ * sensitivity row (flOz for liquids, lb for solids). */
+export interface SelectedDose {
+  product: string
+  amount: number
+  unit: string
+}
+
 export interface DosingRequest {
   customerId?: string
   requestedBy: string
@@ -50,6 +58,10 @@ export interface DosingRequest {
   readings: Partial<Record<ReadingKey, number>>
   /** "Algae present" toggle — re-calls the API, never simulated locally. */
   algaeOrCloudy?: boolean
+  /** The technician's chosen basket (ruled 2026-09-15): absent = recommend;
+   * [] = poured nothing; omit a product to drop it (NEVER send amount 0).
+   * The response is recomputed from it wholesale. */
+  selectedDoses?: SelectedDose[]
 }
 
 /**

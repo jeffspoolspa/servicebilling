@@ -510,10 +510,16 @@ Inventory but keep Follow-Up and Dosing.
   (`POST /maintenance/dosing/recommendations`) and renders the pour sheet
   (Weather-card layout, 2026-08-21): customer card + sample actions,
   side-by-side Balance/Sanitation dials over the derived predicted sample
-  (actual + chosen dose options' effects, live), a Predicted|Measured
+  (actual + chosen dose options' effects, live), a Predicted|Measured|Target
   readings card, a pour card whose focused chemical opens its spring-drag
-  dose tape in place, and warnings / retest / visit-note modals. Absent
-  reading = not measured, never 0.
+  dose tape in place, and retest / visit-note modals. Absent reading = not
+  measured, never 0. Selection changes re-post the same request with
+  `selectedDoses` (the tech's full basket, debounced ~300ms; ruled
+  2026-09-15) and the response replaces the sheet wholesale — the app keeps
+  a slot roster so a product scrubbed to 0 (= omitted from the basket)
+  stays on screen and can be scrubbed back. visitNote is plain sentences
+  rendered verbatim in an editable copy-to-ION textarea; edits never post
+  back.
   API side effect: the append-only recommendation log row. App side effect:
   per-customer volume+chlorination defaults saved to
   `maintenance.pool_configs` ([pool-config](entities/pool-config.md)) and
