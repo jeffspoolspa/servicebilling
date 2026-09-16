@@ -22,15 +22,15 @@ export const dynamic = "force-dynamic"
  *
  *   1. Hero KPIs (MTD / QTD / YTD with YoY)
  *   2. Two-column row:
- *      - Left: cumulative revenue by day, this year vs last year, Jan..Dec
+ *      - Left: monthly revenue, this year vs last year, Jan..Dec, eased by day
  *      - Right: Monthly Bonuses card (five bonus-eligible techs)
  *   3. Breakdown pivot — full width, with dimension/measure/range toggles.
  *      Click any cell / row / column to drill into /work-orders.
  */
 export default async function ServicePage() {
   const range = defaultDateRange()
-  // Trend is the current calendar year, Jan..Dec, cumulative by day, with
-  // last year overlaid (independent of the pivot's configurable range).
+  // Trend is the current calendar year, Jan..Dec, with last year overlaid
+  // (independent of the pivot's configurable range).
   const now = new Date()
   const initialBonusMonth = currentMonthIso(now)
 
