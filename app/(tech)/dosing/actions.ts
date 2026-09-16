@@ -31,6 +31,17 @@ const schema = z.object({
     waterTempF: z.number().optional(),
   }),
   algaeOrCloudy: z.boolean().optional(),
+  // The chosen basket — server validates products/units; positive amounts
+  // only (0 means the entry should have been omitted).
+  selectedDoses: z
+    .array(
+      z.object({
+        product: z.string().min(1),
+        amount: z.number().positive(),
+        unit: z.string().min(1),
+      }),
+    )
+    .optional(),
 })
 
 export type DosingState =

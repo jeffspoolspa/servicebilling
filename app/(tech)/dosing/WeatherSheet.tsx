@@ -7,10 +7,10 @@
 // the focused chemical folds the others away and its spring tape fills the
 // space.
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowDown, ArrowLeftRight, ArrowUp, FileText, Pencil, SlidersHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
-import { sampleValue, type DosingResponse, type Sample, type SensitivityRow } from "./shared"
+import { sampleValue, type Dose, type DosingResponse, type Sample, type SelectedDose, type SensitivityRow } from "./shared"
 import {
   BalanceDial,
   DoseTape,
@@ -55,6 +55,8 @@ const CARD = "rounded-2xl border border-line-soft bg-gradient-to-b from-[#12283C
 
 export function WeatherPourSheet({
   result,
+  resultEpoch,
+  onSelect,
   customerName,
   onNewSample,
   onEditSample,
@@ -64,6 +66,10 @@ export function WeatherPourSheet({
   recalcError,
 }: {
   result: DosingResponse
+  /** Bumps only on FRESH recommendations — selection responses keep it. */
+  resultEpoch: number
+  /** Re-post the technician's basket; the response replaces this one. */
+  onSelect: (basket: SelectedDose[]) => void
   customerName?: string
   onNewSample: () => void
   onEditSample: () => void
@@ -72,7 +78,13 @@ export function WeatherPourSheet({
   recalcPending: boolean
   recalcError: string | null
 }) {
-  const { samples, doses } = result
+  const { samples } = result
+  // The SLOT ROSTER: what the sheet displays. A selection re-post's response
+  // contains ONLY the basket's products, so a product scrubbed to its 0-stop
+  // (= omitted from the basket) would vanish with no way back. The roster
+  // remembers each slot's last-known dose data; an omitted product stays
+  // rendered at 0 and rejoins the basket when scrubbed back up.
+  const [slots, setSlots] = useState<Dose[]>(result.doses)
   const [choice, setChoice] = useState<Record<number, number>>({})
   const [sens, setSens] = useState<Record<number, number | undefined>>({})
   // Opens in list mode — focusing a chemical hides the others, so the tech
@@ -80,16 +92,80 @@ export function WeatherPourSheet({
   const [focus, setFocus] = useState<number | null>(null)
   const [mode, setMode] = useState<"predicted" | "actual" | "target">("predicted")
   const [noteOpen, setNoteOpen] = useState(false)
+  // product name sent per slot in the LAST basket (undefined = omitted)
+  const sentBasket = useRef<Record<number, string | undefined>>({})
+  const lastEpoch = useRef(resultEpoch)
 
   useEffect(() => {
+    if (resultEpoch !== lastEpoch.current) {
+      // Fresh recommendation: the response IS the roster.
+      lastEpoch.current = resultEpoch
+      sentBasket.current = {}
+      setSlots(result.doses)
+      setChoice({})
+      setSens({})
+      return
+    }
+    // Selection response: merge onto the roster. Present products replace
+    // their slot (the server's recommended:true row IS the chosen stop, so
+    // clearing sens re-anchors there); absent products were omitted — keep
+    // their remembered data pinned to the 0-stop.
+    setSlots((prev) =>
+      prev.map((slot, i) => {
+        const sentName = sentBasket.current[i]
+        const incoming = sentName
+          ? result.doses.find((d) => d.product === sentName)
+          : undefined
+        return incoming ?? slot
+      }),
+    )
     setChoice({})
-    setSens({})
-  }, [result])
+    setSens((prev) => {
+      const next: Record<number, number | undefined> = {}
+      for (const [k, v] of Object.entries(prev)) {
+        const i = Number(k)
+        if (sentBasket.current[i] === undefined && v != null) next[i] = v // stays at 0-stop
+      }
+      return next
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, resultEpoch])
 
   const optionAt = (i: number) => {
-    const d = doses[i]
+    const d = slots[i]
     return [d, ...(d.alternatives ?? [])][choice[i] ?? 0] ?? d
   }
+
+  // ── basket: one entry per slot at its chosen stop; 0-stop = omit ──
+  const rowsOf = (o: { sensitivity?: SensitivityRow[]; amount: number; unit: string; effects?: Record<string, number> }): SensitivityRow[] =>
+    o.sensitivity?.length
+      ? o.sensitivity
+      : [{ amount: o.amount, unit: o.unit, recommended: true, effects: o.effects ?? {} }]
+  const buildBasket = (): SelectedDose[] => {
+    const basket: SelectedDose[] = []
+    slots.forEach((_, i) => {
+      const o = optionAt(i)
+      const rows = rowsOf(o)
+      const recRow = rows.findIndex((r) => r.recommended)
+      const row = rows[sens[i] ?? (recRow >= 0 ? recRow : 0)]
+      if (row && row.amount > 0) {
+        sentBasket.current[i] = o.product
+        basket.push({ product: o.product, amount: row.amount, unit: row.unit })
+      } else {
+        sentBasket.current[i] = undefined
+      }
+    })
+    return basket
+  }
+  const buildBasketRef = useRef(buildBasket)
+  buildBasketRef.current = buildBasket
+  // Debounced (~300ms): scrubbing fires per stop; the call is cheap but not free.
+  const repostTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const scheduleRepost = () => {
+    clearTimeout(repostTimer.current)
+    repostTimer.current = setTimeout(() => onSelect(buildBasketRef.current()), 300)
+  }
+  useEffect(() => () => clearTimeout(repostTimer.current), [])
   const selectedEffects = (i: number): Record<string, number> => {
     const o = optionAt(i)
     const rows = o.sensitivity
@@ -100,7 +176,7 @@ export function WeatherPourSheet({
 
   const predicted: Sample = useMemo(() => {
     const base: Record<string, unknown> = { ...samples.actual }
-    for (const i of doses.keys()) {
+    for (const i of slots.keys()) {
       for (const [k, delta] of Object.entries(selectedEffects(i))) {
         const cur = base[k]
         base[k] = Number(((typeof cur === "number" ? cur : 0) + delta).toFixed(2))
@@ -108,7 +184,7 @@ export function WeatherPourSheet({
     }
     return base as Sample
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [samples.actual, doses, choice, sens])
+  }, [samples.actual, slots, choice, sens])
 
   const SANI_LABEL: Record<string, string> = { tab: "Tablet", liquid: "Liquid", salt: "Salt" }
   const anyAssumed = READING_ROWS.some(
@@ -372,12 +448,10 @@ export function WeatherPourSheet({
             </div>
           )}
         </div>
-        {doses.map((d, i) => {
+        {slots.map((d, i) => {
           const o = optionAt(i)
           const options = [d, ...(d.alternatives ?? [])]
-          const rows: SensitivityRow[] = o.sensitivity?.length
-            ? o.sensitivity
-            : [{ amount: o.amount, unit: o.unit, recommended: true, effects: o.effects ?? {} }]
+          const rows = rowsOf(o)
           const recRow = rows.findIndex((r) => r.recommended)
           const activeIdx = sens[i] ?? (recRow >= 0 ? recRow : 0)
           const row = rows[activeIdx]
@@ -394,7 +468,7 @@ export function WeatherPourSheet({
               style={{ gridTemplateRows: hidden ? "0fr" : "1fr", opacity: hidden ? 0 : 1 }}
             >
               <div className="min-h-0 overflow-hidden">
-                <div className={cn(focus == null && i < doses.length - 1 && "border-b border-line-soft/40")}>
+                <div className={cn(focus == null && i < slots.length - 1 && "border-b border-line-soft/40")}>
                   <button
                     type="button"
                     onClick={() => setFocus(focused ? null : i)}
@@ -412,6 +486,7 @@ export function WeatherPourSheet({
                             e.stopPropagation()
                             setChoice((c) => ({ ...c, [i]: ((c[i] ?? 0) + 1) % options.length }))
                             setSens((v) => ({ ...v, [i]: undefined }))
+                            scheduleRepost()
                           }}
                           className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-cyan active:opacity-70"
                         >
@@ -453,7 +528,10 @@ export function WeatherPourSheet({
                           activeIdx={activeIdx}
                           recIdx={recRow}
                           amountLabel={amount}
-                          onSens={(j) => setSens((v) => ({ ...v, [i]: j }))}
+                          onSens={(j) => {
+                            setSens((v) => ({ ...v, [i]: j }))
+                            scheduleRepost()
+                          }}
                           onDone={() => setFocus(null)}
                         />
                       </div>
