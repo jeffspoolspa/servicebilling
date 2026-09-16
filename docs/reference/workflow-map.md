@@ -131,7 +131,7 @@ Archive candidates (confirm not app-route/webhook reachable first):
 
 - ~~`process_maint_period`~~ — RETIRED to `f/z_retired/maintenance_v1/` (2026-07-20), superseded by `process_maint_charges`
 - `switch_to_weekly_campaign` — no caller, idle
-- `classify_work_orders_ai` — no caller (the non-AI `classify_work_orders` is used)
+- `classify_work_orders`, `classify_work_orders_ai` — both dead (2026-09-16): no caller, and they write `qbo_class` / `service_category` columns that were dropped from `public.work_orders`
 - `initial_full_credit_pull` — one-off backfill
 - `distinguished_script` — daily QBO status check (auto-named; verify)
 - ~~`qbo_customer_sync`~~ — RETIRED to `f/z_retired/qbo_sync_v1/` (2026-07-20); event-driven `refresh_customer` replaces it, ADR-007 moots its ADR-005 pause note. `sync_customer_to_qbo` (write-back) stays.

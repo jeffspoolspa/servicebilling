@@ -143,7 +143,7 @@ The QBO invoice processing pipeline. Pulls invoices from QBO, enriches them (mem
 - `pre_process_invoice` — enrich invoice (memo, PM, class)
 - `process_work_order` [retired 2026-07] — dead (0 runs since Mar, no trigger); superseded by `process_invoice`. See [runbooks/service-billing-cleanup.md](runbooks/service-billing-cleanup.md)
 - `process_invoice`, `push_invoice_edits` — push UI edits back to QBO
-- `classify_work_orders`, `classify_work_orders_ai` — WO classification
+- `classify_work_orders`, `classify_work_orders_ai` — [dead] write columns that no longer exist on `public.work_orders`; QBO class now derives in `pre_process_invoice` via `f/billing/_lib/calc.derive_qbo_class`
 - `pull_qbo_invoices`, `refresh_open_invoices`, `pull_qbo_credits` — bulk syncs
 - `refresh_invoice`, `refresh_payment`, `refresh_customer`, `refresh_credit_memo`, `refresh_customer_credits` — single-entity refreshes (webhook + CDC paths)
 - `cdc_reconciler` — every-15min QBO CDC sweep
@@ -706,7 +706,7 @@ f/billing/monthly_autopay flow is retired — see §3.4.)
 
 ## 5. Schemas in the DB
 
-**Quick read**: which schema owns what, and who's allowed to modify it. | Schema | Owned by | Modify rules | Status | |---|---|---|---| | `public` | servicebilling (this repo) | Migrations in this repo's `supabase/migrations/`. Other repos READ but DON'T modify. | Mixed — many active, many abandoned (see §7) | | `billing` | servicebilling | Same | all active | | `billing_audit` | servicebilling | Same | active | | `maintenance` | servicebilling | Same | active | | `app_checks` | check_buddy (separate repo) | check_buddy's migrations live in check_buddy repo. This repo READS but DOESN'T modify. | active in check_buddy | | `email_extraction` | servicebilling | this repo | active | | `agreements` | servicebilling (`lib/agreements` context) | Same | active (2026-08-08) | | `routing` | servicebilling (`lib/routing` context) | Same | active (2026-08-08) | | `ion` | nobody (abandoned) | DROP CASCADE | to-delete | | `Inventory` | nobody (empty) | DROP | to-delete | For a table-level breakdown of which tables are active vs abandoned, see [`2026-05-27-database.md`](audits/2026-05-27-database.md).
+**Quick read**: which schema owns what, and who's allowed to modify it. | Schema | Owned by | Modify rules | Status | |---|---|---|---| | `public` | servicebilling (this repo) | Migrations in this repo's `supabase/migrations/`. Other repos READ but DON'T modify. | Mixed — many active, many abandoned (see §7) | | `billing` | servicebilling | Same | all active | | `billing_audit` | servicebilling | Same | active | | `maintenance` | servicebilling | Same | active | | `app_checks` | check_buddy (separate repo) | check_buddy's migrations live in check_buddy repo. This repo READS but DOESN'T modify. | active in check_buddy | | `email_extraction` | servicebilling | this repo | active | | `agreements` | servicebilling (`lib/agreements` context) | Same | active (2026-08-08) | | `routing` | servicebilling (`lib/routing` context) | Same | active (2026-08-08) | | `ion` | the .NET rebuild (external repo, EF Core migrations) — the live ION mirror | This repo READS only (`f/ION/backfill_work_orders_from_mirror`). Never write. | active (2026-08-20) | | `Inventory` | nobody (empty) | DROP | to-delete | For a table-level breakdown of which tables are active vs abandoned, see [`2026-05-27-database.md`](audits/2026-05-27-database.md).
 
 ---
 
