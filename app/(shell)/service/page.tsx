@@ -3,6 +3,7 @@ import { BarChart3 } from "lucide-react"
 import {
   getRevenueKpis,
   getRevenueTrend,
+  getDailyRevenue,
   getRevenueBreakdown,
   defaultDateRange,
 } from "@/lib/queries/revenue"
@@ -34,9 +35,10 @@ export default async function ServicePage() {
   const now = new Date()
   const initialBonusMonth = currentMonthIso(now)
 
-  const [kpis, trend, initialBreakdown, initialBonuses] = await Promise.all([
+  const [kpis, trend, daily, initialBreakdown, initialBonuses] = await Promise.all([
     getRevenueKpis(now),
     getRevenueTrend(now.getUTCFullYear(), now),
+    getDailyRevenue(now.getUTCFullYear()),
     getRevenueBreakdown({
       dimension: "location",
       measure: "revenue",
@@ -58,7 +60,7 @@ export default async function ServicePage() {
         <RevenueHero kpis={kpis} />
 
         <div className="grid grid-cols-2 gap-5">
-          <RevenueTrendChart data={trend} today={now.toISOString().slice(0, 10)} ytd={kpis.ytd} />
+          <RevenueTrendChart data={trend} daily={daily} today={now.toISOString().slice(0, 10)} ytd={kpis.ytd} />
           <MonthlyBonusesCard initial={initialBonuses} />
         </div>
 

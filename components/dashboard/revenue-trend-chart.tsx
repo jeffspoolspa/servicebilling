@@ -46,7 +46,12 @@ interface Sample {
   cumPrior: number                      // same day last year
 }
 
-export function RevenueTrendChart({ data, today, ytd }: { data: TrendPoint[]; today: string; ytd: KpiBucket }) {
+export function RevenueTrendChart({ data, daily, today, ytd }: {
+  data: TrendPoint[]
+  daily: Record<string, number>          // exact revenue per completed day, both years
+  today: string
+  ytd: KpiBucket
+}) {
   if (data.length === 0) {
     return (
       <Card>
@@ -64,14 +69,14 @@ export function RevenueTrendChart({ data, today, ytd }: { data: TrendPoint[]; to
     prior: { label: priorYear, color: PRIOR },
   }
 
-  const samples = easeByDay(data, year)
+  const samples = easeByDay(data, daily, year, today)
 
   const currentTotal = data.reduce((a, p) => a + (p.current ?? 0), 0)
   const priorTotal = data.reduce((a, p) => a + (p.prior ?? 0), 0)
 
   // The table's year rows are the YTD tile's numbers (exact daily ledger,
-  // same period last year, per workday) so the two never disagree. The
-  // hover pro-rates from monthly totals and can differ by a point.
+  // same period last year, per workday). The hover's to-date figures come
+  // from the same ledger, so all three agree.
   const workdaysThisYear = ytd.workdays_total
   const workdaysSoFar = ytd.workdays_elapsed
   const workdaysPriorSameDay = ytd.prior_workdays
@@ -213,7 +218,7 @@ export function RevenueTrendChart({ data, today, ytd }: { data: TrendPoint[]; to
 // ─── Easing ──────────────────────────────────────────────────────────────
 
 /** Twelve monthly anchors at the 15th, eased into one sample per day. */
-function easeByDay(data: TrendPoint[], year: number): Sample[] {
+function easeByDay(data: TrendPoint[], daily: Record<string, number>, year: number, today: string): Sample[] {
   const days: string[] = []
   const cursor = new Date(Date.UTC(year, 0, 1))
   while (cursor.getUTCFullYear() === year) {
@@ -224,26 +229,18 @@ function easeByDay(data: TrendPoint[], year: number): Sample[] {
   const current = interpolate(anchorX, data.map((p) => p.current), days.length)
   const prior = interpolate(anchorX, data.map((p) => p.prior), days.length)
 
-  // Year-to-date through each day: full months before it plus the current
-  // month's total pro-rated by day of month. The chart only knows monthly
-  // totals, so mid-month is an even split, not the real daily ledger.
+  // Year-to-date through each day from the exact daily ledger, both years
+  // keyed by month-day. Last year's Feb 29 (if any) folds into Feb 28.
   const cumCurrent: Array<number | null> = []
   const cumPrior: number[] = []
-  let doneCurrent = 0
-  let donePrior = 0
-  let lastMonth = -1
+  let runCurrent = 0
+  let runPrior = 0
   for (const day of days) {
-    const m = Number(day.slice(5, 7)) - 1
-    if (m !== lastMonth && lastMonth >= 0) {
-      doneCurrent += data[lastMonth].current ?? 0
-      donePrior += data[lastMonth].prior ?? 0
-    }
-    lastMonth = m
-    const dom = Number(day.slice(8, 10))
-    const dim = new Date(Date.UTC(year, m + 1, 0)).getUTCDate()
-    const share = dom / dim
-    cumCurrent.push(data[m].current == null ? null : doneCurrent + data[m].current! * share)
-    cumPrior.push(donePrior + (data[m].prior ?? 0) * share)
+    runCurrent += daily[day] ?? 0
+    runPrior += daily[`${year - 1}${day.slice(4)}`] ?? 0
+    if (day.slice(5) === "02-28") runPrior += daily[`${year - 1}-02-29`] ?? 0
+    cumCurrent.push(day <= today ? runCurrent : null)
+    cumPrior.push(runPrior)
   }
 
   return days.map((day, i) => {
@@ -258,7 +255,7 @@ function easeByDay(data: TrendPoint[], year: number): Sample[] {
       ahead: both ? [p, Math.max(c, p)] : null,
       behind: both ? [Math.min(c, p), p] : null,
       isAnchor: anchorX.includes(i),
-      cumCurrent: c == null ? null : cumCurrent[i],
+      cumCurrent: cumCurrent[i],
       cumPrior: cumPrior[i],
     }
   })

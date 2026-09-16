@@ -145,6 +145,17 @@ export async function getRevenueTrend(
   }))
 }
 
+/** Revenue per completed day for `year` and the year before: { 'YYYY-MM-DD': subtotal }. */
+export async function getDailyRevenue(year: number): Promise<Record<string, number>> {
+  const rows = await fetchViewRowsByCompleted({
+    fromCompleted: `${year - 1}-01-01`,
+    toCompletedExclusive: `${year + 1}-01-01`,
+  })
+  const out: Record<string, number> = {}
+  for (const r of rows) out[r.completed] = (out[r.completed] ?? 0) + Number(r.sub_total ?? 0)
+  return out
+}
+
 // ── KPIs (MTD / QTD / YTD, YoY by workday pace) ──────────────────────────
 
 export interface KpiBucket {
