@@ -22,16 +22,16 @@ export const dynamic = "force-dynamic"
  *
  *   1. Hero KPIs (MTD / QTD / YTD with YoY)
  *   2. Two-column row:
- *      - Left: one-line revenue trend (total monthly revenue, 12 months)
+ *      - Left: revenue trend, this year vs last year, Jan..Dec
  *      - Right: Monthly Bonuses card (five bonus-eligible techs)
  *   3. Breakdown pivot — full width, with dimension/measure/range toggles.
  *      Click any cell / row / column to drill into /work-orders.
  */
 export default async function ServicePage() {
   const range = defaultDateRange()
-  // Trend uses a fixed 12-month window for the dashboard (independent of
-  // the pivot's configurable range).
-  const trendRange = twelveMonthRange()
+  // Trend is the current calendar year, Jan..Dec, with last year overlaid
+  // (independent of the pivot's configurable range).
+  const trendRange = calendarYearRange()
   const now = new Date()
   const initialBonusMonth = currentMonthIso(now)
 
@@ -74,17 +74,9 @@ export default async function ServicePage() {
   )
 }
 
-function twelveMonthRange(
+function calendarYearRange(
   now: Date = new Date(),
 ): { startMonth: string; endMonth: string } {
-  const end = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
-  )
-  const start = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1),
-  )
-  return {
-    startMonth: start.toISOString().slice(0, 10),
-    endMonth: end.toISOString().slice(0, 10),
-  }
+  const y = now.getUTCFullYear()
+  return { startMonth: `${y}-01-01`, endMonth: `${y + 1}-01-01` }
 }

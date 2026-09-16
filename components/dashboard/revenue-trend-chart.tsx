@@ -1,15 +1,11 @@
 "use client"
 
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  XAxis,
-  YAxis,
-} from "recharts"
+import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
 import { Card } from "@/components/ui/card"
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -18,21 +14,15 @@ import { formatCurrency } from "@/lib/utils/format"
 import type { TrendPoint } from "@/lib/queries/revenue"
 
 /**
- * Simple monthly revenue trend — one line (area-filled) showing total
- * invoiced subtotal per month. Independent of the breakdown pivot; sits
- * in its own card on the Service Dashboard alongside the Monthly
- * Bonuses card.
+ * Monthly revenue, this year against last year, January to December.
+ * Two lines on one calendar axis so the same month lines up vertically.
+ * Months after today carry no point for the current year.
  *
- * Built on shadcn/ui chart primitives over Recharts. Single series, so
- * no legend is needed — the Y axis labels + tooltip carry the data.
+ * Built on shadcn/ui chart primitives over Recharts.
  */
 
-const config: ChartConfig = {
-  revenue: {
-    label: "Revenue",
-    color: "rgb(56 189 248)", // cyan
-  },
-}
+const CURRENT = "rgb(56 189 248)" // cyan
+const PRIOR = "rgb(148 163 184)" // slate
 
 export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
   if (data.length === 0) {
@@ -45,19 +35,22 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
     )
   }
 
+  const year = data[0].month.slice(0, 4)
+  const priorYear = String(Number(year) - 1)
+  const config: ChartConfig = {
+    current: { label: year, color: CURRENT },
+    prior: { label: priorYear, color: PRIOR },
+  }
+
+  const thisMonth = new Date().toISOString().slice(0, 7)
   const chartData = data.map((p) => ({
     month: p.month,
-    revenue: p.current_revenue,
+    current: p.month.slice(0, 7) <= thisMonth ? p.current_revenue : null,
+    prior: p.prior_year_revenue,
   }))
 
-  const totalRevenue = data.reduce((a, p) => a + p.current_revenue, 0)
-
-  // MoM delta (last vs prior month).
-  const last = data[data.length - 1]?.current_revenue ?? 0
-  const prev = data[data.length - 2]?.current_revenue ?? 0
-  const mom = prev > 0 ? ((last - prev) / prev) * 100 : null
-  const momTone =
-    mom == null ? "text-ink-mute" : mom >= 0 ? "text-grass" : "text-coral"
+  const currentTotal = data.reduce((a, p) => a + p.current_revenue, 0)
+  const priorTotal = data.reduce((a, p) => a + (p.prior_year_revenue ?? 0), 0)
 
   return (
     <Card>
@@ -66,35 +59,23 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
           Monthly Revenue
         </span>
         <span className="text-ink-dim">
-          {monthLabel(data[0].month)} — {monthLabel(data[data.length - 1].month)}
+          {year} vs {priorYear}
         </span>
         <span className="ml-auto font-mono tabular-nums text-ink">
-          {formatCurrency(totalRevenue)} total
+          {formatCurrency(currentTotal)} {year}
         </span>
-        {mom != null && (
-          <span className={`font-mono tabular-nums ${momTone}`}>
-            {mom >= 0 ? "+" : ""}
-            {mom.toFixed(0)}% MoM
-          </span>
-        )}
+        <span className="font-mono tabular-nums text-ink-mute">
+          {formatCurrency(priorTotal)} {priorYear}
+        </span>
       </div>
 
       <div className="px-4 pt-4 pb-2">
-        <ChartContainer
-          config={config}
-          className="aspect-auto h-[260px] w-full"
-        >
-          <AreaChart
+        <ChartContainer config={config} className="aspect-auto h-[260px] w-full">
+          <LineChart
             accessibilityLayer
             data={chartData}
             margin={{ top: 12, right: 12, left: 0, bottom: 4 }}
           >
-            <defs>
-              <linearGradient id="revenueFill" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor="rgb(56 189 248)" stopOpacity={0.35} />
-                <stop offset="100%" stopColor="rgb(56 189 248)" stopOpacity={0.02} />
-              </linearGradient>
-            </defs>
             <CartesianGrid
               vertical={false}
               strokeDasharray="3 4"
@@ -122,16 +103,16 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
               content={
                 <ChartTooltipContent
                   labelFormatter={(v) =>
-                    typeof v === "string" ? monthLabelLong(v) : String(v ?? "")
+                    typeof v === "string" ? shortMonth(v) : String(v ?? "")
                   }
-                  formatter={(value) => (
+                  formatter={(value, name) => (
                     <div className="flex items-center justify-between gap-4 flex-1">
                       <span className="flex items-center gap-1.5 text-ink-dim">
                         <span
                           className="inline-block w-2.5 h-2.5 rounded-[2px]"
-                          style={{ background: "rgb(56 189 248)" }}
+                          style={{ background: name === "current" ? CURRENT : PRIOR }}
                         />
-                        Revenue
+                        {name === "current" ? year : priorYear}
                       </span>
                       <span className="font-mono tabular-nums text-ink">
                         {formatCurrency(Number(value))}
@@ -141,16 +122,27 @@ export function RevenueTrendChart({ data }: { data: TrendPoint[] }) {
                 />
               }
             />
-            <Area
+            <ChartLegend content={<ChartLegendContent />} />
+            <Line
               type="monotone"
-              dataKey="revenue"
-              stroke="rgb(56 189 248)"
+              dataKey="prior"
+              stroke={PRIOR}
               strokeWidth={2}
-              fill="url(#revenueFill)"
-              dot={{ fill: "rgb(56 189 248)", r: 2.5 }}
+              strokeDasharray="4 3"
+              dot={false}
               activeDot={{ r: 4, strokeWidth: 0 }}
+              connectNulls={false}
             />
-          </AreaChart>
+            <Line
+              type="monotone"
+              dataKey="current"
+              stroke={CURRENT}
+              strokeWidth={2}
+              dot={{ fill: CURRENT, r: 2.5 }}
+              activeDot={{ r: 4, strokeWidth: 0 }}
+              connectNulls={false}
+            />
+          </LineChart>
         </ChartContainer>
       </div>
     </Card>
@@ -163,31 +155,7 @@ function compactCurrency(n: number): string {
   return `$${n.toFixed(0)}`
 }
 
-function monthLabel(iso: string): string {
-  const d = new Date(iso + "T00:00:00Z")
-  return d.toLocaleString("en-US", {
-    month: "short",
-    year: "2-digit",
-    timeZone: "UTC",
-  })
-}
-
-function monthLabelLong(iso: string): string {
-  const d = new Date(iso + "T00:00:00Z")
-  return d.toLocaleString("en-US", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  })
-}
-
 function shortMonth(iso: string): string {
   const d = new Date(iso + "T00:00:00Z")
-  return d.getUTCMonth() === 0
-    ? d.toLocaleString("en-US", {
-        month: "short",
-        year: "2-digit",
-        timeZone: "UTC",
-      })
-    : d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })
+  return d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })
 }

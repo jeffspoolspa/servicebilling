@@ -233,6 +233,10 @@ async function fetchViewRows(opts: {
       )
       .gte("month", opts.fromMonth)
       .lt("month", opts.toMonthExclusive)
+      // Paging without an ORDER BY is undefined in PostgREST: pages can
+      // overlap or skip once the view is large (it did after the 2019-2025
+      // history backfill: MTD/QTD read $0). wo_number is the view's key.
+      .order("wo_number")
       .range(offset, offset + PAGE - 1)
     if (error) throw new Error(`v_revenue_by_month: ${error.message}`)
     if (!data || data.length === 0) break
@@ -256,6 +260,7 @@ async function fetchViewRowsByCompleted(opts: {
       .select("sub_total, completed, month")
       .gte("completed", opts.fromCompleted)
       .lt("completed", opts.toCompletedExclusive)
+      .order("wo_number")
       .range(offset, offset + PAGE - 1)
     if (error) throw new Error(`v_revenue_by_month: ${error.message}`)
     if (!data || data.length === 0) break
