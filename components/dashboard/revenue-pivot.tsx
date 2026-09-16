@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback } from "react"
+import { Fragment, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { formatCurrency } from "@/lib/utils/format"
@@ -116,9 +116,9 @@ export function RevenuePivot({
           </div>
         ) : (
           <table className="w-full text-[12px]">
-            <thead>
-              <tr className="text-left text-[10px] uppercase tracking-[0.08em] text-ink-mute border-b border-line-soft">
-                <th className="px-5 py-2.5 font-medium sticky left-0 bg-bg-elev">
+            <thead className="text-[10px] uppercase tracking-[0.08em] text-ink-mute">
+              <tr>
+                <th rowSpan={2} className="px-5 py-2.5 text-left font-medium sticky left-0 bg-bg-elev align-bottom border-b border-line-soft">
                   {dimension === "location"
                     ? "Location"
                     : dimension === "tech"
@@ -128,16 +128,27 @@ export function RevenuePivot({
                 {result.months.map((m) => (
                   <th
                     key={m}
-                    className="px-3 py-2.5 font-medium text-right num cursor-pointer hover:text-cyan transition-colors"
+                    colSpan={2}
+                    className="px-3 pt-2.5 pb-0.5 font-medium text-right num cursor-pointer hover:text-cyan transition-colors"
                     onClick={() => drillTo({ month: m })}
                     title={`Open work orders invoiced in ${monthLabel(m, true)}`}
                   >
                     {monthLabel(m)}
                   </th>
                 ))}
-                <th className="px-3 py-2.5 font-medium text-right num bg-bg-elev/60">
+                <th colSpan={2} className="px-3 pt-2.5 pb-0.5 font-medium text-right num bg-bg-elev/60">
                   Total
                 </th>
+              </tr>
+              <tr className="border-b border-line-soft text-ink-mute/60">
+                {result.months.map((m) => (
+                  <Fragment key={m}>
+                    <th className="pl-3 pr-1 pb-1.5 font-normal text-right">{measure === "revenue" ? "$" : "#"}</th>
+                    <th className="pl-1 pr-3 pb-1.5 font-normal text-right whitespace-nowrap">vs {year - 1}</th>
+                  </Fragment>
+                ))}
+                <th className="pl-3 pr-1 pb-1.5 font-normal text-right bg-bg-elev/60">{measure === "revenue" ? "$" : "#"}</th>
+                <th className="pl-1 pr-3 pb-1.5 font-normal text-right bg-bg-elev/60 whitespace-nowrap">vs {year - 1}</th>
               </tr>
             </thead>
             <tbody>
@@ -156,28 +167,35 @@ export function RevenuePivot({
                   {result.months.map((m) => {
                     const v = row.byMonth[m] ?? 0
                     return (
-                      <td
-                        key={m}
-                        className={`px-3 py-1.5 text-right num font-mono ${
-                          v > 0
-                            ? "text-ink-dim hover:text-cyan cursor-pointer"
-                            : "text-ink-mute/40"
-                        }`}
-                        onClick={() =>
-                          v > 0 && drillTo({ dimValue: row.key, month: m })
-                        }
-                        title={
-                          v > 0
-                            ? `Open ${row.key} · ${monthLabel(m, true)}`
-                            : undefined
-                        }
-                      >
-                        {v > 0 ? fmt(v) : "—"}
-                      </td>
+                      <Fragment key={m}>
+                        <td
+                          className={`pl-3 pr-1 py-1.5 text-right num font-mono ${
+                            v > 0
+                              ? "text-ink-dim hover:text-cyan cursor-pointer"
+                              : "text-ink-mute/40"
+                          }`}
+                          onClick={() =>
+                            v > 0 && drillTo({ dimValue: row.key, month: m })
+                          }
+                          title={
+                            v > 0
+                              ? `Open ${row.key} · ${monthLabel(m, true)}`
+                              : undefined
+                          }
+                        >
+                          {v > 0 ? fmt(v) : "—"}
+                        </td>
+                        <td className="pl-1 pr-3 py-1.5 text-right num font-mono text-[11px]">
+                          <Yoy current={v} prior={row.priorByMonth[m]} />
+                        </td>
+                      </Fragment>
                     )
                   })}
-                  <td className="px-3 py-1.5 text-right num font-mono text-ink bg-bg-elev/40">
+                  <td className="pl-3 pr-1 py-1.5 text-right num font-mono text-ink bg-bg-elev/40">
                     {fmt(row.total)}
+                  </td>
+                  <td className="pl-1 pr-3 py-1.5 text-right num font-mono text-[11px] bg-bg-elev/40">
+                    <Yoy current={row.total} prior={row.priorTotal} />
                   </td>
                 </tr>
               ))}
@@ -186,28 +204,22 @@ export function RevenuePivot({
                   Total
                 </td>
                 {result.months.map((m) => (
-                  <td
-                    key={m}
-                    className="px-3 py-2 text-right num font-mono text-ink cursor-pointer hover:text-cyan"
-                    onClick={() => drillTo({ month: m })}
-                  >
-                    {fmt(result.monthTotals[m] ?? 0)}
-                  </td>
+                  <Fragment key={m}>
+                    <td
+                      className="pl-3 pr-1 py-2 text-right num font-mono text-ink cursor-pointer hover:text-cyan"
+                      onClick={() => drillTo({ month: m })}
+                    >
+                      {fmt(result.monthTotals[m] ?? 0)}
+                    </td>
+                    <td className="pl-1 pr-3 py-2 text-right num font-mono text-[11px]">
+                      <Yoy current={result.monthTotals[m] ?? 0} prior={result.priorMonthTotals[m]} />
+                    </td>
+                  </Fragment>
                 ))}
-                <td className="px-3 py-2 text-right num font-mono text-cyan bg-bg-elev/60">
+                <td className="pl-3 pr-1 py-2 text-right num font-mono text-cyan bg-bg-elev/60">
                   {fmt(result.grandTotal)}
                 </td>
-              </tr>
-              <tr className="bg-bg-elev/30 text-[11px]">
-                <td className="px-5 py-1.5 text-ink-mute sticky left-0 bg-[#0A1622]">
-                  vs {year - 1}
-                </td>
-                {result.months.map((m) => (
-                  <td key={m} className="px-3 py-1.5 text-right num font-mono">
-                    <Yoy current={result.monthTotals[m] ?? 0} prior={result.priorMonthTotals[m]} />
-                  </td>
-                ))}
-                <td className="px-3 py-1.5 text-right num font-mono bg-bg-elev/60">
+                <td className="pl-1 pr-3 py-2 text-right num font-mono text-[11px] bg-bg-elev/60">
                   <Yoy current={result.grandTotal} prior={result.priorGrandTotal} />
                 </td>
               </tr>

@@ -46,6 +46,8 @@ export interface PivotRow {
   key: string
   byMonth: Record<string, number>
   total: number
+  priorByMonth: Record<string, number>  // same row, same months last year (same-day cutoff on the month in progress)
+  priorTotal: number
 }
 
 export interface PivotResult {
@@ -116,6 +118,8 @@ export async function getRevenueBreakdown(opts: {
       key,
       byMonth,
       total: Object.values(byMonth).reduce((a, b) => a + b, 0),
+      priorByMonth: {},
+      priorTotal: 0,
     }))
     .sort((a, b) => {
       // Keep the "Other departments" bucket at the bottom regardless of
@@ -126,15 +130,26 @@ export async function getRevenueBreakdown(opts: {
     })
 
   const priorMonthTotals: Record<string, number> = {}
+  const priorRowMap = new Map<string, Record<string, number>>()
   let priorGrandTotal = 0
   for (const r of priorRows) {
     const month = shiftYearForward(r.month)
     const ym = month.slice(0, 7)
     if (ym > thisMonth) continue
     if (ym === thisMonth && r.completed > priorCutoff) continue
+    let dimKey = dimensionValue(r, opts.dimension)
+    if (!dimKey) continue
+    if (opts.dimension === "tech" && r.department !== "Service") dimKey = TECH_OTHER_BUCKET
     const val = opts.measure === "revenue" ? Number(r.sub_total ?? 0) : 1
     priorMonthTotals[month] = (priorMonthTotals[month] ?? 0) + val
     priorGrandTotal += val
+    if (!priorRowMap.has(dimKey)) priorRowMap.set(dimKey, {})
+    const row = priorRowMap.get(dimKey)!
+    row[month] = (row[month] ?? 0) + val
+  }
+  for (const row of pivotRows) {
+    row.priorByMonth = priorRowMap.get(row.key) ?? {}
+    row.priorTotal = Object.values(row.priorByMonth).reduce((a, b) => a + b, 0)
   }
 
   return { months, rows: pivotRows, monthTotals, grandTotal, priorMonthTotals, priorGrandTotal }
@@ -186,17 +201,15 @@ export interface TrendPoint {
   month: string                         // 'YYYY-MM-01' in the current year
   current: number | null                // this year's total for the month; null after the current month
   prior: number | null                  // last year's total for the same month
-  projected: boolean                    // current month: `current` is the full-month run-rate
-  current_actual: number | null         // current month: revenue booked so far
+  partial: boolean                      // the month in progress: `current` is booked so far, not a full month
+  prior_same_days: number | null        // partial month only: last year's same month through the same day
 }
 
 /**
  * Twelve points, Jan..Dec of `year`, each with this year's and last year's
- * monthly total, summed from the daily ledger. The month in progress is
- * plotted at its full-month run-rate (booked so far / workdays elapsed x
- * workdays in the month), the same arithmetic as the MTD tile, so it sits
- * next to last year's full month on equal footing. Flagged `projected` so
- * the chart can draw it as a forecast.
+ * monthly total, summed from the daily ledger. The month in progress
+ * carries what has been booked so far (never a projection) and, for a
+ * like-for-like hover, last year's same month through the same day.
  */
 export function revenueTrend(rows: DailyRow[], year: number, today: Date = new Date()): TrendPoint[] {
   const totals = new Map<string, number>()
@@ -209,14 +222,14 @@ export function revenueTrend(rows: DailyRow[], year: number, today: Date = new D
   return generateMonths(`${year}-01-01`, `${year + 1}-01-01`).map((m) => {
     const ym = m.slice(0, 7)
     const prior = totals.get(shiftYearBack(m).slice(0, 7)) ?? 0
-    if (ym > thisMonth) return { month: m, current: null, prior, projected: false, current_actual: null }
+    if (ym > thisMonth) return { month: m, current: null, prior, partial: false, prior_same_days: null }
     const actual = totals.get(ym) ?? 0
-    if (ym < thisMonth) return { month: m, current: actual, prior, projected: false, current_actual: actual }
-    const [start, end] = periodRange(today, "month")
-    const elapsed = workdays(start, isoDate(addDays(today, 1)))
-    const total = workdays(start, end)
-    const runRate = elapsed > 0 ? (actual / elapsed) * total : actual
-    return { month: m, current: runRate, prior, projected: true, current_actual: actual }
+    if (ym < thisMonth) return { month: m, current: actual, prior, partial: false, prior_same_days: null }
+    const priorStart = shiftYearBack(m)
+    const priorCutoff = shiftYearBack(isoDate(addDays(today, 1)))
+    let priorSameDays = 0
+    for (const r of rows) if (r.day >= priorStart && r.day < priorCutoff) priorSameDays += r.revenue
+    return { month: m, current: actual, prior, partial: true, prior_same_days: priorSameDays }
   })
 }
 

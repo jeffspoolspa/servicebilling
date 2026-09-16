@@ -22,6 +22,10 @@ import { workdays } from "@/lib/utils/workdays"
  * sampled once per day. The fills are computed on those daily samples, so
  * they follow the curve and swap color exactly where the lines cross.
  *
+ * The month in progress plots what is booked so far (dashed segment, hollow
+ * dot: a partial month, not a forecast). Its hover compares both years over
+ * the same days, which is the MTD tile's number.
+ *
  * Fills are exclusive: blue under the lower of the two curves, green for
  * the gap where this year is ahead, red where it is behind. Any vertical
  * slice is one of blue, green, or red. Months after today carry no point.
@@ -42,18 +46,21 @@ interface Sample {
   ahead: [number, number] | null
   behind: [number, number] | null
   isAnchor: boolean
-  projected: boolean                    // on or after the last booked anchor: a run-rate, not booked
+  partial: boolean                      // past the last complete month: the month in progress
+  priorSameDays: number | null          // partial month: last year's same month through the same day
+  partialBooked: number | null          // partial month: this year's booked total so far (not the eased curve value)
   currentBooked: number | null          // solid line: through the last complete month
-  currentProjected: number | null       // dashed line: last complete month -> run-rate anchor
+  currentPartial: number | null         // dashed line: last complete month -> booked-so-far anchor
   cumCurrent: number | null             // year-to-date through this day
   cumPrior: number                      // same day last year
 }
 
-export function RevenueTrendChart({ data, daily, today, ytd }: {
+export function RevenueTrendChart({ data, daily, today, ytd, mtd }: {
   data: TrendPoint[]
   daily: Record<string, number>          // exact revenue per completed day, both years
   today: string
   ytd: KpiBucket
+  mtd: KpiBucket                         // the month in progress: same-period pace for the hover
 }) {
   if (data.length === 0) {
     return (
@@ -69,13 +76,13 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
   const priorYear = String(year - 1)
   const config: ChartConfig = {
     currentBooked: { label: String(year), color: CURRENT },
-    currentProjected: { label: `${year} projected`, color: CURRENT },
+    currentPartial: { label: `${year} month in progress`, color: CURRENT },
     prior: { label: priorYear, color: PRIOR },
   }
 
   const samples = easeByDay(data, daily, year, today)
 
-  const currentTotal = data.reduce((a, p) => a + (p.current_actual ?? 0), 0)
+  const currentTotal = data.reduce((a, p) => a + (p.current ?? 0), 0)
   const priorTotal = data.reduce((a, p) => a + (p.prior ?? 0), 0)
 
   // The table's year rows are the YTD tile's numbers (exact daily ledger,
@@ -148,17 +155,23 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
                   ? ((s.cumCurrent - s.cumPrior) / s.cumPrior) * 100
                   : null
                 const tone = diff == null ? "text-ink-mute" : diff >= 0 ? "text-grass" : "text-coral"
-                const paceDiff = s.current != null && s.prior != null && s.prior > 0
-                  ? ((s.current - s.prior) / s.prior) * 100
-                  : null
+                // Complete months: this month vs the same month last year.
+                // The month in progress: booked so far vs last year's same
+                // days (the MTD tile's pace).
+                const priorShown = s.partial ? s.priorSameDays : s.prior
+                const paceDiff = s.partial
+                  ? mtd.yoy_pct
+                  : s.current != null && s.prior != null && s.prior > 0
+                    ? ((s.current - s.prior) / s.prior) * 100
+                    : null
                 const paceTone = paceDiff == null ? "text-ink-mute" : paceDiff >= 0 ? "text-grass" : "text-coral"
                 return (
                   <div className="rounded-lg border border-line bg-bg-elev px-3 py-2 text-[11px] shadow-xl min-w-[200px]">
                     <div className="text-ink font-medium mb-1.5">{dayLabel(s.day)}</div>
-                    <Row swatch={CURRENT} label={`${year} monthly pace${s.projected ? " (projected)" : ""}`} value={s.current} />
-                    <Row swatch={PRIOR} label={`${priorYear} monthly pace`} value={s.prior} />
+                    <Row swatch={CURRENT} label={s.partial ? `${year} ${monthSoFar(today)}` : `${year} month`} value={s.partial ? s.partialBooked : s.current} />
+                    <Row swatch={PRIOR} label={s.partial ? `${priorYear} ${monthSoFar(today)}` : `${priorYear} month`} value={priorShown} />
                     <div className="flex justify-between gap-4 mt-1">
-                      <span className="text-ink-dim">Pace vs {priorYear}</span>
+                      <span className="text-ink-dim">vs {priorYear}{s.partial ? " same days" : ""}</span>
                       <span className={`font-mono tabular-nums ${paceTone}`}>
                         {paceDiff == null ? "—" : `${paceDiff >= 0 ? "+" : ""}${paceDiff.toFixed(1)}%`}
                       </span>
@@ -189,7 +202,7 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
             <Line type="linear" dataKey="currentBooked" stroke={CURRENT} strokeWidth={2}
               dot={(props) => anchorDot(props, samples)} activeDot={false}
               connectNulls={false} isAnimationActive={false} />
-            <Line type="linear" dataKey="currentProjected" stroke={CURRENT} strokeWidth={2}
+            <Line type="linear" dataKey="currentPartial" stroke={CURRENT} strokeWidth={2}
               strokeDasharray="4 3" dot={(props) => anchorDot(props, samples)} activeDot={false}
               connectNulls={false} isAnimationActive={false} legendType="none" />
           </ComposedChart>
@@ -260,16 +273,18 @@ function easeByDay(data: TrendPoint[], daily: Record<string, number>, year: numb
     cumPrior.push(runPrior)
   }
 
-  // The projected month starts at the last booked anchor (the previous
-  // month's 15th): solid up to there, dashed from there to the run-rate.
-  const projectedIdx = data.findIndex((p) => p.projected)
-  const projectedFrom = projectedIdx > 0 ? anchorX[projectedIdx - 1] : projectedIdx === 0 ? 0 : Infinity
+  // The month in progress starts at the last complete month's anchor:
+  // solid up to there, dashed from there to the booked-so-far anchor.
+  const partialIdx = data.findIndex((p) => p.partial)
+  const partialFrom = partialIdx > 0 ? anchorX[partialIdx - 1] : partialIdx === 0 ? 0 : Infinity
+  const priorSameDays = partialIdx >= 0 ? data[partialIdx].prior_same_days : null
+  const partialBooked = partialIdx >= 0 ? data[partialIdx].current : null
 
   return days.map((day, i) => {
     const c = current[i]
     const p = prior[i]
     const both = c != null && p != null
-    const projected = i >= projectedFrom && c != null
+    const partial = i > partialFrom && c != null
     return {
       day,
       current: c,
@@ -278,9 +293,11 @@ function easeByDay(data: TrendPoint[], daily: Record<string, number>, year: numb
       ahead: both ? [p, Math.max(c, p)] : null,
       behind: both ? [Math.min(c, p), p] : null,
       isAnchor: anchorX.includes(i),
-      projected: i > projectedFrom && c != null,
-      currentBooked: i <= projectedFrom ? c : null,
-      currentProjected: projected ? c : null,
+      partial,
+      priorSameDays: partial ? priorSameDays : null,
+      partialBooked: partial ? partialBooked : null,
+      currentBooked: i <= partialFrom ? c : null,
+      currentPartial: i >= partialFrom && c != null ? c : null,
       cumCurrent: cumCurrent[i],
       cumPrior: cumPrior[i],
     }
@@ -346,9 +363,9 @@ function anchorDot(props: { cx?: number; cy?: number; index?: number; dataKey?: 
   // Each line draws its own anchors: the booked line the solid ones, the
   // projected line the hollow run-rate dot. The shared boundary anchor
   // belongs to the booked line.
-  if (String(props.dataKey) === "currentBooked" && s.projected) return <g key={props.index} />
-  if (String(props.dataKey) === "currentProjected" && !s.projected) return <g key={props.index} />
-  if (s.projected) {
+  if (String(props.dataKey) === "currentBooked" && s.partial) return <g key={props.index} />
+  if (String(props.dataKey) === "currentPartial" && !s.partial) return <g key={props.index} />
+  if (s.partial) {
     return <circle key={props.index} cx={props.cx} cy={props.cy} r={3} fill="rgb(var(--bg-elev))" stroke={CURRENT} strokeWidth={1.5} />
   }
   return <circle key={props.index} cx={props.cx} cy={props.cy} r={2.5} fill={CURRENT} />
@@ -363,6 +380,12 @@ function compactCurrency(n: number): string {
 function shortMonth(iso: string): string {
   const d = new Date(iso + "T00:00:00Z")
   return d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })
+}
+
+/** "Sep 1–16" for the month in progress. */
+function monthSoFar(todayIso: string): string {
+  const d = new Date(todayIso + "T00:00:00Z")
+  return `${d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })} 1–${d.getUTCDate()}`
 }
 
 function dayLabel(iso: string): string {
