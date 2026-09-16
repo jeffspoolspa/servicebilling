@@ -53,6 +53,12 @@ export interface PivotResult {
   rows: PivotRow[]                      // sorted by total desc
   monthTotals: Record<string, number>
   grandTotal: number
+  // Same months one year earlier, keyed by THIS range's month. The month in
+  // progress is cut off at the same day of month last year, and the prior
+  // grand total covers only the months this range has reached, so the YoY
+  // row compares like with like.
+  priorMonthTotals: Record<string, number>
+  priorGrandTotal: number
 }
 
 /**
@@ -68,11 +74,15 @@ export async function getRevenueBreakdown(opts: {
   measure: Measure
   startMonth: string   // 'YYYY-MM-01'
   endMonth: string     // 'YYYY-MM-01' exclusive
+  today?: Date
 }): Promise<PivotResult> {
-  const rows = await fetchViewRows({
-    fromMonth: opts.startMonth,
-    toMonthExclusive: opts.endMonth,
-  })
+  const [rows, priorRows] = await Promise.all([
+    fetchViewRows({ fromMonth: opts.startMonth, toMonthExclusive: opts.endMonth }),
+    fetchViewRows({ fromMonth: shiftYearBack(opts.startMonth), toMonthExclusive: shiftYearBack(opts.endMonth) }),
+  ])
+  const todayIso = isoDate(opts.today ?? new Date())
+  const thisMonth = todayIso.slice(0, 7)
+  const priorCutoff = shiftYearBack(todayIso)
 
   const months = generateMonths(opts.startMonth, opts.endMonth)
   const rowMap = new Map<string, Record<string, number>>()
@@ -115,7 +125,19 @@ export async function getRevenueBreakdown(opts: {
       return b.total - a.total
     })
 
-  return { months, rows: pivotRows, monthTotals, grandTotal }
+  const priorMonthTotals: Record<string, number> = {}
+  let priorGrandTotal = 0
+  for (const r of priorRows) {
+    const month = shiftYearForward(r.month)
+    const ym = month.slice(0, 7)
+    if (ym > thisMonth) continue
+    if (ym === thisMonth && r.completed > priorCutoff) continue
+    const val = opts.measure === "revenue" ? Number(r.sub_total ?? 0) : 1
+    priorMonthTotals[month] = (priorMonthTotals[month] ?? 0) + val
+    priorGrandTotal += val
+  }
+
+  return { months, rows: pivotRows, monthTotals, grandTotal, priorMonthTotals, priorGrandTotal }
 }
 
 // ── Daily ledger: the one surface the tiles, trend, hover, and table use ─
@@ -343,6 +365,12 @@ function periodRange(ref: Date, bucket: "month" | "quarter" | "year"): [string, 
 
 function addDays(d: Date, n: number): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + n))
+}
+
+function shiftYearForward(iso: string): string {
+  const d = new Date(iso + "T00:00:00Z")
+  d.setUTCFullYear(d.getUTCFullYear() + 1)
+  return isoDate(d)
 }
 
 function shiftYearBack(iso: string): string {

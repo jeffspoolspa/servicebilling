@@ -198,12 +198,33 @@ export function RevenuePivot({
                   {fmt(result.grandTotal)}
                 </td>
               </tr>
+              <tr className="bg-bg-elev/30 text-[11px]">
+                <td className="px-5 py-1.5 text-ink-mute sticky left-0 bg-[#0A1622]">
+                  vs {year - 1}
+                </td>
+                {result.months.map((m) => (
+                  <td key={m} className="px-3 py-1.5 text-right num font-mono">
+                    <Yoy current={result.monthTotals[m] ?? 0} prior={result.priorMonthTotals[m]} />
+                  </td>
+                ))}
+                <td className="px-3 py-1.5 text-right num font-mono bg-bg-elev/60">
+                  <Yoy current={result.grandTotal} prior={result.priorGrandTotal} />
+                </td>
+              </tr>
             </tbody>
           </table>
         )}
       </div>
     </Card>
   )
+}
+
+/** Percent change against the same month (or same-day-to-date) last year. */
+function Yoy({ current, prior }: { current: number; prior: number | undefined }) {
+  if (prior == null || prior <= 0 || current <= 0) return <span className="text-ink-mute/40">—</span>
+  const pct = ((current - prior) / prior) * 100
+  const tone = pct >= 0 ? "text-grass" : "text-coral"
+  return <span className={tone}>{pct >= 0 ? "+" : ""}{pct.toFixed(0)}%</span>
 }
 
 function SegmentedControl<T extends string>({
