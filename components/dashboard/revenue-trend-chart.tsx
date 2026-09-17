@@ -9,7 +9,7 @@ import {
   ChartTooltip,
   type ChartConfig,
 } from "@/components/ui/chart"
-import { formatCompactCurrency, formatCurrency } from "@/lib/utils/format"
+import { formatCompactCurrency } from "@/lib/utils/format"
 import type { KpiBucket, TrendPoint } from "@/lib/queries/revenue"
 import { workdays } from "@/lib/utils/workdays"
 
@@ -77,21 +77,19 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
 
   const samples = buildSamples(data, daily, year, today)
 
-  const currentTotal = data.reduce((a, p) => a + (p.current ?? 0), 0)
-  const priorTotal = data.reduce((a, p) => a + (p.prior ?? 0), 0)
 
-  // The table's year rows are the YTD tile's numbers (exact daily ledger,
-  // same period last year, per workday). The hover's to-date figures come
-  // from the same ledger, so all three agree.
+  // Totals table: this year so far, last year in full, and what it takes
+  // to match last year exactly: (last year's total - booked so far) spread
+  // over the workdays left. Figures come from the YTD bucket (daily ledger).
   const workdaysThisYear = ytd.workdays_total
   const workdaysSoFar = ytd.workdays_elapsed
-  const workdaysPriorSameDay = ytd.prior_workdays
+  const workdaysLeft = workdaysThisYear - workdaysSoFar
   const workdaysPrior = workdays(`${year - 1}-01-01`, `${year}-01-01`)
-  const priorSameDay = ytd.prior_year ?? 0
   const currentRate = ytd.per_workday
-  const priorRate = ytd.prior_per_workday ?? 0
-  const paceYoy = ytd.yoy_pct
-  const paceTone = paceYoy == null ? "text-ink-mute" : paceYoy >= 0 ? "text-grass" : "text-coral"
+  const priorFullRate = workdaysPrior > 0 ? ytd.prior_full / workdaysPrior : 0
+  const toGo = ytd.prior_full - ytd.revenue
+  const neededRate = workdaysLeft > 0 ? toGo / workdaysLeft : null
+  const matched = toGo <= 0
 
   return (
     <Card>
@@ -177,32 +175,34 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
       <table className="w-full text-[11px] border-t border-line-soft">
         <thead>
           <tr className="text-ink-mute uppercase tracking-[0.12em] text-[10px]">
-            <th className="text-left font-medium px-5 py-2">Year</th>
-            <th className="text-right font-medium px-3 py-2">To date</th>
-            <th className="text-right font-medium px-3 py-2">Full year</th>
+            <th className="text-left font-medium px-5 py-2"></th>
+            <th className="text-right font-medium px-3 py-2">Revenue</th>
             <th className="text-right font-medium px-3 py-2">Workdays</th>
-            <th className="text-right font-medium px-3 py-2">Per workday</th>
-            <th className="text-right font-medium px-5 py-2">YoY pace</th>
+            <th className="text-right font-medium px-5 py-2 whitespace-nowrap">Per workday</th>
           </tr>
         </thead>
-        <tbody className="font-mono tabular-nums">
+        <tbody className="font-mono tabular-nums whitespace-nowrap">
           <tr>
-            <td className="px-5 py-1.5 text-ink">{year}</td>
-            <td className="px-3 py-1.5 text-right text-ink">{formatCompactCurrency(currentTotal)}</td>
-            <td className="px-3 py-1.5 text-right text-ink-mute">—</td>
+            <td className="px-5 py-1.5 text-ink">{year} so far</td>
+            <td className="px-3 py-1.5 text-right text-ink">{formatCompactCurrency(ytd.revenue)}</td>
             <td className="px-3 py-1.5 text-right text-ink-dim">{workdaysSoFar} of {workdaysThisYear}</td>
-            <td className="px-3 py-1.5 text-right text-ink">{formatCompactCurrency(currentRate)}</td>
-            <td className={`px-5 py-1.5 text-right ${paceTone}`}>
-              {paceYoy == null ? "—" : `${paceYoy >= 0 ? "+" : ""}${paceYoy.toFixed(1)}%`}
-            </td>
+            <td className="px-5 py-1.5 text-right text-ink">{formatCompactCurrency(currentRate)}</td>
           </tr>
           <tr>
-            <td className="px-5 py-1.5 pb-3 text-ink-dim">{priorYear}</td>
-            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{formatCompactCurrency(priorSameDay)}</td>
-            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{formatCompactCurrency(priorTotal)}</td>
-            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{workdaysPriorSameDay} of {workdaysPrior}</td>
-            <td className="px-3 py-1.5 pb-3 text-right text-ink-dim">{formatCompactCurrency(priorRate)}</td>
-            <td className="px-5 py-1.5 pb-3 text-right text-ink-mute">baseline</td>
+            <td className="px-5 py-1.5 text-ink-dim">{priorYear} full year</td>
+            <td className="px-3 py-1.5 text-right text-ink-dim">{formatCompactCurrency(ytd.prior_full)}</td>
+            <td className="px-3 py-1.5 text-right text-ink-dim">{workdaysPrior}</td>
+            <td className="px-5 py-1.5 text-right text-ink-dim">{formatCompactCurrency(priorFullRate)}</td>
+          </tr>
+          <tr className="border-t border-line-soft">
+            <td className="px-5 py-2 pb-3 text-ink">To match {priorYear}</td>
+            <td className={`px-3 py-2 pb-3 text-right ${matched ? "text-grass" : "text-ink"}`}>
+              {matched ? `${formatCompactCurrency(-toGo)} over` : `${formatCompactCurrency(toGo)} to go`}
+            </td>
+            <td className="px-3 py-2 pb-3 text-right text-ink-dim">{workdaysLeft} left</td>
+            <td className={`px-5 py-2 pb-3 text-right font-medium ${matched ? "text-grass" : "text-cyan"}`}>
+              {matched || neededRate == null ? "—" : `${formatCompactCurrency(neededRate)} needed`}
+            </td>
           </tr>
         </tbody>
       </table>
@@ -318,7 +318,7 @@ function Row({ swatch, label, value }: { swatch: string; label: string; value: n
         <span className="inline-block w-2.5 h-2.5 rounded-[2px]" style={{ background: swatch }} />
         {label}
       </span>
-      <span className="font-mono tabular-nums text-ink">{value == null ? "—" : formatCurrency(value)}</span>
+      <span className="font-mono tabular-nums text-ink">{value == null ? "—" : formatCompactCurrency(value)}</span>
     </div>
   )
 }
