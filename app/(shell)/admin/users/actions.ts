@@ -4,10 +4,15 @@ import { z } from "zod"
 import { revalidatePath } from "next/cache"
 import { requireModuleWrite } from "@/lib/auth/access"
 import { createSupabaseAdmin } from "@/lib/supabase/admin"
-import { createSupabaseServer } from "@/lib/supabase/server"
 import { MODULES, type ModuleKey, type RoleKey } from "@/lib/auth/modules"
 
 export type ActionState = { ok?: string; error?: string }
+
+// app_roles is read-own under RLS ("users see own roles") and has NO write
+// policy on purpose: nobody edits access with their own session. Every
+// action here first passes requireModuleWrite("admin"), then writes access
+// rows with the service-role client. Using the session client instead is
+// refused by RLS on insert and silently affects zero rows on delete.
 
 const VALID_MODULES = Object.keys(MODULES) as ModuleKey[]
 
@@ -82,13 +87,12 @@ export async function createAppUser(
     return { error: createErr?.message ?? "Could not create auth user." }
   }
 
-  const server = await createSupabaseServer()
   const rows = pairs.map((p) => ({
     auth_user_id: created.user.id,
     app: p.module,
     role: p.role,
   }))
-  const { error: insertErr } = await server.from("app_roles").insert(rows)
+  const { error: insertErr } = await admin.from("app_roles").insert(rows)
   if (insertErr) {
     // Roll back the auth user so we don't leave an orphan
     await admin.auth.admin.deleteUser(created.user.id)
@@ -134,8 +138,8 @@ export async function updateUserAccess(
     }
   }
 
-  const server = await createSupabaseServer()
-  const { error: delErr } = await server
+  const admin = createSupabaseAdmin()
+  const { error: delErr } = await admin
     .from("app_roles")
     .delete()
     .eq("auth_user_id", auth_user_id)
@@ -147,7 +151,7 @@ export async function updateUserAccess(
       app: p.module,
       role: p.role,
     }))
-    const { error: insErr } = await server.from("app_roles").insert(rows)
+    const { error: insErr } = await admin.from("app_roles").insert(rows)
     if (insErr) return { error: insErr.message }
   }
 
@@ -202,10 +206,10 @@ export async function deactivateAppUser(
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." }
   const { auth_user_id } = parsed.data
 
-  const server = await createSupabaseServer()
-  await server.from("app_roles").delete().eq("auth_user_id", auth_user_id)
-
   const admin = createSupabaseAdmin()
+  const { error: rolesErr } = await admin.from("app_roles").delete().eq("auth_user_id", auth_user_id)
+  if (rolesErr) return { error: rolesErr.message }
+
   const { error } = await admin.auth.admin.deleteUser(auth_user_id)
   if (error) return { error: error.message }
 
