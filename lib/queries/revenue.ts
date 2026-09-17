@@ -124,7 +124,7 @@ export interface DailyRow {
   cumulative: number                    // running total within the year
 }
 
-/** Every day of `year` and the year before from v_service_revenue_daily. */
+/** Every day of `year`, the year before, and the December before that (the trend's Jan 1 lead-in). */
 export async function getServiceDaily(year: number): Promise<DailyRow[]> {
   const sb = createAnon("public")
   const out: DailyRow[] = []
@@ -133,7 +133,7 @@ export async function getServiceDaily(year: number): Promise<DailyRow[]> {
     const { data, error } = await sb
       .from("v_service_revenue_daily")
       .select("day, year, revenue, cumulative")
-      .gte("day", `${year - 1}-01-01`)
+      .gte("day", `${year - 2}-12-01`)
       .lt("day", `${year + 1}-01-01`)
       .order("day")
       .range(offset, offset + PAGE - 1)

@@ -16,19 +16,19 @@ import { workdays } from "@/lib/utils/workdays"
 /**
  * Monthly revenue, this year against last year, January to December.
  *
- * The data is twelve monthly totals per year. Each total anchors at the
- * 15th of its month and the curve between anchors is eased with monotone
- * cubic interpolation (no overshoot, no false peaks between real points),
- * sampled once per day. The fills are computed on those daily samples, so
- * they follow the curve and swap color exactly where the lines cross.
+ * The LINE is monthly totals, nothing else: one dot per month at the
+ * month's last day, joined by a monotone curve (smooth, never overshooting
+ * a real point), and no forecast. The month in progress has its dot at today, carrying what is
+ * booked so far. The line enters the chart from the prior December's total
+ * at Jan 1 so January is not blank.
  *
- * The month in progress plots what is booked so far (dashed segment, hollow
- * dot: a partial month, not a forecast). Its hover compares both years over
- * the same days, which is the MTD tile's number.
+ * The HOVER is exact and per day, read from the daily ledger and never from
+ * the line: month to date and year to date through the hovered day, for
+ * both years, with the percent difference of each.
  *
- * Fills are exclusive: blue under the lower of the two curves, green for
+ * Fills are exclusive: blue under the lower of the two lines, green for
  * the gap where this year is ahead, red where it is behind. Any vertical
- * slice is one of blue, green, or red. Months after today carry no point.
+ * slice is one of blue, green, or red. Days after today carry no point.
  *
  * Built on shadcn/ui chart primitives over Recharts.
  */
@@ -40,27 +40,24 @@ const BEHIND = "rgb(251 113 133)" // coral
 
 interface Sample {
   day: string
-  current: number | null
+  current: number | null                // the line: monthly totals joined by straight segments
   prior: number | null
   base: number | null
   ahead: [number, number] | null
   behind: [number, number] | null
-  isAnchor: boolean
-  partial: boolean                      // past the last complete month: the month in progress
-  priorSameDays: number | null          // partial month: last year's same month through the same day
-  partialBooked: number | null          // partial month: this year's booked total so far (not the eased curve value)
-  currentBooked: number | null          // solid line: through the last complete month
-  currentPartial: number | null         // dashed line: last complete month -> booked-so-far anchor
-  cumCurrent: number | null             // year-to-date through this day
-  cumPrior: number                      // same day last year
+  isAnchor: boolean                     // this year has a dot here
+  isTick: boolean                       // month label on the axis
+  mtdCurrent: number | null             // exact: month to date through this day
+  mtdPrior: number                      // exact: same month, same day of month, last year
+  cumCurrent: number | null             // exact: year to date through this day
+  cumPrior: number                      // exact: same day last year
 }
 
-export function RevenueTrendChart({ data, daily, today, ytd, mtd }: {
+export function RevenueTrendChart({ data, daily, today, ytd }: {
   data: TrendPoint[]
-  daily: Record<string, number>          // exact revenue per completed day, both years
+  daily: Record<string, number>          // exact revenue per completed day (both years + the December before)
   today: string
   ytd: KpiBucket
-  mtd: KpiBucket                         // the month in progress: same-period pace for the hover
 }) {
   if (data.length === 0) {
     return (
@@ -75,12 +72,11 @@ export function RevenueTrendChart({ data, daily, today, ytd, mtd }: {
   const year = Number(data[0].month.slice(0, 4))
   const priorYear = String(year - 1)
   const config: ChartConfig = {
-    currentBooked: { label: String(year), color: CURRENT },
-    currentPartial: { label: `${year} month in progress`, color: CURRENT },
+    current: { label: String(year), color: CURRENT },
     prior: { label: priorYear, color: PRIOR },
   }
 
-  const samples = easeByDay(data, daily, year, today)
+  const samples = buildSamples(data, daily, year, today)
 
   const currentTotal = data.reduce((a, p) => a + (p.current ?? 0), 0)
   const priorTotal = data.reduce((a, p) => a + (p.prior ?? 0), 0)
@@ -133,7 +129,7 @@ export function RevenueTrendChart({ data, daily, today, ytd, mtd }: {
               axisLine={false}
               tickMargin={10}
               fontSize={11}
-              ticks={samples.filter((s) => s.isAnchor).map((s) => s.day)}
+              ticks={samples.filter((s) => s.isTick).map((s) => s.day)}
               tickFormatter={shortMonth}
               interval={0}
             />
@@ -151,40 +147,17 @@ export function RevenueTrendChart({ data, daily, today, ytd, mtd }: {
               content={({ active, payload }) => {
                 const s = payload?.[0]?.payload as Sample | undefined
                 if (!active || !s) return null
-                const diff = s.cumCurrent != null && s.cumPrior > 0
-                  ? ((s.cumCurrent - s.cumPrior) / s.cumPrior) * 100
-                  : null
-                const tone = diff == null ? "text-ink-mute" : diff >= 0 ? "text-grass" : "text-coral"
-                // Complete months: this month vs the same month last year.
-                // The month in progress: booked so far vs last year's same
-                // days (the MTD tile's pace).
-                const priorShown = s.partial ? s.priorSameDays : s.prior
-                const paceDiff = s.partial
-                  ? mtd.yoy_pct
-                  : s.current != null && s.prior != null && s.prior > 0
-                    ? ((s.current - s.prior) / s.prior) * 100
-                    : null
-                const paceTone = paceDiff == null ? "text-ink-mute" : paceDiff >= 0 ? "text-grass" : "text-coral"
+                const span = monthThrough(s.day)
                 return (
-                  <div className="rounded-lg border border-line bg-bg-elev px-3 py-2 text-[11px] shadow-xl min-w-[200px]">
+                  <div className="rounded-lg border border-line bg-bg-elev px-3 py-2 text-[11px] shadow-xl min-w-[210px]">
                     <div className="text-ink font-medium mb-1.5">{dayLabel(s.day)}</div>
-                    <Row swatch={CURRENT} label={s.partial ? `${year} ${monthSoFar(today)}` : `${year} month`} value={s.partial ? s.partialBooked : s.current} />
-                    <Row swatch={PRIOR} label={s.partial ? `${priorYear} ${monthSoFar(today)}` : `${priorYear} month`} value={priorShown} />
-                    <div className="flex justify-between gap-4 mt-1">
-                      <span className="text-ink-dim">vs {priorYear}{s.partial ? " same days" : ""}</span>
-                      <span className={`font-mono tabular-nums ${paceTone}`}>
-                        {paceDiff == null ? "—" : `${paceDiff >= 0 ? "+" : ""}${paceDiff.toFixed(1)}%`}
-                      </span>
-                    </div>
+                    <Row swatch={CURRENT} label={`${year} ${span}`} value={s.mtdCurrent} />
+                    <Row swatch={PRIOR} label={`${priorYear} ${span}`} value={s.mtdPrior} />
+                    <Diff label="Month to date" current={s.mtdCurrent} prior={s.mtdPrior} />
                     <div className="border-t border-line-soft mt-1.5 pt-1.5">
-                      <Row label={`${year} to date`} value={s.cumCurrent} />
-                      <Row label={`${priorYear} to date`} value={s.cumPrior} />
-                      <div className="flex justify-between gap-4 mt-1">
-                        <span className="text-ink-dim">YTD vs {priorYear}</span>
-                        <span className={`font-mono tabular-nums ${tone}`}>
-                          {diff == null ? "—" : `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`}
-                        </span>
-                      </div>
+                      <Row label={`${year} year to date`} value={s.cumCurrent} />
+                      <Row label={`${priorYear} year to date`} value={s.cumPrior} />
+                      <Diff label="Year to date" current={s.cumCurrent} prior={s.cumPrior} />
                     </div>
                   </div>
                 )
@@ -199,12 +172,9 @@ export function RevenueTrendChart({ data, daily, today, ytd, mtd }: {
               isAnimationActive={false} legendType="none" tooltipType="none" />
             <Line type="linear" dataKey="prior" stroke={PRIOR} strokeWidth={2} strokeDasharray="4 3"
               dot={false} activeDot={false} isAnimationActive={false} />
-            <Line type="linear" dataKey="currentBooked" stroke={CURRENT} strokeWidth={2}
+            <Line type="linear" dataKey="current" stroke={CURRENT} strokeWidth={2}
               dot={(props) => anchorDot(props, samples)} activeDot={false}
               connectNulls={false} isAnimationActive={false} />
-            <Line type="linear" dataKey="currentPartial" stroke={CURRENT} strokeWidth={2}
-              strokeDasharray="4 3" dot={(props) => anchorDot(props, samples)} activeDot={false}
-              connectNulls={false} isAnimationActive={false} legendType="none" />
           </ComposedChart>
         </ChartContainer>
       </div>
@@ -245,93 +215,100 @@ export function RevenueTrendChart({ data, daily, today, ytd, mtd }: {
   )
 }
 
-// ─── Easing ──────────────────────────────────────────────────────────────
+// ─── Samples ─────────────────────────────────────────────────────────────
 
-/** Twelve monthly anchors at the 15th, eased into one sample per day. */
-function easeByDay(data: TrendPoint[], daily: Record<string, number>, year: number, today: string): Sample[] {
+/**
+ * One sample per calendar day of `year`.
+ *
+ * Line values: anchors at Jan 1 (the December before) and at each month's
+ * last day (that month's total); the month in progress anchors at today.
+ * Between anchors the value follows the curve, which exists only so the
+ * line is smooth and the fills have an edge to follow. It is never shown
+ * as a number.
+ *
+ * Hover values: summed from the daily ledger by calendar date. Last year's
+ * day is the same month and day number (Feb 29 folds into Feb 28).
+ */
+function buildSamples(data: TrendPoint[], daily: Record<string, number>, year: number, today: string): Sample[] {
   const days: string[] = []
   const cursor = new Date(Date.UTC(year, 0, 1))
   while (cursor.getUTCFullYear() === year) {
     days.push(cursor.toISOString().slice(0, 10))
     cursor.setUTCDate(cursor.getUTCDate() + 1)
   }
-  const anchorX = data.map((p) => days.indexOf(p.month.slice(0, 8) + "15"))
-  const current = interpolate(anchorX, data.map((p) => p.current), days.length)
-  const prior = interpolate(anchorX, data.map((p) => p.prior), days.length)
-
-  // Year-to-date through each day from the exact daily ledger, both years
-  // keyed by month-day. Last year's Feb 29 (if any) folds into Feb 28.
-  const cumCurrent: Array<number | null> = []
-  const cumPrior: number[] = []
-  let runCurrent = 0
-  let runPrior = 0
-  for (const day of days) {
-    runCurrent += daily[day] ?? 0
-    runPrior += daily[`${year - 1}${day.slice(4)}`] ?? 0
-    if (day.slice(5) === "02-28") runPrior += daily[`${year - 1}-02-29`] ?? 0
-    cumCurrent.push(day <= today ? runCurrent : null)
-    cumPrior.push(runPrior)
+  const monthTotal = (y: number, m: number) => {
+    let t = 0
+    const prefix = `${y}-${String(m).padStart(2, "0")}-`
+    for (const [d, v] of Object.entries(daily)) if (d.startsWith(prefix)) t += v
+    return t
   }
 
-  // The month in progress starts at the last complete month's anchor:
-  // solid up to there, dashed from there to the booked-so-far anchor.
-  const partialIdx = data.findIndex((p) => p.partial)
-  const partialFrom = partialIdx > 0 ? anchorX[partialIdx - 1] : partialIdx === 0 ? 0 : Infinity
-  const priorSameDays = partialIdx >= 0 ? data[partialIdx].prior_same_days : null
-  const partialBooked = partialIdx >= 0 ? data[partialIdx].current : null
+  const curAnchors: Array<[number, number]> = [[0, monthTotal(year - 1, 12)]]
+  const priAnchors: Array<[number, number]> = [[0, monthTotal(year - 2, 12)]]
+  const ticks = new Set<number>()
+  data.forEach((p, m) => {
+    const lastDay = new Date(Date.UTC(year, m + 1, 0)).toISOString().slice(0, 10)
+    const endIdx = days.indexOf(lastDay)
+    ticks.add(days.indexOf(p.month.slice(0, 8) + "15"))
+    priAnchors.push([endIdx, p.prior ?? 0])
+    if (p.current == null) return
+    curAnchors.push([p.partial ? days.indexOf(today) : endIdx, p.current])
+  })
+  const current = curve(curAnchors, days.length)
+  const prior = curve(priAnchors, days.length)
+  const dots = new Set(curAnchors.slice(1).map(([x]) => x))
 
+  let mtdC = 0, mtdP = 0, ytdC = 0, ytdP = 0, month = ""
   return days.map((day, i) => {
-    const c = current[i]
-    const p = prior[i]
-    const both = c != null && p != null
-    const partial = i > partialFrom && c != null
+    if (day.slice(0, 7) !== month) { month = day.slice(0, 7); mtdC = 0; mtdP = 0 }
+    const priorDay = `${year - 1}${day.slice(4)}`
+    const p = (daily[priorDay] ?? 0) + (day.slice(5) === "02-28" ? daily[`${year - 1}-02-29`] ?? 0 : 0)
+    const c = daily[day] ?? 0
+    mtdC += c; ytdC += c; mtdP += p; ytdP += p
+    const past = day <= today
+    const lc = current[i], lp = prior[i]
+    const both = lc != null && lp != null
     return {
       day,
-      current: c,
-      prior: p,
-      base: both ? Math.min(c, p) : c,
-      ahead: both ? [p, Math.max(c, p)] : null,
-      behind: both ? [Math.min(c, p), p] : null,
-      isAnchor: anchorX.includes(i),
-      partial,
-      priorSameDays: partial ? priorSameDays : null,
-      partialBooked: partial ? partialBooked : null,
-      currentBooked: i <= partialFrom ? c : null,
-      currentPartial: i >= partialFrom && c != null ? c : null,
-      cumCurrent: cumCurrent[i],
-      cumPrior: cumPrior[i],
+      current: lc,
+      prior: lp,
+      base: both ? Math.min(lc, lp) : lc,
+      ahead: both ? [lp, Math.max(lc, lp)] : null,
+      behind: both ? [Math.min(lc, lp), lp] : null,
+      isAnchor: dots.has(i),
+      isTick: ticks.has(i),
+      mtdCurrent: past ? mtdC : null,
+      mtdPrior: mtdP,
+      cumCurrent: past ? ytdC : null,
+      cumPrior: ytdP,
     }
   })
 }
 
 /**
- * Monotone cubic (Fritsch-Carlson) interpolation through the non-null
- * anchors; null outside the first..last non-null anchor. Monotone means the
- * curve never overshoots between two anchors, so a dip between months is
- * never invented.
+ * Monotone cubic (Fritsch-Carlson) curve through the anchors, one value per
+ * day; null after the last anchor. Monotone means the curve never overshoots
+ * between two anchors, so it cannot invent a peak or a dip the monthly
+ * totals do not have.
  */
-function interpolate(xs: number[], ys: Array<number | null>, n: number): Array<number | null> {
-  const pts = xs.map((x, i) => [x, ys[i]] as const).filter((p): p is readonly [number, number] => p[1] != null)
+function curve(pts: Array<[number, number]>, n: number): Array<number | null> {
   const out: Array<number | null> = new Array(n).fill(null)
   if (pts.length === 0) return out
   if (pts.length === 1) { out[pts[0][0]] = pts[0][1]; return out }
-
   const k = pts.length
   const dx: number[] = [], m: number[] = []
   for (let i = 0; i < k - 1; i++) {
-    dx.push(pts[i + 1][0] - pts[i][0])
+    dx.push(Math.max(1, pts[i + 1][0] - pts[i][0]))
     m.push((pts[i + 1][1] - pts[i][1]) / dx[i])
   }
   const t: number[] = [m[0]]
-  for (let i = 1; i < k - 1; i++) {
-    t.push(m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2)
-  }
+  for (let i = 1; i < k - 1; i++) t.push(m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2)
   t.push(m[k - 2])
   for (let i = 0; i < k - 1; i++) {
     if (m[i] === 0) { t[i] = 0; t[i + 1] = 0; continue }
     const a = t[i] / m[i], b = t[i + 1] / m[i]
-    const s = a * a + b * b
-    if (s > 9) { const r = 3 / Math.sqrt(s); t[i] = r * a * m[i]; t[i + 1] = r * b * m[i] }
+    const s2 = a * a + b * b
+    if (s2 > 9) { const r = 3 / Math.sqrt(s2); t[i] = r * a * m[i]; t[i + 1] = r * b * m[i] }
   }
   for (let i = 0; i < k - 1; i++) {
     const [x0, y0] = pts[i], [x1, y1] = pts[i + 1], h = dx[i]
@@ -357,18 +334,23 @@ function Row({ swatch, label, value }: { swatch?: string; label: string; value: 
   )
 }
 
-function anchorDot(props: { cx?: number; cy?: number; index?: number; dataKey?: unknown }, samples: Sample[]) {
+function Diff({ label, current, prior }: { label: string; current: number | null; prior: number }) {
+  const pct = current != null && prior > 0 ? ((current - prior) / prior) * 100 : null
+  const tone = pct == null ? "text-ink-mute" : pct >= 0 ? "text-grass" : "text-coral"
+  return (
+    <div className="flex justify-between gap-4 mt-1">
+      <span className="text-ink-dim">{label}</span>
+      <span className={`font-mono tabular-nums ${tone}`}>
+        {pct == null ? "—" : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`}
+      </span>
+    </div>
+  )
+}
+
+function anchorDot(props: { cx?: number; cy?: number; index?: number }, samples: Sample[]) {
   const s = props.index != null ? samples[props.index] : undefined
-  if (!s?.isAnchor || s.current == null || props.cx == null || props.cy == null) return <g key={props.index} />
-  // Each line draws its own anchors: the booked line the solid ones, the
-  // projected line the hollow run-rate dot. The shared boundary anchor
-  // belongs to the booked line.
-  if (String(props.dataKey) === "currentBooked" && s.partial) return <g key={props.index} />
-  if (String(props.dataKey) === "currentPartial" && !s.partial) return <g key={props.index} />
-  if (s.partial) {
-    return <circle key={props.index} cx={props.cx} cy={props.cy} r={3} fill="rgb(var(--bg-elev))" stroke={CURRENT} strokeWidth={1.5} />
-  }
-  return <circle key={props.index} cx={props.cx} cy={props.cy} r={2.5} fill={CURRENT} />
+  if (!s?.isAnchor || props.cx == null || props.cy == null) return <g key={props.index} />
+  return <circle key={props.index} cx={props.cx} cy={props.cy} r={3} fill={CURRENT} />
 }
 
 function compactCurrency(n: number): string {
@@ -382,10 +364,11 @@ function shortMonth(iso: string): string {
   return d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })
 }
 
-/** "Sep 1–16" for the month in progress. */
-function monthSoFar(todayIso: string): string {
-  const d = new Date(todayIso + "T00:00:00Z")
-  return `${d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })} 1–${d.getUTCDate()}`
+/** "Sep 1–9" for the hovered day. */
+function monthThrough(iso: string): string {
+  const d = new Date(iso + "T00:00:00Z")
+  const mon = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })
+  return d.getUTCDate() === 1 ? `${mon} 1` : `${mon} 1–${d.getUTCDate()}`
 }
 
 function dayLabel(iso: string): string {
