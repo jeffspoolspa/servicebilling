@@ -240,6 +240,7 @@ export interface KpiBucket {
   workdays_elapsed: number              // workdays in the period through today
   workdays_total: number                // workdays in the whole period
   per_workday: number
+  prior_full: number                    // last year's WHOLE period: the tile's goal line
   prior_year: number | null             // last year's period through the same day
   prior_workdays: number
   prior_per_workday: number | null
@@ -286,6 +287,7 @@ export function revenueKpis(rows: DailyRow[], referenceDate: Date = new Date()):
     const priorStart = shiftYearBack(start)
     const priorEnd = shiftYearBack(throughToday)
     const prior = sumRange(priorStart, priorEnd)
+    const priorFull = sumRange(priorStart, shiftYearBack(fullEnd))
     const priorWorkdays = workdays(priorStart, priorEnd)
     const perWorkday = workdaysElapsed > 0 ? revenue / workdaysElapsed : 0
     const priorPerWorkday = prior > 0 && priorWorkdays > 0 ? prior / priorWorkdays : null
@@ -294,6 +296,7 @@ export function revenueKpis(rows: DailyRow[], referenceDate: Date = new Date()):
       workdays_elapsed: workdaysElapsed,
       workdays_total: workdaysTotal,
       per_workday: perWorkday,
+      prior_full: priorFull,
       prior_year: prior > 0 ? prior : null,
       prior_workdays: priorWorkdays,
       prior_per_workday: priorPerWorkday,
