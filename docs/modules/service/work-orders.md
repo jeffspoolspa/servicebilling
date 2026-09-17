@@ -2,7 +2,7 @@
 
 > Status: [stub]
 > Schema: `public.work_orders` (mixed leadership — see entity doc)
-> Scripts: `f/ION/work_orders.flow`, `f/service_billing/classify_work_orders*`
+> Scripts: `f/ION/work_orders.flow`, `f/ION/_lib/work_orders_upsert`, `f/ION/backfill_work_orders_from_mirror`
 
 ## Purpose
 

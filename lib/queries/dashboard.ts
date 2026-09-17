@@ -59,6 +59,7 @@ export async function getDashboardKpis(): Promise<DashboardKpis> {
       .from("work_orders")
       .select("wo_number", { count: "exact", head: true })
       .eq("billable", true)
+      .is("skipped_at", null)
       .is("qbo_invoice_id", null)
       .gt("sub_total", 0),
     sumWorkOrderTotalsAwaiting(sb),
@@ -88,6 +89,7 @@ export async function getDashboardKpis(): Promise<DashboardKpis> {
       .from("work_orders")
       .select("wo_number", { count: "exact", head: true })
       .eq("billable", true)
+      .is("skipped_at", null)
       .is("invoice_number", null)
       .gt("total_due", 0)
       .not("type", "ilike", "%ESTIMATE%")
@@ -96,19 +98,22 @@ export async function getDashboardKpis(): Promise<DashboardKpis> {
       .from("work_orders")
       .select("wo_number", { count: "exact", head: true })
       .not("completed", "is", null)
+      .is("skipped_at", null)
       .is("invoice_number", null)
       .ilike("type", "%ESTIMATE%"),
     sb
       .from("work_orders")
       .select("wo_number", { count: "exact", head: true })
       .not("completed", "is", null)
+      .is("skipped_at", null)
       .is("invoice_number", null)
       .eq("type", "WARRANTY")
       .gt("total_due", 0),
     sb
       .from("work_orders")
       .select("wo_number", { count: "exact", head: true })
-      .eq("billable", true),
+      .eq("billable", true)
+      .is("skipped_at", null),
     sumAllBillableWorkOrders(sb),
   ])
 
@@ -186,6 +191,7 @@ async function sumWorkOrderTotalsAwaiting(sb: ReturnType<typeof createAnon>): Pr
       .from("work_orders")
       .select("total_due")
       .eq("billable", true)
+      .is("skipped_at", null)
       .is("qbo_invoice_id", null)
       .gt("sub_total", 0)
       .range(from, from + PAGE - 1)
@@ -205,6 +211,7 @@ async function sumAllBillableWorkOrders(sb: ReturnType<typeof createAnon>): Prom
       .from("work_orders")
       .select("total_due")
       .eq("billable", true)
+      .is("skipped_at", null)
       .range(from, from + PAGE - 1)
     if (error || !data || data.length === 0) break
     total += data.reduce((a, r) => a + Number(r.total_due ?? 0), 0)

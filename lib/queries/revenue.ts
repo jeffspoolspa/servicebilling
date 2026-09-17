@@ -1,7 +1,10 @@
 import { createAnon } from "@/lib/supabase/anon"
+import { workdays } from "@/lib/utils/workdays"
 
 /**
- * Revenue dashboard data layer.
+ * Revenue dashboard data layer. SERVICE revenue only: every fetch filters
+ * `revenue_class = 'Service'` (QBO invoice class, or the pipeline's
+ * mechanical rule for history rows without an invoice).
  *
  * Backed by `public.v_revenue_by_month` — one row per (month × work_order),
  * with location / tech / department resolved via employees + departments.
@@ -66,10 +69,7 @@ export async function getRevenueBreakdown(opts: {
   startMonth: string   // 'YYYY-MM-01'
   endMonth: string     // 'YYYY-MM-01' exclusive
 }): Promise<PivotResult> {
-  const rows = await fetchViewRows({
-    fromMonth: opts.startMonth,
-    toMonthExclusive: opts.endMonth,
-  })
+  const rows = await fetchViewRows({ fromMonth: opts.startMonth, toMonthExclusive: opts.endMonth })
 
   const months = generateMonths(opts.startMonth, opts.endMonth)
   const rowMap = new Map<string, Record<string, number>>()
@@ -115,45 +115,96 @@ export async function getRevenueBreakdown(opts: {
   return { months, rows: pivotRows, monthTotals, grandTotal }
 }
 
-// ── Trend (with YoY overlay) ─────────────────────────────────────────────
+// ── Daily ledger: the one surface the tiles, trend, hover, and table use ─
+
+export interface DailyRow {
+  day: string                           // 'YYYY-MM-DD'
+  year: number
+  revenue: number                       // Service-class revenue completed that day
+  cumulative: number                    // running total within the year
+}
+
+/** Every day of `year`, the year before, and the December before that (the trend's Jan 1 lead-in). */
+export async function getServiceDaily(year: number): Promise<DailyRow[]> {
+  const sb = createAnon("public")
+  const out: DailyRow[] = []
+  let offset = 0
+  while (true) {
+    const { data, error } = await sb
+      .from("v_service_revenue_daily")
+      .select("day, year, revenue, cumulative")
+      .gte("day", `${year - 2}-12-01`)
+      .lt("day", `${year + 1}-01-01`)
+      .order("day")
+      .range(offset, offset + PAGE - 1)
+    if (error) throw new Error(`v_service_revenue_daily: ${error.message}`)
+    if (!data || data.length === 0) break
+    for (const r of data as Array<Record<string, unknown>>) {
+      out.push({ day: String(r.day), year: Number(r.year), revenue: Number(r.revenue ?? 0), cumulative: Number(r.cumulative ?? 0) })
+    }
+    if (data.length < PAGE) break
+    offset += PAGE
+  }
+  return out
+}
+
+/** { 'YYYY-MM-DD': revenue } for the hover's exact to-date sums. */
+export function dailyMap(rows: DailyRow[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const r of rows) out[r.day] = r.revenue
+  return out
+}
+
+// ── Trend: monthly revenue, this year vs last ───────────────────────────
 
 export interface TrendPoint {
-  month: string                         // 'YYYY-MM-01'
-  current_revenue: number
-  prior_year_revenue: number | null     // null when no data for that prior month
+  month: string                         // 'YYYY-MM-01' in the current year
+  current: number | null                // this year's total for the month; null after the current month
+  prior: number | null                  // last year's total for the same month
+  partial: boolean                      // the month in progress: `current` is booked so far, not a full month
+  prior_same_days: number | null        // partial month only: last year's same month through the same day
 }
 
-export async function getRevenueTrend(opts: {
-  startMonth: string
-  endMonth: string
-}): Promise<TrendPoint[]> {
-  // Fetch a year back for YoY overlay.
-  const priorStart = shiftYearBack(opts.startMonth)
-  const rows = await fetchViewRows({
-    fromMonth: priorStart,
-    toMonthExclusive: opts.endMonth,
-  })
-
-  const monthTotals = new Map<string, number>()
+/**
+ * Twelve points, Jan..Dec of `year`, each with this year's and last year's
+ * monthly total, summed from the daily ledger. The month in progress
+ * carries what has been booked so far (never a projection) and, for a
+ * like-for-like hover, last year's same month through the same day.
+ */
+export function revenueTrend(rows: DailyRow[], year: number, today: Date = new Date()): TrendPoint[] {
+  const totals = new Map<string, number>()
   for (const r of rows) {
-    monthTotals.set(r.month, (monthTotals.get(r.month) ?? 0) + Number(r.sub_total ?? 0))
+    const m = r.day.slice(0, 7)
+    totals.set(m, (totals.get(m) ?? 0) + r.revenue)
   }
-
-  return generateMonths(opts.startMonth, opts.endMonth).map((m) => ({
-    month: m,
-    current_revenue: monthTotals.get(m) ?? 0,
-    prior_year_revenue: monthTotals.has(shiftYearBack(m))
-      ? monthTotals.get(shiftYearBack(m))!
-      : null,
-  }))
+  const todayIso = isoDate(today)
+  const thisMonth = todayIso.slice(0, 7)
+  return generateMonths(`${year}-01-01`, `${year + 1}-01-01`).map((m) => {
+    const ym = m.slice(0, 7)
+    const prior = totals.get(shiftYearBack(m).slice(0, 7)) ?? 0
+    if (ym > thisMonth) return { month: m, current: null, prior, partial: false, prior_same_days: null }
+    const actual = totals.get(ym) ?? 0
+    if (ym < thisMonth) return { month: m, current: actual, prior, partial: false, prior_same_days: null }
+    const priorStart = shiftYearBack(m)
+    const priorCutoff = shiftYearBack(isoDate(addDays(today, 1)))
+    let priorSameDays = 0
+    for (const r of rows) if (r.day >= priorStart && r.day < priorCutoff) priorSameDays += r.revenue
+    return { month: m, current: actual, prior, partial: true, prior_same_days: priorSameDays }
+  })
 }
 
-// ── KPIs (MTD / QTD / YTD + YoY) ─────────────────────────────────────────
+// ── KPIs (MTD / QTD / YTD, YoY by workday pace) ──────────────────────────
 
 export interface KpiBucket {
-  revenue: number
-  prior_year: number | null
-  yoy_pct: number | null
+  revenue: number                       // this period through today
+  workdays_elapsed: number              // workdays in the period through today
+  workdays_total: number                // workdays in the whole period
+  per_workday: number
+  prior_full: number                    // last year's WHOLE period: the tile's goal line
+  prior_year: number | null             // last year's period through the same day
+  prior_workdays: number
+  prior_per_workday: number | null
+  yoy_pct: number | null                // per-workday pace vs the same period last year
 }
 
 export interface RevenueKpis {
@@ -163,51 +214,60 @@ export interface RevenueKpis {
   reference_date: string
 }
 
-export async function getRevenueKpis(
-  referenceDate: Date = new Date(),
-): Promise<RevenueKpis> {
+/**
+ * Each tile compares this period's revenue per workday (through today)
+ * with last year's revenue per workday over the SAME period through the
+ * same day. Ruled 2026-09-16: the baseline is where we were a year ago,
+ * not last year's full-period average. Per workday (Mon..Fri less
+ * holidays) rather than raw totals so a weekend or holiday shift does not
+ * read as a swing. Sums come straight from the daily ledger.
+ */
+export function revenueKpis(rows: DailyRow[], referenceDate: Date = new Date()): RevenueKpis {
   const ref = new Date(Date.UTC(
     referenceDate.getUTCFullYear(),
     referenceDate.getUTCMonth(),
     referenceDate.getUTCDate(),
   ))
-
-  // Fetch everything from 2 years back (covers YoY for YTD).
-  const fromMonth = `${ref.getUTCFullYear() - 1}-01-01`
-  const toExclusive = isoDate(addDays(ref, 1))
-  const rows = await fetchViewRowsByCompleted({
-    fromCompleted: fromMonth,
-    toCompletedExclusive: toExclusive,
-  })
-
-  const [mtdStart, mtdEnd] = periodRange(ref, "month")
-  const [qtdStart, qtdEnd] = periodRange(ref, "quarter")
-  const [ytdStart, ytdEnd] = periodRange(ref, "year")
+  const byDay = dailyMap(rows)
 
   function sumRange(startIso: string, endIsoExclusive: string): number {
     let total = 0
-    for (const r of rows) {
-      if (r.completed >= startIso && r.completed < endIsoExclusive) {
-        total += Number(r.sub_total ?? 0)
-      }
+    for (const [day, v] of Object.entries(byDay)) {
+      if (day >= startIso && day < endIsoExclusive) total += v
     }
     return total
   }
 
-  function bucket(startIso: string, endIsoExclusive: string): KpiBucket {
-    const cur = sumRange(startIso, endIsoExclusive)
-    const prior = sumRange(shiftYearBack(startIso), shiftYearBack(endIsoExclusive))
+  function bucket(kind: "month" | "quarter" | "year"): KpiBucket {
+    const [start, fullEnd] = periodRange(ref, kind)
+    const throughToday = isoDate(addDays(ref, 1))
+    const revenue = sumRange(start, throughToday)
+    const workdaysElapsed = workdays(start, throughToday)
+    const workdaysTotal = workdays(start, fullEnd)
+    const priorStart = shiftYearBack(start)
+    const priorEnd = shiftYearBack(throughToday)
+    const prior = sumRange(priorStart, priorEnd)
+    const priorFull = sumRange(priorStart, shiftYearBack(fullEnd))
+    const priorWorkdays = workdays(priorStart, priorEnd)
+    const perWorkday = workdaysElapsed > 0 ? revenue / workdaysElapsed : 0
+    const priorPerWorkday = prior > 0 && priorWorkdays > 0 ? prior / priorWorkdays : null
     return {
-      revenue: cur,
+      revenue,
+      workdays_elapsed: workdaysElapsed,
+      workdays_total: workdaysTotal,
+      per_workday: perWorkday,
+      prior_full: priorFull,
       prior_year: prior > 0 ? prior : null,
-      yoy_pct: prior > 0 ? ((cur - prior) / prior) * 100 : null,
+      prior_workdays: priorWorkdays,
+      prior_per_workday: priorPerWorkday,
+      yoy_pct: priorPerWorkday ? ((perWorkday - priorPerWorkday) / priorPerWorkday) * 100 : null,
     }
   }
 
   return {
-    mtd: bucket(mtdStart, mtdEnd),
-    qtd: bucket(qtdStart, qtdEnd),
-    ytd: bucket(ytdStart, ytdEnd),
+    mtd: bucket("month"),
+    qtd: bucket("quarter"),
+    ytd: bucket("year"),
     reference_date: isoDate(ref),
   }
 }
@@ -231,31 +291,13 @@ async function fetchViewRows(opts: {
       .select(
         "wo_number, month, completed, location, tech, department, customer, wo_type, sub_total, total_due, qbo_invoice_id, employee_id",
       )
+      .eq("revenue_class", "Service")
       .gte("month", opts.fromMonth)
       .lt("month", opts.toMonthExclusive)
-      .range(offset, offset + PAGE - 1)
-    if (error) throw new Error(`v_revenue_by_month: ${error.message}`)
-    if (!data || data.length === 0) break
-    all.push(...(data as ViewRow[]))
-    if (data.length < PAGE) break
-    offset += PAGE
-  }
-  return all
-}
-
-async function fetchViewRowsByCompleted(opts: {
-  fromCompleted: string
-  toCompletedExclusive: string
-}): Promise<ViewRow[]> {
-  const sb = createAnon("public")
-  const all: ViewRow[] = []
-  let offset = 0
-  while (true) {
-    const { data, error } = await sb
-      .from("v_revenue_by_month")
-      .select("sub_total, completed, month")
-      .gte("completed", opts.fromCompleted)
-      .lt("completed", opts.toCompletedExclusive)
+      // Paging without an ORDER BY is undefined in PostgREST: pages can
+      // overlap or skip once the view is large (it did after the 2019-2025
+      // history backfill: MTD/QTD read $0). wo_number is the view's key.
+      .order("wo_number")
       .range(offset, offset + PAGE - 1)
     if (error) throw new Error(`v_revenue_by_month: ${error.message}`)
     if (!data || data.length === 0) break
@@ -288,19 +330,13 @@ function periodRange(ref: Date, bucket: "month" | "quarter" | "year"): [string, 
   const y = ref.getUTCFullYear()
   const m = ref.getUTCMonth()
   if (bucket === "month") {
-    const start = new Date(Date.UTC(y, m, 1))
-    const end = addDays(ref, 1)
-    return [isoDate(start), isoDate(end)]
+    return [isoDate(new Date(Date.UTC(y, m, 1))), isoDate(new Date(Date.UTC(y, m + 1, 1)))]
   }
   if (bucket === "quarter") {
     const qMonth = Math.floor(m / 3) * 3
-    const start = new Date(Date.UTC(y, qMonth, 1))
-    const end = addDays(ref, 1)
-    return [isoDate(start), isoDate(end)]
+    return [isoDate(new Date(Date.UTC(y, qMonth, 1))), isoDate(new Date(Date.UTC(y, qMonth + 3, 1)))]
   }
-  const start = new Date(Date.UTC(y, 0, 1))
-  const end = addDays(ref, 1)
-  return [isoDate(start), isoDate(end)]
+  return [`${y}-01-01`, `${y + 1}-01-01`]
 }
 
 function addDays(d: Date, n: number): Date {
@@ -315,20 +351,4 @@ function shiftYearBack(iso: string): string {
 
 function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10)
-}
-
-// ─── Presets used by both the server initial render + the API route ─────
-
-export function defaultDateRange(
-  referenceDate: Date = new Date(),
-): { startMonth: string; endMonth: string } {
-  const ref = new Date(referenceDate)
-  // Last 6 months, inclusive of the current month. endMonth is exclusive so
-  // it points to the first of next month.
-  const endMonth = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() + 1, 1))
-  const startMonth = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() - 5, 1))
-  return {
-    startMonth: isoDate(startMonth),
-    endMonth: isoDate(endMonth),
-  }
 }

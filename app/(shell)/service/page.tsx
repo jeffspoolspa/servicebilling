@@ -1,10 +1,11 @@
 import { ObjectHeader } from "@/components/shell/object-header"
 import { BarChart3 } from "lucide-react"
 import {
-  getRevenueKpis,
-  getRevenueTrend,
+  getServiceDaily,
+  revenueKpis,
+  revenueTrend,
+  dailyMap,
   getRevenueBreakdown,
-  defaultDateRange,
 } from "@/lib/queries/revenue"
 import {
   getMonthlyBonuses,
@@ -13,6 +14,7 @@ import {
 import { RevenueHero } from "@/components/dashboard/revenue-hero"
 import { RevenueTrendChart } from "@/components/dashboard/revenue-trend-chart"
 import { RevenueAnalysis } from "@/components/dashboard/revenue-analysis"
+import { yearRange } from "@/lib/utils/year-range"
 import { MonthlyBonusesCard } from "@/components/dashboard/monthly-bonuses-card"
 
 export const dynamic = "force-dynamic"
@@ -22,36 +24,38 @@ export const dynamic = "force-dynamic"
  *
  *   1. Hero KPIs (MTD / QTD / YTD with YoY)
  *   2. Two-column row:
- *      - Left: one-line revenue trend (total monthly revenue, 12 months)
+ *      - Left: monthly revenue, this year vs last year, Jan..Dec, eased by day
  *      - Right: Monthly Bonuses card (five bonus-eligible techs)
- *   3. Breakdown pivot — full width, with dimension/measure/range toggles.
+ *   3. Breakdown pivot — full width, one calendar year at a time, with
+ *      dimension/measure toggles and a year picker.
  *      Click any cell / row / column to drill into /work-orders.
  */
 export default async function ServicePage() {
-  const range = defaultDateRange()
-  // Trend uses a fixed 12-month window for the dashboard (independent of
-  // the pivot's configurable range).
-  const trendRange = twelveMonthRange()
+  // Trend is the current calendar year, Jan..Dec, with last year overlaid
+  // (independent of the pivot's configurable range).
   const now = new Date()
   const initialBonusMonth = currentMonthIso(now)
 
-  const [kpis, trend, initialBreakdown, initialBonuses] = await Promise.all([
-    getRevenueKpis(now),
-    getRevenueTrend(trendRange),
+  const [ledger, initialBreakdown, initialBonuses] = await Promise.all([
+    getServiceDaily(now.getUTCFullYear()),
     getRevenueBreakdown({
       dimension: "location",
       measure: "revenue",
-      ...range,
+      ...yearRange(now.getUTCFullYear()),
     }),
     getMonthlyBonuses(initialBonusMonth),
   ])
+  // One daily ledger feeds the tiles, the trend, and the hover.
+  const kpis = revenueKpis(ledger, now)
+  const trend = revenueTrend(ledger, now.getUTCFullYear(), now)
+  const daily = dailyMap(ledger)
 
   return (
     <>
       <ObjectHeader
         eyebrow="Service · Live"
         title="Revenue overview"
-        sub="Billable work orders invoiced in QBO, broken out by location, tech, and department. Click any cell to drill into the work orders behind it."
+        sub="Service-class revenue by location and tech. Click any cell to drill into the work orders behind it."
         icon={<BarChart3 className="w-6 h-6" strokeWidth={1.8} />}
       />
 
@@ -59,7 +63,7 @@ export default async function ServicePage() {
         <RevenueHero kpis={kpis} />
 
         <div className="grid grid-cols-2 gap-5">
-          <RevenueTrendChart data={trend} />
+          <RevenueTrendChart data={trend} daily={daily} today={now.toISOString().slice(0, 10)} ytd={kpis.ytd} />
           <MonthlyBonusesCard initial={initialBonuses} />
         </div>
 
@@ -67,24 +71,19 @@ export default async function ServicePage() {
           initialPivot={initialBreakdown}
           initialDimension="location"
           initialMeasure="revenue"
-          initialRange={{ ...range, preset: "6m" }}
+          initialYear={now.getUTCFullYear()}
+          years={selectableYears(now.getUTCFullYear())}
         />
       </div>
     </>
   )
 }
 
-function twelveMonthRange(
-  now: Date = new Date(),
-): { startMonth: string; endMonth: string } {
-  const end = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
-  )
-  const start = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1),
-  )
-  return {
-    startMonth: start.toISOString().slice(0, 10),
-    endMonth: end.toISOString().slice(0, 10),
-  }
+// Work-order history in the revenue view starts in 2019 (the mirror
+// backfill). Newest first for the picker.
+const FIRST_YEAR = 2019
+function selectableYears(current: number): number[] {
+  const out: number[] = []
+  for (let y = current; y >= FIRST_YEAR; y--) out.push(y)
+  return out
 }

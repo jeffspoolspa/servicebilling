@@ -81,6 +81,7 @@ export async function getMonthlyBonuses(
       .gte("month", monthStart)
       .lt("month", monthEndExclusive)
       .eq("included_in_bonus", true)
+      .order("wo_number")
       .range(offset, offset + PAGE - 1)
     if (error) {
       console.error("getMonthlyBonuses fetch error:", error)

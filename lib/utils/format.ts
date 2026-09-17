@@ -53,3 +53,16 @@ export function formatRelative(date: string | Date | null | undefined): string {
   if (days < 30) return `${days}d ago`
   return formatDate(d)
 }
+
+/**
+ * Compact currency for tiles: $78.1k, $405.9k, $1.57M. Two decimals in the
+ * millions, one in the thousands, whole dollars under a thousand.
+ */
+export function formatCompactCurrency(amount: number | null | undefined): string {
+  const n = Number(amount ?? 0)
+  const abs = Math.abs(n)
+  const sign = n < 0 ? "-" : ""
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}k`
+  return `${sign}$${Math.round(abs).toLocaleString("en-US")}`
+}

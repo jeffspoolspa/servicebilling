@@ -227,6 +227,7 @@ export async function getWorkOrderTotals(
     let q = sb
       .from("v_work_orders_browser")
       .select("sub_total", { count: "exact" })
+      .order("wo_number")
       .range(offset, offset + PAGE - 1)
     q = applyFilters(q, filters)
     const { data, error, count: c } = await q

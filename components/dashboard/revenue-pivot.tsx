@@ -9,9 +9,9 @@ import { TECH_OTHER_BUCKET } from "@/lib/queries/revenue"
 
 /**
  * Breakdown pivot — star of the Service Dashboard. This is a controlled
- * component: filter state (dimension / measure / range) lives in the
- * parent <RevenueAnalysis> wrapper so the trend strip below stays in
- * lockstep. The pivot surfaces the controls + the table, but emits
+ * component: filter state (dimension / measure / year) lives in the
+ * parent <RevenueAnalysis> wrapper. Columns are the twelve months of the
+ * chosen year. The pivot surfaces the controls + the table, but emits
  * changes via callbacks.
  *
  * Drilldown paths — every click navigates to /work-orders with filters:
@@ -21,41 +21,29 @@ import { TECH_OTHER_BUCKET } from "@/lib/queries/revenue"
  *   - "Other departments" row (tech view) → ?tech_other=1 (synthetic bucket)
  */
 
-const DATE_PRESETS: Array<{
-  key: "3m" | "6m" | "12m" | "ytd"
-  label: string
-}> = [
-  { key: "3m", label: "Last 3 months" },
-  { key: "6m", label: "Last 6 months" },
-  { key: "12m", label: "Last 12 months" },
-  { key: "ytd", label: "YTD" },
-]
-
-export type Preset = (typeof DATE_PRESETS)[number]["key"]
-
 interface Props {
   result: PivotResult
   dimension: Dimension
   measure: Measure
-  range: { startMonth: string; endMonth: string; preset: Preset }
+  year: number
+  years: number[]                       // selectable, newest first
   pending: boolean
   onDimensionChange: (d: Dimension) => void
   onMeasureChange: (m: Measure) => void
-  /** Parent receives just the new preset; it owns the mapping from
-   *  preset → concrete startMonth/endMonth. Keeps this component
-   *  presentational and avoids an export-soup fast-refresh warning. */
-  onPresetChange: (p: Preset) => void
+  /** Parent owns the mapping from year -> Jan..Dec range. */
+  onYearChange: (y: number) => void
 }
 
 export function RevenuePivot({
   result,
   dimension,
   measure,
-  range,
+  year,
+  years,
   pending,
   onDimensionChange,
   onMeasureChange,
-  onPresetChange,
+  onYearChange,
 }: Props) {
   const router = useRouter()
 
@@ -93,7 +81,6 @@ export function RevenuePivot({
             options={[
               { value: "location", label: "Location" },
               { value: "tech", label: "Tech" },
-              { value: "department", label: "Department" },
             ]}
           />
           <div className="w-px h-4 bg-line-soft mx-1" />
@@ -106,7 +93,15 @@ export function RevenuePivot({
             ]}
           />
           <div className="w-px h-4 bg-line-soft mx-1" />
-          <DateRangePicker value={range.preset} onChange={onPresetChange} />
+          <select
+            value={year}
+            onChange={(e) => onYearChange(Number(e.target.value))}
+            className="bg-bg-elev border border-line rounded-md px-2 py-1 text-[11px] text-ink"
+          >
+            {years.map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
         </div>
       </CardHeader>
 
@@ -117,7 +112,7 @@ export function RevenuePivot({
 
         {result.rows.length === 0 ? (
           <div className="px-5 py-10 text-center text-ink-mute text-sm">
-            No revenue in the selected range.
+            No revenue in {year}.
           </div>
         ) : (
           <table className="w-full text-[12px]">
@@ -238,28 +233,6 @@ function SegmentedControl<T extends string>({
         </button>
       ))}
     </div>
-  )
-}
-
-function DateRangePicker({
-  value,
-  onChange,
-}: {
-  value: Preset
-  onChange: (v: Preset) => void
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as Preset)}
-      className="bg-bg-elev border border-line rounded-md px-2 py-1 text-[11px] text-ink"
-    >
-      {DATE_PRESETS.map((p) => (
-        <option key={p.key} value={p.key}>
-          {p.label}
-        </option>
-      ))}
-    </select>
   )
 }
 
