@@ -22,9 +22,10 @@ import { workdays } from "@/lib/utils/workdays"
  * booked so far. The line enters the chart from the prior December's total
  * at Jan 1 so January is not blank.
  *
- * The HOVER is exact and per day, read from the daily ledger and never from
- * the line: month to date and year to date through the hovered day, for
- * both years, with the percent difference of each.
+ * The HOVER is year to date: each year's cumulative revenue from Jan 1
+ * through the hovered day, summed from the daily ledger by calendar date
+ * (Feb 29 folds into Feb 28), and the percent difference. Nothing is read
+ * off the curve.
  *
  * Fills are exclusive: blue under the lower of the two lines, green for
  * the gap where this year is ahead, red where it is behind. Any vertical
@@ -47,10 +48,8 @@ interface Sample {
   behind: [number, number] | null
   isAnchor: boolean                     // this year has a dot here
   isTick: boolean                       // month label on the axis
-  mtdCurrent: number | null             // exact: month to date through this day
-  mtdPrior: number                      // exact: same month, same day of month, last year
-  cumCurrent: number | null             // exact: year to date through this day
-  cumPrior: number                      // exact: same day last year
+  cumCurrent: number | null             // exact: year to date through this day; null after today
+  cumPrior: number                      // exact: same calendar day last year
 }
 
 export function RevenueTrendChart({ data, daily, today, ytd }: {
@@ -147,18 +146,14 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
               content={({ active, payload }) => {
                 const s = payload?.[0]?.payload as Sample | undefined
                 if (!active || !s) return null
-                const span = monthThrough(s.day)
                 return (
                   <div className="rounded-lg border border-line bg-bg-elev px-3 py-2 text-[11px] shadow-xl min-w-[210px]">
-                    <div className="text-ink font-medium mb-1.5">{dayLabel(s.day)}</div>
-                    <Row swatch={CURRENT} label={`${year} ${span}`} value={s.mtdCurrent} />
-                    <Row swatch={PRIOR} label={`${priorYear} ${span}`} value={s.mtdPrior} />
-                    <Diff label="Month to date" current={s.mtdCurrent} prior={s.mtdPrior} />
-                    <div className="border-t border-line-soft mt-1.5 pt-1.5">
-                      <Row label={`${year} year to date`} value={s.cumCurrent} />
-                      <Row label={`${priorYear} year to date`} value={s.cumPrior} />
-                      <Diff label="Year to date" current={s.cumCurrent} prior={s.cumPrior} />
+                    <div className="text-ink font-medium mb-1.5">
+                      {dayLabel(s.day)} <span className="text-ink-mute font-normal">· year to date</span>
                     </div>
+                    <Row swatch={CURRENT} label={String(year)} value={s.cumCurrent} />
+                    <Row swatch={PRIOR} label={priorYear} value={s.cumPrior} />
+                    <Diff label={`vs ${priorYear}`} current={s.cumCurrent} prior={s.cumPrior} />
                   </div>
                 )
               }}
@@ -226,8 +221,7 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
  * line is smooth and the fills have an edge to follow. It is never shown
  * as a number.
  *
- * Hover values: summed from the daily ledger by calendar date. Last year's
- * day is the same month and day number (Feb 29 folds into Feb 28).
+ * Hover values: year to date, summed from the daily ledger.
  */
 function buildSamples(data: TrendPoint[], daily: Record<string, number>, year: number, today: string): Sample[] {
   const days: string[] = []
@@ -258,14 +252,11 @@ function buildSamples(data: TrendPoint[], daily: Record<string, number>, year: n
   const prior = curve(priAnchors, days.length)
   const dots = new Set(curAnchors.slice(1).map(([x]) => x))
 
-  let mtdC = 0, mtdP = 0, ytdC = 0, ytdP = 0, month = ""
+  let ytdC = 0, ytdP = 0
   return days.map((day, i) => {
-    if (day.slice(0, 7) !== month) { month = day.slice(0, 7); mtdC = 0; mtdP = 0 }
-    const priorDay = `${year - 1}${day.slice(4)}`
-    const p = (daily[priorDay] ?? 0) + (day.slice(5) === "02-28" ? daily[`${year - 1}-02-29`] ?? 0 : 0)
-    const c = daily[day] ?? 0
-    mtdC += c; ytdC += c; mtdP += p; ytdP += p
-    const past = day <= today
+    ytdC += daily[day] ?? 0
+    ytdP += (daily[`${year - 1}${day.slice(4)}`] ?? 0)
+          + (day.slice(5) === "02-28" ? daily[`${year - 1}-02-29`] ?? 0 : 0)
     const lc = current[i], lp = prior[i]
     const both = lc != null && lp != null
     return {
@@ -277,9 +268,7 @@ function buildSamples(data: TrendPoint[], daily: Record<string, number>, year: n
       behind: both ? [Math.min(lc, lp), lp] : null,
       isAnchor: dots.has(i),
       isTick: ticks.has(i),
-      mtdCurrent: past ? mtdC : null,
-      mtdPrior: mtdP,
-      cumCurrent: past ? ytdC : null,
+      cumCurrent: day <= today ? ytdC : null,
       cumPrior: ytdP,
     }
   })
@@ -322,11 +311,11 @@ function curve(pts: Array<[number, number]>, n: number): Array<number | null> {
   return out
 }
 
-function Row({ swatch, label, value }: { swatch?: string; label: string; value: number | null }) {
+function Row({ swatch, label, value }: { swatch: string; label: string; value: number | null }) {
   return (
     <div className="flex items-center justify-between gap-4">
       <span className="flex items-center gap-1.5 text-ink-dim">
-        {swatch && <span className="inline-block w-2.5 h-2.5 rounded-[2px]" style={{ background: swatch }} />}
+        <span className="inline-block w-2.5 h-2.5 rounded-[2px]" style={{ background: swatch }} />
         {label}
       </span>
       <span className="font-mono tabular-nums text-ink">{value == null ? "—" : formatCurrency(value)}</span>
@@ -334,8 +323,8 @@ function Row({ swatch, label, value }: { swatch?: string; label: string; value: 
   )
 }
 
-function Diff({ label, current, prior }: { label: string; current: number | null; prior: number }) {
-  const pct = current != null && prior > 0 ? ((current - prior) / prior) * 100 : null
+function Diff({ label, current, prior }: { label: string; current: number | null; prior: number | null }) {
+  const pct = current != null && prior != null && prior > 0 ? ((current - prior) / prior) * 100 : null
   const tone = pct == null ? "text-ink-mute" : pct >= 0 ? "text-grass" : "text-coral"
   return (
     <div className="flex justify-between gap-4 mt-1">
@@ -362,13 +351,6 @@ function compactCurrency(n: number): string {
 function shortMonth(iso: string): string {
   const d = new Date(iso + "T00:00:00Z")
   return d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })
-}
-
-/** "Sep 1–9" for the hovered day. */
-function monthThrough(iso: string): string {
-  const d = new Date(iso + "T00:00:00Z")
-  const mon = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })
-  return d.getUTCDate() === 1 ? `${mon} 1` : `${mon} 1–${d.getUTCDate()}`
 }
 
 function dayLabel(iso: string): string {
