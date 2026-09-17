@@ -46,6 +46,8 @@ export interface PivotRow {
   key: string
   byMonth: Record<string, number>
   total: number
+  priorByMonth: Record<string, number>  // same row, same months last year (same-day cutoff on the month in progress)
+  priorTotal: number
 }
 
 export interface PivotResult {
@@ -53,6 +55,11 @@ export interface PivotResult {
   rows: PivotRow[]                      // sorted by total desc
   monthTotals: Record<string, number>
   grandTotal: number
+  // Same months one year earlier, keyed by THIS range's month. The month in
+  // progress is cut off at the same day of month last year and months not
+  // reached yet are left out, so every comparison is like for like.
+  priorMonthTotals: Record<string, number>
+  priorGrandTotal: number
 }
 
 /**
@@ -68,8 +75,15 @@ export async function getRevenueBreakdown(opts: {
   measure: Measure
   startMonth: string   // 'YYYY-MM-01'
   endMonth: string     // 'YYYY-MM-01' exclusive
+  today?: Date
 }): Promise<PivotResult> {
-  const rows = await fetchViewRows({ fromMonth: opts.startMonth, toMonthExclusive: opts.endMonth })
+  const [rows, priorRows] = await Promise.all([
+    fetchViewRows({ fromMonth: opts.startMonth, toMonthExclusive: opts.endMonth }),
+    fetchViewRows({ fromMonth: shiftYearBack(opts.startMonth), toMonthExclusive: shiftYearBack(opts.endMonth) }),
+  ])
+  const todayIso = isoDate(opts.today ?? new Date())
+  const thisMonth = todayIso.slice(0, 7)
+  const priorCutoff = shiftYearBack(todayIso)
 
   const months = generateMonths(opts.startMonth, opts.endMonth)
   const rowMap = new Map<string, Record<string, number>>()
@@ -103,6 +117,8 @@ export async function getRevenueBreakdown(opts: {
       key,
       byMonth,
       total: Object.values(byMonth).reduce((a, b) => a + b, 0),
+      priorByMonth: {} as Record<string, number>,
+      priorTotal: 0,
     }))
     .sort((a, b) => {
       // Keep the "Other departments" bucket at the bottom regardless of
@@ -112,7 +128,37 @@ export async function getRevenueBreakdown(opts: {
       return b.total - a.total
     })
 
-  return { months, rows: pivotRows, monthTotals, grandTotal }
+  const priorMonthTotals: Record<string, number> = {}
+  const priorRowMap = new Map<string, Record<string, number>>()
+  let priorGrandTotal = 0
+  for (const r of priorRows) {
+    const month = shiftYearForward(r.month)
+    const ym = month.slice(0, 7)
+    if (ym > thisMonth) continue
+    if (ym === thisMonth && r.completed > priorCutoff) continue
+    let dimKey = dimensionValue(r, opts.dimension)
+    if (!dimKey) continue
+    if (opts.dimension === "tech" && r.department !== "Service") dimKey = TECH_OTHER_BUCKET
+    const val = opts.measure === "revenue" ? Number(r.sub_total ?? 0) : 1
+    priorMonthTotals[month] = (priorMonthTotals[month] ?? 0) + val
+    priorGrandTotal += val
+    if (!priorRowMap.has(dimKey)) priorRowMap.set(dimKey, {})
+    const row = priorRowMap.get(dimKey)!
+    row[month] = (row[month] ?? 0) + val
+  }
+  for (const row of pivotRows) {
+    row.priorByMonth = priorRowMap.get(row.key) ?? {}
+    row.priorTotal = Object.values(row.priorByMonth).reduce((a, b) => a + b, 0)
+  }
+  // A location or tech that billed last year but not yet this year still
+  // deserves its row.
+  for (const [key, byMonth] of priorRowMap) {
+    if (pivotRows.some((r) => r.key === key)) continue
+    pivotRows.push({ key, byMonth: {}, total: 0, priorByMonth: byMonth,
+      priorTotal: Object.values(byMonth).reduce((a, b) => a + b, 0) })
+  }
+
+  return { months, rows: pivotRows, monthTotals, grandTotal, priorMonthTotals, priorGrandTotal }
 }
 
 // ── Daily ledger: the one surface the tiles, trend, hover, and table use ─
@@ -341,6 +387,12 @@ function periodRange(ref: Date, bucket: "month" | "quarter" | "year"): [string, 
 
 function addDays(d: Date, n: number): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + n))
+}
+
+function shiftYearForward(iso: string): string {
+  const d = new Date(iso + "T00:00:00Z")
+  d.setUTCFullYear(d.getUTCFullYear() + 1)
+  return isoDate(d)
 }
 
 function shiftYearBack(iso: string): string {
