@@ -95,6 +95,17 @@ So the match rule is:
    sweep method existed with no caller, so `ion_cust_id` was only ever written as a side effect of
    the visit ingester and a customer stayed unlinked until their first service. See
    [task-record-linkage](../operations/task-record-linkage.md).
+
+   The sweep is **bounded and newest-first** (120/night): a link is pending because the QBO -> ION
+   sync has not run *yet*, which is a claim about recent onboards, so those are attempted first and
+   the tail drains behind them. Deactivated accounts are not swept — nothing is owed to them.
+
+   **A fifth outcome: `failed` (collision).** `uq_customers_ion_cust_id` allows one QBO customer per
+   ION customer, so when a QBO **duplicate** — typically the `(deleted)` twin of a live account —
+   matches the ION customer its sibling already holds, the write is refused. That is a finding, not
+   an outage: two QBO rows are the same person. It is reported per-customer and the sweep continues.
+   Until 2026-08-27 it threw instead, and the exception discarded every customer queued behind it —
+   which is why the nightly sweep linked 32, then 0, while 617 of 620 had never been tried once.
 4. **Manual** — a human sets/corrects it in the UI.
 
 After sources 1–3, ion_cust_id coverage is **8,359 / 8,917 (94%)**. The remaining ~558 are
