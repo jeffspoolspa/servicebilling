@@ -7,6 +7,7 @@ import { createAnon } from "@/lib/supabase/anon"
 import { requireModuleAccess } from "@/lib/auth/access"
 import { PaymentMethodsTable, type PaymentMethodRow } from "./PaymentMethodsTable"
 import { AddCardPanel } from "./AddCardPanel"
+import { RefreshWalletButton } from "./RefreshWalletButton"
 
 export const dynamic = "force-dynamic"
 
@@ -52,13 +53,16 @@ export default async function CustomerPaymentMethodsPage({ params }: PageProps) 
           </p>
         )}
         <p className="text-ink-mute text-sm mb-4">
-          Cards and ACH accounts mirrored from QBO every 4 hours. Deactivating one
+          Cards and ACH accounts mirrored from QBO when a new invoice lands, or on demand with the button below. Deactivating one
           here makes the billing resolver skip it — the next eligible PM (or email)
           is used instead. Existing invoice payment-method assignments refresh
           automatically. QBO is unaffected.
         </p>
         {access.canWrite("service") && customer.qbo_customer_id && (
-          <AddCardPanel customerId={id} vaultUrl={CARD_VAULT_URL} />
+          <>
+            <RefreshWalletButton customerId={id} />
+            <AddCardPanel customerId={id} vaultUrl={CARD_VAULT_URL} />
+          </>
         )}
         <PaymentMethodsTable
           rows={rows}
