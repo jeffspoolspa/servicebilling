@@ -62,7 +62,11 @@ stop pushing — the `source` column makes app-native rows distinguishable.
 ## Reads
 
 - `public.list_active_maintenance_customers()` — SECURITY DEFINER RPC feeding
-  the form's customer picker + mini-card (name, address, phone).
+  the form's customer picker + mini-card (name, address, phone). Returns every
+  customer with an **active task** (any category — not just `recurring`; see
+  `20260806143325_follow_up_customers_all_active_tasks.sql`), one row per
+  customer, so app-created tasks with no ION `service_type` (category
+  `unknown`) still appear.
 - `public.list_customer_follow_ups(customer_id)` — SECURITY DEFINER RPC feeding
   the mini-card open/closed counts and per-customer history modal.
 - `public.list_my_follow_ups()` — SECURITY DEFINER RPC (scoped to the caller's
