@@ -46,7 +46,7 @@ sequenceDiagram
 | Failure | Where | Detected by | Recovery |
 |---|---|---|---|
 | Line items dropped in the ION→QBO push | invoice sync | `subtotal_ok = false` | `needs_review` hold; human re-pushes / fixes in ION+QBO |
-| pre_process `pg_net` trigger dropped | step 2 | invoice stuck `awaiting_pre_processing` | [dispatch_pre_processing](../../scripts/service_billing/dispatch_pre_processing.md) — every 60s |
+| pre_process `pg_net` trigger dropped | step 2 | invoice stuck `awaiting_pre_processing` | [dispatch_pre_processing](../../scripts/service_billing/dispatch_pre_processing.md) — SELF_HEAL on next wake |
 | Intuit timeout / 5xx | step 4 | payment `charge_uncertain` | [reconcile_payments](../../scripts/service_billing/reconcile_payments.md) — every 5 min, polls QBO |
 | QBO webhook never arrives | step 5 reflection | invoice not promoted to `processed` | [cdc_reconciler](../../scripts/service_billing/cdc_reconciler.md) — every 15 min (CDC replay) |
 

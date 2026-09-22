@@ -139,7 +139,7 @@ The QBO invoice processing pipeline. Pulls invoices from QBO, enriches them (mem
 - `pre-process`, `process`, `refresh`, `retry`, `sync`, `sync-all` — pipeline operations
 
 **Windmill scripts** (`f/service_billing/*` — 16 scripts in this repo's domain):
-- `dispatch_pre_processing` — every-60s outbox worker
+- `dispatch_pre_processing` — pre-process drainer, woken per queue-row INSERT (row-level `trg_wake_service_preprocess`); no schedule
 - `pre_process_invoice` — enrich invoice (memo, PM, class)
 - `process_work_order` [retired 2026-07] — dead (0 runs since Mar, no trigger); superseded by `process_invoice`. See [runbooks/service-billing-cleanup.md](runbooks/service-billing-cleanup.md)
 - `process_invoice`, `push_invoice_edits` — push UI edits back to QBO
@@ -166,7 +166,6 @@ The QBO invoice processing pipeline. Pulls invoices from QBO, enriches them (mem
 - `billing.reconciliation_findings` — empty, candidate to drop
 
 **Schedules** (Windmill cron):
-- `dispatch_pre_processing_60s` — every 60s
 - `reconcile_payments_5min` — every 5m
 - `cdc_reconciler_15min` — every 15m
 - `schedule_pull_credits` — every 30m
@@ -780,7 +779,7 @@ Tracked items from [`2026-05-27-database.md`](audits/2026-05-27-database.md). Up
 ## 9. Glossary
 
 - **Indicator/projection pattern** — on `billing.invoices`, several `*_ok` boolean columns (subtotal_ok, credits_ok, payment_method_ok, attempts_ok, enrichment_ok) are maintained by triggers, and a separate projection trigger composes `billing_status` from them. Decouples writes from status logic.
-- **Outbox pattern** — `dispatch_pre_processing` polls a queue every 60s as a backstop for `pg_net` (which is at-most-once and can drop requests under load).
+- **Outbox pattern** — `dispatch_pre_processing` drains `billing.service_preprocess_queue`; woken by a ROW-level insert trigger (never statement-level: the drainer's own zero-row SELF_HEAL insert would re-wake it, the 2026-09-16 runaway). `pg_net` is at-most-once; a lost wake is covered by SELF_HEAL on the next real insert. No schedule.
 - **OCC guard** — Optimistic Concurrency Control. `INSERT...ON CONFLICT DO UPDATE WHERE existing.qbo_last_updated_time < EXCLUDED.qbo_last_updated_time` prevents two concurrent writers from clobbering each other.
 - **CDC reconciler** — Change Data Capture loop. Polls QBO's CDC endpoint every 15min for entities that changed since our last cursor, reconciles drift between cache and QBO.
 - **pg_net** — Supabase extension that lets Postgres fire async HTTP requests from trigger functions. Used for fire-and-forget Windmill webhook calls.
