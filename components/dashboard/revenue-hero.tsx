@@ -3,6 +3,7 @@
 import { Fragment, useState } from "react"
 import { Card, CardBody } from "@/components/ui/card"
 import { formatCompactCurrency } from "@/lib/utils/format"
+import { workdays } from "@/lib/utils/workdays"
 import type { RevenueKpis, KpiBucket, TrendPoint } from "@/lib/queries/revenue"
 
 /**
@@ -22,7 +23,7 @@ export function RevenueHero({ kpis, trend }: { kpis: RevenueKpis; trend: TrendPo
   const year = ref.getUTCFullYear()
 
   return (
-    <section className="grid grid-cols-3 gap-3.5">
+    <section className="grid grid-cols-3 gap-3.5 items-stretch">
       <div className="col-span-2">
         <YearCompare year={year} trend={trend} ytd={kpis.ytd} />
       </div>
@@ -66,9 +67,9 @@ function QuarterDonut({ year, trend, qtd, currentQuarter }: {
   const inner = ring(q.map((x) => x.prior), priTotal, 27, 11)
 
   return (
-    <Card className="relative overflow-hidden">
+    <Card className="relative overflow-hidden h-full">
       <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(400px_120px_at_100%_0%,rgb(56_189_248_/_0.09),transparent_60%)]" />
-      <CardBody>
+      <CardBody className="h-full flex flex-col">
         <div className="flex items-baseline justify-between gap-3 whitespace-nowrap">
           <div className="text-[11px] uppercase tracking-[0.14em] text-ink-mute">
             Quarters <span className="text-ink-mute/60">· {year} vs {year - 1}</span>
@@ -76,8 +77,8 @@ function QuarterDonut({ year, trend, qtd, currentQuarter }: {
           <div className="text-[10px] font-mono text-ink-mute truncate">out {year} · in {year - 1}</div>
         </div>
 
-        <div className="flex items-center gap-4 mt-2">
-          <svg viewBox="0 0 100 100" className="w-[104px] h-[104px] shrink-0" onMouseLeave={() => setHover(null)}>
+        <div className="flex items-center gap-5 mt-2 flex-1">
+          <svg viewBox="0 0 100 100" className="w-[136px] h-[136px] shrink-0" onMouseLeave={() => setHover(null)}>
             <circle cx="50" cy="50" r="40" fill="none" stroke="rgb(255 255 255 / 0.06)" strokeWidth="11" />
             <circle cx="50" cy="50" r="27" fill="none" stroke="rgb(255 255 255 / 0.06)" strokeWidth="11" />
             {inner.map((a) => a.v > 0 && (
@@ -97,7 +98,7 @@ function QuarterDonut({ year, trend, qtd, currentQuarter }: {
           </svg>
 
           <div className="min-w-0 font-mono tabular-nums text-[11px] whitespace-nowrap overflow-hidden">
-            <div className="font-sans num text-[26px] font-semibold tracking-tight text-ink leading-none">
+            <div className="font-sans num text-[28px] font-semibold tracking-tight text-ink leading-none">
               {formatCompactCurrency(g.current)}
             </div>
             <div className="mt-1.5 text-ink-mute">Q{sel + 1} {year}{isCurrent ? " so far" : ""}</div>
@@ -150,6 +151,13 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
   const pace = priorSameDay > 0 ? currentTotal / priorSameDay : 1
   const paceDelta = (pace - 1) * 100
   const daysLeft = ytd.workdays_total - ytd.workdays_elapsed
+  // Per workday: this year so far, last year in full, and what the days left
+  // must average to match last year's total.
+  const workdaysPrior = workdays(`${year - 1}-01-01`, `${year}-01-01`)
+  const perDay = ytd.per_workday
+  const priorPerDay = workdaysPrior > 0 ? ytd.prior_full / workdaysPrior : 0
+  const toGoTotal = ytd.prior_full - ytd.revenue
+  const neededPerDay = daysLeft > 0 ? toGoTotal / daysLeft : null
 
   // Months not yet reached, projected at last year's amount x this year's pace
   // (the month in progress gets its remainder the same way). These draw as
@@ -186,7 +194,16 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
           <div className="text-[11px] uppercase tracking-[0.14em] text-ink-mute">
             Revenue <span className="text-ink-mute/60">· {year} vs {year - 1}</span>
           </div>
-          <div className="text-[11px] font-mono tabular-nums text-ink-mute">{daysLeft} workdays left</div>
+          <div className="text-[11px] font-mono tabular-nums text-ink-mute flex items-baseline gap-3">
+            <span><span className="text-ink">{formatCompactCurrency(perDay)}</span>/day</span>
+            <span>{year - 1} {formatCompactCurrency(priorPerDay)}/day</span>
+            <span>
+              {toGoTotal <= 0 || neededPerDay == null
+                ? <span className="text-grass">{formatCompactCurrency(-toGoTotal)} over</span>
+                : <><span className="text-cyan">{formatCompactCurrency(neededPerDay)}</span>/day needed</>}
+            </span>
+            <span>{daysLeft} left</span>
+          </div>
         </div>
 
         {/* Year-to-date gap where the selected month started and where it ended (or
@@ -205,10 +222,10 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
           const diff = p.current != null && pri > 0 ? cur - pri : null
           const yy = (y: number) => `${label} '${String(y).slice(2)}`
           return (
-            <div className="mt-2.5 flex items-center gap-6 whitespace-nowrap">
+            <div className="mt-4 flex items-center gap-8 whitespace-nowrap">
               {/* the number */}
               <div className="shrink-0">
-                <div className="font-sans num text-[30px] font-semibold tracking-tight text-ink leading-none">
+                <div className="font-sans num text-[40px] font-semibold tracking-tight text-ink leading-none">
                   {p.current == null ? "—" : formatCompactCurrency(cur)}
                 </div>
                 <div className="text-[11px] font-mono mt-1.5 text-ink-dim">
@@ -217,11 +234,11 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
               </div>
 
               {/* the two slices as labeled rows: bar · amount · difference, in columns */}
-              <table className="text-[11px] font-mono tabular-nums border-separate border-spacing-x-3 border-spacing-y-1 -ml-3">
+              <table className="text-[12px] font-mono tabular-nums border-separate border-spacing-x-3 border-spacing-y-1.5 -ml-3">
                 <thead className="text-[10px] uppercase tracking-[0.1em] text-ink-mute/70">
                   <tr>
                     <th className="font-normal text-left"></th>
-                    <th className="font-normal text-left w-[120px]"></th>
+                    <th className="font-normal text-left w-[150px]"></th>
                     <th className="font-normal text-right">revenue</th>
                     <th className="font-normal text-right">$ vs {String(year - 1).slice(2)}</th>
                     <th className="font-normal text-right">% vs {String(year - 1).slice(2)}</th>
@@ -230,14 +247,14 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
                 <tbody>
                   <tr>
                     <td className="text-ink-mute">{yy(year)}</td>
-                    <td><div className="h-3.5 rounded-sm bg-white/[0.06] overflow-hidden"><div className="h-full" style={{ width: `${(cur / mScale) * 100}%`, background: seg(hue, true) }} /></div></td>
+                    <td><div className="h-5 rounded-sm bg-white/[0.06] overflow-hidden"><div className="h-full" style={{ width: `${(cur / mScale) * 100}%`, background: seg(hue, true) }} /></div></td>
                     <td className="text-right text-ink">{p.current == null ? "—" : formatCompactCurrency(cur)}</td>
                     <td className={`text-right ${tone(d)}`}>{diff == null ? "—" : `${diff >= 0 ? "+" : "-"}${formatCompactCurrency(Math.abs(diff))}`}</td>
                     <td className={`text-right ${tone(d)}`}>{pctStr(d)}</td>
                   </tr>
                   <tr>
                     <td className="text-ink-mute">{yy(year - 1)}</td>
-                    <td><div className="h-3.5 rounded-sm bg-white/[0.06] overflow-hidden"><div className="h-full" style={{ width: `${(pri / mScale) * 100}%`, background: seg(hue, false) }} /></div></td>
+                    <td><div className="h-5 rounded-sm bg-white/[0.06] overflow-hidden"><div className="h-full" style={{ width: `${(pri / mScale) * 100}%`, background: seg(hue, false) }} /></div></td>
                     <td className="text-right text-ink-dim">{formatCompactCurrency(pri)}</td>
                     <td></td>
                     <td></td>
@@ -249,7 +266,7 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
           )
         })()}
 
-        <div className="mt-3.5 pt-3 border-t border-line-soft space-y-1.5 text-[11px] font-mono tabular-nums whitespace-nowrap" onMouseLeave={() => setHover(null)}>
+        <div className="mt-5 pt-4 border-t border-line-soft space-y-2.5 text-[11px] font-mono tabular-nums whitespace-nowrap" onMouseLeave={() => setHover(null)}>
           {[
             { row: String(year), values: segments.map((g) => g.current), amount: currentTotal, strong: true },
             { row: String(year - 1), values: segments.map((g) => g.prior), amount: priorTotal, strong: false },
@@ -257,13 +274,13 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
             <Fragment key={r.row}>
               <div className="flex items-center gap-2">
                 <span className="w-10 text-ink-mute">{r.row}</span>
-                <div className="flex-1 h-6 rounded-md bg-white/[0.06] overflow-hidden flex gap-px">
+                <div className="flex-1 h-9 rounded-md bg-white/[0.06] overflow-hidden flex gap-px">
                   {segments.map((g, i) => (
                     <Fragment key={g.label}>
                       {r.values[i] > 0 && (
                         <div
                           onMouseEnter={() => setHover(i)}
-                          className={`h-full flex items-center justify-center text-[10px] leading-none overflow-hidden cursor-default transition-opacity ${sel === i ? "text-[#0A1622] font-medium" : "text-white/70 opacity-60"}`}
+                          className={`h-full flex items-center justify-center text-[11px] leading-none overflow-hidden cursor-default transition-opacity ${sel === i ? "text-[#0A1622] font-medium" : "text-white/70 opacity-60"}`}
                           style={{ width: w(r.values[i]), background: seg(g.hue, sel === i) }}
                           title={`${g.label} ${formatCompactCurrency(r.values[i])}`}
                         >
@@ -292,7 +309,7 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
           ))}
         </div>
         {/* The year, stated once */}
-        <div className="mt-3 pt-2.5 border-t border-line-soft flex items-baseline justify-between gap-3 text-[11px] font-mono tabular-nums whitespace-nowrap">
+        <div className="mt-4 pt-3 border-t border-line-soft flex items-baseline justify-between gap-3 text-[12px] font-mono tabular-nums whitespace-nowrap">
           <span className="text-ink-mute"><span className="text-ink">{formatCompactCurrency(currentTotal)}</span> YTD · {((currentTotal / (priorTotal || 1)) * 100).toFixed(0)}% of {year - 1}</span>
           <span className="text-ink-mute"><span className={tone(paceDelta)}>{pctStr(paceDelta)}</span> · <span className={priorTotal - currentTotal > 0 ? "text-ink" : "text-grass"}>{formatCompactCurrency(Math.abs(priorTotal - currentTotal))} {priorTotal - currentTotal > 0 ? "to go" : "over"}</span></span>
         </div>

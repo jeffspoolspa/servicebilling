@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/chart"
 import { formatCompactCurrency } from "@/lib/utils/format"
 import type { KpiBucket, TrendPoint } from "@/lib/queries/revenue"
-import { workdays } from "@/lib/utils/workdays"
 
 /**
  * Monthly revenue, this year against last year, January to December.
@@ -82,18 +81,9 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
 
   const samples = buildSamples(data, daily, year, today)
 
-  // Header stats: this year per workday, last year per workday, and what
-  // the workdays left must average to match last year's total.
-  const workdaysLeft = ytd.workdays_total - ytd.workdays_elapsed
-  const workdaysPrior = workdays(`${year - 1}-01-01`, `${year}-01-01`)
-  const currentRate = ytd.per_workday
-  const priorFullRate = workdaysPrior > 0 ? ytd.prior_full / workdaysPrior : 0
-  const toGo = ytd.prior_full - ytd.revenue
-  const neededRate = workdaysLeft > 0 ? toGo / workdaysLeft : null
-  const matched = toGo <= 0
 
   return (
-    <Card className="h-full">
+    <Card>
       <div className="flex items-center gap-3 px-5 py-2.5 border-b border-line-soft text-[11px]">
         <span className="uppercase tracking-[0.14em] text-ink-mute font-medium">
           Monthly Revenue
@@ -118,20 +108,9 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
         </div>
       </div>
 
-      {/* per-workday pace, and what the rest of the year must average to match last year */}
-      <div className="px-5 py-1.5 border-b border-line-soft text-[11px] font-mono tabular-nums text-ink-mute whitespace-nowrap flex items-center gap-4">
-        <span><span className="text-ink">{formatCompactCurrency(currentRate)}</span>/day {year}</span>
-        <span>{formatCompactCurrency(priorFullRate)}/day {priorYear}</span>
-        <span className="ml-auto">
-          {matched || neededRate == null
-            ? <span className="text-grass">{formatCompactCurrency(-toGo)} over {priorYear}</span>
-            : <><span className="text-cyan">{formatCompactCurrency(neededRate)}</span>/day needed · {workdaysLeft} left</>}
-        </span>
-      </div>
-
       {view === "bars" && (
         <div className="px-4 pt-4 pb-2">
-          <ChartContainer config={config} className="aspect-auto h-[360px] w-full">
+          <ChartContainer config={config} className="aspect-auto h-[220px] w-full">
             <BarChart accessibilityLayer data={data} margin={{ top: 12, right: 12, left: 0, bottom: 4 }} barGap={2} barCategoryGap="28%">
               <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
               <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={10} fontSize={11} tickFormatter={shortMonth} interval={0} />
@@ -171,7 +150,7 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
       {view === "curve" && (
 
       <div className="px-4 pt-4 pb-2">
-        <ChartContainer config={config} className="aspect-auto h-[360px] w-full">
+        <ChartContainer config={config} className="aspect-auto h-[220px] w-full">
           <ComposedChart
             accessibilityLayer
             data={samples}

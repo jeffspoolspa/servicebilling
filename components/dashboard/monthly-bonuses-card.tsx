@@ -54,7 +54,7 @@ export function MonthlyBonusesCard({ initial }: Props) {
   }, [month, initial.month, refetch])
 
   return (
-    <Card className="flex flex-col h-full min-h-0">
+    <Card className="flex flex-col">
       <div className="flex items-center gap-3 px-5 py-2.5 border-b border-line-soft text-[11px]">
         <span className="uppercase tracking-[0.14em] text-ink-mute font-medium">
           Monthly Bonuses
@@ -95,7 +95,7 @@ export function MonthlyBonusesCard({ initial }: Props) {
 
       <div
         className={
-          "flex-1 min-h-0 overflow-y-auto divide-y divide-line-soft relative" +
+          "divide-y divide-line-soft relative" +
           (pending ? " opacity-60" : "")
         }
       >
