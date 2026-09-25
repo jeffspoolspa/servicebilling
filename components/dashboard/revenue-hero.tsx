@@ -1,3 +1,6 @@
+"use client"
+
+import { useState } from "react"
 import { Card, CardBody } from "@/components/ui/card"
 import { formatCompactCurrency } from "@/lib/utils/format"
 import type { RevenueKpis, KpiBucket, TrendPoint } from "@/lib/queries/revenue"
@@ -17,21 +20,132 @@ import type { RevenueKpis, KpiBucket, TrendPoint } from "@/lib/queries/revenue"
 export function RevenueHero({ kpis, trend }: { kpis: RevenueKpis; trend: TrendPoint[] }) {
   const ref = new Date(kpis.reference_date + "T00:00:00Z")
   const year = ref.getUTCFullYear()
-  const q = Math.floor(ref.getUTCMonth() / 3)
-  const short = (m: number) =>
-    new Date(Date.UTC(year, m, 1)).toLocaleString("en-US", { month: "short", timeZone: "UTC" })
-  const month = short(ref.getUTCMonth())
-  const quarterMonths = `${short(q * 3)}–${short(q * 3 + 2)}`
+  const month = new Date(Date.UTC(year, ref.getUTCMonth(), 1)).toLocaleString("en-US", { month: "short", timeZone: "UTC" })
 
   return (
     <section className="grid grid-cols-3 gap-3.5">
+      <div className="col-span-2">
+        <YearCompare year={year} trend={trend} ytd={kpis.ytd} />
+      </div>
       <Tile label="Month" period={month} thisLabel={month} priorLabel={`${month} '${String(year - 1).slice(2)}`} bucket={kpis.mtd}
         segments={segmentsBy(trend, "month")} highlight={[ref.getUTCMonth()]} />
-      <Tile label="Quarter" period={quarterMonths} thisLabel={`Q${q + 1}`} priorLabel={`Q${q + 1} '${String(year - 1).slice(2)}`} bucket={kpis.qtd}
-        segments={segmentsBy(trend, "quarter")} highlight={[q]} />
-      <Tile label="Year" period={String(year)} thisLabel={String(year)} priorLabel={String(year - 1)} bucket={kpis.ytd}
-        segments={segmentsBy(trend, "quarter")} highlight={[0, 1, 2, 3]} />
     </section>
+  )
+}
+
+/**
+ * The big bar: this year against last year, month by month, one hue per
+ * month shared across both rows. Hover a month to read it; leave it to read
+ * the year. Everything is the daily ledger's monthly totals; the month in
+ * progress compares to last year through the same day.
+ */
+function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; ytd: KpiBucket }) {
+  const [hover, setHover] = useState<number | null>(null)
+  const segments = segmentsBy(trend, "month")
+  const priorTotal = segments.reduce((a, g) => a + g.prior, 0)
+  const currentTotal = segments.reduce((a, g) => a + g.current, 0)
+  const scale = Math.max(priorTotal, currentTotal) || 1
+  const w = (v: number) => `${(v / scale) * 100}%`
+  const wide = (v: number) => v / scale >= 0.05
+
+  const priorSameDay = ytd.prior_year ?? 0
+  const pace = priorSameDay > 0 ? currentTotal / priorSameDay : 1
+  const paceDelta = (pace - 1) * 100
+  const landingPct = pace * 100
+  const daysLeft = ytd.workdays_total - ytd.workdays_elapsed
+
+  // Running totals through each month, both years (partial month through today).
+  let rc = 0, rp = 0
+  const running = trend.map((p) => {
+    rc += p.current ?? 0
+    rp += p.partial ? p.prior_same_days ?? 0 : p.prior ?? 0
+    return { current: rc, prior: rp }
+  })
+
+  const h = hover != null ? trend[hover] : null
+  const hs = hover != null ? segments[hover] : null
+  const hPrior = h ? (h.partial ? h.prior_same_days ?? 0 : h.prior ?? 0) : 0
+  const hDelta = h && h.current != null && hPrior > 0 ? ((h.current - hPrior) / hPrior) * 100 : null
+  const hRun = hover != null ? running[hover] : null
+  const hRunDelta = hRun && hRun.prior > 0 ? ((hRun.current - hRun.prior) / hRun.prior) * 100 : null
+  const tone = (d: number | null) => d == null ? "text-ink-mute" : d >= 0 ? "text-grass" : "text-coral"
+  const pctStr = (d: number | null) => d == null ? "—" : `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`
+  const monthLong = (iso: string) => new Date(iso + "T00:00:00Z").toLocaleString("en-US", { month: "long", timeZone: "UTC" })
+
+  return (
+    <Card className="relative overflow-hidden h-full">
+      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(400px_120px_at_100%_0%,rgb(56_189_248_/_0.09),transparent_60%)]" />
+      <CardBody>
+        <div className="flex items-baseline justify-between gap-3 whitespace-nowrap">
+          <div className="text-[11px] uppercase tracking-[0.14em] text-ink-mute">
+            Year <span className="text-ink-mute/60">· {year} vs {year - 1}</span>
+          </div>
+          <div className="text-[11px] font-mono tabular-nums text-ink-mute">
+            {hs ? "hover to compare · " : ""}{daysLeft} workday{daysLeft === 1 ? "" : "s"} left
+          </div>
+        </div>
+
+        {/* Readout: the hovered month, or the year */}
+        <div className="grid grid-cols-[auto_1fr_auto] items-baseline gap-x-6 mt-2.5 whitespace-nowrap min-h-[52px]">
+          {h && hs ? (
+            <>
+              <div>
+                <div className="font-sans num text-[30px] font-semibold tracking-tight text-ink leading-none">
+                  {formatCompactCurrency(h.current ?? 0)}
+                </div>
+                <div className="text-[11px] font-mono text-ink-mute mt-1">
+                  {monthLong(h.month)} {year}{h.partial ? " so far" : ""}
+                </div>
+              </div>
+              <div className="text-[11px] font-mono tabular-nums">
+                <div><span className="text-ink-mute">{monthLong(h.month)} {year - 1}{h.partial ? " same days" : ""}</span> <span className="text-ink-dim">{formatCompactCurrency(hPrior)}</span> <span className={tone(hDelta)}>{pctStr(hDelta)}</span></div>
+                <div className="mt-1"><span className="text-ink-mute">Year to date through {hs.label}</span> <span className="text-ink-dim">{formatCompactCurrency(hRun?.current ?? 0)}</span> <span className="text-ink-mute">vs {formatCompactCurrency(hRun?.prior ?? 0)}</span> <span className={tone(hRunDelta)}>{pctStr(hRunDelta)}</span></div>
+              </div>
+              <div />
+            </>
+          ) : (
+            <>
+              <div>
+                <div className="font-sans num text-[30px] font-semibold tracking-tight text-ink leading-none">
+                  {formatCompactCurrency(currentTotal)}
+                </div>
+                <div className="text-[11px] font-mono text-ink-mute mt-1">{year} so far</div>
+              </div>
+              <div className="text-[11px] font-mono tabular-nums">
+                <div><span className="text-ink-mute">{year - 1} same day</span> <span className="text-ink-dim">{formatCompactCurrency(priorSameDay)}</span> <span className={tone(paceDelta)}>{pctStr(paceDelta)} pace</span></div>
+                <div className="mt-1"><span className="text-ink-mute">{year - 1} full year</span> <span className="text-ink-dim">{formatCompactCurrency(priorTotal)}</span> <span className="text-ink-mute">· {((currentTotal / (priorTotal || 1)) * 100).toFixed(0)}% booked · lands {landingPct.toFixed(0)}% at this pace</span></div>
+              </div>
+              <div />
+            </>
+          )}
+        </div>
+
+        <div className="mt-3 space-y-1.5 text-[11px] font-mono tabular-nums whitespace-nowrap" onMouseLeave={() => setHover(null)}>
+          {[
+            { row: String(year), values: segments.map((g) => g.current), amount: currentTotal, strong: true },
+            { row: String(year - 1), values: segments.map((g) => g.prior), amount: priorTotal, strong: false },
+          ].map((r) => (
+            <div key={r.row} className="flex items-center gap-2">
+              <span className="w-10 text-ink-mute">{r.row}</span>
+              <div className="flex-1 h-6 rounded-md bg-white/[0.06] overflow-hidden flex gap-px">
+                {segments.map((g, i) => r.values[i] > 0 && (
+                  <div
+                    key={g.label}
+                    onMouseEnter={() => setHover(i)}
+                    className={`h-full flex items-center justify-center text-[10px] leading-none overflow-hidden cursor-default transition-opacity ${hover == null || hover === i ? "" : "opacity-40"} ${hover === i ? "text-[#0A1622] font-medium" : "text-white/70"}`}
+                    style={{ width: w(r.values[i]), background: seg(g.hue, hover === i || hover == null) }}
+                    title={`${g.label} ${formatCompactCurrency(r.values[i])}`}
+                  >
+                    {wide(r.values[i]) ? g.label : ""}
+                  </div>
+                ))}
+              </div>
+              <span className={`w-14 text-right ${r.strong ? "text-ink" : "text-ink-dim"}`}>{formatCompactCurrency(r.amount)}</span>
+            </div>
+          ))}
+        </div>
+      </CardBody>
+    </Card>
   )
 }
 
