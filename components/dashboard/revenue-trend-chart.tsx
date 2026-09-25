@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line, XAxis, YAxis } from "recharts"
+import { Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line, ReferenceLine, XAxis, YAxis } from "recharts"
 import { Card } from "@/components/ui/card"
 import {
   ChartContainer,
@@ -50,7 +50,14 @@ interface Sample {
   isTick: boolean                       // month label on the axis
   cumCurrent: number | null             // exact: year to date through this day; null after today
   cumPrior: number                      // exact: same calendar day last year
+  cumPace: number | null                // from today on: booked + last year's remaining accrual x this year's pace
+  cumAhead: [number, number] | null     // Shapes: the gap where this year's YTD is above last year's
+  cumBehind: [number, number] | null    // Shapes: the gap where it is below
 }
+
+const VIEWS = { curve: "Curve", bars: "Bars", shapes: "Shapes", deviation: "Deviation" } as const
+type View = keyof typeof VIEWS
+const monthIdx = (day: string) => Number(day.slice(5, 7)) - 1
 
 export function RevenueTrendChart({ data, daily, today, ytd }: {
   data: TrendPoint[]
@@ -59,7 +66,8 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
   ytd: KpiBucket
 }) {
   // Hooks first, before any early return, so their order never changes.
-  const [view, setView] = useState<"curve" | "bars">("curve")
+  const [view, setView] = useState<View>("curve")
+  const [hoverMonth, setHoverMonth] = useState<number | null>(null)
   if (data.length === 0) {
     return (
       <Card>
@@ -79,18 +87,32 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
   const monthLong = (iso: string) =>
     new Date(iso + "T00:00:00Z").toLocaleString("en-US", { month: "long", timeZone: "UTC" })
 
-  const samples = buildSamples(data, daily, year, today)
-
   // Bars view: this year beside last year per month. Months not reached (and
   // the rest of the month in progress) are projected at this year's pace:
   // last year's amount x (this year's YTD / last year's YTD through the same day).
   const pace = ytd.prior_year && ytd.prior_year > 0 ? ytd.revenue / ytd.prior_year : 1
+  const samples = buildSamples(data, daily, year, today, pace)
   const barData = data.map((p) => {
     const prior = p.partial ? p.prior_same_days ?? 0 : p.prior ?? 0
     const projected = p.current == null ? (p.prior ?? 0) * pace
       : p.partial ? Math.max(0, ((p.prior ?? 0) - (p.prior_same_days ?? 0)) * pace) : 0
     return { ...p, prior, booked: p.current ?? 0, projected, priorFull: p.prior ?? 0 }
   })
+
+  // Deviation view: each month's gap against last year (the month in progress
+  // through the same day), months not reached at this year's pace, and the
+  // running year-to-date gap as a line.
+  let running = 0
+  const devData = barData.map((p) => {
+    const future = p.current == null
+    const dev = future ? p.priorFull * (pace - 1) : p.booked - p.prior
+    running += dev
+    return { month: p.month, dev, future, partial: p.partial, booked: p.booked, prior: p.prior, projected: p.projected, priorFull: p.priorFull, cum: running }
+  })
+  const months = data.map((p) => p.month)
+  const inMonth = (m: number) => (s: Sample) => monthIdx(s.day) === m
+  const slabOpacity = (m: number, lit: boolean) =>
+    hoverMonth === m ? (lit ? 0.95 : 0.75) : lit ? (m % 2 ? 0.55 : 0.75) : m % 2 ? 0.28 : 0.4
 
 
   return (
@@ -103,7 +125,7 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
           {year} vs {priorYear}
         </span>
         <div className="ml-auto inline-flex rounded-md border border-line bg-bg-elev p-0.5">
-          {(["curve", "bars"] as const).map((v) => (
+          {(Object.keys(VIEWS) as View[]).map((v) => (
             <button
               key={v}
               type="button"
@@ -113,11 +135,138 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
                 (view === v ? "bg-cyan/15 text-cyan" : "text-ink-mute hover:text-ink")
               }
             >
-              {v === "curve" ? "Curve" : "Bars"}
+              {VIEWS[v]}
             </button>
           ))}
         </div>
       </div>
+
+      {view === "shapes" && (
+        // Two shapes: each year's revenue accrued by day, cut into months.
+        // Last year's is the whole year; this year's runs to today, then a
+        // dashed edge at this year's pace. The gap between them is green
+        // where this year is ahead, red where behind. Hover lights a month.
+        <div className="px-4 pt-4 pb-2 flex-1 min-h-0 flex flex-col">
+          <ChartContainer config={config} className="aspect-auto flex-1 min-h-[200px] w-full">
+            <ComposedChart
+              accessibilityLayer
+              data={samples}
+              margin={{ top: 12, right: 12, left: 0, bottom: 4 }}
+              onMouseMove={(st) => setHoverMonth(typeof st.activeLabel === "string" ? monthIdx(st.activeLabel) : null)}
+              onMouseLeave={() => setHoverMonth(null)}
+            >
+              <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
+              <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={10} fontSize={11}
+                ticks={samples.filter((s) => s.isTick).map((s) => s.day)} tickFormatter={shortMonth} interval={0} />
+              <YAxis tickLine={false} axisLine={false} tickMargin={6} width={56} fontSize={11} tickCount={5} tickFormatter={compactCurrency} />
+              <ChartTooltip
+                cursor={{ stroke: "rgb(var(--line))", strokeWidth: 1 }}
+                content={({ active, payload }) => {
+                  const s = payload?.[0]?.payload as Sample | undefined
+                  if (!active || !s) return null
+                  const m = data[monthIdx(s.day)]
+                  const mPrior = m.partial ? m.prior_same_days : m.prior
+                  return (
+                    <div className="rounded-lg border border-line bg-bg-elev px-3 py-2 text-[11px] shadow-xl min-w-[210px]">
+                      <div className="text-ink font-medium mb-1.5">
+                        {dayLabel(s.day)} <span className="text-ink-mute font-normal">· year to date</span>
+                      </div>
+                      <Row swatch={CURRENT} label={String(year)} value={s.cumCurrent ?? s.cumPace} />
+                      <Row swatch={PRIOR} label={priorYear} value={s.cumPrior} />
+                      <Diff label={`vs ${priorYear}`} current={s.cumCurrent} prior={s.cumPrior} />
+                      <div className="text-ink font-medium mt-2 mb-1 pt-1.5 border-t border-line-soft">
+                        {monthLong(m.month)}{m.partial ? <span className="text-ink-mute font-normal"> · through today</span> : null}
+                      </div>
+                      <Row swatch={CURRENT} label={String(year)} value={m.current} />
+                      <Row swatch={PRIOR} label={m.partial ? `${priorYear} same days` : priorYear} value={mPrior} />
+                      <Diff label={`vs ${priorYear}`} current={m.current} prior={mPrior} />
+                    </div>
+                  )
+                }}
+              />
+              <ChartLegend content={<ChartLegendContent />} />
+              {months.map((mo, m) => (
+                <Area key={`p${mo}`} type="linear" dataKey={(s: Sample) => (inMonth(m)(s) ? s.cumPrior : null)}
+                  stroke="none" fill={PRIOR} fillOpacity={slabOpacity(m, false)}
+                  isAnimationActive={false} legendType="none" tooltipType="none" />
+              ))}
+              {months.map((mo, m) => (
+                <Area key={`c${mo}`} type="linear" dataKey={(s: Sample) => (inMonth(m)(s) ? s.cumCurrent : null)}
+                  stroke="none" fill={CURRENT} fillOpacity={slabOpacity(m, true)}
+                  isAnimationActive={false} legendType="none" tooltipType="none" />
+              ))}
+              <Area type="linear" dataKey="cumAhead" stroke="none" fill={AHEAD} fillOpacity={0.4}
+                isAnimationActive={false} legendType="none" tooltipType="none" />
+              <Area type="linear" dataKey="cumBehind" stroke="none" fill={BEHIND} fillOpacity={0.4}
+                isAnimationActive={false} legendType="none" tooltipType="none" />
+              <Line type="linear" dataKey="cumPrior" name="prior" stroke={PRIOR} strokeWidth={2}
+                dot={false} activeDot={false} isAnimationActive={false} />
+              <Line type="linear" dataKey="cumCurrent" name="current" stroke={CURRENT} strokeWidth={2.5}
+                dot={false} activeDot={{ r: 4, fill: CURRENT, stroke: "none" }} isAnimationActive={false} />
+              <Line type="linear" dataKey="cumPace" stroke={CURRENT} strokeWidth={2} strokeDasharray="3 4" strokeOpacity={0.6}
+                dot={false} activeDot={false} isAnimationActive={false} legendType="none" tooltipType="none" />
+            </ComposedChart>
+          </ChartContainer>
+        </div>
+      )}
+
+      {view === "deviation" && (
+        // Deviation: each month's gap against last year as a bar from zero,
+        // months not reached hatched at this year's pace, and the running
+        // year-to-date gap as a line through the months.
+        <div className="px-4 pt-4 pb-2 flex-1 min-h-0 flex flex-col">
+          <ChartContainer config={config} className="aspect-auto flex-1 min-h-[200px] w-full">
+            <ComposedChart accessibilityLayer data={devData} margin={{ top: 12, right: 12, left: 0, bottom: 4 }} barCategoryGap="35%">
+              <defs>
+                <pattern id="devHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                  <rect width="6" height="6" fill={CURRENT} fillOpacity={0.12} />
+                  <rect width="2.5" height="6" fill={CURRENT} fillOpacity={0.7} />
+                </pattern>
+              </defs>
+              <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
+              <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={10} fontSize={11} tickFormatter={shortMonth} interval={0} />
+              <YAxis tickLine={false} axisLine={false} tickMargin={6} width={56} fontSize={11} tickCount={5} tickFormatter={signedCurrency} />
+              <ReferenceLine y={0} stroke="rgb(var(--line))" />
+              <ChartTooltip
+                cursor={{ fill: "rgb(255 255 255 / 0.03)" }}
+                content={({ active, payload }) => {
+                  const p = payload?.[0]?.payload as (typeof devData)[number] | undefined
+                  if (!active || !p) return null
+                  return (
+                    <div className="rounded-lg border border-line bg-bg-elev px-3 py-2 text-[11px] shadow-xl min-w-[210px]">
+                      <div className="text-ink font-medium mb-1.5">
+                        {monthLong(p.month)}{p.partial ? <span className="text-ink-mute font-normal"> · through today</span> : p.future ? <span className="text-ink-mute font-normal"> · at this pace</span> : null}
+                      </div>
+                      <Row swatch={CURRENT} label={String(year)} value={p.future ? p.projected : p.booked} />
+                      <Row swatch={PRIOR} label={p.partial ? `${priorYear} same days` : priorYear} value={p.future ? p.priorFull : p.prior} />
+                      <div className="flex justify-between gap-4 mt-1">
+                        <span className="text-ink-dim">gap</span>
+                        <span className={`font-mono tabular-nums ${p.dev >= 0 ? "text-grass" : "text-coral"}`}>{signedCurrency(p.dev)}</span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-ink-dim">year to date</span>
+                        <span className={`font-mono tabular-nums ${p.cum >= 0 ? "text-grass" : "text-coral"}`}>{signedCurrency(p.cum)}</span>
+                      </div>
+                    </div>
+                  )
+                }}
+              />
+              <Bar dataKey="dev" isAnimationActive={false} radius={3}>
+                {devData.map((p) => (
+                  <Cell key={p.month} fill={p.future ? "url(#devHatch)" : p.dev >= 0 ? AHEAD : BEHIND} fillOpacity={p.future ? 1 : p.partial ? 0.75 : 0.9} />
+                ))}
+              </Bar>
+              <Line type="linear" dataKey="cum" stroke="rgb(var(--ink))" strokeWidth={2} isAnimationActive={false}
+                dot={(props: { cx?: number; cy?: number; index?: number }) => {
+                  const p = props.index != null ? devData[props.index] : undefined
+                  if (!p || props.cx == null || props.cy == null) return <g key={props.index} />
+                  return <circle key={props.index} cx={props.cx} cy={props.cy} r={3.5} fill={p.future ? "rgb(var(--bg-elev))" : "rgb(var(--ink))"} stroke="rgb(var(--ink))" strokeWidth={1.5} />
+                }}
+                activeDot={false} />
+            </ComposedChart>
+          </ChartContainer>
+        </div>
+      )}
 
       {view === "bars" && (
         <div className="px-4 pt-4 pb-2 flex-1 min-h-0 flex flex-col">
@@ -255,7 +404,7 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
  *
  * Hover values: year to date, summed from the daily ledger.
  */
-function buildSamples(data: TrendPoint[], daily: Record<string, number>, year: number, today: string): Sample[] {
+function buildSamples(data: TrendPoint[], daily: Record<string, number>, year: number, today: string, pace: number): Sample[] {
   const days: string[] = []
   const cursor = new Date(Date.UTC(year, 0, 1))
   while (cursor.getUTCFullYear() === year) {
@@ -284,13 +433,15 @@ function buildSamples(data: TrendPoint[], daily: Record<string, number>, year: n
   const prior = curve(priAnchors, days.length)
   const dots = new Set(curAnchors.slice(1).map(([x]) => x))
 
-  let ytdC = 0, ytdP = 0
-  return days.map((day, i) => {
+  let ytdC = 0, ytdP = 0, bookedToday = 0, priorToday = 0
+  const out: Sample[] = days.map((day, i) => {
     ytdC += daily[day] ?? 0
     ytdP += (daily[`${year - 1}${day.slice(4)}`] ?? 0)
           + (day.slice(5) === "02-28" ? daily[`${year - 1}-02-29`] ?? 0 : 0)
+    if (day <= today) { bookedToday = ytdC; priorToday = ytdP }
     const lc = current[i], lp = prior[i]
     const both = lc != null && lp != null
+    const past = day <= today
     return {
       day,
       current: lc,
@@ -300,10 +451,16 @@ function buildSamples(data: TrendPoint[], daily: Record<string, number>, year: n
       behind: both ? [Math.min(lc, lp), lp] : null,
       isAnchor: dots.has(i),
       isTick: ticks.has(i),
-      cumCurrent: day <= today ? ytdC : null,
+      cumCurrent: past ? ytdC : null,
       cumPrior: ytdP,
+      cumPace: null,
+      cumAhead: past ? [ytdP, Math.max(ytdC, ytdP)] : null,
+      cumBehind: past ? [Math.min(ytdC, ytdP), ytdP] : null,
     }
   })
+  // the pace tail: from today, last year's remaining accrual at this year's pace
+  for (const s of out) if (s.day >= today) s.cumPace = bookedToday + (s.cumPrior - priorToday) * pace
+  return out
 }
 
 /**
@@ -378,6 +535,10 @@ function compactCurrency(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `$${Math.round(n / 1_000)}k`
   return `$${n.toFixed(0)}`
+}
+
+function signedCurrency(n: number): string {
+  return n === 0 ? "$0" : `${n < 0 ? "−" : "+"}${compactCurrency(Math.abs(n))}`
 }
 
 function shortMonth(iso: string): string {
