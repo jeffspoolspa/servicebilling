@@ -174,6 +174,8 @@ The QBO invoice processing pipeline. Pulls invoices from QBO, enriches them (mem
 
 **Triggers on billing.invoices** (the indicator/projection pattern):
 - `trg_request_pm_refresh_on_invoice_insert` — fires `pull_customer_payment_methods` on truly-new invoices (atomic-claim dedup)
+- `trg_enqueue_service_preprocess` + `..._via_number` — enqueue pre-process on WO link; the `_via_number` sibling covers links filled by the BEFORE trigger on `invoice_number` (ION ingest path), gated on value change
+- `trg_wake_preprocess_on_inbox_clear` — wakes `dispatch_pre_processing` when a Payment/CreditMemo inbox row finishes and pre-process work is waiting
 - `trg_bootstrap_indicators_on_invoice_insert` — sets initial indicator values
 - `trg_set_subtotal_ok_from_invoice`, `trg_set_payment_method_ok_from_invoice`, `trg_set_credits_ok_from_override` — recompute indicators when source fields change
 - `trg_project_billing_status_on_indicator_change` — composes billing_status from indicators
