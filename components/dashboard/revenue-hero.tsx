@@ -203,8 +203,8 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
                     <th className="font-normal text-left"></th>
                     <th className="font-normal text-left w-[180px]">{p.partial ? "through today" : "month"}</th>
                     <th className="font-normal text-right">revenue</th>
-                    <th className="font-normal text-right">vs {year - 1}</th>
-                    <th className="font-normal text-right"></th>
+                    <th className="font-normal text-right">$ vs {String(year - 1).slice(2)}</th>
+                    <th className="font-normal text-right">% vs {String(year - 1).slice(2)}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -219,7 +219,7 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
                     <td className="text-ink-mute">{yy(year - 1)}</td>
                     <td><div className="h-3.5 rounded-sm bg-white/[0.06] overflow-hidden"><div className="h-full" style={{ width: `${(pri / mScale) * 100}%`, background: seg(hue, false) }} /></div></td>
                     <td className="text-right text-ink-dim">{formatCompactCurrency(pri)}</td>
-                    <td className="text-right text-ink-mute/60">baseline</td>
+                    <td></td>
                     <td></td>
                   </tr>
                 </tbody>
