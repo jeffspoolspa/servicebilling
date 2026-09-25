@@ -83,7 +83,7 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
 
 
   return (
-    <Card>
+    <Card className="h-full flex flex-col">
       <div className="flex items-center gap-3 px-5 py-2.5 border-b border-line-soft text-[11px]">
         <span className="uppercase tracking-[0.14em] text-ink-mute font-medium">
           Monthly Revenue
@@ -109,8 +109,8 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
       </div>
 
       {view === "bars" && (
-        <div className="px-4 pt-4 pb-2">
-          <ChartContainer config={config} className="aspect-auto h-[220px] w-full">
+        <div className="px-4 pt-4 pb-2 flex-1 min-h-0 flex flex-col">
+          <ChartContainer config={config} className="aspect-auto flex-1 min-h-[200px] w-full">
             <BarChart accessibilityLayer data={data} margin={{ top: 12, right: 12, left: 0, bottom: 4 }} barGap={2} barCategoryGap="28%">
               <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
               <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={10} fontSize={11} tickFormatter={shortMonth} interval={0} />
@@ -149,8 +149,8 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
 
       {view === "curve" && (
 
-      <div className="px-4 pt-4 pb-2">
-        <ChartContainer config={config} className="aspect-auto h-[220px] w-full">
+      <div className="px-4 pt-4 pb-2 flex-1 min-h-0 flex flex-col">
+        <ChartContainer config={config} className="aspect-auto flex-1 min-h-[200px] w-full">
           <ComposedChart
             accessibilityLayer
             data={samples}
