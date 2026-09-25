@@ -60,7 +60,7 @@ export default async function ServicePage() {
       />
 
       <div className="px-7 py-6 flex flex-col gap-6">
-        <RevenueHero kpis={kpis} />
+        <RevenueHero kpis={kpis} trend={trend} />
 
         <div className="grid grid-cols-2 gap-5">
           <RevenueTrendChart data={trend} daily={daily} today={now.toISOString().slice(0, 10)} ytd={kpis.ytd} />

@@ -1,6 +1,6 @@
 import { Card, CardBody } from "@/components/ui/card"
 import { formatCompactCurrency } from "@/lib/utils/format"
-import type { RevenueKpis, KpiBucket } from "@/lib/queries/revenue"
+import type { RevenueKpis, KpiBucket, TrendPoint } from "@/lib/queries/revenue"
 
 /**
  * Hero row: month, quarter, year, all in one format. Two horizontal bars on
@@ -14,7 +14,7 @@ import type { RevenueKpis, KpiBucket } from "@/lib/queries/revenue"
  * The label is landing - 100%. No even-calendar assumption, and a weak
  * period is not assumed to recover on its own.
  */
-export function RevenueHero({ kpis }: { kpis: RevenueKpis }) {
+export function RevenueHero({ kpis, trend }: { kpis: RevenueKpis; trend: TrendPoint[] }) {
   const ref = new Date(kpis.reference_date + "T00:00:00Z")
   const year = ref.getUTCFullYear()
   const q = Math.floor(ref.getUTCMonth() / 3)
@@ -25,19 +25,83 @@ export function RevenueHero({ kpis }: { kpis: RevenueKpis }) {
 
   return (
     <section className="grid grid-cols-3 gap-3.5">
-      <Tile label="Month" period={month} thisLabel={month} priorLabel={`${month} '${String(year - 1).slice(2)}`} bucket={kpis.mtd} />
-      <Tile label="Quarter" period={quarterMonths} thisLabel={`Q${q + 1}`} priorLabel={`Q${q + 1} '${String(year - 1).slice(2)}`} bucket={kpis.qtd} />
-      <Tile label="Year" period={String(year)} thisLabel={String(year)} priorLabel={String(year - 1)} bucket={kpis.ytd} />
+      <Tile label="Month" period={month} thisLabel={month} priorLabel={`${month} '${String(year - 1).slice(2)}`} bucket={kpis.mtd}
+        segments={segmentsBy(trend, "month")} highlight={[ref.getUTCMonth()]} />
+      <Tile label="Quarter" period={quarterMonths} thisLabel={`Q${q + 1}`} priorLabel={`Q${q + 1} '${String(year - 1).slice(2)}`} bucket={kpis.qtd}
+        segments={segmentsBy(trend, "quarter")} highlight={[q]} />
+      <Tile label="Year" period={String(year)} thisLabel={String(year)} priorLabel={String(year - 1)} bucket={kpis.ytd}
+        segments={segmentsBy(trend, "quarter")} highlight={[0, 1, 2, 3]} />
     </section>
   )
 }
 
-function Tile({ label, period, thisLabel, priorLabel, bucket }: {
+interface Segment { label: string; current: number; prior: number; hue: number }
+
+// One hue per calendar slot, shared by both years so Sep lines up with Sep.
+// Months walk the color wheel; quarters take every third stop.
+const MONTH_HUE = [200, 225, 250, 280, 310, 340, 10, 30, 50, 80, 120, 160]
+const seg = (hue: number, lit: boolean) =>
+  `hsl(${hue} ${lit ? 65 : 30}% ${lit ? 58 : 42}% / ${lit ? 1 : 0.55})`
+
+/** The year split into months or quarters, both years, from the trend's monthly totals. */
+function segmentsBy(trend: TrendPoint[], by: "month" | "quarter"): Segment[] {
+  if (by === "month") {
+    return trend.map((p, i) => ({
+      label: new Date(p.month + "T00:00:00Z").toLocaleString("en-US", { month: "short", timeZone: "UTC" }),
+      current: p.current ?? 0,
+      prior: p.prior ?? 0,
+      hue: MONTH_HUE[i],
+    }))
+  }
+  return [0, 1, 2, 3].map((qi) => ({
+    label: `Q${qi + 1}`,
+    current: trend.slice(qi * 3, qi * 3 + 3).reduce((a, p) => a + (p.current ?? 0), 0),
+    prior: trend.slice(qi * 3, qi * 3 + 3).reduce((a, p) => a + (p.prior ?? 0), 0),
+    hue: MONTH_HUE[qi * 3 + 1],
+  }))
+}
+
+/** One year as a segmented bar, each slot in its own hue, labeled when wide enough. */
+function YearBar({ rowLabel, values, segments, lit, w, wide, pct, amount, strong }: {
+  rowLabel: string
+  values: number[]
+  segments: Segment[]
+  lit: (i: number) => boolean
+  w: (v: number) => string
+  wide: (v: number) => boolean
+  pct: string
+  amount: string
+  strong?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-12 text-ink-mute truncate">{rowLabel}</span>
+      <div className="flex-1 h-3.5 rounded-md bg-white/[0.06] overflow-hidden flex gap-px">
+        {segments.map((g, i) => values[i] > 0 && (
+          <div
+            key={g.label}
+            className={`h-full flex items-center justify-center text-[9px] leading-none overflow-hidden ${lit(i) ? "text-[#0A1622] font-medium" : "text-white/60"}`}
+            style={{ width: w(values[i]), background: seg(g.hue, lit(i)) }}
+            title={`${g.label} ${formatCompactCurrency(values[i])}`}
+          >
+            {wide(values[i]) ? g.label : ""}
+          </div>
+        ))}
+      </div>
+      <span className={`w-9 text-right ${strong ? "text-ink" : "text-ink-dim"}`}>{pct}</span>
+      <span className="w-14 text-right text-ink-dim">{amount}</span>
+    </div>
+  )
+}
+
+function Tile({ label, period, thisLabel, priorLabel, bucket, segments, highlight }: {
   label: string
   period: string
   thisLabel: string
   priorLabel: string
   bucket: KpiBucket
+  segments: Segment[]                   // the whole year, split
+  highlight: number[]                   // which segments are this tile's period
 }) {
   const prior = bucket.prior_full
   const booked = bucket.revenue
@@ -46,14 +110,20 @@ function Tile({ label, period, thisLabel, priorLabel, bucket }: {
   const pace = hasPrior ? booked / priorSameDay : 1          // this period vs last, same days
   const bookedPct = prior > 0 ? (booked / prior) * 100 : 0     // of last year's period total
   const landingPct = hasPrior ? pace * 100 : bookedPct         // where this pace lands
-  const restPct = Math.max(0, landingPct - bookedPct)
   const projected = hasPrior ? prior * pace : booked
   const delta = hasPrior ? landingPct - 100 : null
   const ahead = (delta ?? 0) >= 0
-  const scale = Math.max(100, landingPct) || 100
-  const w = (pct: number) => `${(pct / scale) * 100}%`
   const daysLeft = bucket.workdays_total - bucket.workdays_elapsed
   const done = daysLeft <= 0
+
+  // Both year bars share one scale: the larger of last year's total and
+  // this year's booked total, so widths are comparable across the two rows.
+  const priorYearTotal = segments.reduce((a, g) => a + g.prior, 0)
+  const currentYearTotal = segments.reduce((a, g) => a + g.current, 0)
+  const scale = Math.max(priorYearTotal, currentYearTotal) || 1
+  const w = (v: number) => `${(v / scale) * 100}%`
+  const lit = (i: number) => highlight.includes(i)
+  const wide = (v: number) => v / scale >= 0.11      // room for a 3-letter label without crowding
 
   return (
     <Card className="relative overflow-hidden">
@@ -82,30 +152,17 @@ function Tile({ label, period, thisLabel, priorLabel, bucket }: {
         </div>
 
         <div className="mt-3 space-y-1.5 text-[11px] font-mono tabular-nums whitespace-nowrap">
-          <div className="flex items-center gap-2">
-            <span className="w-12 text-ink-mute truncate">{thisLabel}</span>
-            <div className="flex-1 h-2.5 rounded-full bg-white/[0.06] overflow-hidden flex">
-              <div className="h-full bg-cyan" style={{ width: w(bookedPct) }}
-                title={`Booked so far: ${bookedPct.toFixed(0)}% of ${priorLabel} (${formatCompactCurrency(booked)})`} />
-              <div className={`h-full ${ahead ? "bg-grass/45" : "bg-coral/45"}`} style={{ width: w(restPct) }}
-                title={`Rest of ${label.toLowerCase()} at this pace: +${restPct.toFixed(0)}%, landing at ${landingPct.toFixed(0)}% (${formatCompactCurrency(projected)})`} />
-            </div>
-            <span className="w-9 text-right text-ink">{bookedPct.toFixed(0)}%</span>
-            <span className="w-14 text-right text-ink-dim">{formatCompactCurrency(booked)}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-12 text-ink-mute truncate">{priorLabel}</span>
-            <div className="flex-1 h-2.5 rounded-full bg-white/[0.06] overflow-hidden">
-              <div className="h-full bg-ink/45" style={{ width: w(100) }} />
-            </div>
-            <span className="w-9 text-right text-ink-dim">100%</span>
-            <span className="w-14 text-right text-ink-dim">{formatCompactCurrency(prior)}</span>
-          </div>
+          <YearBar rowLabel={thisLabel} values={segments.map((g) => g.current)} segments={segments} lit={lit} w={w} wide={wide}
+            pct={`${bookedPct.toFixed(0)}%`} amount={formatCompactCurrency(booked)} strong />
+          <YearBar rowLabel={priorLabel} values={segments.map((g) => g.prior)} segments={segments} lit={lit} w={w} wide={wide}
+            pct="100%" amount={formatCompactCurrency(prior)} />
         </div>
 
-        <div className="mt-2.5 flex items-center gap-3 text-[10px] font-mono text-ink-mute whitespace-nowrap">
-          <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-[2px] bg-cyan" />booked</span>
-          <span className="flex items-center gap-1"><span className={`inline-block w-2 h-2 rounded-[2px] ${ahead ? "bg-grass/45" : "bg-coral/45"}`} />rest of {label.toLowerCase()} at this pace</span>
+        <div className="mt-2.5 flex items-center justify-between gap-3 text-[10px] font-mono text-ink-mute whitespace-nowrap overflow-hidden">
+          <span className="truncate">bright = {thisLabel} · dim = rest of year</span>
+          <span title={`Rest of ${label.toLowerCase()} at this pace lands at ${landingPct.toFixed(0)}% of ${priorLabel} (${formatCompactCurrency(projected)})`}>
+            lands {landingPct.toFixed(0)}%
+          </span>
         </div>
       </CardBody>
     </Card>
