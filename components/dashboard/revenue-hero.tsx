@@ -133,10 +133,12 @@ function YearCompare({ year, trend, ytd, qtd }: { year: number; trend: TrendPoin
                   {segments.map((g, i) => (
                     <Fragment key={g.label}>
                       {r.values[i] > 0 && (
+                        // the hovered month's whole quarter stays lit (it is what the
+                        // quarter block reads); the month itself carries a ring
                         <div
                           onMouseEnter={() => setHover(i)}
-                          className={`h-full flex items-center justify-center text-[11px] leading-none overflow-hidden cursor-default transition-opacity ${sel === i ? "text-[#0A1622] font-medium" : "text-white/70 opacity-60"}`}
-                          style={{ width: w(r.values[i]), background: seg(g.hue, sel === i) }}
+                          className={`h-full flex items-center justify-center text-[11px] leading-none overflow-hidden cursor-default transition-opacity ${Math.floor(i / 3) === qi ? "text-[#0A1622] font-medium" : "text-white/70 opacity-50"} ${sel === i ? "ring-2 ring-inset ring-white/80" : ""}`}
+                          style={{ width: w(r.values[i]), background: seg(g.hue, Math.floor(i / 3) === qi) }}
                           title={`${g.label} ${formatCompactCurrency(r.values[i])}`}
                         >
                           {wide(r.values[i]) ? g.label : ""}
