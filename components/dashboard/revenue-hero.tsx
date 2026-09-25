@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { Fragment, useState } from "react"
 import { Card, CardBody } from "@/components/ui/card"
 import { formatCompactCurrency } from "@/lib/utils/format"
 import type { RevenueKpis, KpiBucket, TrendPoint } from "@/lib/queries/revenue"
@@ -154,6 +154,20 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
   const paceDelta = (pace - 1) * 100
   const daysLeft = ytd.workdays_total - ytd.workdays_elapsed
 
+  const sel = hover ?? current
+  const ytdThrough = (idx: number) => {
+    let c = 0, q = 0
+    for (let i = 0; i <= idx; i++) {
+      c += trend[i].current ?? 0
+      q += trend[i].partial ? trend[i].prior_same_days ?? 0 : trend[i].prior ?? 0
+    }
+    return { c, q }
+  }
+  const g0 = sel > 0 ? ytdThrough(sel - 1) : { c: 0, q: 0 }   // month start
+  const g1 = ytdThrough(sel)                                   // month end / today
+  const gap0 = g0.c - g0.q, gap1 = g1.c - g1.q
+  const gap1Pct = g1.q > 0 ? (gap1 / g1.q) * 100 : null
+  const moved = gap1 - gap0                                    // > 0 = caught up this month
   const tone = (d: number | null) => d == null ? "text-ink-mute" : d >= 0 ? "text-grass" : "text-coral"
   const pctStr = (d: number | null) => d == null ? "—" : `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`
   const monthLong = (iso: string) => new Date(iso + "T00:00:00Z").toLocaleString("en-US", { month: "long", timeZone: "UTC" })
@@ -170,11 +184,12 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
           <div className="text-[11px] font-mono tabular-nums text-ink-mute">hover a month</div>
         </div>
 
+        {/* Year-to-date gap where the selected month started and where it ended (or
+            stands today), on the year scale: the catch-up this month made or lost. */}
         {/* Month tracker: the hovered month, else the month in progress. The two
             short bars are that month's slices lifted out of the year bars below,
             drawn on their own scale so the gap between them is the difference. */}
         {(() => {
-          const sel = hover ?? current
           const p = trend[sel]
           const cur = p.current ?? 0
           const pri = p.partial ? p.prior_same_days ?? 0 : p.prior ?? 0
@@ -224,6 +239,7 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
                   </tr>
                 </tbody>
               </table>
+
             </div>
           )
         })()}
@@ -232,24 +248,42 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
           {[
             { row: String(year), values: segments.map((g) => g.current), amount: currentTotal, strong: true },
             { row: String(year - 1), values: segments.map((g) => g.prior), amount: priorTotal, strong: false },
-          ].map((r) => (
-            <div key={r.row} className="flex items-center gap-2">
-              <span className="w-10 text-ink-mute">{r.row}</span>
-              <div className="flex-1 h-6 rounded-md bg-white/[0.06] overflow-hidden flex gap-px">
-                {segments.map((g, i) => r.values[i] > 0 && (
-                  <div
-                    key={g.label}
-                    onMouseEnter={() => setHover(i)}
-                    className={`h-full flex items-center justify-center text-[10px] leading-none overflow-hidden cursor-default transition-opacity ${(hover ?? current) === i ? "text-[#0A1622] font-medium" : "text-white/70 opacity-60"}`}
-                    style={{ width: w(r.values[i]), background: seg(g.hue, (hover ?? current) === i) }}
-                    title={`${g.label} ${formatCompactCurrency(r.values[i])}`}
-                  >
-                    {wide(r.values[i]) ? g.label : ""}
-                  </div>
-                ))}
+          ].map((r, ri) => (
+            <Fragment key={r.row}>
+              <div className="flex items-center gap-2">
+                <span className="w-10 text-ink-mute">{r.row}</span>
+                <div className="flex-1 h-6 rounded-md bg-white/[0.06] overflow-hidden flex gap-px">
+                  {segments.map((g, i) => r.values[i] > 0 && (
+                    <div
+                      key={g.label}
+                      onMouseEnter={() => setHover(i)}
+                      className={`h-full flex items-center justify-center text-[10px] leading-none overflow-hidden cursor-default transition-opacity ${sel === i ? "text-[#0A1622] font-medium" : "text-white/70 opacity-60"}`}
+                      style={{ width: w(r.values[i]), background: seg(g.hue, sel === i) }}
+                      title={`${g.label} ${formatCompactCurrency(r.values[i])}`}
+                    >
+                      {wide(r.values[i]) ? g.label : ""}
+                    </div>
+                  ))}
+                </div>
+                <span className={`w-14 text-right ${r.strong ? "text-ink" : "text-ink-dim"}`}>{formatCompactCurrency(r.amount)}</span>
               </div>
-              <span className={`w-14 text-right ${r.strong ? "text-ink" : "text-ink-dim"}`}>{formatCompactCurrency(r.amount)}</span>
-            </div>
+              {ri === 0 && (
+                // The YTD gap, on the same scale, between the two bars: hollow = where
+                // the month started, filled = where it stands after the month.
+                <div className="flex items-center gap-2">
+                  <span className="w-10 text-[10px] text-ink-mute/70">gap</span>
+                  <div className="flex-1 h-2 relative" title={`YTD gap vs ${year - 1}: ${formatCompactCurrency(gap0)} at the start of ${segments[sel].label}, ${formatCompactCurrency(gap1)} after`}>
+                    <div className="absolute inset-y-0 rounded-sm border border-ink/40"
+                      style={{ left: w(Math.min(g0.c, g0.q)), width: w(Math.abs(gap0)) }} />
+                    <div className={`absolute inset-y-0 rounded-sm ${gap1 >= 0 ? "bg-grass/70" : "bg-coral/70"}`}
+                      style={{ left: w(Math.min(g1.c, g1.q)), width: w(Math.abs(gap1)) }} />
+                  </div>
+                  <span className={`w-14 text-right text-[10px] ${tone(gap1)}`}>
+                    {gap1Pct == null ? "—" : `${gap1 >= 0 ? "+" : ""}${formatCompactCurrency(gap1)}`}
+                  </span>
+                </div>
+              )}
+            </Fragment>
           ))}
         </div>
         {/* The year, stated once */}
