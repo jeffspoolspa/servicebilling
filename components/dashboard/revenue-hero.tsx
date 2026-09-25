@@ -182,38 +182,59 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
           const d = pri > 0 && p.current != null ? ((cur - pri) / pri) * 100 : null
           const hue = segments[sel].hue
           const label = segments[sel].label
+          const diff = p.current != null && pri > 0 ? cur - pri : null
           return (
-            <div className="mt-2.5 grid grid-cols-[auto_1fr] items-center gap-x-6 whitespace-nowrap">
+            <div className="mt-2.5 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-6 whitespace-nowrap">
+              {/* the number */}
               <div>
                 <div className="font-sans num text-[30px] font-semibold tracking-tight text-ink leading-none">
                   {p.current == null ? "—" : formatCompactCurrency(cur)}
                 </div>
-                <div className="text-[11px] font-mono mt-1.5">
-                  <span className="text-ink-dim">{monthLong(p.month)} {year}{p.partial ? " so far" : ""}</span>
-                  {" "}<span className={tone(d)}>{pctStr(d)}</span>
-                  {p.current != null && pri > 0 && (
-                    <span className={tone(d)}> {cur - pri >= 0 ? "+" : "-"}{formatCompactCurrency(Math.abs(cur - pri))}</span>
-                  )}
-                  <span className="text-ink-mute"> vs {year - 1}</span>
+                <div className="text-[11px] font-mono mt-1.5 text-ink-dim">
+                  {monthLong(p.month)} {year}{p.partial ? " so far" : ""}
                 </div>
               </div>
-              <div className="min-w-0 max-w-[300px] text-[11px] font-mono tabular-nums">
-                <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1">
-                  <span className="text-ink-mute w-16">{label} {String(year).slice(2)}{p.partial ? "*" : ""}</span>
+
+              {/* the two slices, side by side, own scale */}
+              <div className="min-w-0 max-w-[260px] text-[11px] font-mono tabular-nums">
+                <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1">
+                  <span className="text-ink-mute w-12">{label} {String(year).slice(2)}</span>
                   <div className="h-3.5 rounded-sm bg-white/[0.06] overflow-hidden">
                     <div className="h-full" style={{ width: `${(cur / mScale) * 100}%`, background: seg(hue, true) }} />
                   </div>
-                  <span className="text-ink w-14 text-right">{p.current == null ? "—" : formatCompactCurrency(cur)}</span>
-                  <span className="text-ink-mute w-16">{label} {String(year - 1).slice(2)}{p.partial ? "*" : ""}</span>
+                  <span className="text-ink-mute w-12">{label} {String(year - 1).slice(2)}</span>
                   <div className="h-3.5 rounded-sm bg-white/[0.06] overflow-hidden">
                     <div className="h-full" style={{ width: `${(pri / mScale) * 100}%`, background: seg(hue, false) }} />
                   </div>
-                  <span className="text-ink-dim w-14 text-right">{formatCompactCurrency(pri)}</span>
                 </div>
-                <div className="mt-1 text-[10px] text-ink-mute">
-                  {label} slices from the bars below, own scale{p.partial ? " · * through today" : ""}
+                <div className="mt-1 text-[10px] text-ink-mute truncate">
+                  {label} slices from the bars below, own scale{p.partial ? " · through today, same days" : ""}
                 </div>
               </div>
+
+              {/* the comparison, as a table */}
+              <table className="text-[11px] font-mono tabular-nums">
+                <tbody>
+                  <tr>
+                    <td className="pr-4 text-ink-mute">{year}</td>
+                    <td className="text-right text-ink">{p.current == null ? "—" : formatCompactCurrency(cur)}</td>
+                  </tr>
+                  <tr>
+                    <td className="pr-4 text-ink-mute">{year - 1}</td>
+                    <td className="text-right text-ink-dim">{formatCompactCurrency(pri)}</td>
+                  </tr>
+                  <tr className="border-t border-line-soft">
+                    <td className="pr-4 pt-1 text-ink-mute">Difference</td>
+                    <td className={`pt-1 text-right ${tone(d)}`}>
+                      {diff == null ? "—" : `${diff >= 0 ? "+" : "-"}${formatCompactCurrency(Math.abs(diff))}`}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="pr-4 text-ink-mute"></td>
+                    <td className={`text-right ${tone(d)}`}>{pctStr(d)}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           )
         })()}
