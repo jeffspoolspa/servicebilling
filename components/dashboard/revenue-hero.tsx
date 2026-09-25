@@ -22,7 +22,7 @@ export function RevenueHero({ kpis, trend }: { kpis: RevenueKpis; trend: TrendPo
   const ref = new Date(kpis.reference_date + "T00:00:00Z")
   return (
     <section className="grid grid-cols-3 gap-3.5 items-stretch auto-rows-[minmax(300px,auto)]">
-      <YearCompare year={ref.getUTCFullYear()} trend={trend} ytd={kpis.ytd} />
+      <YearCompare year={ref.getUTCFullYear()} trend={trend} ytd={kpis.ytd} qtd={kpis.qtd} />
     </section>
   )
 }
@@ -36,7 +36,7 @@ export function RevenueHero({ kpis, trend }: { kpis: RevenueKpis; trend: TrendPo
  * ledger's monthly totals; the month in progress compares to last year
  * through the same day.
  */
-function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; ytd: KpiBucket }) {
+function YearCompare({ year, trend, ytd, qtd }: { year: number; trend: TrendPoint[]; ytd: KpiBucket; qtd: KpiBucket }) {
   const [hover, setHover] = useState<number | null>(null)
   const current = trend.findIndex((p) => p.partial) >= 0 ? trend.findIndex((p) => p.partial) : Math.max(0, trend.filter((p) => p.current != null).length - 1)
   const segments = segmentsBy(trend, "month")
@@ -82,6 +82,22 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
   const label = segments[sel].label
   const diff = p.current != null && pri > 0 ? cur - pri : null
   const yy = (y: number) => `${label} '${String(y).slice(2)}`
+
+  // The quarter holding the selected month. The quarter in progress compares
+  // to last year through the same day (the QTD bucket); a finished quarter
+  // compares whole to whole.
+  const qi = Math.floor(sel / 3)
+  const quarters = segmentsBy(trend, "quarter")
+  const qCurrentQuarter = Math.floor(current / 3)
+  const qPartial = qi === qCurrentQuarter && p.partial
+  const qCur = quarters[qi].current
+  const qPri = qPartial ? qtd.prior_year ?? 0 : quarters[qi].prior
+  const qScale = Math.max(qCur, qPri) || 1
+  const qD = qPri > 0 && qCur > 0 ? ((qCur - qPri) / qPri) * 100 : null
+  const qDiff = qPri > 0 && qCur > 0 ? qCur - qPri : null
+  const qHue = quarters[qi].hue
+  const qLabel = `Q${qi + 1}`
+  const qyy = (y: number) => `${qLabel} '${String(y).slice(2)}`
   const glow = "absolute inset-0 pointer-events-none bg-[radial-gradient(400px_120px_at_100%_0%,rgb(56_189_248_/_0.09),transparent_60%)]"
 
   return (
@@ -154,35 +170,78 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
         </CardBody>
       </Card>
 
-      {/* ── The month ────────────────────────────────────────────────── */}
+      {/* ── The month, then its quarter: number left, the two slices beside it ── */}
       <Card className="relative overflow-hidden">
         <div className={glow} />
-        <CardBody className="h-full flex flex-col">
-          <div className="text-[11px] uppercase tracking-[0.14em] text-ink-mute whitespace-nowrap">
-            Month <span className="text-ink-mute/60">· {monthLong(p.month)}{p.partial ? " so far" : ""}</span>
-          </div>
-
-          <div className="font-sans num text-[40px] font-semibold tracking-tight text-ink leading-none mt-3">
-            {p.current == null ? "—" : formatCompactCurrency(cur)}
-          </div>
-          <div className="mt-1.5 text-[12px] font-mono tabular-nums whitespace-nowrap">
-            <span className={tone(d)}>{diff == null ? "—" : `${diff >= 0 ? "+" : "-"}${formatCompactCurrency(Math.abs(diff))}`}</span>
-            <span className={`ml-2 ${tone(d)}`}>{pctStr(d)}</span>
-            <span className="text-ink-mute"> vs {year - 1}</span>
-          </div>
-
-          {/* the two slices lifted out of the year bars, on their own scale */}
-          <div className="mt-auto pt-4 grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-2 text-[12px] font-mono tabular-nums whitespace-nowrap">
-            <span className="text-ink-mute">{yy(year)}</span>
-            <div className="h-5 rounded-sm bg-white/[0.06] overflow-hidden"><div className="h-full" style={{ width: `${(cur / mScale) * 100}%`, background: seg(hue, true) }} /></div>
-            <span className="text-right text-ink w-16">{p.current == null ? "—" : formatCompactCurrency(cur)}</span>
-            <span className="text-ink-mute">{yy(year - 1)}</span>
-            <div className="h-5 rounded-sm bg-white/[0.06] overflow-hidden"><div className="h-full" style={{ width: `${(pri / mScale) * 100}%`, background: seg(hue, false) }} /></div>
-            <span className="text-right text-ink-dim w-16">{formatCompactCurrency(pri)}</span>
-          </div>
+        <CardBody className="h-full flex flex-col justify-between gap-4">
+          <Block
+            title="Month" sub={`${monthLong(p.month)}${p.partial ? " so far" : ""}`}
+            value={p.current == null ? "—" : formatCompactCurrency(cur)}
+            diff={diff} pct={d} priorYear={year - 1}
+            rows={[
+              { label: yy(year), v: cur, lit: true, amount: p.current == null ? "—" : formatCompactCurrency(cur), strong: true },
+              { label: yy(year - 1), v: pri, lit: false, amount: formatCompactCurrency(pri), strong: false },
+            ]}
+            scale={mScale} hue={hue} tone={tone} pctStr={pctStr}
+          />
+          <div className="border-t border-line-soft" />
+          <Block
+            title="Quarter" sub={`${qLabel}${qPartial ? " so far" : ""}`}
+            value={qCur > 0 ? formatCompactCurrency(qCur) : "—"}
+            diff={qDiff} pct={qD} priorYear={year - 1}
+            rows={[
+              { label: qyy(year), v: qCur, lit: true, amount: qCur > 0 ? formatCompactCurrency(qCur) : "—", strong: true },
+              { label: qyy(year - 1), v: qPri, lit: false, amount: formatCompactCurrency(qPri), strong: false },
+            ]}
+            scale={qScale} hue={qHue} tone={tone} pctStr={pctStr}
+          />
         </CardBody>
       </Card>
     </>
+  )
+}
+
+/** A period block: title, the number with its difference on the left, the two slices beside it. */
+function Block({ title, sub, value, diff, pct, priorYear, rows, scale, hue, tone, pctStr }: {
+  title: string
+  sub: string
+  value: string
+  diff: number | null
+  pct: number | null
+  priorYear: number
+  rows: Array<{ label: string; v: number; lit: boolean; amount: string; strong: boolean }>
+  scale: number
+  hue: number
+  tone: (d: number | null) => string
+  pctStr: (d: number | null) => string
+}) {
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-[0.14em] text-ink-mute whitespace-nowrap">
+        {title} <span className="text-ink-mute/60">· {sub}</span>
+      </div>
+      <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4">
+        <div>
+          <div className="font-sans num text-[26px] font-semibold tracking-tight text-ink leading-none">{value}</div>
+          <div className="mt-1.5 text-[11px] font-mono tabular-nums whitespace-nowrap">
+            <span className={tone(pct)}>{diff == null ? "—" : `${diff >= 0 ? "+" : "-"}${formatCompactCurrency(Math.abs(diff))}`}</span>
+            <span className={`ml-2 ${tone(pct)}`}>{pctStr(pct)}</span>
+            <span className="text-ink-mute"> vs {priorYear}</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1.5 text-[11px] font-mono tabular-nums whitespace-nowrap">
+          {rows.map((r) => (
+            <Fragment key={r.label}>
+              <span className="text-ink-mute">{r.label}</span>
+              <div className="h-4 rounded-sm bg-white/[0.06] overflow-hidden">
+                <div className="h-full" style={{ width: `${(r.v / scale) * 100}%`, background: seg(hue, r.lit) }} />
+              </div>
+              <span className={`text-right w-14 ${r.strong ? "text-ink" : "text-ink-dim"}`}>{r.amount}</span>
+            </Fragment>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
 
