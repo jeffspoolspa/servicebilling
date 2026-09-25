@@ -1,6 +1,7 @@
 "use client"
 
-import { Area, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "recharts"
+import { useState } from "react"
+import { Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line, XAxis, YAxis } from "recharts"
 import { Card } from "@/components/ui/card"
 import {
   ChartContainer,
@@ -74,8 +75,11 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
     current: { label: String(year), color: CURRENT },
     prior: { label: priorYear, color: PRIOR },
   }
+  const monthLong = (iso: string) =>
+    new Date(iso + "T00:00:00Z").toLocaleString("en-US", { month: "long", timeZone: "UTC" })
 
   const samples = buildSamples(data, daily, year, today)
+  const [view, setView] = useState<"curve" | "bars">("curve")
 
 
   // Totals table: this year so far, last year in full, and what it takes
@@ -100,7 +104,63 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
         <span className="text-ink-dim">
           {year} vs {priorYear}
         </span>
+        <div className="ml-auto inline-flex rounded-md border border-line bg-bg-elev p-0.5">
+          {(["curve", "bars"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              className={
+                "px-2.5 py-1 text-[11px] rounded transition-colors " +
+                (view === v ? "bg-cyan/15 text-cyan" : "text-ink-mute hover:text-ink")
+              }
+            >
+              {v === "curve" ? "Curve" : "Bars"}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {view === "bars" && (
+        <div className="px-4 pt-4 pb-2">
+          <ChartContainer config={config} className="aspect-auto h-[260px] w-full">
+            <BarChart accessibilityLayer data={data} margin={{ top: 12, right: 12, left: 0, bottom: 4 }} barGap={2} barCategoryGap="28%">
+              <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
+              <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={10} fontSize={11} tickFormatter={shortMonth} interval={0} />
+              <YAxis tickLine={false} axisLine={false} tickMargin={6} width={56} fontSize={11} tickCount={5} tickFormatter={compactCurrency} />
+              <ChartTooltip
+                cursor={{ fill: "rgb(255 255 255 / 0.03)" }}
+                content={({ active, payload }) => {
+                  const p = payload?.[0]?.payload as TrendPoint | undefined
+                  if (!active || !p) return null
+                  const prior = p.partial ? p.prior_same_days ?? 0 : p.prior ?? 0
+                  return (
+                    <div className="rounded-lg border border-line bg-bg-elev px-3 py-2 text-[11px] shadow-xl min-w-[200px]">
+                      <div className="text-ink font-medium mb-1.5">
+                        {monthLong(p.month)}{p.partial ? <span className="text-ink-mute font-normal"> · through today</span> : null}
+                      </div>
+                      <Row swatch={CURRENT} label={String(year)} value={p.current} />
+                      <Row swatch={PRIOR} label={p.partial ? `${priorYear} same days` : priorYear} value={prior} />
+                      <Diff label={`vs ${priorYear}`} current={p.current} prior={prior} />
+                    </div>
+                  )
+                }}
+              />
+              <ChartLegend content={<ChartLegendContent />} />
+              <Bar dataKey="prior" name="prior" fill={PRIOR} fillOpacity={0.55} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+              <Bar dataKey="current" name="current" radius={[3, 3, 0, 0]} isAnimationActive={false}>
+                {data.map((p) => {
+                  const prior = p.partial ? p.prior_same_days ?? 0 : p.prior ?? 0
+                  const tone = p.current == null ? "transparent" : prior > 0 && p.current < prior ? BEHIND : prior > 0 ? AHEAD : CURRENT
+                  return <Cell key={p.month} fill={tone} fillOpacity={p.partial ? 0.6 : 0.9} />
+                })}
+              </Bar>
+            </BarChart>
+          </ChartContainer>
+        </div>
+      )}
+
+      {view === "curve" && (
 
       <div className="px-4 pt-4 pb-2">
         <ChartContainer config={config} className="aspect-auto h-[260px] w-full">
@@ -171,6 +231,7 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
           </ComposedChart>
         </ChartContainer>
       </div>
+      )}
 
       <table className="w-full text-[11px] border-t border-line-soft">
         <thead>
