@@ -81,6 +81,17 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
 
   const samples = buildSamples(data, daily, year, today)
 
+  // Bars view: this year beside last year per month. Months not reached (and
+  // the rest of the month in progress) are projected at this year's pace:
+  // last year's amount x (this year's YTD / last year's YTD through the same day).
+  const pace = ytd.prior_year && ytd.prior_year > 0 ? ytd.revenue / ytd.prior_year : 1
+  const barData = data.map((p) => {
+    const prior = p.partial ? p.prior_same_days ?? 0 : p.prior ?? 0
+    const projected = p.current == null ? (p.prior ?? 0) * pace
+      : p.partial ? Math.max(0, ((p.prior ?? 0) - (p.prior_same_days ?? 0)) * pace) : 0
+    return { ...p, prior, booked: p.current ?? 0, projected, priorFull: p.prior ?? 0 }
+  })
+
 
   return (
     <Card className="h-full flex flex-col">
@@ -111,37 +122,44 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
       {view === "bars" && (
         <div className="px-4 pt-4 pb-2 flex-1 min-h-0 flex flex-col">
           <ChartContainer config={config} className="aspect-auto flex-1 min-h-[200px] w-full">
-            <BarChart accessibilityLayer data={data} margin={{ top: 12, right: 12, left: 0, bottom: 4 }} barGap={2} barCategoryGap="28%">
+            <BarChart accessibilityLayer data={barData} margin={{ top: 12, right: 12, left: 0, bottom: 4 }} barGap={3} barCategoryGap="30%">
+              <defs>
+                <pattern id="barHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                  <rect width="6" height="6" fill={CURRENT} fillOpacity={0.12} />
+                  <rect width="2.5" height="6" fill={CURRENT} fillOpacity={0.7} />
+                </pattern>
+              </defs>
               <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
               <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={10} fontSize={11} tickFormatter={shortMonth} interval={0} />
               <YAxis tickLine={false} axisLine={false} tickMargin={6} width={56} fontSize={11} tickCount={5} tickFormatter={compactCurrency} />
               <ChartTooltip
                 cursor={{ fill: "rgb(255 255 255 / 0.03)" }}
                 content={({ active, payload }) => {
-                  const p = payload?.[0]?.payload as TrendPoint | undefined
+                  const p = payload?.[0]?.payload as (typeof barData)[number] | undefined
                   if (!active || !p) return null
-                  const prior = p.partial ? p.prior_same_days ?? 0 : p.prior ?? 0
+                  const future = p.current == null
                   return (
-                    <div className="rounded-lg border border-line bg-bg-elev px-3 py-2 text-[11px] shadow-xl min-w-[200px]">
+                    <div className="rounded-lg border border-line bg-bg-elev px-3 py-2 text-[11px] shadow-xl min-w-[210px]">
                       <div className="text-ink font-medium mb-1.5">
-                        {monthLong(p.month)}{p.partial ? <span className="text-ink-mute font-normal"> · through today</span> : null}
+                        {monthLong(p.month)}{p.partial ? <span className="text-ink-mute font-normal"> · through today</span> : future ? <span className="text-ink-mute font-normal"> · at this pace</span> : null}
                       </div>
-                      <Row swatch={CURRENT} label={String(year)} value={p.current} />
-                      <Row swatch={PRIOR} label={p.partial ? `${priorYear} same days` : priorYear} value={prior} />
-                      <Diff label={`vs ${priorYear}`} current={p.current} prior={prior} />
+                      <Row swatch={CURRENT} label={String(year)} value={future ? p.projected : p.booked} />
+                      {p.partial && p.projected > 0 && <Row swatch={CURRENT} label="rest of month at pace" value={p.projected} />}
+                      <Row swatch={PRIOR} label={p.partial ? `${priorYear} same days` : priorYear} value={future ? p.priorFull : p.prior} />
+                      <Diff label={`vs ${priorYear}`} current={future ? p.projected : p.booked} prior={future ? p.priorFull : p.prior} />
                     </div>
                   )
                 }}
               />
               <ChartLegend content={<ChartLegendContent />} />
-              <Bar dataKey="prior" name="prior" fill={PRIOR} fillOpacity={0.55} radius={[3, 3, 0, 0]} isAnimationActive={false} />
-              <Bar dataKey="current" name="current" radius={[3, 3, 0, 0]} isAnimationActive={false}>
-                {data.map((p) => {
-                  const prior = p.partial ? p.prior_same_days ?? 0 : p.prior ?? 0
-                  const tone = p.current == null ? "transparent" : prior > 0 && p.current < prior ? BEHIND : prior > 0 ? AHEAD : CURRENT
-                  return <Cell key={p.month} fill={tone} fillOpacity={p.partial ? 0.6 : 0.9} />
+              <Bar dataKey="priorFull" name="prior" fill={PRIOR} fillOpacity={0.55} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+              <Bar dataKey="booked" name="current" stackId="cur" isAnimationActive={false}>
+                {barData.map((p) => {
+                  const tone = p.current == null ? "transparent" : p.prior > 0 && p.booked < p.prior ? BEHIND : p.prior > 0 ? AHEAD : CURRENT
+                  return <Cell key={p.month} fill={tone} fillOpacity={p.partial ? 0.7 : 0.9} />
                 })}
               </Bar>
+              <Bar dataKey="projected" name="projected" stackId="cur" fill="url(#barHatch)" radius={[3, 3, 0, 0]} isAnimationActive={false} legendType="none" />
             </BarChart>
           </ChartContainer>
         </div>
