@@ -59,6 +59,8 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
   today: string
   ytd: KpiBucket
 }) {
+  // Hooks first, before any early return, so their order never changes.
+  const [view, setView] = useState<"curve" | "bars">("curve")
   if (data.length === 0) {
     return (
       <Card>
@@ -79,15 +81,10 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
     new Date(iso + "T00:00:00Z").toLocaleString("en-US", { month: "long", timeZone: "UTC" })
 
   const samples = buildSamples(data, daily, year, today)
-  const [view, setView] = useState<"curve" | "bars">("curve")
 
-
-  // Totals table: this year so far, last year in full, and what it takes
-  // to match last year exactly: (last year's total - booked so far) spread
-  // over the workdays left. Figures come from the YTD bucket (daily ledger).
-  const workdaysThisYear = ytd.workdays_total
-  const workdaysSoFar = ytd.workdays_elapsed
-  const workdaysLeft = workdaysThisYear - workdaysSoFar
+  // Header stats: this year per workday, last year per workday, and what
+  // the workdays left must average to match last year's total.
+  const workdaysLeft = ytd.workdays_total - ytd.workdays_elapsed
   const workdaysPrior = workdays(`${year - 1}-01-01`, `${year}-01-01`)
   const currentRate = ytd.per_workday
   const priorFullRate = workdaysPrior > 0 ? ytd.prior_full / workdaysPrior : 0
@@ -96,7 +93,7 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
   const matched = toGo <= 0
 
   return (
-    <Card>
+    <Card className="h-full">
       <div className="flex items-center gap-3 px-5 py-2.5 border-b border-line-soft text-[11px]">
         <span className="uppercase tracking-[0.14em] text-ink-mute font-medium">
           Monthly Revenue
@@ -121,9 +118,20 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
         </div>
       </div>
 
+      {/* per-workday pace, and what the rest of the year must average to match last year */}
+      <div className="px-5 py-1.5 border-b border-line-soft text-[11px] font-mono tabular-nums text-ink-mute whitespace-nowrap flex items-center gap-4">
+        <span><span className="text-ink">{formatCompactCurrency(currentRate)}</span>/day {year}</span>
+        <span>{formatCompactCurrency(priorFullRate)}/day {priorYear}</span>
+        <span className="ml-auto">
+          {matched || neededRate == null
+            ? <span className="text-grass">{formatCompactCurrency(-toGo)} over {priorYear}</span>
+            : <><span className="text-cyan">{formatCompactCurrency(neededRate)}</span>/day needed · {workdaysLeft} left</>}
+        </span>
+      </div>
+
       {view === "bars" && (
         <div className="px-4 pt-4 pb-2">
-          <ChartContainer config={config} className="aspect-auto h-[260px] w-full">
+          <ChartContainer config={config} className="aspect-auto h-[360px] w-full">
             <BarChart accessibilityLayer data={data} margin={{ top: 12, right: 12, left: 0, bottom: 4 }} barGap={2} barCategoryGap="28%">
               <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
               <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={10} fontSize={11} tickFormatter={shortMonth} interval={0} />
@@ -163,7 +171,7 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
       {view === "curve" && (
 
       <div className="px-4 pt-4 pb-2">
-        <ChartContainer config={config} className="aspect-auto h-[260px] w-full">
+        <ChartContainer config={config} className="aspect-auto h-[360px] w-full">
           <ComposedChart
             accessibilityLayer
             data={samples}
@@ -233,40 +241,6 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
       </div>
       )}
 
-      <table className="w-full text-[11px] border-t border-line-soft">
-        <thead>
-          <tr className="text-ink-mute uppercase tracking-[0.12em] text-[10px]">
-            <th className="text-left font-medium px-5 py-2"></th>
-            <th className="text-right font-medium px-3 py-2">Revenue</th>
-            <th className="text-right font-medium px-3 py-2">Workdays</th>
-            <th className="text-right font-medium px-5 py-2 whitespace-nowrap">Per workday</th>
-          </tr>
-        </thead>
-        <tbody className="font-mono tabular-nums whitespace-nowrap">
-          <tr>
-            <td className="px-5 py-1.5 text-ink">{year} so far</td>
-            <td className="px-3 py-1.5 text-right text-ink">{formatCompactCurrency(ytd.revenue)}</td>
-            <td className="px-3 py-1.5 text-right text-ink-dim">{workdaysSoFar} of {workdaysThisYear}</td>
-            <td className="px-5 py-1.5 text-right text-ink">{formatCompactCurrency(currentRate)}</td>
-          </tr>
-          <tr>
-            <td className="px-5 py-1.5 text-ink-dim">{priorYear} full year</td>
-            <td className="px-3 py-1.5 text-right text-ink-dim">{formatCompactCurrency(ytd.prior_full)}</td>
-            <td className="px-3 py-1.5 text-right text-ink-dim">{workdaysPrior}</td>
-            <td className="px-5 py-1.5 text-right text-ink-dim">{formatCompactCurrency(priorFullRate)}</td>
-          </tr>
-          <tr className="border-t border-line-soft">
-            <td className="px-5 py-2 pb-3 text-ink">To match {priorYear}</td>
-            <td className={`px-3 py-2 pb-3 text-right ${matched ? "text-grass" : "text-ink"}`}>
-              {matched ? `${formatCompactCurrency(-toGo)} over` : `${formatCompactCurrency(toGo)} to go`}
-            </td>
-            <td className="px-3 py-2 pb-3 text-right text-ink-dim">{workdaysLeft} left</td>
-            <td className={`px-5 py-2 pb-3 text-right font-medium ${matched ? "text-grass" : "text-cyan"}`}>
-              {matched || neededRate == null ? "—" : `${formatCompactCurrency(neededRate)} needed`}
-            </td>
-          </tr>
-        </tbody>
-      </table>
     </Card>
   )
 }
