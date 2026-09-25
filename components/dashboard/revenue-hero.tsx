@@ -20,17 +20,117 @@ import type { RevenueKpis, KpiBucket, TrendPoint } from "@/lib/queries/revenue"
 export function RevenueHero({ kpis, trend }: { kpis: RevenueKpis; trend: TrendPoint[] }) {
   const ref = new Date(kpis.reference_date + "T00:00:00Z")
   const year = ref.getUTCFullYear()
-  const month = new Date(Date.UTC(year, ref.getUTCMonth(), 1)).toLocaleString("en-US", { month: "short", timeZone: "UTC" })
 
   return (
     <section className="grid grid-cols-3 gap-3.5">
       <div className="col-span-2">
         <YearCompare year={year} trend={trend} ytd={kpis.ytd} />
       </div>
-      <Tile label="Month" period={month} thisLabel={month} priorLabel={`${month} '${String(year - 1).slice(2)}`} bucket={kpis.mtd}
-        segments={segmentsBy(trend, "month")} highlight={[ref.getUTCMonth()]} />
+      <QuarterDonut year={year} trend={trend} qtd={kpis.qtd} currentQuarter={Math.floor(ref.getUTCMonth() / 3)} />
     </section>
   )
+}
+
+/**
+ * Quarter donut: two rings, outer = this year, inner = last year, each cut
+ * into the four quarters (same hue per quarter on both rings). A quarter's
+ * arc length is its share of that year's total, so the seasonal shape is
+ * the shape of the ring. Hover a quarter to read it; default is the
+ * current quarter, which compares to last year through the same day.
+ */
+function QuarterDonut({ year, trend, qtd, currentQuarter }: {
+  year: number; trend: TrendPoint[]; qtd: KpiBucket; currentQuarter: number
+}) {
+  const [hover, setHover] = useState<number | null>(null)
+  const q = segmentsBy(trend, "quarter")
+  const sel = hover ?? currentQuarter
+  const curTotal = q.reduce((a, g) => a + g.current, 0)
+  const priTotal = q.reduce((a, g) => a + g.prior, 0)
+  const g = q[sel]
+  const isCurrent = sel === currentQuarter
+  const prior = isCurrent ? qtd.prior_year ?? 0 : g.prior
+  const delta = prior > 0 && g.current > 0 ? ((g.current - prior) / prior) * 100 : null
+  const tone = delta == null ? "text-ink-mute" : delta >= 0 ? "text-grass" : "text-coral"
+
+  // Arcs: share of each year's own total, so both rings close at 100%.
+  const ring = (values: number[], total: number, r: number, width: number) => {
+    let acc = 0
+    return values.map((v, i) => {
+      const start = acc / (total || 1)
+      acc += v
+      const end = acc / (total || 1)
+      return { i, d: arc(50, 50, r, start, end), width, v }
+    })
+  }
+  const outer = ring(q.map((x) => x.current), priTotal || curTotal, 40, 11)   // outer scaled to LAST year's total so a short year shows a gap
+  const inner = ring(q.map((x) => x.prior), priTotal, 27, 11)
+
+  return (
+    <Card className="relative overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(400px_120px_at_100%_0%,rgb(56_189_248_/_0.09),transparent_60%)]" />
+      <CardBody>
+        <div className="flex items-baseline justify-between gap-3 whitespace-nowrap">
+          <div className="text-[11px] uppercase tracking-[0.14em] text-ink-mute">
+            Quarters <span className="text-ink-mute/60">· {year} vs {year - 1}</span>
+          </div>
+          <div className="text-[10px] font-mono text-ink-mute truncate">out {year} · in {year - 1}</div>
+        </div>
+
+        <div className="flex items-center gap-4 mt-2">
+          <svg viewBox="0 0 100 100" className="w-[104px] h-[104px] shrink-0" onMouseLeave={() => setHover(null)}>
+            <circle cx="50" cy="50" r="40" fill="none" stroke="rgb(255 255 255 / 0.06)" strokeWidth="11" />
+            <circle cx="50" cy="50" r="27" fill="none" stroke="rgb(255 255 255 / 0.06)" strokeWidth="11" />
+            {inner.map((a) => a.v > 0 && (
+              <path key={`p${a.i}`} d={a.d} fill="none" stroke={seg(q[a.i].hue, sel === a.i)} strokeWidth={a.width}
+                opacity={sel === a.i ? 1 : 0.55} onMouseEnter={() => setHover(a.i)}>
+                <title>{`Q${a.i + 1} ${year - 1}: ${formatCompactCurrency(a.v)}`}</title>
+              </path>
+            ))}
+            {outer.map((a) => a.v > 0 && (
+              <path key={`c${a.i}`} d={a.d} fill="none" stroke={seg(q[a.i].hue, sel === a.i)} strokeWidth={a.width}
+                opacity={sel === a.i ? 1 : 0.55} onMouseEnter={() => setHover(a.i)}>
+                <title>{`Q${a.i + 1} ${year}: ${formatCompactCurrency(a.v)}`}</title>
+              </path>
+            ))}
+            <text x="50" y="47" textAnchor="middle" className="fill-ink" style={{ fontSize: 13, fontWeight: 600 }}>Q{sel + 1}</text>
+            <text x="50" y="59" textAnchor="middle" className="fill-ink-mute" style={{ fontSize: 8 }}>{isCurrent ? "so far" : "full"}</text>
+          </svg>
+
+          <div className="min-w-0 font-mono tabular-nums text-[11px] whitespace-nowrap overflow-hidden">
+            <div className="font-sans num text-[26px] font-semibold tracking-tight text-ink leading-none">
+              {formatCompactCurrency(g.current)}
+            </div>
+            <div className="mt-1.5 text-ink-mute">Q{sel + 1} {year}{isCurrent ? " so far" : ""}</div>
+            <div className="mt-1">
+              <span className="text-ink-mute">Q{sel + 1} {year - 1}{isCurrent ? " to date" : ""}</span>{" "}
+              <span className="text-ink-dim">{formatCompactCurrency(prior)}</span>
+            </div>
+            <div className={`mt-1 ${tone}`}>
+              {delta == null ? "—" : `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%${isCurrent ? " pace" : ""}`}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-2.5 flex items-center gap-2.5 text-[10px] font-mono text-ink-mute whitespace-nowrap">
+          {q.map((x, i) => (
+            <button key={x.label} type="button" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
+              className={`flex items-center gap-1 ${sel === i ? "text-ink" : ""}`}>
+              <span className="inline-block w-2 h-2 rounded-[2px]" style={{ background: seg(x.hue, true) }} />{x.label}
+            </button>
+          ))}
+        </div>
+      </CardBody>
+    </Card>
+  )
+}
+
+/** SVG arc path for a ring segment from `from` to `to` (fractions of a turn, 12 o'clock start). */
+function arc(cx: number, cy: number, r: number, from: number, to: number): string {
+  const a0 = (from - 0.25) * Math.PI * 2, a1 = (Math.min(to, 0.9999) - 0.25) * Math.PI * 2
+  const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0)
+  const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1)
+  const large = to - from > 0.5 ? 1 : 0
+  return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`
 }
 
 /**
@@ -41,6 +141,7 @@ export function RevenueHero({ kpis, trend }: { kpis: RevenueKpis; trend: TrendPo
  */
 function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; ytd: KpiBucket }) {
   const [hover, setHover] = useState<number | null>(null)
+  const current = trend.findIndex((p) => p.partial) >= 0 ? trend.findIndex((p) => p.partial) : Math.max(0, trend.filter((p) => p.current != null).length - 1)
   const segments = segmentsBy(trend, "month")
   const priorTotal = segments.reduce((a, g) => a + g.prior, 0)
   const currentTotal = segments.reduce((a, g) => a + g.current, 0)
@@ -54,20 +155,6 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
   const landingPct = pace * 100
   const daysLeft = ytd.workdays_total - ytd.workdays_elapsed
 
-  // Running totals through each month, both years (partial month through today).
-  let rc = 0, rp = 0
-  const running = trend.map((p) => {
-    rc += p.current ?? 0
-    rp += p.partial ? p.prior_same_days ?? 0 : p.prior ?? 0
-    return { current: rc, prior: rp }
-  })
-
-  const h = hover != null ? trend[hover] : null
-  const hs = hover != null ? segments[hover] : null
-  const hPrior = h ? (h.partial ? h.prior_same_days ?? 0 : h.prior ?? 0) : 0
-  const hDelta = h && h.current != null && hPrior > 0 ? ((h.current - hPrior) / hPrior) * 100 : null
-  const hRun = hover != null ? running[hover] : null
-  const hRunDelta = hRun && hRun.prior > 0 ? ((hRun.current - hRun.prior) / hRun.prior) * 100 : null
   const tone = (d: number | null) => d == null ? "text-ink-mute" : d >= 0 ? "text-grass" : "text-coral"
   const pctStr = (d: number | null) => d == null ? "—" : `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`
   const monthLong = (iso: string) => new Date(iso + "T00:00:00Z").toLocaleString("en-US", { month: "long", timeZone: "UTC" })
@@ -76,51 +163,59 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
     <Card className="relative overflow-hidden h-full">
       <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(400px_120px_at_100%_0%,rgb(56_189_248_/_0.09),transparent_60%)]" />
       <CardBody>
+        {/* Header: title left; the year, stated once, right */}
         <div className="flex items-baseline justify-between gap-3 whitespace-nowrap">
           <div className="text-[11px] uppercase tracking-[0.14em] text-ink-mute">
-            Year <span className="text-ink-mute/60">· {year} vs {year - 1}</span>
+            Revenue <span className="text-ink-mute/60">· {year} vs {year - 1}</span>
           </div>
-          <div className="text-[11px] font-mono tabular-nums text-ink-mute">
-            {hs ? "hover to compare · " : ""}{daysLeft} workday{daysLeft === 1 ? "" : "s"} left
-          </div>
+          <div className="text-[11px] font-mono tabular-nums text-ink-mute">hover a month</div>
         </div>
 
-        {/* Readout: the hovered month, or the year */}
-        <div className="grid grid-cols-[auto_1fr_auto] items-baseline gap-x-6 mt-2.5 whitespace-nowrap min-h-[52px]">
-          {h && hs ? (
-            <>
+        {/* Month tracker: the hovered month, else the month in progress. The two
+            short bars are that month's slices lifted out of the year bars below,
+            drawn on their own scale so the gap between them is the difference. */}
+        {(() => {
+          const sel = hover ?? current
+          const p = trend[sel]
+          const cur = p.current ?? 0
+          const pri = p.partial ? p.prior_same_days ?? 0 : p.prior ?? 0
+          const mScale = Math.max(cur, pri) || 1
+          const d = pri > 0 && p.current != null ? ((cur - pri) / pri) * 100 : null
+          const hue = segments[sel].hue
+          const label = segments[sel].label
+          return (
+            <div className="mt-2.5 grid grid-cols-[auto_1fr] items-center gap-x-6 whitespace-nowrap">
               <div>
                 <div className="font-sans num text-[30px] font-semibold tracking-tight text-ink leading-none">
-                  {formatCompactCurrency(h.current ?? 0)}
+                  {p.current == null ? "—" : formatCompactCurrency(cur)}
                 </div>
-                <div className="text-[11px] font-mono text-ink-mute mt-1">
-                  {monthLong(h.month)} {year}{h.partial ? " so far" : ""}
+                <div className="text-[11px] font-mono mt-1.5">
+                  <span className="text-ink-dim">{monthLong(p.month)} {year}{p.partial ? " so far" : ""}</span>
+                  {" "}<span className={tone(d)}>{pctStr(d)}</span> <span className="text-ink-mute">vs {year - 1}</span>
                 </div>
               </div>
-              <div className="text-[11px] font-mono tabular-nums">
-                <div><span className="text-ink-mute">{monthLong(h.month)} {year - 1}{h.partial ? " same days" : ""}</span> <span className="text-ink-dim">{formatCompactCurrency(hPrior)}</span> <span className={tone(hDelta)}>{pctStr(hDelta)}</span></div>
-                <div className="mt-1"><span className="text-ink-mute">Year to date through {hs.label}</span> <span className="text-ink-dim">{formatCompactCurrency(hRun?.current ?? 0)}</span> <span className="text-ink-mute">vs {formatCompactCurrency(hRun?.prior ?? 0)}</span> <span className={tone(hRunDelta)}>{pctStr(hRunDelta)}</span></div>
-              </div>
-              <div />
-            </>
-          ) : (
-            <>
-              <div>
-                <div className="font-sans num text-[30px] font-semibold tracking-tight text-ink leading-none">
-                  {formatCompactCurrency(currentTotal)}
+              <div className="min-w-0 max-w-[300px] text-[11px] font-mono tabular-nums">
+                <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1">
+                  <span className="text-ink-mute w-16">{label} {String(year).slice(2)}{p.partial ? "*" : ""}</span>
+                  <div className="h-3.5 rounded-sm bg-white/[0.06] overflow-hidden">
+                    <div className="h-full" style={{ width: `${(cur / mScale) * 100}%`, background: seg(hue, true) }} />
+                  </div>
+                  <span className="text-ink w-14 text-right">{p.current == null ? "—" : formatCompactCurrency(cur)}</span>
+                  <span className="text-ink-mute w-16">{label} {String(year - 1).slice(2)}{p.partial ? "*" : ""}</span>
+                  <div className="h-3.5 rounded-sm bg-white/[0.06] overflow-hidden">
+                    <div className="h-full" style={{ width: `${(pri / mScale) * 100}%`, background: seg(hue, false) }} />
+                  </div>
+                  <span className="text-ink-dim w-14 text-right">{formatCompactCurrency(pri)}</span>
                 </div>
-                <div className="text-[11px] font-mono text-ink-mute mt-1">{year} so far</div>
+                <div className="mt-1 text-[10px] text-ink-mute">
+                  {label} slices from the bars below, own scale{p.partial ? " · * through today" : ""}
+                </div>
               </div>
-              <div className="text-[11px] font-mono tabular-nums">
-                <div><span className="text-ink-mute">{year - 1} same day</span> <span className="text-ink-dim">{formatCompactCurrency(priorSameDay)}</span> <span className={tone(paceDelta)}>{pctStr(paceDelta)} pace</span></div>
-                <div className="mt-1"><span className="text-ink-mute">{year - 1} full year</span> <span className="text-ink-dim">{formatCompactCurrency(priorTotal)}</span> <span className="text-ink-mute">· {((currentTotal / (priorTotal || 1)) * 100).toFixed(0)}% booked · lands {landingPct.toFixed(0)}% at this pace</span></div>
-              </div>
-              <div />
-            </>
-          )}
-        </div>
+            </div>
+          )
+        })()}
 
-        <div className="mt-3 space-y-1.5 text-[11px] font-mono tabular-nums whitespace-nowrap" onMouseLeave={() => setHover(null)}>
+        <div className="mt-3.5 pt-3 border-t border-line-soft space-y-1.5 text-[11px] font-mono tabular-nums whitespace-nowrap" onMouseLeave={() => setHover(null)}>
           {[
             { row: String(year), values: segments.map((g) => g.current), amount: currentTotal, strong: true },
             { row: String(year - 1), values: segments.map((g) => g.prior), amount: priorTotal, strong: false },
@@ -132,8 +227,8 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
                   <div
                     key={g.label}
                     onMouseEnter={() => setHover(i)}
-                    className={`h-full flex items-center justify-center text-[10px] leading-none overflow-hidden cursor-default transition-opacity ${hover == null || hover === i ? "" : "opacity-40"} ${hover === i ? "text-[#0A1622] font-medium" : "text-white/70"}`}
-                    style={{ width: w(r.values[i]), background: seg(g.hue, hover === i || hover == null) }}
+                    className={`h-full flex items-center justify-center text-[10px] leading-none overflow-hidden cursor-default transition-opacity ${(hover ?? current) === i ? "text-[#0A1622] font-medium" : "text-white/70 opacity-60"}`}
+                    style={{ width: w(r.values[i]), background: seg(g.hue, (hover ?? current) === i) }}
                     title={`${g.label} ${formatCompactCurrency(r.values[i])}`}
                   >
                     {wide(r.values[i]) ? g.label : ""}
@@ -143,6 +238,11 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
               <span className={`w-14 text-right ${r.strong ? "text-ink" : "text-ink-dim"}`}>{formatCompactCurrency(r.amount)}</span>
             </div>
           ))}
+        </div>
+        {/* The year, stated once */}
+        <div className="mt-3 pt-2.5 border-t border-line-soft flex items-baseline justify-between gap-3 text-[11px] font-mono tabular-nums whitespace-nowrap">
+          <span className="text-ink-mute"><span className="text-ink">{formatCompactCurrency(currentTotal)}</span> YTD · {((currentTotal / (priorTotal || 1)) * 100).toFixed(0)}% of {year - 1}</span>
+          <span className="text-ink-mute"><span className={tone(paceDelta)}>{pctStr(paceDelta)}</span> vs same day · lands {landingPct.toFixed(0)}% at this pace · {daysLeft} workdays left</span>
         </div>
       </CardBody>
     </Card>
@@ -175,110 +275,3 @@ function segmentsBy(trend: TrendPoint[], by: "month" | "quarter"): Segment[] {
   }))
 }
 
-/** One year as a segmented bar, each slot in its own hue, labeled when wide enough. */
-function YearBar({ rowLabel, values, segments, lit, w, wide, pct, amount, strong }: {
-  rowLabel: string
-  values: number[]
-  segments: Segment[]
-  lit: (i: number) => boolean
-  w: (v: number) => string
-  wide: (v: number) => boolean
-  pct: string
-  amount: string
-  strong?: boolean
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="w-12 text-ink-mute truncate">{rowLabel}</span>
-      <div className="flex-1 h-3.5 rounded-md bg-white/[0.06] overflow-hidden flex gap-px">
-        {segments.map((g, i) => values[i] > 0 && (
-          <div
-            key={g.label}
-            className={`h-full flex items-center justify-center text-[9px] leading-none overflow-hidden ${lit(i) ? "text-[#0A1622] font-medium" : "text-white/60"}`}
-            style={{ width: w(values[i]), background: seg(g.hue, lit(i)) }}
-            title={`${g.label} ${formatCompactCurrency(values[i])}`}
-          >
-            {wide(values[i]) ? g.label : ""}
-          </div>
-        ))}
-      </div>
-      <span className={`w-9 text-right ${strong ? "text-ink" : "text-ink-dim"}`}>{pct}</span>
-      <span className="w-14 text-right text-ink-dim">{amount}</span>
-    </div>
-  )
-}
-
-function Tile({ label, period, thisLabel, priorLabel, bucket, segments, highlight }: {
-  label: string
-  period: string
-  thisLabel: string
-  priorLabel: string
-  bucket: KpiBucket
-  segments: Segment[]                   // the whole year, split
-  highlight: number[]                   // which segments are this tile's period
-}) {
-  const prior = bucket.prior_full
-  const booked = bucket.revenue
-  const priorSameDay = bucket.prior_year ?? 0
-  const hasPrior = prior > 0 && priorSameDay > 0
-  const pace = hasPrior ? booked / priorSameDay : 1          // this period vs last, same days
-  const bookedPct = prior > 0 ? (booked / prior) * 100 : 0     // of last year's period total
-  const landingPct = hasPrior ? pace * 100 : bookedPct         // where this pace lands
-  const projected = hasPrior ? prior * pace : booked
-  const delta = hasPrior ? landingPct - 100 : null
-  const ahead = (delta ?? 0) >= 0
-  const daysLeft = bucket.workdays_total - bucket.workdays_elapsed
-  const done = daysLeft <= 0
-
-  // Both year bars share one scale: the larger of last year's total and
-  // this year's booked total, so widths are comparable across the two rows.
-  const priorYearTotal = segments.reduce((a, g) => a + g.prior, 0)
-  const currentYearTotal = segments.reduce((a, g) => a + g.current, 0)
-  const scale = Math.max(priorYearTotal, currentYearTotal) || 1
-  const w = (v: number) => `${(v / scale) * 100}%`
-  const lit = (i: number) => highlight.includes(i)
-  const wide = (v: number) => v / scale >= 0.11      // room for a 3-letter label without crowding
-
-  return (
-    <Card className="relative overflow-hidden">
-      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(400px_120px_at_100%_0%,rgb(56_189_248_/_0.09),transparent_60%)]" />
-      <CardBody>
-        <div className="flex items-baseline justify-between gap-3 whitespace-nowrap">
-          <div className="text-[11px] uppercase tracking-[0.14em] text-ink-mute">
-            {label} <span className="text-ink-mute/60">· {period}</span>
-          </div>
-          <div className="text-[11px] font-mono tabular-nums text-ink-mute">
-            {daysLeft} workday{daysLeft === 1 ? "" : "s"} left
-          </div>
-        </div>
-
-        <div className="flex items-baseline justify-between gap-3 mt-2.5 whitespace-nowrap">
-          <div className="font-sans num text-[34px] font-semibold tracking-tight text-ink leading-none">
-            {formatCompactCurrency(booked)}
-          </div>
-          {delta != null ? (
-            <div className={`font-mono tabular-nums text-[13px] ${ahead ? "text-grass" : "text-coral"}`}>
-              {ahead ? "+" : ""}{delta.toFixed(1)}% <span className="text-ink-mute">{done ? "vs last yr" : "pace"}</span>
-            </div>
-          ) : (
-            <div className="font-mono text-[11px] text-ink-mute">no prior-year baseline</div>
-          )}
-        </div>
-
-        <div className="mt-3 space-y-1.5 text-[11px] font-mono tabular-nums whitespace-nowrap">
-          <YearBar rowLabel={thisLabel} values={segments.map((g) => g.current)} segments={segments} lit={lit} w={w} wide={wide}
-            pct={`${bookedPct.toFixed(0)}%`} amount={formatCompactCurrency(booked)} strong />
-          <YearBar rowLabel={priorLabel} values={segments.map((g) => g.prior)} segments={segments} lit={lit} w={w} wide={wide}
-            pct="100%" amount={formatCompactCurrency(prior)} />
-        </div>
-
-        <div className="mt-2.5 flex items-center justify-between gap-3 text-[10px] font-mono text-ink-mute whitespace-nowrap overflow-hidden">
-          <span className="truncate">bright = {thisLabel} · dim = rest of year</span>
-          <span title={`Rest of ${label.toLowerCase()} at this pace lands at ${landingPct.toFixed(0)}% of ${priorLabel} (${formatCompactCurrency(projected)})`}>
-            lands {landingPct.toFixed(0)}%
-          </span>
-        </div>
-      </CardBody>
-    </Card>
-  )
-}
