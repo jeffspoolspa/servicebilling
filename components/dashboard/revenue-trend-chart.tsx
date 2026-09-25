@@ -1,6 +1,7 @@
 "use client"
 
-import { Area, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "recharts"
+import { useState } from "react"
+import { Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line, XAxis, YAxis } from "recharts"
 import { Card } from "@/components/ui/card"
 import {
   ChartContainer,
@@ -11,7 +12,6 @@ import {
 } from "@/components/ui/chart"
 import { formatCompactCurrency } from "@/lib/utils/format"
 import type { KpiBucket, TrendPoint } from "@/lib/queries/revenue"
-import { workdays } from "@/lib/utils/workdays"
 
 /**
  * Monthly revenue, this year against last year, January to December.
@@ -58,6 +58,8 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
   today: string
   ytd: KpiBucket
 }) {
+  // Hooks first, before any early return, so their order never changes.
+  const [view, setView] = useState<"curve" | "bars">("curve")
   if (data.length === 0) {
     return (
       <Card>
@@ -74,25 +76,25 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
     current: { label: String(year), color: CURRENT },
     prior: { label: priorYear, color: PRIOR },
   }
+  const monthLong = (iso: string) =>
+    new Date(iso + "T00:00:00Z").toLocaleString("en-US", { month: "long", timeZone: "UTC" })
 
   const samples = buildSamples(data, daily, year, today)
 
+  // Bars view: this year beside last year per month. Months not reached (and
+  // the rest of the month in progress) are projected at this year's pace:
+  // last year's amount x (this year's YTD / last year's YTD through the same day).
+  const pace = ytd.prior_year && ytd.prior_year > 0 ? ytd.revenue / ytd.prior_year : 1
+  const barData = data.map((p) => {
+    const prior = p.partial ? p.prior_same_days ?? 0 : p.prior ?? 0
+    const projected = p.current == null ? (p.prior ?? 0) * pace
+      : p.partial ? Math.max(0, ((p.prior ?? 0) - (p.prior_same_days ?? 0)) * pace) : 0
+    return { ...p, prior, booked: p.current ?? 0, projected, priorFull: p.prior ?? 0 }
+  })
 
-  // Totals table: this year so far, last year in full, and what it takes
-  // to match last year exactly: (last year's total - booked so far) spread
-  // over the workdays left. Figures come from the YTD bucket (daily ledger).
-  const workdaysThisYear = ytd.workdays_total
-  const workdaysSoFar = ytd.workdays_elapsed
-  const workdaysLeft = workdaysThisYear - workdaysSoFar
-  const workdaysPrior = workdays(`${year - 1}-01-01`, `${year}-01-01`)
-  const currentRate = ytd.per_workday
-  const priorFullRate = workdaysPrior > 0 ? ytd.prior_full / workdaysPrior : 0
-  const toGo = ytd.prior_full - ytd.revenue
-  const neededRate = workdaysLeft > 0 ? toGo / workdaysLeft : null
-  const matched = toGo <= 0
 
   return (
-    <Card>
+    <Card className="h-full flex flex-col">
       <div className="flex items-center gap-3 px-5 py-2.5 border-b border-line-soft text-[11px]">
         <span className="uppercase tracking-[0.14em] text-ink-mute font-medium">
           Monthly Revenue
@@ -100,10 +102,73 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
         <span className="text-ink-dim">
           {year} vs {priorYear}
         </span>
+        <div className="ml-auto inline-flex rounded-md border border-line bg-bg-elev p-0.5">
+          {(["curve", "bars"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              className={
+                "px-2.5 py-1 text-[11px] rounded transition-colors " +
+                (view === v ? "bg-cyan/15 text-cyan" : "text-ink-mute hover:text-ink")
+              }
+            >
+              {v === "curve" ? "Curve" : "Bars"}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="px-4 pt-4 pb-2">
-        <ChartContainer config={config} className="aspect-auto h-[260px] w-full">
+      {view === "bars" && (
+        <div className="px-4 pt-4 pb-2 flex-1 min-h-0 flex flex-col">
+          <ChartContainer config={config} className="aspect-auto flex-1 min-h-[200px] w-full">
+            <BarChart accessibilityLayer data={barData} margin={{ top: 12, right: 12, left: 0, bottom: 4 }} barGap={3} barCategoryGap="30%">
+              <defs>
+                <pattern id="barHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                  <rect width="6" height="6" fill={CURRENT} fillOpacity={0.12} />
+                  <rect width="2.5" height="6" fill={CURRENT} fillOpacity={0.7} />
+                </pattern>
+              </defs>
+              <CartesianGrid vertical={false} strokeDasharray="3 4" stroke="rgb(var(--line-soft))" />
+              <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={10} fontSize={11} tickFormatter={shortMonth} interval={0} />
+              <YAxis tickLine={false} axisLine={false} tickMargin={6} width={56} fontSize={11} tickCount={5} tickFormatter={compactCurrency} />
+              <ChartTooltip
+                cursor={{ fill: "rgb(255 255 255 / 0.03)" }}
+                content={({ active, payload }) => {
+                  const p = payload?.[0]?.payload as (typeof barData)[number] | undefined
+                  if (!active || !p) return null
+                  const future = p.current == null
+                  return (
+                    <div className="rounded-lg border border-line bg-bg-elev px-3 py-2 text-[11px] shadow-xl min-w-[210px]">
+                      <div className="text-ink font-medium mb-1.5">
+                        {monthLong(p.month)}{p.partial ? <span className="text-ink-mute font-normal"> · through today</span> : future ? <span className="text-ink-mute font-normal"> · at this pace</span> : null}
+                      </div>
+                      <Row swatch={CURRENT} label={String(year)} value={future ? p.projected : p.booked} />
+                      {p.partial && p.projected > 0 && <Row swatch={CURRENT} label="rest of month at pace" value={p.projected} />}
+                      <Row swatch={PRIOR} label={p.partial ? `${priorYear} same days` : priorYear} value={future ? p.priorFull : p.prior} />
+                      <Diff label={`vs ${priorYear}`} current={future ? p.projected : p.booked} prior={future ? p.priorFull : p.prior} />
+                    </div>
+                  )
+                }}
+              />
+              <ChartLegend content={<ChartLegendContent />} />
+              <Bar dataKey="priorFull" name="prior" fill={PRIOR} fillOpacity={0.55} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+              <Bar dataKey="booked" name="current" stackId="cur" isAnimationActive={false}>
+                {barData.map((p) => {
+                  const tone = p.current == null ? "transparent" : p.prior > 0 && p.booked < p.prior ? BEHIND : p.prior > 0 ? AHEAD : CURRENT
+                  return <Cell key={p.month} fill={tone} fillOpacity={p.partial ? 0.7 : 0.9} />
+                })}
+              </Bar>
+              <Bar dataKey="projected" name="projected" stackId="cur" fill="url(#barHatch)" radius={[3, 3, 0, 0]} isAnimationActive={false} legendType="none" />
+            </BarChart>
+          </ChartContainer>
+        </div>
+      )}
+
+      {view === "curve" && (
+
+      <div className="px-4 pt-4 pb-2 flex-1 min-h-0 flex flex-col">
+        <ChartContainer config={config} className="aspect-auto flex-1 min-h-[200px] w-full">
           <ComposedChart
             accessibilityLayer
             data={samples}
@@ -171,41 +236,8 @@ export function RevenueTrendChart({ data, daily, today, ytd }: {
           </ComposedChart>
         </ChartContainer>
       </div>
+      )}
 
-      <table className="w-full text-[11px] border-t border-line-soft">
-        <thead>
-          <tr className="text-ink-mute uppercase tracking-[0.12em] text-[10px]">
-            <th className="text-left font-medium px-5 py-2"></th>
-            <th className="text-right font-medium px-3 py-2">Revenue</th>
-            <th className="text-right font-medium px-3 py-2">Workdays</th>
-            <th className="text-right font-medium px-5 py-2 whitespace-nowrap">Per workday</th>
-          </tr>
-        </thead>
-        <tbody className="font-mono tabular-nums whitespace-nowrap">
-          <tr>
-            <td className="px-5 py-1.5 text-ink">{year} so far</td>
-            <td className="px-3 py-1.5 text-right text-ink">{formatCompactCurrency(ytd.revenue)}</td>
-            <td className="px-3 py-1.5 text-right text-ink-dim">{workdaysSoFar} of {workdaysThisYear}</td>
-            <td className="px-5 py-1.5 text-right text-ink">{formatCompactCurrency(currentRate)}</td>
-          </tr>
-          <tr>
-            <td className="px-5 py-1.5 text-ink-dim">{priorYear} full year</td>
-            <td className="px-3 py-1.5 text-right text-ink-dim">{formatCompactCurrency(ytd.prior_full)}</td>
-            <td className="px-3 py-1.5 text-right text-ink-dim">{workdaysPrior}</td>
-            <td className="px-5 py-1.5 text-right text-ink-dim">{formatCompactCurrency(priorFullRate)}</td>
-          </tr>
-          <tr className="border-t border-line-soft">
-            <td className="px-5 py-2 pb-3 text-ink">To match {priorYear}</td>
-            <td className={`px-3 py-2 pb-3 text-right ${matched ? "text-grass" : "text-ink"}`}>
-              {matched ? `${formatCompactCurrency(-toGo)} over` : `${formatCompactCurrency(toGo)} to go`}
-            </td>
-            <td className="px-3 py-2 pb-3 text-right text-ink-dim">{workdaysLeft} left</td>
-            <td className={`px-5 py-2 pb-3 text-right font-medium ${matched ? "text-grass" : "text-cyan"}`}>
-              {matched || neededRate == null ? "—" : `${formatCompactCurrency(neededRate)} needed`}
-            </td>
-          </tr>
-        </tbody>
-      </table>
     </Card>
   )
 }
