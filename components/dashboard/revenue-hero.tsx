@@ -173,7 +173,7 @@ function YearCompare({ year, trend, ytd, qtd }: { year: number; trend: TrendPoin
       {/* ── The month, then its quarter: number left, the two slices beside it ── */}
       <Card className="relative overflow-hidden">
         <div className={glow} />
-        <CardBody className="h-full flex flex-col justify-between gap-4">
+        <CardBody className="h-full flex flex-col">
           <Block
             title="Month" sub={`${monthLong(p.month)}${p.partial ? " so far" : ""}`}
             value={p.current == null ? "—" : formatCompactCurrency(cur)}
@@ -216,24 +216,24 @@ function Block({ title, sub, value, diff, pct, priorYear, rows, scale, hue, tone
   pctStr: (d: number | null) => string
 }) {
   return (
-    <div>
+    <div className="flex-1 min-h-0 flex flex-col justify-center">
       <div className="text-[11px] uppercase tracking-[0.14em] text-ink-mute whitespace-nowrap">
         {title} <span className="text-ink-mute/60">· {sub}</span>
       </div>
-      <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4">
+      <div className="mt-2.5 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4">
         <div>
-          <div className="font-sans num text-[26px] font-semibold tracking-tight text-ink leading-none">{value}</div>
+          <div className="font-sans num text-[32px] font-semibold tracking-tight text-ink leading-none">{value}</div>
           <div className="mt-1.5 text-[11px] font-mono tabular-nums whitespace-nowrap">
             <span className={tone(pct)}>{diff == null ? "—" : `${diff >= 0 ? "+" : "-"}${formatCompactCurrency(Math.abs(diff))}`}</span>
             <span className={`ml-2 ${tone(pct)}`}>{pctStr(pct)}</span>
             <span className="text-ink-mute"> vs {priorYear}</span>
           </div>
         </div>
-        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1.5 text-[11px] font-mono tabular-nums whitespace-nowrap">
+        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-2 text-[11px] font-mono tabular-nums whitespace-nowrap">
           {rows.map((r) => (
             <Fragment key={r.label}>
               <span className="text-ink-mute">{r.label}</span>
-              <div className="h-4 rounded-sm bg-white/[0.06] overflow-hidden">
+              <div className="h-5 rounded-sm bg-white/[0.06] overflow-hidden">
                 <div className="h-full" style={{ width: `${(r.v / scale) * 100}%`, background: seg(hue, r.lit) }} />
               </div>
               <span className={`text-right w-14 ${r.strong ? "text-ink" : "text-ink-dim"}`}>{r.amount}</span>
