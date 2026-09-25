@@ -152,7 +152,6 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
   const priorSameDay = ytd.prior_year ?? 0
   const pace = priorSameDay > 0 ? currentTotal / priorSameDay : 1
   const paceDelta = (pace - 1) * 100
-  const landingPct = pace * 100
   const daysLeft = ytd.workdays_total - ytd.workdays_elapsed
 
   const tone = (d: number | null) => d == null ? "text-ink-mute" : d >= 0 ? "text-grass" : "text-coral"
@@ -191,7 +190,11 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
                 </div>
                 <div className="text-[11px] font-mono mt-1.5">
                   <span className="text-ink-dim">{monthLong(p.month)} {year}{p.partial ? " so far" : ""}</span>
-                  {" "}<span className={tone(d)}>{pctStr(d)}</span> <span className="text-ink-mute">vs {year - 1}</span>
+                  {" "}<span className={tone(d)}>{pctStr(d)}</span>
+                  {p.current != null && pri > 0 && (
+                    <span className={tone(d)}> {cur - pri >= 0 ? "+" : "-"}{formatCompactCurrency(Math.abs(cur - pri))}</span>
+                  )}
+                  <span className="text-ink-mute"> vs {year - 1}</span>
                 </div>
               </div>
               <div className="min-w-0 max-w-[300px] text-[11px] font-mono tabular-nums">
@@ -242,7 +245,7 @@ function YearCompare({ year, trend, ytd }: { year: number; trend: TrendPoint[]; 
         {/* The year, stated once */}
         <div className="mt-3 pt-2.5 border-t border-line-soft flex items-baseline justify-between gap-3 text-[11px] font-mono tabular-nums whitespace-nowrap">
           <span className="text-ink-mute"><span className="text-ink">{formatCompactCurrency(currentTotal)}</span> YTD · {((currentTotal / (priorTotal || 1)) * 100).toFixed(0)}% of {year - 1}</span>
-          <span className="text-ink-mute"><span className={tone(paceDelta)}>{pctStr(paceDelta)}</span> vs same day · lands {landingPct.toFixed(0)}% at this pace · {daysLeft} workdays left</span>
+          <span className="text-ink-mute"><span className={tone(paceDelta)}>{pctStr(paceDelta)}</span> vs same day · <span className={priorTotal - currentTotal > 0 ? "text-ink" : "text-grass"}>{formatCompactCurrency(Math.abs(priorTotal - currentTotal))} {priorTotal - currentTotal > 0 ? "to go" : "over"}</span> · {daysLeft} workdays left</span>
         </div>
       </CardBody>
     </Card>
