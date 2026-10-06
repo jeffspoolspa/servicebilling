@@ -3,21 +3,14 @@ import { formatCompactCurrency } from "@/lib/utils/format"
 import type { RevenueKpis, KpiBucket } from "@/lib/queries/revenue"
 
 /**
- * Hero row of three goal trackers — month, quarter, year. Each works like a
- * fundraising thermometer:
- *
- *   goal    = what the same period brought in last year, in full
- *   bar     = vertical, beside the number: revenue booked so far this
- *             period as a share of that goal, filling from the bottom
- *   line    = across the bar at the share of the period's workdays already
- *             used. Fill above the line: revenue is ahead of the calendar.
- *             Fill below it: the calendar is ahead of revenue.
- *   verdict = dollars still to go, or dollars over once the goal is passed,
- *             and the workdays left to get there
- *
- * No pace judgement: the tile states the total and where we stand against
- * it. A slim meter: cyan while under the goal, green once it is met. The
- * meter caps visually at 100% but the percentage keeps counting.
+ * Hero row: month, quarter, year, one format. Two horizontal bars on one
+ * scale: last year's full period (100%) and this period as booked so far.
+ * The goal mark on this year's bar is seasonal, not calendar: it sits at
+ * the share of last year's period that had come in by this same day, so
+ * a slow January or a busy April moves the mark, not the verdict.
+ *   booked  = this period's revenue by today / last year's period total
+ *   goal    = last year's revenue by this day / last year's period total
+ * Bar past the mark: ahead of last year's season. Short of it: behind.
  */
 export function RevenueHero({ kpis }: { kpis: RevenueKpis }) {
   const ref = new Date(kpis.reference_date + "T00:00:00Z")
@@ -26,31 +19,36 @@ export function RevenueHero({ kpis }: { kpis: RevenueKpis }) {
   const short = (m: number) =>
     new Date(Date.UTC(year, m, 1)).toLocaleString("en-US", { month: "short", timeZone: "UTC" })
   const month = short(ref.getUTCMonth())
-  const quarterMonths = `${short(q * 3)}–${short(q * 3 + 2)}`
+  const yy = String(year - 1).slice(2)
 
   return (
     <section className="grid grid-cols-3 gap-3.5">
-      <Tile label="Month" period={month} goalLabel={`${month} ${year - 1}`} bucket={kpis.mtd} />
-      <Tile label="Quarter" period={quarterMonths} goalLabel={`Q${q + 1} ${year - 1}`} bucket={kpis.qtd} />
-      <Tile label="Year" period={String(year)} goalLabel={String(year - 1)} bucket={kpis.ytd} />
+      <Tile label="Month" period={month} thisLabel={month} priorLabel={`${month} '${yy}`} bucket={kpis.mtd} />
+      <Tile label="Quarter" period={`${short(q * 3)}–${short(q * 3 + 2)}`} thisLabel={`Q${q + 1}`} priorLabel={`Q${q + 1} '${yy}`} bucket={kpis.qtd} />
+      <Tile label="Year" period={String(year)} thisLabel={String(year)} priorLabel={String(year - 1)} bucket={kpis.ytd} />
     </section>
   )
 }
 
-function Tile({ label, period, goalLabel, bucket }: {
+function Tile({ label, period, thisLabel, priorLabel, bucket }: {
   label: string
   period: string
-  goalLabel: string
+  thisLabel: string
+  priorLabel: string
   bucket: KpiBucket
 }) {
-  const goal = bucket.prior_full
-  const hasGoal = goal > 0
-  const toGo = goal - bucket.revenue
-  const met = hasGoal && toGo <= 0
-  const pct = hasGoal ? (bucket.revenue / goal) * 100 : 0
+  const prior = bucket.prior_full
+  const booked = bucket.revenue
+  const priorSameDay = bucket.prior_year ?? 0
+  const hasPrior = prior > 0 && priorSameDay > 0
+  const bookedPct = prior > 0 ? (booked / prior) * 100 : 0     // of last year's period total
+  const goalPct = hasPrior ? (priorSameDay / prior) * 100 : 0  // last year's share by this day
+  const delta = hasPrior ? ((booked - priorSameDay) / priorSameDay) * 100 : null
+  const ahead = (delta ?? 0) >= 0
+  const scale = Math.max(100, bookedPct) || 100
+  const w = (pct: number) => `${(pct / scale) * 100}%`
   const daysLeft = bucket.workdays_total - bucket.workdays_elapsed
-  const daysPct = bucket.workdays_total > 0 ? (bucket.workdays_elapsed / bucket.workdays_total) * 100 : 0
-  const tone = met ? "text-grass" : "text-ink-dim"
+  const done = daysLeft <= 0
 
   return (
     <Card className="relative overflow-hidden">
@@ -61,65 +59,48 @@ function Tile({ label, period, goalLabel, bucket }: {
             {label} <span className="text-ink-mute/60">· {period}</span>
           </div>
           <div className="text-[11px] font-mono tabular-nums text-ink-mute">
-            {goalLabel} <span className="text-ink-dim">{hasGoal ? formatCompactCurrency(goal) : "—"}</span>
+            {daysLeft} workday{daysLeft === 1 ? "" : "s"} left
           </div>
         </div>
 
-        <div className="flex items-stretch justify-between gap-4 mt-2.5">
-          {/* Where we are */}
-          <div className="flex flex-col justify-between min-w-0 whitespace-nowrap">
-            <div className="font-sans num text-[34px] font-semibold tracking-tight text-ink leading-none">
-              {formatCompactCurrency(bucket.revenue)}
-            </div>
-            <div className="mt-3 text-[11px] font-mono tabular-nums">
-              <div className={tone}>
-                {!hasGoal
-                  ? "no prior-year total"
-                  : met
-                    ? `${formatCompactCurrency(-toGo)} over`
-                    : `${formatCompactCurrency(toGo)} to go`}
-              </div>
-              <div className="text-ink-mute mt-0.5">
-                {daysLeft} workday{daysLeft === 1 ? "" : "s"} left
-              </div>
-            </div>
+        <div className="flex items-baseline justify-between gap-3 mt-2.5 whitespace-nowrap">
+          <div className="font-sans num text-[34px] font-semibold tracking-tight text-ink leading-none">
+            {formatCompactCurrency(booked)}
           </div>
-
-          {/* The goal: a rounded meter, notched at the share of workdays used */}
-          <div className="flex items-stretch gap-3.5 shrink-0">
-            <div
-              className="relative w-3.5 min-h-[72px] rounded-full bg-white/[0.06] overflow-hidden"
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(Math.min(100, pct))}
-              aria-label={`${label} revenue against ${goalLabel}`}
-            >
-              <div
-                className={`absolute inset-x-0 bottom-0 rounded-full ${
-                  met
-                    ? "bg-gradient-to-t from-grass/50 to-grass"
-                    : "bg-gradient-to-t from-cyan/40 to-cyan"
-                }`}
-                style={{ height: `${Math.min(100, pct)}%` }}
-              />
-              {/* workdays used: a white line across the meter, never wider than it */}
-              <div
-                className="absolute inset-x-0 h-[2px] bg-white shadow-[0_0_0_1px_rgb(10_22_34_/_0.55)]"
-                style={{ bottom: `calc(${Math.min(100, daysPct)}% - 1px)` }}
-                title={`${bucket.workdays_elapsed} of ${bucket.workdays_total} workdays used`}
-              />
+          {delta != null ? (
+            <div className={`font-mono tabular-nums text-[13px] ${ahead ? "text-grass" : "text-coral"}`}>
+              {ahead ? "+" : ""}{delta.toFixed(1)}% <span className="text-ink-mute">{done ? `vs ${priorLabel}` : `vs ${priorLabel} to date`}</span>
             </div>
-            <dl className="flex flex-col justify-center gap-1 text-[11px] font-mono tabular-nums whitespace-nowrap leading-tight">
-              <div>
-                <dd className={`inline ${met ? "text-grass" : "text-ink"}`}>{hasGoal ? `${pct.toFixed(0)}%` : "—"}</dd>
-                <dt className="inline text-ink-mute"> of goal</dt>
-              </div>
-              <div>
-                <dd className="inline text-ink-dim">{daysPct.toFixed(0)}%</dd>
-                <dt className="inline text-ink-mute"> of days</dt>
-              </div>
-            </dl>
+          ) : (
+            <div className="font-mono text-[11px] text-ink-mute">no prior-year baseline</div>
+          )}
+        </div>
+
+        <div className="mt-3 space-y-1.5 text-[11px] font-mono tabular-nums whitespace-nowrap">
+          <div className="flex items-center gap-2">
+            <span className="w-12 text-ink-mute truncate">{thisLabel}</span>
+            <div className="relative flex-1 h-2.5 rounded-full bg-white/[0.06] overflow-hidden">
+              <div className={`h-full rounded-full ${ahead ? "bg-cyan" : "bg-cyan/80"}`} style={{ width: w(bookedPct) }}
+                title={`${bookedPct.toFixed(0)}% of ${priorLabel} (${formatCompactCurrency(booked)})`} />
+              {hasPrior && !done && (
+                // the season mark: where last year stood by this same day
+                <div
+                  className="absolute inset-y-0 w-[2px] bg-white shadow-[0_0_0_1px_rgb(10_22_34_/_0.55)]"
+                  style={{ left: `calc(${w(goalPct)} - 1px)` }}
+                  title={`${priorLabel} had ${goalPct.toFixed(0)}% (${formatCompactCurrency(priorSameDay)}) by this day`}
+                />
+              )}
+            </div>
+            <span className="w-9 text-right text-ink">{bookedPct.toFixed(0)}%</span>
+            <span className="w-14 text-right text-ink-dim">{formatCompactCurrency(booked)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-12 text-ink-mute truncate">{priorLabel}</span>
+            <div className="flex-1 h-2.5 rounded-full bg-white/[0.06] overflow-hidden">
+              <div className="h-full bg-ink/45" style={{ width: w(100) }} />
+            </div>
+            <span className="w-9 text-right text-ink-dim">100%</span>
+            <span className="w-14 text-right text-ink-dim">{formatCompactCurrency(prior)}</span>
           </div>
         </div>
       </CardBody>

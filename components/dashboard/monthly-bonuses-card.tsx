@@ -74,12 +74,12 @@ export function MonthlyBonusesCard({ initial }: Props) {
         </span>
       </div>
 
-      <div className="px-5 py-3 border-b border-line-soft flex items-center gap-4">
+      <div className="px-5 py-2 border-b border-line-soft flex items-center gap-4">
         <div>
           <div className="text-[10px] uppercase tracking-[0.14em] text-ink-mute">
             Total Payout
           </div>
-          <div className="font-mono tabular-nums text-[22px] text-ink mt-0.5">
+          <div className="font-mono tabular-nums text-[18px] text-ink mt-0.5">
             {formatCurrency(data.total_bonus)}
           </div>
         </div>
@@ -95,7 +95,7 @@ export function MonthlyBonusesCard({ initial }: Props) {
 
       <div
         className={
-          "flex-1 divide-y divide-line-soft relative" +
+          "divide-y divide-line-soft relative" +
           (pending ? " opacity-60" : "")
         }
       >
@@ -111,7 +111,7 @@ export function MonthlyBonusesCard({ initial }: Props) {
           <Link
             key={e.tech}
             href={href}
-            className="flex items-center gap-3 px-5 py-2.5 hover:bg-white/[0.03] transition-colors group"
+            className="flex items-center gap-3 px-5 py-1.5 hover:bg-white/[0.03] transition-colors group"
             title={
               e.note
                 ? `${e.displayName} — ${e.note}`
@@ -119,7 +119,7 @@ export function MonthlyBonusesCard({ initial }: Props) {
             }
           >
             <div className="min-w-0 flex-1">
-              <div className="text-ink text-[13px] flex items-center gap-1.5">
+              <div className="text-ink text-[12px] flex items-center gap-1.5">
                 {e.displayName}
                 {e.note && (
                   <Info
@@ -138,7 +138,7 @@ export function MonthlyBonusesCard({ initial }: Props) {
               </div>
             </div>
             <div className="text-right">
-              <div className="font-mono tabular-nums text-[15px] text-ink">
+              <div className="font-mono tabular-nums text-[13px] text-ink">
                 {formatCurrency(e.bonus)}
               </div>
             </div>

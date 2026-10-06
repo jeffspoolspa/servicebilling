@@ -109,24 +109,25 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
   // swapped): re-post the SAME request with selectedDoses — the server
   // recomputes doses/effects/retest/visitNote wholesale (ruled 2026-09-15).
   // Sequence-guarded: only the latest response lands.
-  const repostSelection = (selectedDoses: SelectedDose[]) => {
+  const repostSelection = async (selectedDoses: SelectedDose[]) => {
     const seq = ++repostSeq.current
     setRecalcError(null)
-    startTransition(async () => {
-      const res = await getRecommendation({
-        ...(customerId ? { customerId } : {}),
-        pool: { volumeGallons: volumeNum, sanitiser },
-        readings: measured,
-        ...(algae ? { algaeOrCloudy: true } : {}),
-        selectedDoses,
-      })
-      if (seq !== repostSeq.current) return
-      if (res.ok) {
-        setResult(res.data)
-      } else {
-        setRecalcError(res.error)
-      }
+    // Deliberately OUTSIDE the shared transition: a selection correction is
+    // a silent background confirm — nothing dims or relabels while it flies
+    // (the shared pending drives the algae toggle and action bar).
+    const res = await getRecommendation({
+      ...(customerId ? { customerId } : {}),
+      pool: { volumeGallons: volumeNum, sanitiser },
+      readings: measured,
+      ...(algae ? { algaeOrCloudy: true } : {}),
+      selectedDoses,
     })
+    if (seq !== repostSeq.current) return
+    if (res.ok) {
+      setResult(res.data)
+    } else {
+      setRecalcError(res.error)
+    }
   }
 
   // The chlorine card's "Algae present" toggle: same sample, re-called with
