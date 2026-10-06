@@ -1058,6 +1058,17 @@ export interface AppliedPayment {
   payment_method_name: string | null
 }
 
+// Mirror of billing.credit_lookback() (24 months, ruled 2026-09-25). The gate
+// counts credits inside this window; the UI must show the same set or a WO is
+// held for credits nobody can see.
+// ponytail: duplicated literal; move UI reads onto a DB view if it drifts again.
+const CREDIT_LOOKBACK_MONTHS = 24
+function creditCutoff(): string {
+  const d = new Date()
+  d.setMonth(d.getMonth() - CREDIT_LOOKBACK_MONTHS)
+  return d.toISOString().slice(0, 10)
+}
+
 export async function getAppliedPaymentsForInvoice(
   qboInvoiceId: string,
 ): Promise<AppliedPayment[]> {
@@ -1237,9 +1248,7 @@ export async function getNeedsReviewTriageQueue(
   )
   const creditsByCustomer = new Map<string, OpenCredit[]>()
   if (customerIds.length > 0) {
-    const sixMonthsAgo = new Date()
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
-    const cutoff = sixMonthsAgo.toISOString().slice(0, 10)
+    const cutoff = creditCutoff()
     const { data: credits } = await sb
       .from("billing_customer_payments")
       .select("id, qbo_payment_id, qbo_customer_id, type, unapplied_amt, total_amt, txn_date, ref_num, memo")
@@ -1410,11 +1419,9 @@ export async function getWorkOrderDetail(
 
     // Open credits for this customer (regardless of whether matched to this invoice).
     // Filter to APPLICABLE only — matches the filter process_invoice uses for its
-    // pre-charge recheck and the triage view: no maint-scoped, no stale >6mo.
+    // pre-charge recheck and the triage view: no maint-scoped, nothing older than the lookback.
     if (invoice?.qbo_customer_id) {
-      const sixMonthsAgo = new Date()
-      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
-      const cutoff = sixMonthsAgo.toISOString().slice(0, 10)
+      const cutoff = creditCutoff()
       const [credRes, decRes, stateRes, pmRes] = await Promise.all([
         sb
           .from("billing_customer_payments")
