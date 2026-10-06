@@ -153,7 +153,7 @@ The QBO invoice processing pipeline. Pulls invoices from QBO, enriches them (mem
 - `service_billing_processing`, `distinguished_script` — legacy / chronically failing, candidates for archive
 
 **Database tables**:
-- `billing.invoices` — central table. ~2,240 rows. Triggers cascade: indicators (subtotal_ok, credits_ok, payment_method_ok, attempts_ok, enrichment_ok) feed projection trigger → billing_status. **The PM-refresh AFTER INSERT trigger is here** (post-fix).
+- `billing.invoices` — central table. ~2,240 rows. Triggers cascade: indicators (subtotal_ok, credits_ok, payment_method_ok, attempts_ok, enrichment_ok) plus email_status and balance feed projection trigger → billing_status. **The PM-refresh AFTER INSERT trigger is here** (post-fix).
 - `billing.customer_payments` — QBO payment cache, ~16k rows
 - `billing.customer_payment_methods` — cards + ACH on file
 - `billing.processing_attempts` — audit log of charge attempts
@@ -176,7 +176,7 @@ The QBO invoice processing pipeline. Pulls invoices from QBO, enriches them (mem
 - `trg_request_pm_refresh_on_invoice_insert` — fires `pull_customer_payment_methods` on truly-new invoices (atomic-claim dedup)
 - `trg_bootstrap_indicators_on_invoice_insert` — sets initial indicator values
 - `trg_set_subtotal_ok_from_invoice`, `trg_set_payment_method_ok_from_invoice`, `trg_set_credits_ok_from_override` — recompute indicators when source fields change
-- `trg_project_billing_status_on_indicator_change` — composes billing_status from indicators
+- `trg_project_billing_status_on_indicator_change` — re-projects billing_status when an indicator, `email_status` or `balance` changes (the last two since 2026-10-06: v3 status reads them directly; without them a sent-but-unpaid invoice stayed `ready_to_process`)
 - `trg_auto_promote_to_processed` — moves to 'processed' when paid+sent
 - `trg_set_attempts_unblocked_at_on_pm_change` — clears blocked-attempt state on PM change
 

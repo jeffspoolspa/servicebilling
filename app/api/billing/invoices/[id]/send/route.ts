@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server"
 import { triggerScriptSync } from "@/lib/windmill"
 import { guardApi } from "@/lib/auth/api"
 import { createSupabaseServer } from "@/lib/supabase/server"
+import { getInvoiceState } from "@/lib/queries/dashboard"
 
 /**
  * POST /api/billing/invoices/[id]/send
@@ -36,6 +37,10 @@ export async function POST(
   if (!inv) return NextResponse.json({ error: "invoice not found" }, { status: 404 })
   if (inv.email_status === "EmailSent") {
     return NextResponse.json({ error: "invoice already sent" }, { status: 400 })
+  }
+  // send_and_record would refuse anyway; say so instead of reporting a send
+  if ((await getInvoiceState(id))?.send_waived) {
+    return NextResponse.json({ error: "sending is skipped for this invoice; undo the skip first" }, { status: 400 })
   }
 
   // Open balance => the customer pays this one themselves. Flip the route

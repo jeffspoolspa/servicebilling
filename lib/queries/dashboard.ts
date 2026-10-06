@@ -912,6 +912,7 @@ export interface InvoiceState {
   settled: boolean
   voided: boolean
   on_hold: boolean
+  send_waived: boolean
   state: "paid" | "ar" | "in_flight" | "needs_review" | "audit"
 }
 
@@ -920,7 +921,7 @@ export async function getInvoiceState(
 ): Promise<InvoiceState | null> {
   const { data } = await createAnon("billing")
     .from("v_invoice_state")
-    .select("qbo_invoice_id, balance, sent, settled, voided, on_hold, state")
+    .select("qbo_invoice_id, balance, sent, settled, voided, on_hold, send_waived, state")
     .eq("qbo_invoice_id", qboInvoiceId)
     .maybeSingle()
   return (data as InvoiceState | null) ?? null

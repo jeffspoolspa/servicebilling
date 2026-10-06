@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Maintains the `credits_ok` indicator on [billing.invoices](../../entities/invoice.md). True when there are no unallocated credits flagged for the invoice's customer that should have been applied first.
+Maintains the `credits_ok` indicator on [billing.invoices](../../entities/invoice.md). Since 2026-10-06 `billing.compute_credits_ok` returns the gate's own `credits_settled` (every credit in `public.billing_open_credits` has an applied/rejected decision for this invoice). Nothing reads the value; it is the bell: when it flips, the projection trigger re-projects `billing_status`. It once used its own 180-day window, so a 6-24 month credit consumed in QBO changed nothing and the invoice stayed held.
 
 When [pre_process_invoice](../service_billing/pre_process_invoice.md) auto-applies a credit, it decrements `customer_payments.unapplied_amt`; that UPDATE fires this trigger, which recomputes `credits_ok`, which fires the projection trigger that sets `billing_status`.
 

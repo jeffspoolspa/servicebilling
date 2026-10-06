@@ -30,6 +30,7 @@ import { CustomerCard } from "@/components/work-orders/detail/customer-card"
 import { PaymentMethodInline } from "@/components/work-orders/detail/payment-method-inline"
 import { BonusInline } from "@/components/work-orders/detail/bonus-inline"
 import { SendInvoiceButton } from "@/components/work-orders/detail/send-invoice-button"
+import { SkipSendButton } from "@/components/work-orders/detail/skip-send-button"
 import { createAnon } from "@/lib/supabase/anon"
 
 export const dynamic = "force-dynamic"
@@ -259,10 +260,18 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
             state={billingState}
             send={
               invoice && !invoiceState?.voided && !openHold ? (
-                <SendInvoiceButton
-                  qboInvoiceId={invoice.qbo_invoice_id}
-                  hasOpenBalance={Number(invoice.balance ?? 0) > 0}
-                />
+                <>
+                  {!invoiceState?.send_waived && (
+                    <SendInvoiceButton
+                      qboInvoiceId={invoice.qbo_invoice_id}
+                      hasOpenBalance={Number(invoice.balance ?? 0) > 0}
+                    />
+                  )}
+                  <SkipSendButton
+                    qboInvoiceId={invoice.qbo_invoice_id}
+                    skipped={invoiceState?.send_waived ?? false}
+                  />
+                </>
               ) : undefined
             }
             bonus={
