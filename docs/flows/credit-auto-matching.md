@@ -20,9 +20,15 @@ Pulls QBO credit memos into the cache and auto-matches available credit to the w
   `public.billing_open_credits`, which IS that filter; never re-derive it.
   Incident: 2026-10-06, the lookback moved 6 -> 24 months in the DB on 2026-09-25 but
   three app-side copies kept 6 months, so WOs were held in `credit_review` with an
-  empty Payments & credits table. Still debt: the four DB functions (gate,
-  `compute_billing_status`, reject-on-settle, `complete_credit_review`) repeat the
-  WHERE clause inline instead of reading the view.
+  empty Payments & credits table. The DB functions read the view too (gate,
+  `compute_billing_status`, reject-on-settle, `complete_credit_review`).
+- [invariant] `billing.invoices.credits_ok` is the gate's `credits_settled`
+  (`compute_credits_ok`), stored only as the bell that re-projects `billing_status`
+  when a `customer_payments` change flips it. Nothing reads its value. If it is
+  computed from a different credit set than the gate, a credit can change without
+  ringing the bell and the invoice stays held. Incident: 2026-10-06, it still used
+  180 days; three invoices whose 6-24 month credits were consumed in QBO stayed in
+  `credit_review`.
 
 - [invariant] Every upsert into `billing.customer_payments` MUST refresh `qbo_customer_id`
   on conflict (and derive it from the payload's `CustomerRef`, never from a caller
