@@ -180,13 +180,25 @@ export function DoseTape({
     return () => cancelAnimationFrame(raf.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  // Track the amount under the marker so an external re-anchor that lands
+  // on the SAME amount (a re-spanned grid confirming the choice) repositions
+  // instantly — any tape movement not made by the finger reads as a glitch.
+  const lastAmount = useRef(rows[activeIdx]?.amount)
   useEffect(() => {
     if (activeIdx !== lastIdx.current) {
       lastIdx.current = activeIdx
-      springTo(activeIdx)
+      if (rows[activeIdx]?.amount === lastAmount.current) {
+        cancelAnimationFrame(raf.current)
+        pos.current = activeIdx
+        vel.current = 0
+        render()
+      } else {
+        springTo(activeIdx)
+      }
     }
+    lastAmount.current = rows[activeIdx]?.amount
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeIdx])
+  }, [activeIdx, rows])
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     cancelAnimationFrame(raf.current)
