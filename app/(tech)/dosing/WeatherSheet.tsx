@@ -99,31 +99,44 @@ export function WeatherPourSheet({
   // HELD here and applied on release — never yank a tape under a finger.
   const gestureOn = useRef(false)
   const heldResult = useRef<DosingResponse | null>(null)
+  const slotsRef = useRef(slots)
+  slotsRef.current = slots
+  const sensRef = useRef(sens)
+  sensRef.current = sens
 
   // Selection response: merge onto the roster. Present products replace
   // their slot (the server's recommended:true row IS the chosen stop, so
   // clearing sens re-anchors there); absent products were omitted — keep
   // their remembered data pinned to the 0-stop.
   const applyMerge = (res: DosingResponse) => {
-    setSlots((prev) =>
-      prev.map((slot, i) => {
-        const sentName = sentBasket.current[i]
-        const incoming = sentName ? res.doses.find((d) => d.product === sentName) : undefined
-        if (!incoming) return slot
-        // Identical grid (same stops) = identical indices: keep the new data
-        // but the tape won't move; a re-spanned grid re-anchors on purpose.
-        return incoming
-      }),
-    )
-    setChoice({})
-    setSens((prev) => {
-      const next: Record<number, number | undefined> = {}
-      for (const [k, v] of Object.entries(prev)) {
-        const i = Number(k)
-        if (sentBasket.current[i] === undefined && v != null) next[i] = v // stays at 0-stop
+    // A response that merely CONFIRMS the amount already under the marker
+    // must not move anything (ruled 2026-10-06): keep the old slot object —
+    // old grid, old recommended tick, user's own index — so the tape is
+    // byte-identical. Only a real correction (flip, re-spanned grid without
+    // the chosen amount) replaces the slot and re-anchors.
+    const prev = slotsRef.current
+    const prevSens = sensRef.current
+    const nextSens: Record<number, number | undefined> = {}
+    const nextSlots = prev.map((slot, i) => {
+      const sentName = sentBasket.current[i]
+      if (sentName === undefined) {
+        if (prevSens[i] != null) nextSens[i] = prevSens[i] // stays at 0-stop
+        return slot
       }
-      return next
+      const incoming = res.doses.find((d) => d.product === sentName)
+      if (!incoming) return slot
+      if (incoming.product === slot.product) {
+        const recAmt = rowsOf(incoming).find((r) => r.recommended)?.amount
+        if (recAmt != null && rowsOf(slot).some((r) => r.amount === recAmt)) {
+          if (prevSens[i] != null) nextSens[i] = prevSens[i] // keep the user's index
+          return slot // zero-churn confirm
+        }
+      }
+      return incoming // correction/flip: server grid takes over, sens clears
     })
+    setSlots(nextSlots)
+    setChoice({})
+    setSens(nextSens)
   }
 
   useEffect(() => {
