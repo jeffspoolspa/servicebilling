@@ -1058,17 +1058,6 @@ export interface AppliedPayment {
   payment_method_name: string | null
 }
 
-// Mirror of billing.credit_lookback() (24 months, ruled 2026-09-25). The gate
-// counts credits inside this window; the UI must show the same set or a WO is
-// held for credits nobody can see.
-// ponytail: duplicated literal; move UI reads onto a DB view if it drifts again.
-const CREDIT_LOOKBACK_MONTHS = 24
-function creditCutoff(): string {
-  const d = new Date()
-  d.setMonth(d.getMonth() - CREDIT_LOOKBACK_MONTHS)
-  return d.toISOString().slice(0, 10)
-}
-
 export async function getAppliedPaymentsForInvoice(
   qboInvoiceId: string,
 ): Promise<AppliedPayment[]> {
@@ -1238,7 +1227,7 @@ export async function getNeedsReviewTriageQueue(
   }
 
   // Batch-fetch applicable open credits for all unique customers in this queue.
-  // Same filter as process_invoice's pre-charge recheck: no maint, no stale.
+  // billing_open_credits IS the gate's filter (lookback + no maint).
   const customerIds = Array.from(
     new Set(
       invoices
@@ -1248,18 +1237,12 @@ export async function getNeedsReviewTriageQueue(
   )
   const creditsByCustomer = new Map<string, OpenCredit[]>()
   if (customerIds.length > 0) {
-    const cutoff = creditCutoff()
     const { data: credits } = await sb
-      .from("billing_customer_payments")
+      .from("billing_open_credits")
       .select("id, qbo_payment_id, qbo_customer_id, type, unapplied_amt, total_amt, txn_date, ref_num, memo")
       .in("qbo_customer_id", customerIds)
-      .gt("unapplied_amt", 0)
-      .or(`txn_date.is.null,txn_date.gte.${cutoff}`)
       .order("txn_date", { ascending: false })
     for (const c of (credits ?? []) as Array<Record<string, unknown>>) {
-      // Client-side maint filter (Postgrest doesn't expose case-insensitive NOT ILIKE cleanly)
-      const memo = (c.memo as string | null) ?? ""
-      if (/maint/i.test(memo)) continue
       const cid = String(c.qbo_customer_id)
       const list = creditsByCustomer.get(cid) ?? []
       list.push(c as unknown as OpenCredit)
@@ -1421,14 +1404,11 @@ export async function getWorkOrderDetail(
     // Filter to APPLICABLE only — matches the filter process_invoice uses for its
     // pre-charge recheck and the triage view: no maint-scoped, nothing older than the lookback.
     if (invoice?.qbo_customer_id) {
-      const cutoff = creditCutoff()
       const [credRes, decRes, stateRes, pmRes] = await Promise.all([
         sb
-          .from("billing_customer_payments")
+          .from("billing_open_credits")
           .select("id, qbo_payment_id, type, unapplied_amt, total_amt, txn_date, ref_num, memo")
           .eq("qbo_customer_id", invoice.qbo_customer_id)
-          .gt("unapplied_amt", 0)
-          .or(`txn_date.is.null,txn_date.gte.${cutoff}`)
           .order("txn_date", { ascending: true }),
         // The per-invoice credit decision record — what pre-process saw for
         // THIS invoice and each credit's outcome (candidate/applied/rejected/
@@ -1461,10 +1441,7 @@ export async function getWorkOrderDetail(
           .order("is_default", { ascending: false, nullsFirst: false })
           .order("qbo_created_at", { ascending: false }),
       ])
-      // Client-side maint filter (Postgrest NOT ILIKE is awkward to express)
-      openCredits = ((credRes.data ?? []) as OpenCredit[]).filter(
-        (c) => !(c.memo && /maint/i.test(c.memo)),
-      )
+      openCredits = (credRes.data ?? []) as OpenCredit[]
       creditDecisions = (decRes.data ?? []) as CreditDecision[]
       billingState = (stateRes.data ?? null) as ServiceBillingState | null
       paymentMethods = (pmRes.data ?? []) as PaymentMethod[]
