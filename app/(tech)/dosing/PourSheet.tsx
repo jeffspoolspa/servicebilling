@@ -99,6 +99,8 @@ export function DoseTape({
   amountLabel,
   onSens,
   onDone,
+  onGesture,
+  onSettle,
 }: {
   rows: { amount: number; unit: string }[]
   activeIdx: number
@@ -107,6 +109,10 @@ export function DoseTape({
   onSens: (i: number) => void
   /** Renders a done button mirroring the reset one — closes the picker. */
   onDone?: () => void
+  /** Finger down/up on the band — a selection is only FINAL at up. */
+  onGesture?: (active: boolean) => void
+  /** A selection settled (finger lifted, stop tapped, reset) — safe to act on. */
+  onSettle?: () => void
 }) {
   const n = rows.length
   const scale = stopScale(rows)
@@ -193,6 +199,7 @@ export function DoseTape({
     // Un-rubber the current position so the finger picks up where it looks.
     drag.current = { id: e.pointerId, raw: pos.current, x: e.clientX, t: performance.now() }
     moved.current = false
+    onGesture?.(true)
     vel.current = 0
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -219,6 +226,8 @@ export function DoseTape({
     const target = clampIdx(Math.round(d.raw + vel.current * 0.12))
     commit(target)
     springTo(target)
+    onGesture?.(false)
+    onSettle?.()
   }
 
   return (

@@ -95,28 +95,24 @@ export function WeatherPourSheet({
   // product name sent per slot in the LAST basket (undefined = omitted)
   const sentBasket = useRef<Record<number, string | undefined>>({})
   const lastEpoch = useRef(resultEpoch)
+  // A finger on a tape owns the view: responses landing mid-gesture are
+  // HELD here and applied on release — never yank a tape under a finger.
+  const gestureOn = useRef(false)
+  const heldResult = useRef<DosingResponse | null>(null)
 
-  useEffect(() => {
-    if (resultEpoch !== lastEpoch.current) {
-      // Fresh recommendation: the response IS the roster.
-      lastEpoch.current = resultEpoch
-      sentBasket.current = {}
-      setSlots(result.doses)
-      setChoice({})
-      setSens({})
-      return
-    }
-    // Selection response: merge onto the roster. Present products replace
-    // their slot (the server's recommended:true row IS the chosen stop, so
-    // clearing sens re-anchors there); absent products were omitted — keep
-    // their remembered data pinned to the 0-stop.
+  // Selection response: merge onto the roster. Present products replace
+  // their slot (the server's recommended:true row IS the chosen stop, so
+  // clearing sens re-anchors there); absent products were omitted — keep
+  // their remembered data pinned to the 0-stop.
+  const applyMerge = (res: DosingResponse) => {
     setSlots((prev) =>
       prev.map((slot, i) => {
         const sentName = sentBasket.current[i]
-        const incoming = sentName
-          ? result.doses.find((d) => d.product === sentName)
-          : undefined
-        return incoming ?? slot
+        const incoming = sentName ? res.doses.find((d) => d.product === sentName) : undefined
+        if (!incoming) return slot
+        // Identical grid (same stops) = identical indices: keep the new data
+        // but the tape won't move; a re-spanned grid re-anchors on purpose.
+        return incoming
       }),
     )
     setChoice({})
@@ -128,8 +124,35 @@ export function WeatherPourSheet({
       }
       return next
     })
+  }
+
+  useEffect(() => {
+    if (resultEpoch !== lastEpoch.current) {
+      // Fresh recommendation: the response IS the roster.
+      lastEpoch.current = resultEpoch
+      sentBasket.current = {}
+      heldResult.current = null
+      setSlots(result.doses)
+      setChoice({})
+      setSens({})
+      return
+    }
+    if (gestureOn.current) {
+      heldResult.current = result
+      return
+    }
+    applyMerge(result)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result, resultEpoch])
+
+  const onTapeGesture = (active: boolean) => {
+    gestureOn.current = active
+    if (!active && heldResult.current) {
+      const held = heldResult.current
+      heldResult.current = null
+      applyMerge(held)
+    }
+  }
 
   const optionAt = (i: number) => {
     const d = slots[i]
@@ -159,7 +182,8 @@ export function WeatherPourSheet({
   }
   const buildBasketRef = useRef(buildBasket)
   buildBasketRef.current = buildBasket
-  // Debounced (~300ms): scrubbing fires per stop; the call is cheap but not free.
+  // Debounced (~300ms): fires on gesture SETTLE (finger up, tap, reset,
+  // flip) — never mid-scrub; coalesces rapid taps.
   const repostTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const scheduleRepost = () => {
     clearTimeout(repostTimer.current)
@@ -528,10 +552,9 @@ export function WeatherPourSheet({
                           activeIdx={activeIdx}
                           recIdx={recRow}
                           amountLabel={amount}
-                          onSens={(j) => {
-                            setSens((v) => ({ ...v, [i]: j }))
-                            scheduleRepost()
-                          }}
+                          onSens={(j) => setSens((v) => ({ ...v, [i]: j }))}
+                          onGesture={onTapeGesture}
+                          onSettle={scheduleRepost}
                           onDone={() => setFocus(null)}
                         />
                       </div>
