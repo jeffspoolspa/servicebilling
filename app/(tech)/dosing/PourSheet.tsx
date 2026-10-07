@@ -186,28 +186,35 @@ export function DoseTape({
   activeIdx,
   recIdx,
   anchorKey = 0,
+  gallons,
+  onToggleUnit,
   onSens,
   onDone,
-  onGesture,
   onSettle,
 }: {
-  rows: { amount: number; unit: string }[]
+  rows: { amount: number; unit: string; overLimit?: string[]; gallons?: number }[]
   activeIdx: number
   recIdx: number
   /** Bump to re-anchor the tape to `activeIdx` from outside (fresh result,
    * server correction). Plain activeIdx changes are echoes of the tape's
    * own commits and are ignored — the gesture, not the parent, leads. */
   anchorKey?: number
+  /** Jug-poured products: show gallons (true) or fl oz (false); with
+   * onToggleUnit, the unit becomes a tappable switch. */
+  gallons?: boolean
+  onToggleUnit?: () => void
   onSens: (i: number) => void
   /** Renders a done button mirroring the reset one — closes the picker. */
   onDone?: () => void
-  /** Finger down/up on the band — a selection is only FINAL at up. */
-  onGesture?: (active: boolean) => void
-  /** A selection settled (finger lifted, stop tapped, reset) — safe to act on. */
+  /** A selection settled (the wheel stopped, a stop tapped, reset) — safe to act on. */
   onSettle?: () => void
 }) {
   const n = rows.length
   const scale = stopScale(rows)
+  const inGal = !!gallons && rows.every((r) => r.gallons != null)
+  const unitLabel = inGal ? "gal" : scale.label
+  const shown = (r: { amount: number; gallons?: number }) =>
+    inGal ? trimNum(r.gallons!) : trimNum(r.amount / scale.div)
   const track = useRef<HTMLDivElement>(null)
   // All motion lives in refs and writes transforms directly — a re-render
   // per frame would drop frames.
@@ -221,8 +228,8 @@ export function DoseTape({
   // The label follows the tape's OWN commits immediately (a tiny local
   // render) — never waits on the parent's re-render of the whole sheet.
   const [liveIdx, setLiveIdx] = useState(activeIdx)
-  const cb = useRef({ onSens, onGesture, onSettle })
-  cb.current = { onSens, onGesture, onSettle }
+  const cb = useRef({ onSens, onSettle })
+  cb.current = { onSens, onSettle }
   const rowsRef = useRef(rows)
   rowsRef.current = rows
 
@@ -239,7 +246,7 @@ export function DoseTape({
     const at = f > 0
     num.style.opacity = at ? String(0.45 * (1 - f)) : ""
     bar.style.transform = at ? `scaleX(${1 + FOCUS.barWidth * f}) scaleY(${1 + FOCUS.barHeight * f})` : ""
-    if (!bar.dataset.rec) bar.style.opacity = at ? String(0.25 + 0.75 * f) : ""
+    if (!bar.dataset.solid) bar.style.opacity = at ? String(0.25 + 0.75 * f) : ""
   }
   const syncFocus = (force = false) => {
     const el = track.current
@@ -323,15 +330,13 @@ export function DoseTape({
     raf.current = requestAnimationFrame(step)
   }
 
-  // A release hands the tape to the wheel. The GESTURE lasts until the wheel
-  // stops: only then is the selection final (onGesture false, onSettle) —
-  // posting mid-spin would send a stop the wheel is about to leave.
+  // A release hands the tape to the wheel; the selection is final only when
+  // it stops — posting mid-spin would send a stop it's about to leave.
   const coasting = useRef(false)
   const endCoast = (settle: boolean) => {
     cancelAnimationFrame(raf.current)
     if (!coasting.current) return
     coasting.current = false
-    cb.current.onGesture?.(false)
     if (settle) cb.current.onSettle?.()
   }
   const coast = () => {
@@ -392,12 +397,7 @@ export function DoseTape({
     pos.current = activeIdx
     lastIdx.current = activeIdx
     render()
-    return () => {
-      cancelAnimationFrame(raf.current)
-      // Unmounted mid-drag or mid-spin (product flip): release the parent's
-      // response hold, or it would wait forever.
-      if (drag.current || coasting.current) cb.current.onGesture?.(false)
-    }
+    return () => cancelAnimationFrame(raf.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   // A new grid renders new stop elements — repaint focus from scratch.
@@ -430,7 +430,7 @@ export function DoseTape({
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     cancelAnimationFrame(raf.current)
-    coasting.current = false // caught mid-spin: still one gesture, no release
+    coasting.current = false // caught mid-spin: the new drag takes over
     primeTickAudio()
     // Can throw if the pointer already lifted — capture is best-effort.
     try {
@@ -441,7 +441,6 @@ export function DoseTape({
     // Un-rubber the current position so the finger picks up where it looks.
     drag.current = { id: e.pointerId, raw: undetent(pos.current), x: e.clientX, t: performance.now(), trail: [] }
     moved.current = false
-    cb.current.onGesture?.(true)
     vel.current = 0
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -488,22 +487,22 @@ export function DoseTape({
           className="shrink-0 flex flex-col items-center gap-1.5 pt-3 pb-6"
           style={{ width: TAPE_ITEM }}
         >
-          <span className="text-sm tabular-nums text-ink opacity-[0.45]">
-            {trimNum(r.amount / scale.div)}
-          </span>
+          <span className="text-sm tabular-nums text-ink opacity-[0.45]">{shown(r)}</span>
           <span
-            data-rec={i === recIdx ? "1" : undefined}
+            data-solid={r.overLimit || i === recIdx ? "1" : undefined}
             className={cn(
               "block w-px h-4 rounded-full origin-top",
-              i === recIdx ? "bg-cyan" : "bg-white opacity-25",
+              r.overLimit ? "bg-red-400" : i === recIdx ? "bg-cyan" : "bg-white opacity-25",
             )}
           />
         </button>
       )),
-    [rows, recIdx, scale.div],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, recIdx, scale.div, inGal],
   )
   const live = rows[liveIdx] ?? rows[0]
   const onRec = liveIdx === recIdx
+  const over = live?.overLimit
 
   return (
     <div className="space-y-3">
@@ -525,20 +524,34 @@ export function DoseTape({
           {/* kept in the layout when off-recommendation so the row doesn't jump */}
           <span
             className={cn(
-              "text-[10px] uppercase tracking-wide text-cyan transition-opacity duration-150",
-              onRec ? "opacity-100" : "opacity-0",
+              "text-[10px] uppercase tracking-wide transition-opacity duration-150",
+              over ? "text-red-400 font-semibold" : "text-cyan",
+              over || onRec ? "opacity-100" : "opacity-0",
             )}
           >
-            Recommended
+            {over ? `Over limit · ${over.map((k) => LABEL_NAMES[k] ?? humanize(k)).join(", ")}` : "Recommended"}
           </span>
-          <span
-            ref={labelRef}
-            className={cn(
-              "text-3xl font-display tabular-nums transition-colors duration-150",
-              onRec ? "text-cyan" : "text-ink",
+          <span className="flex items-baseline gap-2">
+            <span
+              ref={labelRef}
+              className={cn(
+                "text-3xl font-display tabular-nums transition-colors duration-150",
+                over ? "text-red-400" : onRec ? "text-cyan" : "text-ink",
+              )}
+            >
+              {live ? (onToggleUnit ? shown(live) : `${shown(live)} ${unitLabel}`) : ""}
+            </span>
+            {onToggleUnit && (
+              <button
+                type="button"
+                onClick={onToggleUnit}
+                aria-label={inGal ? "Show fluid ounces" : "Show gallons"}
+                className="self-center inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white/10 text-xs text-ink-dim active:scale-95 transition-transform"
+              >
+                {unitLabel}
+                <ArrowLeftRight className="w-3 h-3" strokeWidth={2} />
+              </button>
             )}
-          >
-            {live ? `${trimNum(live.amount / scale.div)} ${scale.label}` : ""}
           </span>
         </span>
         {/* rolls the tape back to the recommended stop */}
