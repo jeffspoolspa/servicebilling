@@ -80,9 +80,9 @@ export function trimNum(n: number): string {
 
 /**
  * The dose picker — the Phantom leverage-picker layout: the big selected
- * amount over a horizontal ruler with the amount ABOVE each tick. The
- * selected stop hides behind the fixed centre line; the recommended tick is
- * cyan. The tape is a spring-driven drag surface (NOT native scroll — that
+ * amount over a horizontal ruler with the amount ABOVE each tick. The stop
+ * at the centre grows into the focused bar and number (no separate centre
+ * line); the recommended tick is cyan. The tape is a spring-driven drag surface (NOT native scroll — that
  * wedges on iOS and feels dead at 3 stops): swipe anywhere in the band,
  * drag past the ends and it stretches and springs back, release and it
  * spins on like a prize wheel, ticking at each stop until a peg catches it.
@@ -173,6 +173,10 @@ function tickSound(intensity: number) {
   osc.start(t)
   osc.stop(t + 0.035)
 }
+// How much the stop in focus grows (scale factors at full focus): the
+// number, and the bar's width and height. Feel knobs.
+const FOCUS = { number: 0.6, barWidth: 2, barHeight: 1.25 }
+
 const reducedMotion = () =>
   typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches
 
@@ -221,24 +225,39 @@ export function DoseTape({
   const rowsRef = useRef(rows)
   rowsRef.current = rows
 
-  // The stop under the centre line hides, driven by the PIXELS (pos) on the
-  // same frame that moves them — a hide keyed to React state lagged the
-  // strip and left the number showing behind the bar.
-  const hidden = useRef(-1)
-  const syncHide = (force = false) => {
+  // FOCUS lives on the stops themselves (ruled 2026-10-07): the stop at the
+  // centre is a tall bright bar with a large number, and as the strip moves
+  // the next one grows while the last one shrinks — painted from the pixels
+  // on the same frame, so there is no second bar to disagree with.
+  const painted = useRef<number[]>([])
+  const paint = (stop: Element | undefined, f: number) => {
+    if (!stop) return
+    const num = stop.children[0] as HTMLElement
+    const bar = stop.children[1] as HTMLElement
+    const at = f > 0
+    num.style.transform = at ? `scale(${1 + FOCUS.number * f})` : ""
+    num.style.opacity = at ? String(0.45 + 0.55 * f) : ""
+    bar.style.transform = at ? `scaleX(${1 + FOCUS.barWidth * f}) scaleY(${1 + FOCUS.barHeight * f})` : ""
+    if (!bar.dataset.rec) bar.style.opacity = at ? String(0.25 + 0.75 * f) : ""
+  }
+  const syncFocus = (force = false) => {
     const el = track.current
     if (!el) return
-    const idx = Math.round(Math.max(0, Math.min(rowsRef.current.length - 1, pos.current)))
-    if (!force && idx === hidden.current) return
     const kids = el.children
-    for (let k = 0; k < kids.length; k++) {
-      ;(kids[k] as HTMLElement).style.opacity = k === idx ? "0" : ""
+    const p = pos.current
+    const lo = Math.floor(p)
+    const near = [lo, lo + 1].filter((k) => k >= 0 && k < kids.length)
+    if (force) for (let k = 0; k < kids.length; k++) paint(kids[k], 0)
+    else for (const k of painted.current) if (!near.includes(k)) paint(kids[k], 0)
+    for (const k of near) {
+      const t = Math.max(0, 1 - Math.abs(p - k))
+      paint(kids[k], t * t * (3 - 2 * t))
     }
-    hidden.current = idx
+    painted.current = near
   }
   const render = () => {
     if (track.current) track.current.style.transform = `translate3d(${-pos.current * TAPE_ITEM}px,0,0)`
-    syncHide()
+    syncFocus()
   }
   const clampIdx = (i: number) => Math.max(0, Math.min(n - 1, i))
   // Past either end the tape moves at a fraction of the finger — the stretch.
@@ -248,7 +267,6 @@ export function DoseTape({
   // "did an outside re-anchor land on the same amount?".
   const lastAmount = useRef(rows[activeIdx]?.amount)
   const labelRef = useRef<HTMLSpanElement>(null)
-  const flapperRef = useRef<HTMLSpanElement>(null)
   // Speed now, in stops/s: the coast's velocity, or the drag's recent trail.
   const speedNow = () => {
     if (coasting.current) return Math.abs(vel.current)
@@ -258,18 +276,11 @@ export function DoseTape({
     const b = tr[tr.length - 1]
     return b.t > a.t ? Math.abs(((b.raw - a.raw) * 1000) / (b.t - a.t)) : 0
   }
-  // Each stop passing the centre is a TICK: the flapper (the centre line,
-  // hinged at its top) gets knocked the way the strip is moving — harder at
-  // speed — and springs back; the number pops; the click sounds.
-  const tick = (dir: number) => {
-    const speed = speedNow()
-    tickSound(Math.min(1, speed / 25))
+  // Each stop reaching the centre is a TICK: the click sounds (louder at
+  // speed) and the readout pops.
+  const tick = () => {
+    tickSound(Math.min(1, speedNow() / 25))
     if (reducedMotion()) return
-    const angle = dir * Math.min(24, 7 + speed * 0.6)
-    flapperRef.current?.animate([{ rotate: `${angle}deg` }, { rotate: "0deg" }], {
-      duration: 180,
-      easing: "cubic-bezier(0.3, 1.5, 0.5, 1)",
-    })
     labelRef.current?.animate([{ transform: "scale(1.07)" }, { transform: "scale(1)" }], {
       duration: 160,
       easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
@@ -277,10 +288,9 @@ export function DoseTape({
   }
   const commit = (i: number) => {
     if (i !== lastIdx.current) {
-      const dir = i > lastIdx.current ? 1 : -1
       lastIdx.current = i
       lastAmount.current = rowsRef.current[i]?.amount
-      tick(dir)
+      tick()
       setLiveIdx(i)
       cb.current.onSens(i)
     }
@@ -389,9 +399,9 @@ export function DoseTape({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  // A new grid renders new stop elements — re-apply the pixel-driven hide.
+  // A new grid renders new stop elements — repaint focus from scratch.
   useLayoutEffect(() => {
-    syncHide(true)
+    syncFocus(true)
   })
   // External re-anchor ONLY when anchorKey changes. Landing on the same
   // amount repositions instantly — tape movement the finger didn't make
@@ -474,11 +484,19 @@ export function DoseTape({
           onClick={() => {
             if (!moved.current) jumpRef.current(i)
           }}
-          className="shrink-0 flex flex-col items-center gap-1.5 pt-1 pb-1.5 transition-opacity duration-150"
+          className="shrink-0 flex flex-col items-center gap-1.5 pt-3 pb-6"
           style={{ width: TAPE_ITEM }}
         >
-          <span className="text-sm tabular-nums text-ink-mute">{trimNum(r.amount / scale.div)}</span>
-          <span className={cn("w-px rounded-full", i === recIdx ? "h-4 bg-cyan" : "h-4 bg-white/20")} />
+          <span className="inline-block origin-bottom text-sm tabular-nums text-ink opacity-[0.45]">
+            {trimNum(r.amount / scale.div)}
+          </span>
+          <span
+            data-rec={i === recIdx ? "1" : undefined}
+            className={cn(
+              "block w-px h-4 rounded-full origin-top",
+              i === recIdx ? "bg-cyan" : "bg-white opacity-25",
+            )}
+          />
         </button>
       )),
     [rows, recIdx, scale.div],
@@ -553,11 +571,6 @@ export function DoseTape({
         >
           {strip}
         </div>
-        {/* fixed centre indicator — stands in for the hidden selected stop */}
-        <span
-          ref={flapperRef}
-          className="pointer-events-none absolute left-1/2 -translate-x-1/2 inset-y-0 w-0.5 rounded-full bg-white origin-top"
-        />
         {/* edge fades */}
         <span className="pointer-events-none absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-bg-elev to-transparent" />
         <span className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-bg-elev to-transparent" />
