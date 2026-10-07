@@ -90,13 +90,18 @@ export function trimNum(n: number): string {
 const TAPE_ITEM = 56
 // Damping ratio ~0.88 — a whisper of overshoot, right for a drag surface.
 const SPRING = { stiffness: 220, damping: 26 }
+// How far a release projects ahead: target = pos + v * FLING_S.
+const FLING_S = 0.12
+// Fling velocity is measured over the last VELOCITY_WINDOW_MS of the drag,
+// never from one pointer sample (the sample before lift-off is jittery).
+const VELOCITY_WINDOW_MS = 100
 const RUBBER = 0.35
 
 export function DoseTape({
   rows,
   activeIdx,
   recIdx,
-  amountLabel,
+  anchorKey = 0,
   onSens,
   onDone,
   onGesture,
@@ -105,7 +110,10 @@ export function DoseTape({
   rows: { amount: number; unit: string }[]
   activeIdx: number
   recIdx: number
-  amountLabel: string
+  /** Bump to re-anchor the tape to `activeIdx` from outside (fresh result,
+   * server correction). Plain activeIdx changes are echoes of the tape's
+   * own commits and are ignored — the gesture, not the parent, leads. */
+  anchorKey?: number
   onSens: (i: number) => void
   /** Renders a done button mirroring the reset one — closes the picker. */
   onDone?: () => void
@@ -123,21 +131,49 @@ export function DoseTape({
   const vel = useRef(0) // stops/second
   const raf = useRef(0)
   const lastIdx = useRef(activeIdx)
-  const drag = useRef<{ id: number; raw: number; x: number; t: number } | null>(null)
+  const drag = useRef<{ id: number; raw: number; x: number; t: number; trail: { t: number; raw: number }[] } | null>(null)
   // Survives past pointerup so the click that follows a drag doesn't jump.
   const moved = useRef(false)
+  // The label follows the tape's OWN commits immediately (a tiny local
+  // render) — never waits on the parent's re-render of the whole sheet.
+  const [liveIdx, setLiveIdx] = useState(activeIdx)
+  const cb = useRef({ onSens, onGesture, onSettle })
+  cb.current = { onSens, onGesture, onSettle }
+  const rowsRef = useRef(rows)
+  rowsRef.current = rows
 
+  // The stop under the centre line hides, driven by the PIXELS (pos) on the
+  // same frame that moves them — a hide keyed to React state lagged the
+  // strip and left the number showing behind the bar.
+  const hidden = useRef(-1)
+  const syncHide = (force = false) => {
+    const el = track.current
+    if (!el) return
+    const idx = Math.round(Math.max(0, Math.min(rowsRef.current.length - 1, pos.current)))
+    if (!force && idx === hidden.current) return
+    const kids = el.children
+    for (let k = 0; k < kids.length; k++) {
+      ;(kids[k] as HTMLElement).style.opacity = k === idx ? "0" : ""
+    }
+    hidden.current = idx
+  }
   const render = () => {
     if (track.current) track.current.style.transform = `translate3d(${-pos.current * TAPE_ITEM}px,0,0)`
+    syncHide()
   }
   const clampIdx = (i: number) => Math.max(0, Math.min(n - 1, i))
   // Past either end the tape moves at a fraction of the finger — the stretch.
   const rubber = (raw: number) =>
     raw < 0 ? raw * RUBBER : raw > n - 1 ? n - 1 + (raw - (n - 1)) * RUBBER : raw
+  // Amount under the marker as of the tape's own last commit — the basis for
+  // "did an outside re-anchor land on the same amount?".
+  const lastAmount = useRef(rows[activeIdx]?.amount)
   const commit = (i: number) => {
     if (i !== lastIdx.current) {
       lastIdx.current = i
-      onSens(i)
+      lastAmount.current = rowsRef.current[i]?.amount
+      setLiveIdx(i)
+      cb.current.onSens(i)
     }
   }
 
@@ -170,9 +206,12 @@ export function DoseTape({
   const jump = (i: number) => {
     commit(i)
     springTo(i)
+    cb.current.onSettle?.()
   }
+  const jumpRef = useRef(jump)
+  jumpRef.current = jump
 
-  // Mount + external re-anchors (product flip remount, result refresh).
+  // Mount: place the strip before paint.
   useLayoutEffect(() => {
     pos.current = activeIdx
     lastIdx.current = activeIdx
@@ -180,25 +219,32 @@ export function DoseTape({
     return () => cancelAnimationFrame(raf.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  // Track the amount under the marker so an external re-anchor that lands
-  // on the SAME amount (a re-spanned grid confirming the choice) repositions
-  // instantly — any tape movement not made by the finger reads as a glitch.
-  const lastAmount = useRef(rows[activeIdx]?.amount)
+  // A new grid renders new stop elements — re-apply the pixel-driven hide.
+  useLayoutEffect(() => {
+    syncHide(true)
+  })
+  // External re-anchor ONLY when anchorKey changes. Landing on the same
+  // amount repositions instantly — tape movement the finger didn't make
+  // reads as a glitch; a genuinely different amount springs there.
+  const seenAnchor = useRef(anchorKey)
   useEffect(() => {
-    if (activeIdx !== lastIdx.current) {
-      lastIdx.current = activeIdx
-      if (rows[activeIdx]?.amount === lastAmount.current) {
-        cancelAnimationFrame(raf.current)
-        pos.current = activeIdx
-        vel.current = 0
-        render()
-      } else {
-        springTo(activeIdx)
-      }
-    }
+    if (anchorKey === seenAnchor.current) return
+    seenAnchor.current = anchorKey
+    if (drag.current) return // the gesture owns the tape; release re-commits
+    lastIdx.current = activeIdx
+    setLiveIdx(activeIdx)
+    const same = rows[activeIdx]?.amount === lastAmount.current
     lastAmount.current = rows[activeIdx]?.amount
+    if (same) {
+      cancelAnimationFrame(raf.current)
+      pos.current = activeIdx
+      vel.current = 0
+      render()
+    } else {
+      springTo(activeIdx)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeIdx, rows])
+  }, [anchorKey])
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     cancelAnimationFrame(raf.current)
@@ -209,9 +255,9 @@ export function DoseTape({
       /* keep the drag; move/up still bubble to the band */
     }
     // Un-rubber the current position so the finger picks up where it looks.
-    drag.current = { id: e.pointerId, raw: pos.current, x: e.clientX, t: performance.now() }
+    drag.current = { id: e.pointerId, raw: pos.current, x: e.clientX, t: performance.now(), trail: [] }
     moved.current = false
-    onGesture?.(true)
+    cb.current.onGesture?.(true)
     vel.current = 0
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -219,13 +265,13 @@ export function DoseTape({
     if (!d || e.pointerId !== d.id) return
     const dx = e.clientX - d.x
     const now = performance.now()
-    const dt = Math.max(1, now - d.t) / 1000
     const dIdx = -dx / TAPE_ITEM
     if (Math.abs(dx) > 4) moved.current = true
-    vel.current = dIdx / dt
     d.raw += dIdx
     d.x = e.clientX
     d.t = now
+    d.trail.push({ t: now, raw: d.raw })
+    while (d.trail.length > 2 && now - d.trail[0].t > VELOCITY_WINDOW_MS) d.trail.shift()
     pos.current = rubber(d.raw)
     render()
     commit(Math.round(clampIdx(d.raw)))
@@ -234,13 +280,42 @@ export function DoseTape({
     const d = drag.current
     if (!d || e.pointerId !== d.id) return
     drag.current = null
-    // A short velocity projection picks the stop a flick was headed for.
-    const target = clampIdx(Math.round(d.raw + vel.current * 0.12))
+    // Release velocity over the recent window; a finger that paused before
+    // lifting releases at rest (no surprise fling).
+    const now = performance.now()
+    const first = d.trail[0]
+    const last = d.trail[d.trail.length - 1]
+    const span = last && first ? last.t - first.t : 0
+    vel.current = last && now - last.t < 60 && span >= 8 ? ((last.raw - first.raw) * 1000) / span : 0
+    const target = clampIdx(Math.round(d.raw + vel.current * FLING_S))
     commit(target)
     springTo(target)
-    onGesture?.(false)
-    onSettle?.()
+    cb.current.onGesture?.(false)
+    cb.current.onSettle?.()
   }
+
+  // The strip depends only on the grid — liveIdx changes re-render the
+  // header, not 20-50 stop buttons.
+  const strip = useMemo(
+    () =>
+      rows.map((r, i) => (
+        <button
+          key={i}
+          type="button"
+          onClick={() => {
+            if (!moved.current) jumpRef.current(i)
+          }}
+          className="shrink-0 flex flex-col items-center gap-1.5 pt-1 pb-1.5 transition-opacity duration-150"
+          style={{ width: TAPE_ITEM }}
+        >
+          <span className="text-sm tabular-nums text-ink-mute">{trimNum(r.amount / scale.div)}</span>
+          <span className={cn("w-px rounded-full", i === recIdx ? "h-4 bg-cyan" : "h-4 bg-white/20")} />
+        </button>
+      )),
+    [rows, recIdx, scale.div],
+  )
+  const live = rows[liveIdx] ?? rows[0]
+  const onRec = liveIdx === recIdx
 
   return (
     <div className="space-y-3">
@@ -263,7 +338,7 @@ export function DoseTape({
           <span
             className={cn(
               "text-[10px] uppercase tracking-wide text-cyan transition-opacity duration-150",
-              activeIdx === recIdx ? "opacity-100" : "opacity-0",
+              onRec ? "opacity-100" : "opacity-0",
             )}
           >
             Recommended
@@ -271,22 +346,22 @@ export function DoseTape({
           <span
             className={cn(
               "text-3xl font-display tabular-nums transition-colors duration-150",
-              activeIdx === recIdx ? "text-cyan" : "text-ink",
+              onRec ? "text-cyan" : "text-ink",
             )}
           >
-            {amountLabel}
+            {live ? `${trimNum(live.amount / scale.div)} ${scale.label}` : ""}
           </span>
         </span>
         {/* rolls the tape back to the recommended stop */}
         <button
           type="button"
           onClick={() => recIdx >= 0 && jump(recIdx)}
-          disabled={recIdx < 0 || activeIdx === recIdx}
+          disabled={recIdx < 0 || onRec}
           aria-label="Back to recommended dose"
           className={cn(
             "absolute right-0 top-1/2 -translate-y-1/2 w-10 h-10 grid place-items-center rounded-full",
             "bg-white/10 text-ink-dim active:scale-95 transition-[transform,opacity] duration-150",
-            (recIdx < 0 || activeIdx === recIdx) && "opacity-30",
+            (recIdx < 0 || onRec) && "opacity-30",
           )}
         >
           <RotateCcw className="w-4 h-4" strokeWidth={2} />
@@ -306,28 +381,7 @@ export function DoseTape({
           className="flex will-change-transform"
           style={{ marginLeft: `calc(50% - ${TAPE_ITEM / 2}px)` }}
         >
-          {rows.map((r, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => {
-                if (!moved.current) jump(i)
-              }}
-              className={cn(
-                "shrink-0 flex flex-col items-center gap-1.5 pt-1 pb-1.5",
-                "transition-opacity duration-150",
-                i === activeIdx && "opacity-0",
-              )}
-              style={{ width: TAPE_ITEM }}
-            >
-              <span className="text-sm tabular-nums text-ink-mute">
-                {trimNum(r.amount / scale.div)}
-              </span>
-              <span
-                className={cn("w-px rounded-full", i === recIdx ? "h-4 bg-cyan" : "h-4 bg-white/20")}
-              />
-            </button>
-          ))}
+          {strip}
         </div>
         {/* fixed centre indicator — stands in for the hidden selected stop */}
         <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 inset-y-0 w-0.5 rounded-full bg-white" />
@@ -1396,7 +1450,6 @@ function DoseDetailSheet({
               rows={rows}
               activeIdx={activeIdx}
               recIdx={recRow}
-              amountLabel={shownAmount}
               onSens={onSens}
             />
           ) : (
