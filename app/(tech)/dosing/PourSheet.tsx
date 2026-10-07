@@ -85,7 +85,7 @@ export function trimNum(n: number): string {
  * cyan. The tape is a spring-driven drag surface (NOT native scroll — that
  * wedges on iOS and feels dead at 3 stops): swipe anywhere in the band,
  * drag past the ends and it stretches and springs back, release and it
- * springs to the nearest stop carrying your velocity.
+ * spins on like a prize wheel, ticking at each stop until a peg catches it.
  */
 const TAPE_ITEM = 56
 // Damping ratio ~0.88 — a whisper of overshoot, right for a drag surface.
@@ -121,6 +121,60 @@ function undetent(p: number): number {
 // never from one pointer sample (the sample before lift-off is jittery).
 const VELOCITY_WINDOW_MS = 100
 const RUBBER = 0.35
+
+// The release behaves like a big prize wheel (ruled 2026-10-07): it coasts
+// under friction, the pegs between stops (a periodic pull toward each stop)
+// barely touch it at speed but lurch it near the end — tick... tick.....
+// tick — and the last peg catches it with a small rock into the slot. Tuned
+// by simulation: a slight overshoot settles in ~0.47s, a flick at 25 stops/s
+// coasts ~15 stops over ~2s. All four are feel knobs.
+const WHEEL = {
+  friction: 1.4, // 1/s — lower = longer coast
+  peg: 26, // stops/s^2 — strength of the pull into each stop
+  captureSpeed: 4, // stops/s — below this the pegs take over...
+  captureDamping: 18, // ...and this settles the final rock
+}
+
+// The tick: one short click per stop, like the wheel's flapper. The audio
+// graph is created on the first touch (iOS only starts audio inside a user
+// gesture); 'ambient' obeys the ring/silent switch and mixes with whatever
+// the tech is playing instead of pausing it.
+const TICK_SOUND = true
+let tickCtx: AudioContext | null = null
+let lastTickAt = 0
+function primeTickAudio() {
+  if (!TICK_SOUND || typeof window === "undefined") return
+  try {
+    if (!tickCtx) {
+      const nav = navigator as Navigator & { audioSession?: { type: string } }
+      if (nav.audioSession) nav.audioSession.type = "ambient"
+      tickCtx = new AudioContext()
+    }
+    if (tickCtx.state === "suspended") void tickCtx.resume()
+  } catch {
+    tickCtx = null // no audio on this browser — the tick stays visual
+  }
+}
+function tickSound(intensity: number) {
+  const ctx = tickCtx
+  if (!ctx || ctx.state !== "running") return
+  const now = performance.now()
+  if (now - lastTickAt < 18) return // a blur of pegs, not a buzz
+  lastTickAt = now
+  const t = ctx.currentTime
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = "triangle"
+  osc.frequency.setValueAtTime(1900, t)
+  gain.gain.setValueAtTime(0.0001, t)
+  gain.gain.exponentialRampToValueAtTime(0.05 + 0.07 * intensity, t + 0.002)
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.03)
+  osc.connect(gain).connect(ctx.destination)
+  osc.start(t)
+  osc.stop(t + 0.035)
+}
+const reducedMotion = () =>
+  typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches
 
 export function DoseTape({
   rows,
@@ -194,14 +248,39 @@ export function DoseTape({
   // "did an outside re-anchor land on the same amount?".
   const lastAmount = useRef(rows[activeIdx]?.amount)
   const labelRef = useRef<HTMLSpanElement>(null)
+  const flapperRef = useRef<HTMLSpanElement>(null)
+  // Speed now, in stops/s: the coast's velocity, or the drag's recent trail.
+  const speedNow = () => {
+    if (coasting.current) return Math.abs(vel.current)
+    const tr = drag.current?.trail
+    if (!tr || tr.length < 2) return 0
+    const a = tr[tr.length - 2]
+    const b = tr[tr.length - 1]
+    return b.t > a.t ? Math.abs(((b.raw - a.raw) * 1000) / (b.t - a.t)) : 0
+  }
+  // Each stop passing the centre is a TICK: the flapper (the centre line,
+  // hinged at its top) gets knocked the way the strip is moving — harder at
+  // speed — and springs back; the number pops; the click sounds.
+  const tick = (dir: number) => {
+    const speed = speedNow()
+    tickSound(Math.min(1, speed / 25))
+    if (reducedMotion()) return
+    const angle = dir * Math.min(24, 7 + speed * 0.6)
+    flapperRef.current?.animate([{ rotate: `${angle}deg` }, { rotate: "0deg" }], {
+      duration: 180,
+      easing: "cubic-bezier(0.3, 1.5, 0.5, 1)",
+    })
+    labelRef.current?.animate([{ transform: "scale(1.07)" }, { transform: "scale(1)" }], {
+      duration: 160,
+      easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+    })
+  }
   const commit = (i: number) => {
     if (i !== lastIdx.current) {
+      const dir = i > lastIdx.current ? 1 : -1
       lastIdx.current = i
       lastAmount.current = rowsRef.current[i]?.amount
-      labelRef.current?.animate([{ transform: "scale(1.07)" }, { transform: "scale(1)" }], {
-        duration: 160,
-        easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
-      })
+      tick(dir)
       setLiveIdx(i)
       cb.current.onSens(i)
     }
@@ -209,7 +288,7 @@ export function DoseTape({
 
   const springTo = (target: number) => {
     cancelAnimationFrame(raf.current)
-    if (typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (reducedMotion()) {
       pos.current = target
       vel.current = 0
       render()
@@ -233,7 +312,63 @@ export function DoseTape({
     raf.current = requestAnimationFrame(step)
   }
 
+  // A release hands the tape to the wheel. The GESTURE lasts until the wheel
+  // stops: only then is the selection final (onGesture false, onSettle) —
+  // posting mid-spin would send a stop the wheel is about to leave.
+  const coasting = useRef(false)
+  const endCoast = (settle: boolean) => {
+    cancelAnimationFrame(raf.current)
+    if (!coasting.current) return
+    coasting.current = false
+    cb.current.onGesture?.(false)
+    if (settle) cb.current.onSettle?.()
+  }
+  const coast = () => {
+    cancelAnimationFrame(raf.current)
+    coasting.current = true
+    if (reducedMotion()) {
+      const target = clampIdx(Math.round(pos.current + vel.current * FLING_S))
+      pos.current = target
+      vel.current = 0
+      render()
+      commit(target)
+      endCoast(true)
+      return
+    }
+    let last = performance.now()
+    const step = (now: number) => {
+      const h = Math.min(32, now - last) / 1000 / 4 // 4 substeps: pegs are stiff
+      last = now
+      for (let k = 0; k < 4; k++) {
+        const x = pos.current
+        const v = vel.current
+        let a = -WHEEL.friction * v
+        if (x < 0) a += -SPRING.stiffness * x - SPRING.damping * v
+        else if (x > n - 1) a += -SPRING.stiffness * (x - (n - 1)) - SPRING.damping * v
+        else {
+          a += -WHEEL.peg * Math.sin(2 * Math.PI * x)
+          if (Math.abs(v) < WHEEL.captureSpeed) a += -WHEEL.captureDamping * v
+        }
+        vel.current = v + a * h
+        pos.current = x + vel.current * h
+      }
+      render()
+      const at = Math.round(clampIdx(pos.current))
+      commit(at)
+      if (Math.abs(vel.current) < 0.05 && Math.abs(pos.current - at) < 0.004) {
+        pos.current = at
+        vel.current = 0
+        render()
+        endCoast(true)
+        return
+      }
+      raf.current = requestAnimationFrame(step)
+    }
+    raf.current = requestAnimationFrame(step)
+  }
+
   const jump = (i: number) => {
+    endCoast(false)
     commit(i)
     springTo(i)
     cb.current.onSettle?.()
@@ -246,7 +381,12 @@ export function DoseTape({
     pos.current = activeIdx
     lastIdx.current = activeIdx
     render()
-    return () => cancelAnimationFrame(raf.current)
+    return () => {
+      cancelAnimationFrame(raf.current)
+      // Unmounted mid-drag or mid-spin (product flip): release the parent's
+      // response hold, or it would wait forever.
+      if (drag.current || coasting.current) cb.current.onGesture?.(false)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   // A new grid renders new stop elements — re-apply the pixel-driven hide.
@@ -261,6 +401,7 @@ export function DoseTape({
     if (anchorKey === seenAnchor.current) return
     seenAnchor.current = anchorKey
     if (drag.current) return // the gesture owns the tape; release re-commits
+    endCoast(false)
     lastIdx.current = activeIdx
     setLiveIdx(activeIdx)
     const same = rows[activeIdx]?.amount === lastAmount.current
@@ -278,6 +419,8 @@ export function DoseTape({
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     cancelAnimationFrame(raf.current)
+    coasting.current = false // caught mid-spin: still one gesture, no release
+    primeTickAudio()
     // Can throw if the pointer already lifted — capture is best-effort.
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
@@ -317,11 +460,7 @@ export function DoseTape({
     const last = d.trail[d.trail.length - 1]
     const span = last && first ? last.t - first.t : 0
     vel.current = last && now - last.t < 60 && span >= 8 ? ((last.raw - first.raw) * 1000) / span : 0
-    const target = clampIdx(Math.round(d.raw + vel.current * FLING_S))
-    commit(target)
-    springTo(target)
-    cb.current.onGesture?.(false)
-    cb.current.onSettle?.()
+    coast()
   }
 
   // The strip depends only on the grid — liveIdx changes re-render the
@@ -415,7 +554,10 @@ export function DoseTape({
           {strip}
         </div>
         {/* fixed centre indicator — stands in for the hidden selected stop */}
-        <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 inset-y-0 w-0.5 rounded-full bg-white" />
+        <span
+          ref={flapperRef}
+          className="pointer-events-none absolute left-1/2 -translate-x-1/2 inset-y-0 w-0.5 rounded-full bg-white origin-top"
+        />
         {/* edge fades */}
         <span className="pointer-events-none absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-bg-elev to-transparent" />
         <span className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-bg-elev to-transparent" />
