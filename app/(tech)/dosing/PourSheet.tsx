@@ -92,6 +92,31 @@ const TAPE_ITEM = 56
 const SPRING = { stiffness: 220, damping: 26 }
 // How far a release projects ahead: target = pos + v * FLING_S.
 const FLING_S = 0.12
+// Padlock detents (ruled 2026-10-07): while dragging, the strip rests at
+// each stop and moves quickly through the space between — the finger can
+// feel where a number IS. 0 = free 1:1 glide, 1 = full smoothstep (dead
+// still at each stop). The feel knob.
+const DETENT = 0.8
+
+/** Finger position (stop units) -> displayed position, sticky at integers. */
+function detent(x: number): number {
+  const n = Math.floor(x)
+  const t = x - n
+  return n + t + DETENT * (t * t * (3 - 2 * t) - t)
+}
+/** Inverse of detent within its cell — so grabbing a moving strip picks up
+ * exactly where it looks, without a jump. Monotonic, so bisection is exact. */
+function undetent(p: number): number {
+  const n = Math.floor(p)
+  let lo = 0
+  let hi = 1
+  for (let k = 0; k < 24; k++) {
+    const mid = (lo + hi) / 2
+    if (detent(n + mid) - n < p - n) lo = mid
+    else hi = mid
+  }
+  return n + (lo + hi) / 2
+}
 // Fling velocity is measured over the last VELOCITY_WINDOW_MS of the drag,
 // never from one pointer sample (the sample before lift-off is jittery).
 const VELOCITY_WINDOW_MS = 100
@@ -168,10 +193,15 @@ export function DoseTape({
   // Amount under the marker as of the tape's own last commit — the basis for
   // "did an outside re-anchor land on the same amount?".
   const lastAmount = useRef(rows[activeIdx]?.amount)
+  const labelRef = useRef<HTMLSpanElement>(null)
   const commit = (i: number) => {
     if (i !== lastIdx.current) {
       lastIdx.current = i
       lastAmount.current = rowsRef.current[i]?.amount
+      labelRef.current?.animate([{ transform: "scale(1.07)" }, { transform: "scale(1)" }], {
+        duration: 160,
+        easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+      })
       setLiveIdx(i)
       cb.current.onSens(i)
     }
@@ -255,7 +285,7 @@ export function DoseTape({
       /* keep the drag; move/up still bubble to the band */
     }
     // Un-rubber the current position so the finger picks up where it looks.
-    drag.current = { id: e.pointerId, raw: pos.current, x: e.clientX, t: performance.now(), trail: [] }
+    drag.current = { id: e.pointerId, raw: undetent(pos.current), x: e.clientX, t: performance.now(), trail: [] }
     moved.current = false
     cb.current.onGesture?.(true)
     vel.current = 0
@@ -272,7 +302,7 @@ export function DoseTape({
     d.t = now
     d.trail.push({ t: now, raw: d.raw })
     while (d.trail.length > 2 && now - d.trail[0].t > VELOCITY_WINDOW_MS) d.trail.shift()
-    pos.current = rubber(d.raw)
+    pos.current = d.raw < 0 || d.raw > n - 1 ? rubber(d.raw) : detent(d.raw)
     render()
     commit(Math.round(clampIdx(d.raw)))
   }
@@ -344,6 +374,7 @@ export function DoseTape({
             Recommended
           </span>
           <span
+            ref={labelRef}
             className={cn(
               "text-3xl font-display tabular-nums transition-colors duration-150",
               onRec ? "text-cyan" : "text-ink",
