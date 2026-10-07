@@ -7,10 +7,10 @@
 // the focused chemical folds the others away and its spring tape fills the
 // space.
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { ArrowDown, ArrowLeftRight, ArrowUp, FileText, Pencil, SlidersHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
-import { sampleValue, type Dose, type DosingResponse, type Sample, type SelectedDose, type SensitivityRow } from "./shared"
+import { sampleValue, type Dose, type DoseOption, type DosingResponse, type Sample, type SelectedDose, type SensitivityRow } from "./shared"
 import {
   BalanceDial,
   DoseTape,
@@ -53,6 +53,17 @@ function fmt(v: number | null, digits: number) {
 
 const CARD = "rounded-2xl border border-line-soft bg-gradient-to-b from-[#12283C] to-[#0C1A28]"
 
+const familyOf = (d: Dose): DoseOption[] => {
+  const { alternatives, ...primary } = d
+  return [primary, ...(alternatives ?? [])]
+}
+
+// A member with no grid (an alternative from the recommend call) is one stop.
+const rowsOf = (o: DoseOption): SensitivityRow[] =>
+  o.sensitivity?.length
+    ? o.sensitivity
+    : [{ amount: o.amount, unit: o.unit, recommended: true, effects: o.effects ?? {} }]
+
 export function WeatherPourSheet({
   result,
   resultEpoch,
@@ -79,64 +90,85 @@ export function WeatherPourSheet({
   recalcError: string | null
 }) {
   const { samples } = result
-  // The SLOT ROSTER: what the sheet displays. A selection re-post's response
-  // contains ONLY the basket's products, so a product scrubbed to its 0-stop
-  // (= omitted from the basket) would vanish with no way back. The roster
-  // remembers each slot's last-known dose data; an omitted product stays
-  // rendered at 0 and rejoins the basket when scrubbed back up.
-  const [slots, setSlots] = useState<Dose[]>(result.doses)
+  // The ROSTER: per slot, the dose's whole FAMILY — [primary, ...alternatives]
+  // from the fresh recommendation. Selection responses carry only the
+  // basket's products and ship `alternatives: []`, so an omitted product
+  // (scrubbed to 0) or a flipped-away sibling would vanish with no way back.
+  // The family is remembered here; a response only refreshes the member sent.
+  const [families, setFamilies] = useState<DoseOption[][]>(() => result.doses.map(familyOf))
   const [choice, setChoice] = useState<Record<number, number>>({})
   const [sens, setSens] = useState<Record<number, number | undefined>>({})
+  // Bumped per slot ONLY when its tape must re-anchor from outside (fresh
+  // recommendation, server correction). A tape never reacts to the echo of
+  // its own commits — that echo, arriving late, is what spun the dial back.
+  const [anchor, setAnchor] = useState<Record<number, number>>({})
+  const [, startTransition] = useTransition()
   // Opens in list mode — focusing a chemical hides the others, so the tech
   // sees the whole pour list first.
   const [focus, setFocus] = useState<number | null>(null)
   const [mode, setMode] = useState<"predicted" | "actual" | "target">("predicted")
   const [noteOpen, setNoteOpen] = useState(false)
-  // product name sent per slot in the LAST basket (undefined = omitted)
+  // The latest selection, written SYNCHRONOUSLY by every user action. A merge
+  // in the same event as a release must see the stop just committed, not the
+  // last render's — reading the render's copy reverted the dial.
+  const sensLive = useRef<Record<number, number | undefined>>({})
+  const choiceLive = useRef<Record<number, number>>({})
+  const familiesRef = useRef(families)
+  familiesRef.current = families
+  // What the last basket sent, per slot (product undefined = omitted).
   const sentBasket = useRef<Record<number, string | undefined>>({})
+  const sentAmount = useRef<Record<number, number | undefined>>({})
   const lastEpoch = useRef(resultEpoch)
-  // A finger on a tape owns the view: responses landing mid-gesture are
-  // HELD here and applied on release — never yank a tape under a finger.
+  // A finger on a tape owns the view: responses landing mid-gesture are HELD
+  // and applied on release — never yank a tape under a finger.
   const gestureOn = useRef(false)
   const heldResult = useRef<DosingResponse | null>(null)
-  const slotsRef = useRef(slots)
-  slotsRef.current = slots
-  const sensRef = useRef(sens)
-  sensRef.current = sens
 
-  // Selection response: merge onto the roster. Present products replace
-  // their slot (the server's recommended:true row IS the chosen stop, so
-  // clearing sens re-anchors there); absent products were omitted — keep
-  // their remembered data pinned to the 0-stop.
+  const selectionOf = (fam: DoseOption[], i: number) => {
+    const o = fam[choiceLive.current[i] ?? 0] ?? fam[0]
+    const rows = rowsOf(o)
+    const rec = rows.findIndex((r) => r.recommended)
+    return { o, row: rows[sensLive.current[i] ?? (rec >= 0 ? rec : 0)] }
+  }
+
   const applyMerge = (res: DosingResponse) => {
-    // A response that merely CONFIRMS the amount already under the marker
-    // must not move anything (ruled 2026-10-06): keep the old slot object —
-    // old grid, old recommended tick, user's own index — so the tape is
-    // byte-identical. Only a real correction (flip, re-spanned grid without
-    // the chosen amount) replaces the slot and re-anchors.
-    const prev = slotsRef.current
-    const prevSens = sensRef.current
-    const nextSens: Record<number, number | undefined> = {}
-    const nextSlots = prev.map((slot, i) => {
+    const corrected: number[] = []
+    const next = familiesRef.current.map((fam, i) => {
       const sentName = sentBasket.current[i]
-      if (sentName === undefined) {
-        if (prevSens[i] != null) nextSens[i] = prevSens[i] // stays at 0-stop
-        return slot
-      }
+      if (sentName === undefined) return fam // omitted: stays at its 0-stop
+      const m = fam.findIndex((o) => o.product === sentName)
       const incoming = res.doses.find((d) => d.product === sentName)
-      if (!incoming) return slot
-      if (incoming.product === slot.product) {
-        const recAmt = rowsOf(incoming).find((r) => r.recommended)?.amount
-        if (recAmt != null && rowsOf(slot).some((r) => r.amount === recAmt)) {
-          if (prevSens[i] != null) nextSens[i] = prevSens[i] // keep the user's index
-          return slot // zero-churn confirm
-        }
-      }
-      return incoming // correction/flip: server grid takes over, sens clears
+      if (m < 0 || !incoming) return fam
+      // The tech moved on after this basket was sent — a fresher post is in
+      // flight and this answer is already history: leave the slot alone.
+      const { o, row } = selectionOf(fam, i)
+      if (o.product !== sentName || row?.amount !== sentAmount.current[i]) return fam
+      // Confirming answer: the member's grid already holds the chosen amount.
+      // Zero churn — old grid, original recommended tick, the tech's index.
+      const recAmt = rowsOf(incoming).find((r) => r.recommended)?.amount
+      const grid = fam[m].sensitivity
+      if (grid?.length && recAmt != null && grid.some((r) => r.amount === recAmt)) return fam
+      // Correction (a flipped-to member's first real grid, or a grid that no
+      // longer holds the amount): the server's member takes over, re-anchor.
+      corrected.push(i)
+      const { alternatives: _dropped, ...member } = incoming
+      return fam.map((x, j) => (j === m ? member : x))
     })
-    setSlots(nextSlots)
-    setChoice({})
-    setSens(nextSens)
+    if (!corrected.length) return
+    setFamilies(next)
+    const live = { ...sensLive.current }
+    for (const i of corrected) delete live[i]
+    sensLive.current = live
+    setSens((prev) => {
+      const out = { ...prev }
+      for (const i of corrected) delete out[i]
+      return out
+    })
+    setAnchor((prev) => {
+      const out = { ...prev }
+      for (const i of corrected) out[i] = (out[i] ?? 0) + 1
+      return out
+    })
   }
 
   useEffect(() => {
@@ -144,10 +176,14 @@ export function WeatherPourSheet({
       // Fresh recommendation: the response IS the roster.
       lastEpoch.current = resultEpoch
       sentBasket.current = {}
+      sentAmount.current = {}
       heldResult.current = null
-      setSlots(result.doses)
+      sensLive.current = {}
+      choiceLive.current = {}
+      setFamilies(result.doses.map(familyOf))
       setChoice({})
       setSens({})
+      setAnchor((prev) => Object.fromEntries(result.doses.map((_, i) => [i, (prev[i] ?? 0) + 1])))
       return
     }
     if (gestureOn.current) {
@@ -167,40 +203,52 @@ export function WeatherPourSheet({
     }
   }
 
+  // ── selection writers: the live ref first (synchronous truth), then state ──
+  const selectStop = (i: number, j: number) => {
+    sensLive.current = { ...sensLive.current, [i]: j }
+    // Transition priority: the tape animates imperatively and owns its own
+    // label, so the sheet (dials, readings) re-renders interruptibly and a
+    // scrub never waits on it.
+    startTransition(() => setSens((v) => ({ ...v, [i]: j })))
+  }
+  const flip = (i: number, len: number) => {
+    const c = ((choiceLive.current[i] ?? 0) + 1) % len
+    choiceLive.current = { ...choiceLive.current, [i]: c }
+    const live = { ...sensLive.current }
+    delete live[i]
+    sensLive.current = live
+    setChoice((v) => ({ ...v, [i]: c }))
+    setSens((v) => ({ ...v, [i]: undefined }))
+    scheduleRepost()
+  }
+
   const optionAt = (i: number) => {
-    const d = slots[i]
-    return [d, ...(d.alternatives ?? [])][choice[i] ?? 0] ?? d
+    const fam = families[i]
+    return fam[choice[i] ?? 0] ?? fam[0]
   }
 
   // ── basket: one entry per slot at its chosen stop; 0-stop = omit ──
-  const rowsOf = (o: { sensitivity?: SensitivityRow[]; amount: number; unit: string; effects?: Record<string, number> }): SensitivityRow[] =>
-    o.sensitivity?.length
-      ? o.sensitivity
-      : [{ amount: o.amount, unit: o.unit, recommended: true, effects: o.effects ?? {} }]
   const buildBasket = (): SelectedDose[] => {
     const basket: SelectedDose[] = []
-    slots.forEach((_, i) => {
-      const o = optionAt(i)
-      const rows = rowsOf(o)
-      const recRow = rows.findIndex((r) => r.recommended)
-      const row = rows[sens[i] ?? (recRow >= 0 ? recRow : 0)]
+    familiesRef.current.forEach((fam, i) => {
+      const { o, row } = selectionOf(fam, i)
       if (row && row.amount > 0) {
         sentBasket.current[i] = o.product
+        sentAmount.current[i] = row.amount
         basket.push({ product: o.product, amount: row.amount, unit: row.unit })
       } else {
         sentBasket.current[i] = undefined
+        sentAmount.current[i] = undefined
       }
     })
     return basket
   }
-  const buildBasketRef = useRef(buildBasket)
-  buildBasketRef.current = buildBasket
   // Debounced (~300ms): fires on gesture SETTLE (finger up, tap, reset,
-  // flip) — never mid-scrub; coalesces rapid taps.
+  // flip) — never mid-scrub; coalesces rapid taps. Reads live refs only.
   const repostTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const scheduleRepost = () => {
     clearTimeout(repostTimer.current)
-    repostTimer.current = setTimeout(() => onSelect(buildBasketRef.current()), 300)
+    repostTimer.current = setTimeout(() => onSelect(buildBasket()), 300)
   }
   useEffect(() => () => clearTimeout(repostTimer.current), [])
   const selectedEffects = (i: number): Record<string, number> => {
@@ -213,7 +261,7 @@ export function WeatherPourSheet({
 
   const predicted: Sample = useMemo(() => {
     const base: Record<string, unknown> = { ...samples.actual }
-    for (const i of slots.keys()) {
+    for (const i of families.keys()) {
       for (const [k, delta] of Object.entries(selectedEffects(i))) {
         const cur = base[k]
         base[k] = Number(((typeof cur === "number" ? cur : 0) + delta).toFixed(2))
@@ -221,7 +269,7 @@ export function WeatherPourSheet({
     }
     return base as Sample
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [samples.actual, slots, choice, sens])
+  }, [samples.actual, families, choice, sens])
 
   const SANI_LABEL: Record<string, string> = { tab: "Tablet", liquid: "Liquid", salt: "Salt" }
   const anyAssumed = READING_ROWS.some(
@@ -485,9 +533,8 @@ export function WeatherPourSheet({
             </div>
           )}
         </div>
-        {slots.map((d, i) => {
+        {families.map((options, i) => {
           const o = optionAt(i)
-          const options = [d, ...(d.alternatives ?? [])]
           const rows = rowsOf(o)
           const recRow = rows.findIndex((r) => r.recommended)
           const activeIdx = sens[i] ?? (recRow >= 0 ? recRow : 0)
@@ -505,7 +552,7 @@ export function WeatherPourSheet({
               style={{ gridTemplateRows: hidden ? "0fr" : "1fr", opacity: hidden ? 0 : 1 }}
             >
               <div className="min-h-0 overflow-hidden">
-                <div className={cn(focus == null && i < slots.length - 1 && "border-b border-line-soft/40")}>
+                <div className={cn(focus == null && i < families.length - 1 && "border-b border-line-soft/40")}>
                   <button
                     type="button"
                     onClick={() => setFocus(focused ? null : i)}
@@ -521,9 +568,7 @@ export function WeatherPourSheet({
                           tabIndex={0}
                           onClick={(e) => {
                             e.stopPropagation()
-                            setChoice((c) => ({ ...c, [i]: ((c[i] ?? 0) + 1) % options.length }))
-                            setSens((v) => ({ ...v, [i]: undefined }))
-                            scheduleRepost()
+                            flip(i, options.length)
                           }}
                           className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-cyan active:opacity-70"
                         >
@@ -564,8 +609,8 @@ export function WeatherPourSheet({
                           rows={rows}
                           activeIdx={activeIdx}
                           recIdx={recRow}
-                          amountLabel={amount}
-                          onSens={(j) => setSens((v) => ({ ...v, [i]: j }))}
+                          anchorKey={anchor[i] ?? 0}
+                          onSens={(j) => selectStop(i, j)}
                           onGesture={onTapeGesture}
                           onSettle={scheduleRepost}
                           onDone={() => setFocus(null)}
