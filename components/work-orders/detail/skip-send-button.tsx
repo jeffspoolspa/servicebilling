@@ -5,16 +5,18 @@ import { useRouter } from "next/navigation"
 import { useCanWrite } from "@/components/providers/access-provider"
 
 /**
- * Skip sending / Undo skip for an unsent invoice. Skipping waives delivery
+ * Skip sending / Undo skip for an unsent invoice, or for a work order before
+ * its invoice exists (the invoice inherits it when it links). Skipping waives delivery
  * (delivery_waived {reason: not_wanted}): the queue never emails it and the
  * Send invoice button is replaced by this until undone. A card charge is not
  * affected — only the email.
  */
 export function SkipSendButton({
-  qboInvoiceId,
+  apiPath,
   skipped,
 }: {
-  qboInvoiceId: string
+  /** /api/billing/invoices/<id>/skip-send or /api/work-orders/<wo>/skip-send */
+  apiPath: string
   skipped: boolean
 }) {
   const canWrite = useCanWrite("service")
@@ -27,7 +29,7 @@ export function SkipSendButton({
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch(`/api/billing/invoices/${qboInvoiceId}/skip-send${query}`, init)
+      const res = await fetch(`${apiPath}${query}`, init)
       if (!res.ok) {
         const { error: msg } = await res.json().catch(() => ({ error: "failed" }))
         throw new Error(msg || `${res.status}`)

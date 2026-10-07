@@ -31,6 +31,7 @@ import { PaymentMethodInline } from "@/components/work-orders/detail/payment-met
 import { BonusInline } from "@/components/work-orders/detail/bonus-inline"
 import { SendInvoiceButton } from "@/components/work-orders/detail/send-invoice-button"
 import { SkipSendButton } from "@/components/work-orders/detail/skip-send-button"
+import { getWorkOrderSendSkip } from "@/lib/queries/send-skip"
 import { createAnon } from "@/lib/supabase/anon"
 
 export const dynamic = "force-dynamic"
@@ -146,6 +147,9 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
     ])
 
   const pills = summaryPills(wo.billable, skipped, invoiceState)
+  // the work order's own Skip sending — set before the invoice exists, it is
+  // what the invoice inherits when it links (billing.send_waived folds both)
+  const sendSkip = await getWorkOrderSendSkip(wo.wo_number)
 
   // Invoice tab should show an attention dot if there's something to look at
   const invoiceAttention =
@@ -182,11 +186,21 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
               processing control — it survived the header cleanup. Unlike the
               Skip flag it replaced, it lives in billing.holds and emits an
               event both ways, so the reason is in the invoice's history. */}
-          <HoldButton
-            woNumber={wo.wo_number}
-            held={Boolean(openHold)}
-            holdReason={openHold?.reason ?? null}
-          />
+          <span className="flex items-center gap-2 text-[11px]">
+            {/* before the invoice exists, Skip sending lives on the work order;
+                once it links, the Summary card's control takes over */}
+            {!invoice && (
+              <SkipSendButton
+                apiPath={`/api/work-orders/${wo.wo_number}/skip-send`}
+                skipped={sendSkip != null}
+              />
+            )}
+            <HoldButton
+              woNumber={wo.wo_number}
+              held={Boolean(openHold)}
+              holdReason={openHold?.reason ?? null}
+            />
+          </span>
         </span>
       </div>
       {customerCard && (
@@ -202,6 +216,23 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
               <span className="ml-2">— {openHold.reason}</span>
               <span className="text-ink-mute ml-2">
                 {openHold.placed_by} · {new Date(openHold.placed_at).toLocaleString()}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sendSkip && (
+        <div className="px-7 pt-5">
+          <div className="rounded-lg border border-line-soft bg-white/[0.03] px-4 py-3 flex items-center gap-3">
+            <div className="text-ink-dim text-[12px]">
+              <span className="text-ink font-medium">Send skipped</span>
+              <span className="ml-2">
+                — {invoice ? "this invoice will not be emailed" : "the invoice will not be emailed when it syncs"}
+                {sendSkip.note ? `: ${sendSkip.note}` : ""}
+              </span>
+              <span className="text-ink-mute ml-2">
+                {sendSkip.actor} · {new Date(sendSkip.at).toLocaleString()}
               </span>
             </div>
           </div>
@@ -268,7 +299,7 @@ export default async function WorkOrderDetailPage({ params, searchParams }: Page
                     />
                   )}
                   <SkipSendButton
-                    qboInvoiceId={invoice.qbo_invoice_id}
+                    apiPath={`/api/billing/invoices/${invoice.qbo_invoice_id}/skip-send`}
                     skipped={invoiceState?.send_waived ?? false}
                   />
                 </>
