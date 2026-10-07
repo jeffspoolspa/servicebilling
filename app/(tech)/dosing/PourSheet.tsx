@@ -173,9 +173,10 @@ function tickSound(intensity: number) {
   osc.start(t)
   osc.stop(t + 0.035)
 }
-// How much the stop in focus grows (scale factors at full focus): the
-// number, and the bar's width and height. Feel knobs.
-const FOCUS = { number: 0.6, barWidth: 2, barHeight: 1.25 }
+// How much the stop in focus grows (scale factors at full focus): the bar's
+// width and height. Its strip number fades out as it takes focus — the
+// readout above is the one number for the selection. Feel knobs.
+const FOCUS = { barWidth: 2, barHeight: 1.25 }
 
 const reducedMotion = () =>
   typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -226,17 +227,17 @@ export function DoseTape({
   rowsRef.current = rows
 
   // FOCUS lives on the stops themselves (ruled 2026-10-07): the stop at the
-  // centre is a tall bright bar with a large number, and as the strip moves
-  // the next one grows while the last one shrinks — painted from the pixels
-  // on the same frame, so there is no second bar to disagree with.
+  // centre is a tall bright bar whose strip number fades out (the readout
+  // above shows it — never two copies), and as the strip moves the next one
+  // grows while the last one shrinks — painted from the pixels on the same
+  // frame, so there is no second bar to disagree with.
   const painted = useRef<number[]>([])
   const paint = (stop: Element | undefined, f: number) => {
     if (!stop) return
     const num = stop.children[0] as HTMLElement
     const bar = stop.children[1] as HTMLElement
     const at = f > 0
-    num.style.transform = at ? `scale(${1 + FOCUS.number * f})` : ""
-    num.style.opacity = at ? String(0.45 + 0.55 * f) : ""
+    num.style.opacity = at ? String(0.45 * (1 - f)) : ""
     bar.style.transform = at ? `scaleX(${1 + FOCUS.barWidth * f}) scaleY(${1 + FOCUS.barHeight * f})` : ""
     if (!bar.dataset.rec) bar.style.opacity = at ? String(0.25 + 0.75 * f) : ""
   }
@@ -487,7 +488,7 @@ export function DoseTape({
           className="shrink-0 flex flex-col items-center gap-1.5 pt-3 pb-6"
           style={{ width: TAPE_ITEM }}
         >
-          <span className="inline-block origin-bottom text-sm tabular-nums text-ink opacity-[0.45]">
+          <span className="text-sm tabular-nums text-ink opacity-[0.45]">
             {trimNum(r.amount / scale.div)}
           </span>
           <span
