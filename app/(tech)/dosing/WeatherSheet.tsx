@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { ArrowDown, ArrowLeftRight, ArrowUp, FileText, Pencil, SlidersHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils/cn"
-import { sampleValue, type Dose, type DoseOption, type DosingResponse, type Sample, type SelectedDose, type SensitivityRow } from "./shared"
+import { sampleValue, type Dose, type DoseOption, type DosingResponse, type Sample, type SelectedDose } from "./shared"
 import {
   BalanceDial,
   DoseTape,
@@ -58,11 +58,6 @@ const familyOf = (d: Dose): DoseOption[] => {
   return [primary, ...(alternatives ?? [])]
 }
 
-// A member with no grid (an alternative from the recommend call) is one stop.
-const rowsOf = (o: DoseOption): SensitivityRow[] =>
-  o.sensitivity?.length
-    ? o.sensitivity
-    : [{ amount: o.amount, unit: o.unit, recommended: true, effects: o.effects ?? {} }]
 
 export function WeatherPourSheet({
   result,
@@ -91,16 +86,16 @@ export function WeatherPourSheet({
 }) {
   const { samples } = result
   // The ROSTER: per slot, the dose's whole FAMILY — [primary, ...alternatives]
-  // from the fresh recommendation. Selection responses carry only the
-  // basket's products and ship `alternatives: []`, so an omitted product
-  // (scrubbed to 0) or a flipped-away sibling would vanish with no way back.
-  // The family is remembered here; a response only refreshes the member sent.
+  // — from the fresh recommendation. The dials are the API's stable half
+  // (contract 2026-10-07): every grid and alternative is identical in a
+  // selection's answer, which lists only the basket's products. So the roster
+  // is set once per recommendation and a selection's answer never touches it
+  // (it refreshes only the note, the retest list and the doses' effects).
   const [families, setFamilies] = useState<DoseOption[][]>(() => result.doses.map(familyOf))
   const [choice, setChoice] = useState<Record<number, number>>({})
   const [sens, setSens] = useState<Record<number, number | undefined>>({})
-  // Bumped per slot ONLY when its tape must re-anchor from outside (fresh
-  // recommendation, server correction). A tape never reacts to the echo of
-  // its own commits — that echo, arriving late, is what spun the dial back.
+  // Bumped per slot when a FRESH recommendation must re-anchor its tape. A
+  // tape never reacts to the echo of its own commits.
   const [anchor, setAnchor] = useState<Record<number, number>>({})
   const [, startTransition] = useTransition()
   // Opens in list mode — focusing a chemical hides the others, so the tech
@@ -108,100 +103,30 @@ export function WeatherPourSheet({
   const [focus, setFocus] = useState<number | null>(null)
   const [mode, setMode] = useState<"predicted" | "actual" | "target">("predicted")
   const [noteOpen, setNoteOpen] = useState(false)
-  // The latest selection, written SYNCHRONOUSLY by every user action. A merge
-  // in the same event as a release must see the stop just committed, not the
-  // last render's — reading the render's copy reverted the dial.
+  // The latest selection, written SYNCHRONOUSLY by every user action — the
+  // basket is built from these, never from a possibly-stale render.
   const sensLive = useRef<Record<number, number | undefined>>({})
   const choiceLive = useRef<Record<number, number>>({})
   const familiesRef = useRef(families)
   familiesRef.current = families
-  // What the last basket sent, per slot (product undefined = omitted).
-  const sentBasket = useRef<Record<number, string | undefined>>({})
-  const sentAmount = useRef<Record<number, number | undefined>>({})
   const lastEpoch = useRef(resultEpoch)
-  // A finger on a tape owns the view: responses landing mid-gesture are HELD
-  // and applied on release — never yank a tape under a finger.
-  const gestureOn = useRef(false)
-  const heldResult = useRef<DosingResponse | null>(null)
 
   const selectionOf = (fam: DoseOption[], i: number) => {
     const o = fam[choiceLive.current[i] ?? 0] ?? fam[0]
-    const rows = rowsOf(o)
-    const rec = rows.findIndex((r) => r.recommended)
-    return { o, row: rows[sensLive.current[i] ?? (rec >= 0 ? rec : 0)] }
-  }
-
-  const applyMerge = (res: DosingResponse) => {
-    const corrected: number[] = []
-    const next = familiesRef.current.map((fam, i) => {
-      const sentName = sentBasket.current[i]
-      if (sentName === undefined) return fam // omitted: stays at its 0-stop
-      const m = fam.findIndex((o) => o.product === sentName)
-      const incoming = res.doses.find((d) => d.product === sentName)
-      if (m < 0 || !incoming) return fam
-      // The tech moved on after this basket was sent — a fresher post is in
-      // flight and this answer is already history: leave the slot alone.
-      const { o, row } = selectionOf(fam, i)
-      if (o.product !== sentName || row?.amount !== sentAmount.current[i]) return fam
-      // Confirming answer: the member's grid already holds the chosen amount.
-      // Zero churn — old grid, original recommended tick, the tech's index.
-      const recAmt = rowsOf(incoming).find((r) => r.recommended)?.amount
-      const grid = fam[m].sensitivity
-      if (grid?.length && recAmt != null && grid.some((r) => r.amount === recAmt)) return fam
-      // Correction (a flipped-to member's first real grid, or a grid that no
-      // longer holds the amount): the server's member takes over, re-anchor.
-      corrected.push(i)
-      const { alternatives: _dropped, ...member } = incoming
-      return fam.map((x, j) => (j === m ? member : x))
-    })
-    if (!corrected.length) return
-    setFamilies(next)
-    const live = { ...sensLive.current }
-    for (const i of corrected) delete live[i]
-    sensLive.current = live
-    setSens((prev) => {
-      const out = { ...prev }
-      for (const i of corrected) delete out[i]
-      return out
-    })
-    setAnchor((prev) => {
-      const out = { ...prev }
-      for (const i of corrected) out[i] = (out[i] ?? 0) + 1
-      return out
-    })
+    const rec = o.sensitivity.findIndex((r) => r.recommended)
+    return { o, row: o.sensitivity[sensLive.current[i] ?? (rec >= 0 ? rec : 0)] }
   }
 
   useEffect(() => {
-    if (resultEpoch !== lastEpoch.current) {
-      // Fresh recommendation: the response IS the roster.
-      lastEpoch.current = resultEpoch
-      sentBasket.current = {}
-      sentAmount.current = {}
-      heldResult.current = null
-      sensLive.current = {}
-      choiceLive.current = {}
-      setFamilies(result.doses.map(familyOf))
-      setChoice({})
-      setSens({})
-      setAnchor((prev) => Object.fromEntries(result.doses.map((_, i) => [i, (prev[i] ?? 0) + 1])))
-      return
-    }
-    if (gestureOn.current) {
-      heldResult.current = result
-      return
-    }
-    applyMerge(result)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (resultEpoch === lastEpoch.current) return // a selection's answer: dials unchanged
+    lastEpoch.current = resultEpoch
+    sensLive.current = {}
+    choiceLive.current = {}
+    setFamilies(result.doses.map(familyOf))
+    setChoice({})
+    setSens({})
+    setAnchor((prev) => Object.fromEntries(result.doses.map((_, i) => [i, (prev[i] ?? 0) + 1])))
   }, [result, resultEpoch])
-
-  const onTapeGesture = (active: boolean) => {
-    gestureOn.current = active
-    if (!active && heldResult.current) {
-      const held = heldResult.current
-      heldResult.current = null
-      applyMerge(held)
-    }
-  }
 
   // ── selection writers: the live ref first (synchronous truth), then state ──
   const selectStop = (i: number, j: number) => {
@@ -226,20 +151,41 @@ export function WeatherPourSheet({
     const fam = families[i]
     return fam[choice[i] ?? 0] ?? fam[0]
   }
+  const selectedRow = (i: number) => {
+    const o = optionAt(i)
+    const rec = o.sensitivity.findIndex((r) => r.recommended)
+    return o.sensitivity[sens[i] ?? (rec >= 0 ? rec : 0)]
+  }
+  // Readings the selected stops push past their dial limits — an emergency.
+  const overKeys = new Set<string>()
+  families.forEach((_, i) => selectedRow(i)?.overLimit?.forEach((k) => overKeys.add(k)))
+
+  // Jug-poured products (acid) read in fl oz or gallons — the tech's choice,
+  // remembered on this phone (a convenience; nothing depends on it).
+  const [jugGal, setJugGal] = useState(false)
+  useEffect(() => {
+    try {
+      setJugGal(localStorage.getItem("dosing.jugUnit") === "gal")
+    } catch {
+      /* storage blocked: default to fl oz */
+    }
+  }, [])
+  const toggleJugUnit = () =>
+    setJugGal((v) => {
+      try {
+        localStorage.setItem("dosing.jugUnit", v ? "flOz" : "gal")
+      } catch {
+        /* storage blocked: the switch still works for this visit */
+      }
+      return !v
+    })
 
   // ── basket: one entry per slot at its chosen stop; 0-stop = omit ──
   const buildBasket = (): SelectedDose[] => {
     const basket: SelectedDose[] = []
     familiesRef.current.forEach((fam, i) => {
       const { o, row } = selectionOf(fam, i)
-      if (row && row.amount > 0) {
-        sentBasket.current[i] = o.product
-        sentAmount.current[i] = row.amount
-        basket.push({ product: o.product, amount: row.amount, unit: row.unit })
-      } else {
-        sentBasket.current[i] = undefined
-        sentAmount.current[i] = undefined
-      }
+      if (row && row.amount > 0) basket.push({ product: o.product, amount: row.amount, unit: row.unit })
     })
     return basket
   }
@@ -449,16 +395,23 @@ export function WeatherPourSheet({
                       ) : (
                         <ArrowDown className="w-3.5 h-3.5 text-cyan" strokeWidth={2.5} />
                       ))}
+                    {mode === "predicted" && overKeys.has(r.key) && (
+                      <span className="px-1.5 rounded bg-red-500/20 text-[9px] font-semibold uppercase tracking-wide text-red-300">
+                        Over
+                      </span>
+                    )}
                     <span
                       className={cn(
                         "text-base tabular-nums transition-colors duration-300",
-                        assumed
-                          ? "text-orange-400 italic"
-                          : inRange == null
-                            ? "text-ink"
-                            : inRange
-                              ? "text-emerald-300"
-                              : "text-red-300",
+                        mode === "predicted" && overKeys.has(r.key)
+                          ? "text-red-400 font-semibold"
+                          : assumed
+                            ? "text-orange-400 italic"
+                            : inRange == null
+                              ? "text-ink"
+                              : inRange
+                                ? "text-emerald-300"
+                                : "text-red-300",
                       )}
                     >
                       {fmt(value, r.digits)}
@@ -535,14 +488,18 @@ export function WeatherPourSheet({
         </div>
         {families.map((options, i) => {
           const o = optionAt(i)
-          const rows = rowsOf(o)
+          const rows = o.sensitivity
           const recRow = rows.findIndex((r) => r.recommended)
           const activeIdx = sens[i] ?? (recRow >= 0 ? recRow : 0)
           const row = rows[activeIdx]
           const scale = stopScale(rows)
+          const jug = rows.every((r) => r.gallons != null)
           const amount = row
-            ? `${trimNum(row.amount / scale.div)} ${scale.label}`
+            ? jug && jugGal
+              ? `${trimNum(row.gallons!)} gal`
+              : `${trimNum(row.amount / scale.div)} ${scale.label}`
             : o.displayAmount.replace(/\s*\(.*\)$/, "")
+          const over = !!row?.overLimit
           const focused = focus === i
           const hidden = focus != null && !focused
           return (
@@ -586,13 +543,20 @@ export function WeatherPourSheet({
                     )}
                     {/* the tape's own big amount takes over while focused */}
                     {!focused && (
-                      <span
-                        className={cn(
-                          "shrink-0 text-lg font-display tabular-nums transition-colors duration-150",
-                          activeIdx === recRow ? "text-cyan" : "text-ink",
+                      <span className="shrink-0 flex flex-col items-end">
+                        <span
+                          className={cn(
+                            "text-lg font-display tabular-nums transition-colors duration-150",
+                            over ? "text-red-400" : activeIdx === recRow ? "text-cyan" : "text-ink",
+                          )}
+                        >
+                          {amount}
+                        </span>
+                        {row?.pourSeconds != null && (
+                          <span className="text-[10px] tabular-nums text-ink-mute">
+                            {trimNum(row.pourSeconds)}s pour
+                          </span>
                         )}
-                      >
-                        {amount}
                       </span>
                     )}
                   </button>
@@ -610,8 +574,9 @@ export function WeatherPourSheet({
                           activeIdx={activeIdx}
                           recIdx={recRow}
                           anchorKey={anchor[i] ?? 0}
+                          gallons={jug ? jugGal : undefined}
+                          onToggleUnit={jug ? toggleJugUnit : undefined}
                           onSens={(j) => selectStop(i, j)}
-                          onGesture={onTapeGesture}
                           onSettle={scheduleRepost}
                           onDone={() => setFocus(null)}
                         />

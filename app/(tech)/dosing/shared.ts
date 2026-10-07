@@ -93,13 +93,22 @@ export function sampleValue(s: Sample, key: string): number | null {
   return typeof v === "number" ? v : null
 }
 
-/** One stop on a dose's pour grid — the slider rows ARE the grid. */
+/** One stop on a dose's pour grid — the slider rows ARE the grid. Since the
+ * 2026-10-07 contract every pour increment is a row and the grid is stable:
+ * identical with or without selectedDoses. */
 export interface SensitivityRow {
   amount: number
   unit: string
-  /** The default stop; its effects equal the dose's own effects. */
+  /** The engine's advised stop — never moved by a selection. */
   recommended?: boolean
   effects: Record<string, number>
+  /** The dial's final stop only: wire keys of the readings it pushes past
+   * their dial limits. The app shows it as an emergency. */
+  overLimit?: string[]
+  /** Jug-poured products (acid) only: the amount in gallons (2 dp) and the
+   * seconds it takes to pour. */
+  gallons?: number
+  pourSeconds?: number
 }
 
 export interface DoseOption {
@@ -107,8 +116,9 @@ export interface DoseOption {
   amount: number
   unit: string
   displayAmount: string
-  /** The dose slider stops; selecting one swaps this dose's effects. */
-  sensitivity?: SensitivityRow[]
+  /** The dial: every pour increment from 0 to the dial limits. Doses AND
+   * alternatives always carry one. */
+  sensitivity: SensitivityRow[]
   /** How to physically add this product. */
   instruction?: string
   /** Caution codes, e.g. "separate-pour". */
