@@ -20,7 +20,7 @@ This is a mixed-leadership table. Critical to get right — writing an ION-owned
 | `billable_override` | **us** | manual/UI input to the generated column |
 | `employee_id` | **derived** | reconciled from `assigned_to` via `ion_username` lookup during sync |
 | `billing_status`, `billing_status_set_at`, `needs_review_reason` | **us (service-billing)** | [process_work_order](../scripts/service_billing/process_work_order.md) + a WO trigger |
-| `skipped_at`, `skipped_reason` | **us** | the skip route (UI) or the [mirror backfill](../flows/sync/ion-work-orders.md#backfill-from-the-net-ion-mirror) with reason `pre-pipeline history`. Skipped = outside service billing; history rows with an ION `invoice_number` still count as revenue via `v_revenue_by_month`. |
+| `skipped_at`, `skipped_reason` | **us** | the skip route (UI) or the [mirror backfill](../flows/sync/ion-work-orders.md#backfill-from-the-net-ion-mirror) with reason `pre-pipeline history`. Skipped = outside service billing; history rows with an ION `invoice_number` still count as revenue via `v_revenue_by_month`, which dates every row by `scheduled` (ION's work-order date). |
 
 How the split is preserved: the ION sync's DataFrame only contains ION columns, so its upsert never touches `billing_status`. See [ion-work-orders sync](../flows/sync/ion-work-orders.md).
 

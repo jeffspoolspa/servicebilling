@@ -8,13 +8,13 @@ import { CTA_TECHS } from "@/lib/queries/bonuses"
  * WO, LEFT JOINed to invoices so WOs without an invoice yet still appear
  * (with NULL invoice_* columns). This is the operational backlog view.
  *
- * Different from v_revenue_by_month (used by the dashboard / bonus
- * pool), which INNER JOINs invoices because those consumers compute
- * monetary aggregates that only make sense for invoiced WOs.
+ * Different from v_revenue_by_month (the dashboard's revenue surface),
+ * which also requires the WO to be completed. Both bucket `month` by the
+ * work order's date (`wo_date`), so a pivot cell drills into its own rows.
  */
 
 export interface WorkOrderFilters {
-  month?: string          // 'YYYY-MM' — bucketed by invoice.txn_date month
+  month?: string          // 'YYYY-MM' — bucketed by the work order's date
   /**
    * Date range filters (inclusive on both ends). YYYY-MM-DD format.
    * Filters the same column the table sorts by — the COALESCE'd

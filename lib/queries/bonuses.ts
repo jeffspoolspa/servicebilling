@@ -12,6 +12,11 @@ import { createAnon } from "@/lib/supabase/anon"
  * "Bonus-eligible" = the `included_in_bonus` flag on v_revenue_by_month,
  * which itself is a COALESCE of (user override, qbo_class='Service').
  * Users can toggle the override from the WO detail page or WO table.
+ *
+ * Unlike dashboard revenue (billable work orders on their work-order
+ * date, invoice or not), bonuses pay on INVOICES in the month of the
+ * invoice date: the range is on `invoice_date`, which is null until the
+ * QBO invoice is cached.
  */
 
 /** The three Brunswick-Service techs whose combined revenue drives Zach's
@@ -78,8 +83,8 @@ export async function getMonthlyBonuses(
     const { data, error } = await sb
       .from("v_revenue_by_month")
       .select("tech, sub_total")
-      .gte("month", monthStart)
-      .lt("month", monthEndExclusive)
+      .gte("invoice_date", monthStart)
+      .lt("invoice_date", monthEndExclusive)
       .eq("included_in_bonus", true)
       .order("wo_number")
       .range(offset, offset + PAGE - 1)

@@ -28,7 +28,7 @@ export type Measure = "revenue" | "count"
 interface ViewRow {
   wo_number: string
   month: string        // 'YYYY-MM-DD' (first of month)
-  completed: string    // 'YYYY-MM-DD'
+  wo_date: string      // 'YYYY-MM-DD' — the work order's date; revenue is dated by it
   location: string | null
   tech: string
   department: string
@@ -135,7 +135,7 @@ export async function getRevenueBreakdown(opts: {
     const month = shiftYearForward(r.month)
     const ym = month.slice(0, 7)
     if (ym > thisMonth) continue
-    if (ym === thisMonth && r.completed > priorCutoff) continue
+    if (ym === thisMonth && r.wo_date > priorCutoff) continue
     let dimKey = dimensionValue(r, opts.dimension)
     if (!dimKey) continue
     if (opts.dimension === "tech" && r.department !== "Service") dimKey = TECH_OTHER_BUCKET
@@ -335,7 +335,7 @@ async function fetchViewRows(opts: {
     const { data, error } = await sb
       .from("v_revenue_by_month")
       .select(
-        "wo_number, month, completed, location, tech, department, customer, wo_type, sub_total, total_due, qbo_invoice_id, employee_id",
+        "wo_number, month, wo_date, location, tech, department, customer, wo_type, sub_total, total_due, qbo_invoice_id, employee_id",
       )
       .eq("revenue_class", "Service")
       .gte("month", opts.fromMonth)
