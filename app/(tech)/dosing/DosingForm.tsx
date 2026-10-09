@@ -170,6 +170,12 @@ export function DosingForm({ customers }: { customers: ActiveCustomer[] }) {
 
   // New = a different sample: wipe everything, back to a blank form.
   const newSample = () => {
+    if (
+      !window.confirm(
+        "Are you sure? This will reset all your values and take you back to the input screen.",
+      )
+    )
+      return
     setResult(null)
     setReadings({})
     setVolume(null)
