@@ -15,7 +15,7 @@ on:
   workflow_dispatch: # manual "Run workflow" button
     inputs:
       trigger_ingest:
-        description: "Also run daily_visit_ingest after minting"
+        description: "Ignored. Kept because f/ION/session_keepalive still sends it; GitHub rejects an undeclared input"
         type: boolean
         default: true
 
@@ -44,5 +44,4 @@ jobs:
           WINDMILL_TOKEN: ${{ secrets.WINDMILL_TOKEN }}
           WINDMILL_WORKSPACE: ${{ vars.WINDMILL_WORKSPACE || 'jps-internal' }}
           WINDMILL_BASE: ${{ vars.WINDMILL_BASE || 'https://app.windmill.dev/api' }}
-          TRIGGER_INGEST: ${{ (github.event_name == 'schedule' || inputs.trigger_ingest) && '1' || '0' }}
         run: node scripts/ion-mint-session.mjs

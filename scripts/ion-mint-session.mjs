@@ -1,14 +1,13 @@
 // ion-mint-session — mint a fresh ION session in a REAL browser environment
 // (GitHub Actions Ubuntu, where playwright chromium just works) and push it
-// into Windmill's f/ION/session_cache variable. The ingest then runs
-// browser-free on Windmill. This routes the ONE browser-dependent step
+// into Windmill's f/ION/session_cache variable. Windmill's ION jobs then run
+// browser-free. This routes the ONE browser-dependent step
 // (login) off Windmill's broken chromium worker onto infra we control.
 //
 // Env (GitHub Actions secrets):
 //   WINDMILL_TOKEN      — Windmill API token (scope: write the session_cache var)
 //   WINDMILL_WORKSPACE  — default "jps-internal"
 //   WINDMILL_BASE       — default "https://app.windmill.dev/api"
-//   TRIGGER_INGEST      — "1" to also kick daily_visit_ingest after minting
 //
 // ION creds are read from Windmill (single source of truth) — GH only needs
 // the Windmill token.
@@ -37,16 +36,6 @@ async function wmSetVar(path, value) {
     body: JSON.stringify({ value }),
   })
   if (!r.ok) throw new Error(`update ${path}: ${r.status} ${(await r.text()).slice(0, 200)}`)
-}
-
-async function wmRunScript(path, args) {
-  const r = await fetch(`${BASE}/w/${WS}/jobs/run/p/${path}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify(args),
-  })
-  if (!r.ok) throw new Error(`run ${path}: ${r.status}`)
-  return (await r.text()).replace(/"/g, "")
 }
 
 // ION retired the Fluidra portal hop (2026-08): login is now a single ColdFusion
@@ -104,11 +93,6 @@ try {
   const session = { cookies, cfClientId, ionOrigin, capturedAt: now, expiresAt: now + INACTIVITY_MS }
   await wmSetVar("f/ION/session_cache", JSON.stringify(session))
   console.log(`minted + pushed: ${cookies.length} cookies, cfClientId ${cfClientId ? "yes" : "no"}`)
-
-  if (process.env.TRIGGER_INGEST === "1") {
-    const job = await wmRunScript("f/ION/daily_visit_ingest", { lookback_days: 2, dry_run: false })
-    console.log(`triggered daily_visit_ingest: job ${job}`)
-  }
 } finally {
   await browser.close()
 }
