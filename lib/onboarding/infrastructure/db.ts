@@ -35,6 +35,7 @@ export interface OfficeRow {
   calendly_name_keywords: string[]
   gusto_department: string
   samsara_cost_center: string
+  sms_sender: "richmond_hill" | "brunswick" | "st_marys" | null
 }
 
 export interface OfficeStaffRow {

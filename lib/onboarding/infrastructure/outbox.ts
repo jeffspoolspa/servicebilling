@@ -1,5 +1,7 @@
 import "server-only"
 import { sendMail } from "@/lib/external/google/gmail"
+import { sendText } from "@/lib/external/ringcentral/sms"
+import type { Office as RcOffice } from "@/lib/comms/types"
 import { must, type OnbDb, type CandidateRow, type InterviewRow } from "./db"
 import { logEvent } from "./events"
 import { loadSettings, escapeHtml, type OnboardingSettings } from "./settings"
@@ -16,7 +18,7 @@ import { loadSettings, escapeHtml, type OnboardingSettings } from "./settings"
  *   Rewritten mail gets a "[TEST]" subject and a banner naming the
  *   original recipients.
  */
-export type EmailKind = "pre_interview" | "scorecard_reminder" | "rejection" | "follow_up" | "hire"
+export type EmailKind = "pre_interview" | "scorecard_reminder" | "rejection" | "follow_up" | "hire" | "hire_sms"
 
 export interface Enqueue {
   candidateId: string | null
@@ -30,6 +32,11 @@ export interface Enqueue {
   sendAfter?: Date
   /** Cancel instead of send if the candidate's status is no longer this. */
   requireStatus?: string | null
+  /**
+   * 'sms': `to` holds phone numbers and `html` the plain-text body; the
+   * sending number is the candidate office's offices.sms_sender.
+   */
+  channel?: "email" | "sms"
 }
 
 const INTERNAL_DOMAIN = "@jeffspoolspa.com"
@@ -46,6 +53,7 @@ export async function enqueueEmail(db: OnbDb, e: Enqueue): Promise<{ id: string;
     body_html: e.html,
     send_after: (e.sendAfter ?? new Date()).toISOString(),
     require_status: e.requireStatus ?? null,
+    channel: e.channel ?? "email",
   }
   const ins = await db.from("outbound_emails").upsert(row, { onConflict: "dedupe_key", ignoreDuplicates: true }).select("id")
   const created = must<{ id: string }[] | null>(ins, "enqueue email") ?? []
@@ -112,12 +120,16 @@ interface OutboxRow {
   body_html: string
   require_status: string | null
   attempts: number
+  channel: "email" | "sms"
 }
 
 async function sendOne(db: OnbDb, row: OutboxRow, s: OnboardingSettings): Promise<"sent" | "canceled" | "failed"> {
-  let candidate: Pick<CandidateRow, "status" | "is_test"> | null = null
+  let candidate: Pick<CandidateRow, "status" | "is_test" | "office_code"> | null = null
   if (row.candidate_id) {
-    candidate = must(await db.from("candidates").select("status, is_test").eq("id", row.candidate_id).single(), "load candidate")
+    candidate = must(
+      await db.from("candidates").select("status, is_test, office_code").eq("id", row.candidate_id).single(),
+      "load candidate",
+    )
   }
 
   const cancelReason = await staleReason(db, row, candidate)
@@ -131,6 +143,8 @@ async function sendOne(db: OnbDb, row: OutboxRow, s: OnboardingSettings): Promis
     })
     return "canceled"
   }
+
+  if (row.channel === "sms") return sendSmsRow(db, row, s, candidate)
 
   const { to, cc, subject, html, rewritten } = applyRails(row, s, candidate?.is_test ?? false)
   try {
@@ -171,6 +185,49 @@ async function sendOne(db: OnbDb, row: OutboxRow, s: OnboardingSettings): Promis
       payload: { outbox_id: row.id, attempts },
       error: message,
     })
+    return "failed"
+  }
+}
+
+/**
+ * Texts: every phone number is "outside the company", so with live_mode off
+ * (or for a test candidate) the text goes to settings.test_phone instead.
+ * Sent from the candidate office's RingCentral number (offices.sms_sender).
+ */
+async function sendSmsRow(
+  db: OnbDb,
+  row: OutboxRow,
+  s: OnboardingSettings,
+  candidate: Pick<CandidateRow, "is_test" | "office_code"> | null,
+): Promise<"sent" | "failed"> {
+  const rewritten = Boolean(candidate?.is_test) || !s.liveMode
+  const to = rewritten ? [s.testPhone] : row.to_addrs
+  const body = rewritten ? `[TEST for ${row.to_addrs.join(", ")}] ${row.body_html}` : row.body_html
+  try {
+    const { data: office } = await db.from("offices").select("sms_sender").eq("code", candidate?.office_code ?? "BWK").maybeSingle()
+    const sender = ((office as { sms_sender?: RcOffice } | null)?.sms_sender ?? "brunswick") as RcOffice
+    const ids: string[] = []
+    for (const phone of to) ids.push((await sendText(sender, phone, body)).id)
+    await db
+      .from("outbound_emails")
+      .update({ status: "sent", sent_at: new Date().toISOString(), gmail_message_id: ids.join(","), attempts: row.attempts + 1, last_error: null })
+      .eq("id", row.id)
+    await logEvent(db, { candidateId: row.candidate_id, type: `sms.${row.kind}.sent`, payload: { outbox_id: row.id, to, from_office: sender, rewritten } })
+    return "sent"
+  } catch (err) {
+    const attempts = row.attempts + 1
+    const message = err instanceof Error ? err.message : String(err)
+    const retry = attempts < 3
+    await db
+      .from("outbound_emails")
+      .update({
+        status: retry ? "queued" : "failed",
+        attempts,
+        last_error: message.slice(0, 1000),
+        send_after: new Date(Date.now() + attempts * 5 * 60_000).toISOString(),
+      })
+      .eq("id", row.id)
+    await logEvent(db, { candidateId: row.candidate_id, type: `sms.${row.kind}.${retry ? "retry" : "failed"}`, status: "error", payload: { outbox_id: row.id, attempts }, error: message })
     return "failed"
   }
 }

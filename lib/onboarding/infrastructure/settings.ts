@@ -9,6 +9,9 @@ export interface EmailTemplate {
 export interface OnboardingSettings {
   liveMode: boolean
   testRecipient: string
+  /** Where texts go while live mode is off / for test candidates. */
+  testPhone: string
+  smsTemplates: { hire: string }
   testCandidateEmails: string[]
   sharedMailboxes: string[]
   sender: string
@@ -27,6 +30,8 @@ export async function loadSettings(db: OnbDb = onboardingDb()): Promise<Onboardi
   return {
     liveMode: v.live_mode === true,
     testRecipient: String(v.test_recipient ?? "ryan@jeffspoolspa.com"),
+    testPhone: String(v.test_phone ?? ""),
+    smsTemplates: (v.sms_templates as OnboardingSettings["smsTemplates"]) ?? { hire: "" },
     testCandidateEmails: (v.test_candidate_emails as string[]) ?? [],
     sharedMailboxes: (v.shared_mailboxes as string[]) ?? [],
     sender: String(v.sender ?? "jpsbilling@jeffspoolspa.com"),
