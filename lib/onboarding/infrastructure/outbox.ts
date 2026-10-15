@@ -1,5 +1,6 @@
 import "server-only"
-import { sendMail } from "@/lib/external/google/gmail"
+import { sendMail, type MailAttachment } from "@/lib/external/google/gmail"
+import { downloadFile } from "@/lib/external/google/drive"
 import { sendText } from "@/lib/external/ringcentral/sms"
 import type { Office as RcOffice } from "@/lib/comms/types"
 import { must, type OnbDb, type CandidateRow, type InterviewRow } from "./db"
@@ -18,7 +19,16 @@ import { loadSettings, escapeHtml, type OnboardingSettings } from "./settings"
  *   Rewritten mail gets a "[TEST]" subject and a banner naming the
  *   original recipients.
  */
-export type EmailKind = "pre_interview" | "scorecard_reminder" | "rejection" | "follow_up" | "hire" | "hire_sms"
+export type EmailKind =
+  | "pre_interview"
+  | "scorecard_reminder"
+  | "rejection"
+  | "follow_up"
+  | "hire"
+  | "hire_sms"
+  | "review"
+  | "reupload"
+  | "reupload_sms"
 
 export interface Enqueue {
   candidateId: string | null
@@ -37,6 +47,8 @@ export interface Enqueue {
    * sending number is the candidate office's offices.sms_sender.
    */
   channel?: "email" | "sms"
+  /** Drive files attached at send time (fetched fresh, never stored here). */
+  attachments?: { drive_file_id: string; filename: string }[]
 }
 
 const INTERNAL_DOMAIN = "@jeffspoolspa.com"
@@ -54,6 +66,7 @@ export async function enqueueEmail(db: OnbDb, e: Enqueue): Promise<{ id: string;
     send_after: (e.sendAfter ?? new Date()).toISOString(),
     require_status: e.requireStatus ?? null,
     channel: e.channel ?? "email",
+    attachments: e.attachments ?? [],
   }
   const ins = await db.from("outbound_emails").upsert(row, { onConflict: "dedupe_key", ignoreDuplicates: true }).select("id")
   const created = must<{ id: string }[] | null>(ins, "enqueue email") ?? []
@@ -121,6 +134,7 @@ interface OutboxRow {
   require_status: string | null
   attempts: number
   channel: "email" | "sms"
+  attachments: { drive_file_id: string; filename: string }[] | null
 }
 
 async function sendOne(db: OnbDb, row: OutboxRow, s: OnboardingSettings): Promise<"sent" | "canceled" | "failed"> {
@@ -148,7 +162,12 @@ async function sendOne(db: OnbDb, row: OutboxRow, s: OnboardingSettings): Promis
 
   const { to, cc, subject, html, rewritten } = applyRails(row, s, candidate?.is_test ?? false)
   try {
-    const msg = await sendMail(s.sender, { from: `Jeff's Pool & Spa <${s.sender}>`, to, cc, subject, html })
+    const attachments: MailAttachment[] = []
+    for (const a of row.attachments ?? []) {
+      const f = await downloadFile(s.sender, a.drive_file_id)
+      attachments.push({ filename: a.filename, contentType: f.contentType, data: f.data })
+    }
+    const msg = await sendMail(s.sender, { from: `Jeff's Pool & Spa <${s.sender}>`, to, cc, subject, html, attachments })
     await db
       .from("outbound_emails")
       .update({ status: "sent", sent_at: new Date().toISOString(), gmail_message_id: msg.id, attempts: row.attempts + 1, last_error: null })

@@ -28,6 +28,9 @@ export default async function OnboardingLayout({ children }: { children: React.R
             <Link href="/service/onboarding/interview" className="px-2.5 py-1 rounded-md text-ink-dim hover:text-ink hover:bg-white/5">
               Interview Form
             </Link>
+            <Link href="/service/onboarding/candidates" className="px-2.5 py-1 rounded-md text-ink-dim hover:text-ink hover:bg-white/5">
+              Candidates
+            </Link>
             {me.staff.is_admin && (
               <Link href="/service/onboarding/setup" className="px-2.5 py-1 rounded-md text-ink-dim hover:text-ink hover:bg-white/5">
                 Setup

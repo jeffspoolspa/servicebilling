@@ -10,6 +10,10 @@ const nextConfig = {
     // The key is a glob: [monthId] would be a character class, so the
     // brackets must be escaped to match the literal route path.
     "/api/billing/months/\\[monthId\\]/explainer-generate": ["./node_modules/@sparticuz/chromium/bin/**/*"],
+    // Candidate onboarding renders PDFs (scorecards, photo uploads) in these.
+    "/service/onboarding/interview": ["./node_modules/@sparticuz/chromium/bin/**/*"],
+    "/service/onboarding/upload/\\[token\\]": ["./node_modules/@sparticuz/chromium/bin/**/*"],
+    "/api/onboarding/tick": ["./node_modules/@sparticuz/chromium/bin/**/*"],
   },
   turbopack: {
     root: import.meta.dirname,

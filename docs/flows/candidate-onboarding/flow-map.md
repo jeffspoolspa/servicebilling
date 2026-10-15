@@ -15,6 +15,15 @@
      status Interviewed -> outcome status -> queue the outcome email -> send immediate
      ones -> render PDF -> Drive `JPS Hiring/Last, First/Last, First - Interview Scorecard - YYYY-MM-DD.pdf`.
 5. Delayed rejection goes out on a later tick, unless the status moved.
+6. Hire -> candidate gets email + text with `/service/onboarding/upload/<token>`: details (legal name,
+   DOB, GA DL#, expiry, year first licensed; non-GA blocks), MVR, DL front/back, criminal report.
+   Photos are compressed in the browser, staged in storage, converted to one PDF per document and
+   filed to Drive as `Last, First - <DocType> - YYYY-MM-DD.pdf`. Status Docs Submitted; review email
+   (docs attached, <= 20 MB else MVR + DL only) to `settings.review_recipients`.
+7. Approver opens the review page: checklist (all required), start date, pay rate ->
+   Approve (Marsh driver-add Gmail DRAFT, Approved) / Reject (reason; rejection email) /
+   Request re-upload (new link by email + text).
+8. Staff create the employee in Gusto from the panel's values, then Mark invited -> Gusto Invited.
 
 Setup (once, re-runnable): an onboarding admin uses `/service/onboarding/setup` (Connect
 Calendly; or `POST /api/onboarding/calendly/setup`)

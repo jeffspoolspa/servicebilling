@@ -12,6 +12,11 @@ export interface OnboardingSettings {
   /** Where texts go while live mode is off / for test candidates. */
   testPhone: string
   smsTemplates: { hire: string }
+  smsReupload: string
+  reuploadEmail: EmailTemplate
+  reviewRecipients: string[]
+  marsh: { to: string[]; cc: string[] }
+  approvalChecklist: { key: string; label: string }[]
   testCandidateEmails: string[]
   sharedMailboxes: string[]
   sender: string
@@ -32,6 +37,11 @@ export async function loadSettings(db: OnbDb = onboardingDb()): Promise<Onboardi
     testRecipient: String(v.test_recipient ?? "ryan@jeffspoolspa.com"),
     testPhone: String(v.test_phone ?? ""),
     smsTemplates: (v.sms_templates as OnboardingSettings["smsTemplates"]) ?? { hire: "" },
+    smsReupload: String(v.sms_reupload ?? ""),
+    reuploadEmail: (v.reupload_email as EmailTemplate) ?? { subject: "Please re-upload a document", body: "<p>{{upload_url}}</p>" },
+    reviewRecipients: (v.review_recipients as string[]) ?? ["jpsbilling@jeffspoolspa.com"],
+    marsh: (v.marsh as OnboardingSettings["marsh"]) ?? { to: [], cc: [] },
+    approvalChecklist: (v.approval_checklist as OnboardingSettings["approvalChecklist"]) ?? [],
     testCandidateEmails: (v.test_candidate_emails as string[]) ?? [],
     sharedMailboxes: (v.shared_mailboxes as string[]) ?? [],
     sender: String(v.sender ?? "jpsbilling@jeffspoolspa.com"),
@@ -40,6 +50,11 @@ export async function loadSettings(db: OnbDb = onboardingDb()): Promise<Onboardi
     templates: v.email_templates as OnboardingSettings["templates"],
     driveRootId: DRIVE_ROOT_ID,
   }
+}
+
+/** {{key}} substitution for plain text (SMS): no escaping. */
+export function renderText(tpl: string, vars: Record<string, string | number | null | undefined>): string {
+  return tpl.replace(/\{\{(\w+)\}\}/g, (_, k: string) => String(vars[k] ?? ""))
 }
 
 /** {{key}} substitution; values are HTML-escaped. */
