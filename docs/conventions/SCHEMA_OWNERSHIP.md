@@ -21,6 +21,7 @@ The inverse isn't restricted: a module can own zero, one, or many schemas. For e
 | `app_checks` | check-buddy (external repo) | [modules/_external/check-buddy.md](../modules/_external/check-buddy.md) |
 | `agreements` | agreements context (`lib/agreements`) | (added 2026-08-08: terms + ION incarnations + intake ledger; single writer = the repository/intake store) |
 | `routing` | routing context (`lib/routing`) | (added 2026-08-08: quotas keyed to agreement terms eras + whole-config placement versions; single writer = the converger) |
+| `onboarding` | onboarding context (`lib/onboarding`) | (added 2026-10-15: candidate hiring pipeline, Calendly -> scorecard -> outcomes; hiring PII, service_role only; writers named in the floor migration; see [flows/candidate-onboarding](../flows/candidate-onboarding/index.md)) |
 | `email_extraction` | email-extraction | (stub) |
 | `public` | per-table ownership (see below) | various |
 
