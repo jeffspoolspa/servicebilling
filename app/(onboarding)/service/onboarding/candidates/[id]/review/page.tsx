@@ -34,13 +34,13 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
     db.from("events").select("created_at, type, status, actor, error").eq("candidate_id", id).order("created_at", { ascending: false }).limit(60),
     db.from("approvals").select("*").eq("candidate_id", id).order("created_at", { ascending: false }),
   ])
-  const details = det as null | { legal_first: string; legal_last: string; dob: string; dl_number: string; dl_state: string; dl_expires: string; first_licensed_year: number }
+  const details = det as null | { legal_first: string; legal_last: string; dob: string; dl_number: string; dl_state: string; dl_expires: string; first_licensed_year: number | null; licensed_3_years: boolean | null }
   const documents = (docs ?? []) as { id: string; doc_type: string; filename: string; review_status: string; uploaded_at: string }[]
   const sc = ((scs ?? []) as ScorecardRow[])[0] ?? null
   const iv = ((ivs ?? []) as InterviewRow[])[0] ?? null
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" })
   const age = details ? ageOn(details.dob, today) : null
-  const yearsLicensed = details ? Number(today.slice(0, 4)) - details.first_licensed_year : null
+  const licensed3 = details ? (details.licensed_3_years ?? (details.first_licensed_year !== null ? Number(today.slice(0, 4)) - details.first_licensed_year >= 3 : null)) : null
   const reviewable = c.status === "docs_submitted" || c.status === "reupload_requested"
   const fmt = (iso: string) => `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}`
   const liveDocs = documents.filter((d) => d.review_status !== "superseded")
@@ -80,14 +80,14 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
                 ["Date of birth", `${fmt(details.dob)} (age ${age})`],
                 ["License", `${details.dl_state} · ${details.dl_number}`],
                 ["Expires", fmt(details.dl_expires)],
-                ["First licensed", `${details.first_licensed_year} (${yearsLicensed} years)`],
+                ["Licensed 3+ years", licensed3 === null ? "—" : licensed3 ? "Yes (candidate says; confirm on the MVR)" : "No"],
               ]}
             />
           ) : (
             <p className="text-ink-mute text-[13px]">Not submitted yet.</p>
           )}
           {age !== null && age < 21 && <p className="mt-2 text-coral text-[13px]">Under 21: not an acceptable driver.</p>}
-          {yearsLicensed !== null && yearsLicensed < 3 && <p className="mt-1 text-coral text-[13px]">Licensed under 3 years: not an acceptable driver.</p>}
+          {licensed3 === false && <p className="mt-1 text-coral text-[13px]">Candidate says licensed under 3 years: not an acceptable driver.</p>}
           {age !== null && age > 65 && <p className="mt-1 text-sun text-[13px]">Over 65: needs a physician statement.</p>}
         </Box>
       </div>

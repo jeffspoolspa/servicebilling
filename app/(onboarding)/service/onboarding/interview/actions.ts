@@ -2,9 +2,10 @@
 
 import { z } from "zod"
 import { revalidatePath } from "next/cache"
+import { after } from "next/server"
 import { onboardingDb } from "@/lib/onboarding/infrastructure/db"
 import { assertOnboardingStaff } from "@/lib/onboarding/infrastructure/staff-guard"
-import { submitScorecard, markNoShow, ScorecardRuleError } from "@/lib/onboarding/application/submit-scorecard"
+import { submitScorecard, markNoShow, fileScorecardPdf, loadRefData, ScorecardRuleError } from "@/lib/onboarding/application/submit-scorecard"
 import { OFFICE_CODES, POSITIONS } from "@/lib/onboarding/domain"
 
 export type ActionResult = { ok: true; candidateId: string; duplicate?: boolean } | { ok: false; error: string }
@@ -67,7 +68,14 @@ export async function submitScorecardAction(raw: unknown): Promise<ActionResult>
   const parsed = ScorecardSchema.safeParse(raw)
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the form" }
   try {
-    const r = await submitScorecard(onboardingDb(), parsed.data, actor)
+    const db = onboardingDb()
+    const r = await submitScorecard(db, parsed.data, actor, { filePdfInline: false })
+    if (!r.duplicate) {
+      // Answer the interviewer now; file the PDF to Drive after the response.
+      after(async () => {
+        await fileScorecardPdf(db, await loadRefData(db), r.scorecardId).catch(() => undefined)
+      })
+    }
     revalidatePath("/service/onboarding/interview")
     return { ok: true, candidateId: r.candidateId, duplicate: r.duplicate }
   } catch (err) {

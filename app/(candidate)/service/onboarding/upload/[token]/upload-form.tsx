@@ -69,7 +69,7 @@ export function UploadForm(p: Props) {
   const [dlState, setDlState] = useState("GA")
   const [dlNumber, setDlNumber] = useState("")
   const [dlExpires, setDlExpires] = useState("")
-  const [firstYear, setFirstYear] = useState("")
+  const [licensed3, setLicensed3] = useState(false)
   const [files, setFiles] = useState<Record<UploadSlot, Picked[]>>({ mvr: [], dl_front: [], dl_back: [], criminal: [] })
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -96,7 +96,7 @@ export function UploadForm(p: Props) {
     setError(null)
     const details =
       p.purpose === "initial"
-        ? { legalFirst, legalLast, dob, dlState, dlNumber, dlExpires, firstLicensedYear: Number(firstYear) }
+        ? { legalFirst, legalLast, dob, dlState, dlNumber, dlExpires, licensed3Years: licensed3 }
         : null
     if (details) {
       const problems = detailProblems(details, today)
@@ -198,16 +198,20 @@ export function UploadForm(p: Props) {
               We can only accept a Georgia driver&apos;s license. If you have a Georgia license, select GA. Otherwise, please call the office that interviewed you.
             </p>
           )}
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <div>
-              <span className={label}>License expiration date</span>
-              <input className={input} type="date" value={dlExpires} onChange={(e) => setDlExpires(e.target.value)} disabled={notGA} />
-            </div>
-            <div>
-              <span className={label}>Year first licensed</span>
-              <input className={input} inputMode="numeric" placeholder="e.g. 2015" value={firstYear} onChange={(e) => setFirstYear(e.target.value.replace(/\D/g, "").slice(0, 4))} disabled={notGA} />
-            </div>
+          <div className="mt-3">
+            <span className={label}>License expiration date</span>
+            <input className={input} type="date" value={dlExpires} onChange={(e) => setDlExpires(e.target.value)} disabled={notGA} />
           </div>
+          <label className="mt-4 flex items-start gap-3 text-[15px] text-slate-800">
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-5 accent-sky-700"
+              checked={licensed3}
+              onChange={(e) => setLicensed3(e.target.checked)}
+              disabled={notGA}
+            />
+            <span>I have had a driver&apos;s license for at least 3 years.</span>
+          </label>
         </Card>
       )}
 
@@ -217,7 +221,10 @@ export function UploadForm(p: Props) {
             <li>
               Get it online from Georgia DDS at{" "}
               <a className="text-sky-700 underline" href="https://dds.drives.ga.gov/" target="_blank" rel="noreferrer">dds.drives.ga.gov</a>{" "}
-              (DDS Online Services; you&apos;ll need an account and a card). Choose the <strong>3-year Driver History Report</strong>, $7.00.
+              (DDS Online Services; you&apos;ll need an account and a card). Choose the <strong>3-year Driver History Report</strong> ($7.00).
+            </li>
+            <li>
+              <strong>We&apos;ll reimburse you</strong> for the report fee. Keep your receipt.
             </li>
             <li>Or get one in person at any DDS Customer Service Center (bring form DDS-18).</li>
             <li>The online report can be printed but not downloaded: use <strong>Print → Save as PDF</strong> and upload the PDF, or take clear photos of each printed page.</li>

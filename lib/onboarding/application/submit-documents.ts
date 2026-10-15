@@ -127,7 +127,7 @@ export async function submitDocuments(db: OnbDb, rawToken: string, input: Submit
           dl_number: d.dlNumber.replace(/\s|-/g, ""),
           dl_state: "GA",
           dl_expires: d.dlExpires,
-          first_licensed_year: d.firstLicensedYear,
+          licensed_3_years: d.licensed3Years,
           updated_at: new Date().toISOString(),
         })
         .select("candidate_id"),

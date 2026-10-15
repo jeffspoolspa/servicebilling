@@ -17,6 +17,7 @@ export interface OnboardingSettings {
   reviewRecipients: string[]
   marsh: { to: string[]; cc: string[] }
   approvalChecklist: { key: string; label: string }[]
+  officeBrands: Record<string, { name: string; reply_to?: string }>
   testCandidateEmails: string[]
   sharedMailboxes: string[]
   sender: string
@@ -42,6 +43,7 @@ export async function loadSettings(db: OnbDb = onboardingDb()): Promise<Onboardi
     reviewRecipients: (v.review_recipients as string[]) ?? ["jpsbilling@jeffspoolspa.com"],
     marsh: (v.marsh as OnboardingSettings["marsh"]) ?? { to: [], cc: [] },
     approvalChecklist: (v.approval_checklist as OnboardingSettings["approvalChecklist"]) ?? [],
+    officeBrands: (v.office_brands as OnboardingSettings["officeBrands"]) ?? {},
     testCandidateEmails: (v.test_candidate_emails as string[]) ?? [],
     sharedMailboxes: (v.shared_mailboxes as string[]) ?? [],
     sender: String(v.sender ?? "jpsbilling@jeffspoolspa.com"),

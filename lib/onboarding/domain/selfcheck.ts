@@ -111,7 +111,7 @@ check("age from date of birth", () => {
   assert.equal(ageOn("2005-10-15", "2026-10-15"), 21)
 })
 check("upload details: GA only, valid license, sane dates", () => {
-  const ok = { legalFirst: "A", legalLast: "B", dob: "1990-01-01", dlState: "GA", dlNumber: "054123456", dlExpires: "2030-01-01", firstLicensedYear: 2008 }
+  const ok = { legalFirst: "A", legalLast: "B", dob: "1990-01-01", dlState: "GA", dlNumber: "054123456", dlExpires: "2030-01-01", licensed3Years: true }
   assert.deepEqual(detailProblems(ok, "2026-10-15"), [])
   assert.equal(detailProblems({ ...ok, dlState: "FL" }, "2026-10-15").length, 1)
   assert.equal(detailProblems({ ...ok, dlExpires: "2026-10-14" }, "2026-10-15").length, 1)

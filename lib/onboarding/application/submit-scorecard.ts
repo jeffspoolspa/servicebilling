@@ -66,6 +66,7 @@ export async function submitScorecard(
   db: OnbDb,
   input: ScorecardInput,
   actor: string,
+  opts: { filePdfInline?: boolean } = {},
 ): Promise<{ scorecardId: string; candidateId: string; duplicate: boolean }> {
   const ref = await loadRefData(db)
 
@@ -171,7 +172,10 @@ export async function submitScorecard(
   const outboxIds = await queueOutcome(db, ref, { ...candidate, status: OUTCOME_STATUS[input.recommendation] }, sc)
   await drainOutbox(db, { onlyIds: outboxIds })
 
-  await fileScorecardPdf(db, ref, sc.id).catch(() => undefined) // logged inside; tick retries
+  // The PDF render is slow (chromium); callers that can defer it (server
+  // actions via next/server after()) pass filePdfInline: false. The tick
+  // retries any scorecard still missing its PDF either way.
+  if (opts.filePdfInline !== false) await fileScorecardPdf(db, ref, sc.id).catch(() => undefined)
 
   return { scorecardId: sc.id, candidateId: candidate.id, duplicate: false }
 }
