@@ -15,6 +15,8 @@ import { logEvent } from "../infrastructure/events"
 import { drainOutbox } from "../infrastructure/outbox"
 import { loadRefData, officeDefaultStaff, setCandidateStatus, type RefData } from "./context"
 import { queuePreInterview } from "./pre-interview"
+import { noticeOffice } from "./office-notice"
+import { easternTime } from "../infrastructure/internal-emails"
 
 const ACTOR = "calendly"
 
@@ -136,6 +138,7 @@ async function created(db: OnbDb, ref: RefData, f: BookingFact) {
         payload: { interview_id: old.id, from: old.start_at, to: f.startAt },
         actor: ACTOR,
       })
+      await noticeOffice(db, candidate.id, "interview rescheduled", `New time: ${easternTime(f.startAt)}`, `resched:${f.inviteeUri}`)
     }
   }
   if (!interview) {
@@ -150,6 +153,13 @@ async function created(db: OnbDb, ref: RefData, f: BookingFact) {
         payload: { interview_id: interview.id, office, start_at: f.startAt, event: f.eventName, host: host?.email ?? null, interviewer: interviewer?.name ?? null },
         actor: ACTOR,
       })
+      await noticeOffice(
+        db,
+        candidate.id,
+        "interview booked",
+        `${easternTime(f.startAt)} · interviewer ${interviewer?.name ?? "not set"} · ${f.eventName ?? ""}`,
+        `booked:${f.inviteeUri}`,
+      )
     }
   }
 
@@ -190,6 +200,7 @@ async function canceled(db: OnbDb, f: BookingFact) {
 
   must(await db.from("interviews").update({ status: "canceled", updated_at: new Date().toISOString() }).eq("id", iv.id).select("id"), "cancel interview")
   await logEvent(db, { candidateId: iv.candidate_id, type: "interview.canceled", payload: { interview_id: iv.id, by: f.canceledBy }, actor: ACTOR })
+  await noticeOffice(db, iv.candidate_id, "interview canceled", `Was ${easternTime(iv.start_at)}`, `canceled:${f.inviteeUri}`)
 
   const others = must<{ id: string }[]>(
     await db.from("interviews").select("id").eq("candidate_id", iv.candidate_id).in("status", ["scheduled", "rescheduled"]),

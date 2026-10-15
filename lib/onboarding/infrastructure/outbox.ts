@@ -30,6 +30,7 @@ export type EmailKind =
   | "review"
   | "reupload"
   | "reupload_sms"
+  | "office_notice"
 
 export interface Enqueue {
   candidateId: string | null

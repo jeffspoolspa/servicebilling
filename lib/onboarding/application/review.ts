@@ -8,6 +8,7 @@ import { enqueueEmail, drainOutbox } from "../infrastructure/outbox"
 import { renderTemplate, renderText, escapeHtml } from "../infrastructure/settings"
 import { loadRefData, officeName, setCandidateStatus } from "./context"
 import { issueUploadToken } from "./upload-tokens"
+import { noticeOffice } from "./office-notice"
 
 export class ReviewRuleError extends Error {}
 
@@ -72,6 +73,8 @@ export async function approveCandidate(db: OnbDb, input: ApproveInput, actor: Ac
   await logEvent(db, { candidateId: c.id, type: "review.approved", payload: { start: input.targetStartDate, pay_rate: input.payRate }, actor: actor.label })
   await setCandidateStatus(db, c, "approved", actor.label, "approved on review page")
 
+  const approvedNotice = await noticeOffice(db, c.id, "approved", `By ${actor.label} · start ${input.targetStartDate} · $${input.payRate}/hr. Next: send the Marsh draft and create the employee in Gusto.`, `approved:${c.id}:${input.targetStartDate}`)
+  if (approvedNotice) await drainOutbox(db, { onlyIds: [approvedNotice] }).catch(() => undefined)
   let marshDraft = false
   try {
     await createMarshDraft(db, c.id)
@@ -163,7 +166,8 @@ export async function rejectCandidate(db: OnbDb, candidateId: string, reason: st
     html: renderTemplate(t.body, vars),
     requireStatus: "rejected",
   })
-  await drainOutbox(db, { onlyIds: [id] })
+  const n = await noticeOffice(db, c.id, "rejected", `By ${actor.label}: ${reason.trim().slice(0, 300)}`, `rejected:${a.id}`)
+  await drainOutbox(db, { onlyIds: n ? [id, n] : [id] })
 }
 
 /** Re-upload: pick documents + note -> a new link by email and text. */
@@ -219,6 +223,8 @@ export async function requestReupload(db: OnbDb, candidateId: string, docs: Uplo
       ).id,
     )
   }
+  const n = await noticeOffice(db, c.id, "re-upload requested", `${picked.join(", ")} · by ${actor.label}${note ? ` · ${note.slice(0, 300)}` : ""}`, `reupload:${a.id}`)
+  if (n) ids.push(n)
   await drainOutbox(db, { onlyIds: ids })
 }
 
@@ -236,4 +242,6 @@ export async function markGustoInvited(db: OnbDb, candidateId: string, actor: Ac
   )
   await logEvent(db, { candidateId: c.id, type: "gusto.invited", actor: actor.label })
   await setCandidateStatus(db, c, "gusto_invited", actor.label, "Gusto invite sent (manual)")
+  const n = await noticeOffice(db, c.id, "Gusto invite sent", `Recorded by ${actor.label}`, `gusto:${c.id}`)
+  if (n) await drainOutbox(db, { onlyIds: [n] }).catch(() => undefined)
 }

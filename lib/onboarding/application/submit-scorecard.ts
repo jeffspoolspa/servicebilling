@@ -17,6 +17,7 @@ import { uploadCandidateDoc } from "../infrastructure/candidate-drive"
 import { scorecardPdf } from "../infrastructure/scorecard-pdf"
 import { loadRefData, officeName, setCandidateStatus, type RefData } from "./context"
 import { issueUploadToken } from "./upload-tokens"
+import { noticeOffice } from "./office-notice"
 
 export class ScorecardRuleError extends Error {
   constructor(message: string) {
@@ -170,6 +171,15 @@ export async function submitScorecard(
   await setCandidateStatus(db, candidate, "interviewed", actor)
   await setCandidateStatus(db, { ...candidate, status: "interviewed" }, OUTCOME_STATUS[input.recommendation], actor, "scorecard recommendation")
   const outboxIds = await queueOutcome(db, ref, { ...candidate, status: OUTCOME_STATUS[input.recommendation] }, sc)
+  const interviewerName = ref.staff.find((st) => st.id === input.interviewerStaffId)?.name ?? actor
+  const notice = await noticeOffice(
+    db,
+    candidate.id,
+    `scorecard: ${input.recommendation === "hire" ? "Hire" : input.recommendation === "no_hire" ? "No Hire" : "Follow-up Interview"}`,
+    `Score ${score.toFixed(1)} (grade ${grade}) by ${interviewerName}${payRate ? ` · $${payRate}/hr` : ""}${input.comments ? ` · ${input.comments.slice(0, 300)}` : ""}`,
+    `scorecard:${sc.id}`,
+  )
+  if (notice) outboxIds.push(notice)
   await drainOutbox(db, { onlyIds: outboxIds })
 
   // The PDF render is slow (chromium); callers that can defer it (server
@@ -301,6 +311,7 @@ export async function markNoShow(db: OnbDb, interviewId: string, actor: string):
   }
   const c = must<CandidateRow>(await db.from("candidates").select("*").eq("id", iv.candidate_id).single(), "load candidate")
   if (c.status === "scheduled") await setCandidateStatus(db, c, "no_show", actor, "No Show on interview form")
+  await noticeOffice(db, c.id, "No Show", `Marked by ${actor}`, `noshow:${iv.id}`)
   return { candidateId: c.id }
 }
 
