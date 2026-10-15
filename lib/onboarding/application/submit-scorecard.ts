@@ -240,7 +240,24 @@ async function queueOutcome(db: OnbDb, ref: RefData, c: CandidateRow, sc: Scorec
     html: renderTemplate(t.body, vars),
   })
   await logEvent(db, { candidateId: c.id, type: "upload_link.created", payload: { purpose: "initial", expires_days: 14 } })
-  return [id]
+
+  // Same link by text, so they can upload straight from their phone.
+  const ids = [id]
+  if (c.phone && s.smsTemplates.hire) {
+    // Plain-text template: no HTML escaping.
+    const text = s.smsTemplates.hire.replace(/\{\{(\w+)\}\}/g, (_, k: string) => String((vars as Record<string, string>)[k] ?? ""))
+    const sms = await enqueueEmail(db, {
+      candidateId: c.id,
+      kind: "hire_sms",
+      channel: "sms",
+      dedupeKey: `hire_sms:${sc.id}`,
+      to: [c.phone],
+      subject: "",
+      html: text,
+    })
+    ids.push(sms.id)
+  }
+  return ids
 }
 
 /** Render the scorecard PDF and file it in the candidate's Drive folder. */

@@ -13,7 +13,7 @@
 | `onboarding.scorecards` | One per interview | `submit-scorecard`; tick (pdf id retry) | unique interview_id |
 | `onboarding.upload_tokens` | Candidate upload links (sha256 only, 14 days) | `submit-scorecard` (hire); P2 re-upload | unique token_hash |
 | `onboarding.settings` | live_mode, test recipient, templates, rejection delay | seed; settings page (P4) | key |
-| `onboarding.outbound_emails` | Outbox for every email | `infrastructure/outbox.ts` only | unique dedupe_key |
+| `onboarding.outbound_emails` | Outbox for every email and text (`channel` email/sms) | `infrastructure/outbox.ts` only | unique dedupe_key |
 | `onboarding.events` | Append-only side-effect log / timeline | any sentence via `logEvent` | identity |
 
 ## External calls
@@ -23,6 +23,7 @@
 | Calendly | webhook in (invitee.created / invitee.canceled) | `/api/webhooks/calendly` |
 | Calendly | `GET /users/me`, `GET /event_types`, `GET/POST /webhook_subscriptions` | `calendly-setup` |
 | Gmail (as jpsbilling@) | `users.messages.send` | outbox drain |
+| RingCentral | `POST /extension/{id}/sms` from the office number (`lib/external/ringcentral/sms.ts`; does not write the customer comms tables) | outbox drain |
 | Drive (as jpsbilling@) | find/create `Last, First` folder under JPS Hiring, multipart upload | scorecard PDF |
 
 ## Env
