@@ -120,17 +120,39 @@ export async function currentUser(): Promise<{ uri: string; organization: string
   return { uri: r.resource.uri, organization: r.resource.current_organization, email: r.resource.email }
 }
 
+/**
+ * Every event type in the organization. `?organization=` alone omits
+ * shared/collective types owned by other hosts, so we also list per member
+ * (`?user=`) and dedupe by URI.
+ */
 export async function listOrgEventTypes(organization: string): Promise<CalendlyEventType[]> {
-  const out: CalendlyEventType[] = []
-  let next: string | null = `/event_types?${new URLSearchParams({ organization, count: "100" })}`
-  while (next) {
-    const r: {
-      collection: { uri: string; name: string; active: boolean; scheduling_url: string; pooling_type: string | null; kind: string | null }[]
-      pagination: { next_page: string | null }
-    } = await api(next)
-    for (const e of r.collection) {
-      out.push({ uri: e.uri, name: e.name, active: e.active, schedulingUrl: e.scheduling_url, kind: e.pooling_type ?? e.kind })
+  const byUri = new Map<string, CalendlyEventType>()
+  const collect = async (query: Record<string, string>) => {
+    let next: string | null = `/event_types?${new URLSearchParams({ ...query, count: "100" })}`
+    while (next) {
+      const r: {
+        collection: { uri: string; name: string; active: boolean; scheduling_url: string; pooling_type: string | null; kind: string | null }[]
+        pagination: { next_page: string | null }
+      } = await api(next)
+      for (const e of r.collection) {
+        byUri.set(e.uri, { uri: e.uri, name: e.name, active: e.active, schedulingUrl: e.scheduling_url, kind: e.pooling_type ?? e.kind })
+      }
+      next = r.pagination?.next_page ?? null
     }
+  }
+  await collect({ organization })
+  for (const user of await listOrgMemberUris(organization)) {
+    await collect({ user, organization })
+  }
+  return [...byUri.values()]
+}
+
+async function listOrgMemberUris(organization: string): Promise<string[]> {
+  const out: string[] = []
+  let next: string | null = `/organization_memberships?${new URLSearchParams({ organization, count: "100" })}`
+  while (next) {
+    const r: { collection: { user: { uri: string } }[]; pagination: { next_page: string | null } } = await api(next)
+    for (const m of r.collection) if (m.user?.uri) out.push(m.user.uri)
     next = r.pagination?.next_page ?? null
   }
   return out
