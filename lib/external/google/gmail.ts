@@ -89,6 +89,14 @@ export function buildMime(m: MailMessage): string {
 }
 
 export async function sendMail(mailbox: string, m: MailMessage): Promise<{ id: string; threadId: string }> {
+  if (m.attachments?.length) {
+    // Media upload: up to 35 MB per message (the JSON endpoint is far smaller).
+    return googleJson(mailbox, [SCOPES.gmailCompose], "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media", {
+      method: "POST",
+      headers: { "content-type": "message/rfc822" },
+      body: buildMime(m),
+    })
+  }
   const raw = Buffer.from(buildMime(m), "utf8").toString("base64url")
   return googleJson(mailbox, [SCOPES.gmailCompose], "https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
     method: "POST",
@@ -98,6 +106,13 @@ export async function sendMail(mailbox: string, m: MailMessage): Promise<{ id: s
 }
 
 export async function createDraft(mailbox: string, m: MailMessage): Promise<{ id: string; message: { id: string } }> {
+  if (m.attachments?.length) {
+    return googleJson(mailbox, [SCOPES.gmailCompose], "https://gmail.googleapis.com/upload/gmail/v1/users/me/drafts?uploadType=media", {
+      method: "POST",
+      headers: { "content-type": "message/rfc822" },
+      body: buildMime(m),
+    })
+  }
   const raw = Buffer.from(buildMime(m), "utf8").toString("base64url")
   return googleJson(mailbox, [SCOPES.gmailCompose], "https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
     method: "POST",

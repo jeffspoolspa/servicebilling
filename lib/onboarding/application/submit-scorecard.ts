@@ -1,5 +1,4 @@
 import "server-only"
-import { createHash, randomBytes } from "node:crypto"
 import {
   overallScore,
   gradeFor,
@@ -17,6 +16,7 @@ import { renderTemplate } from "../infrastructure/settings"
 import { uploadCandidateDoc } from "../infrastructure/candidate-drive"
 import { scorecardPdf } from "../infrastructure/scorecard-pdf"
 import { loadRefData, officeName, setCandidateStatus, type RefData } from "./context"
+import { issueUploadToken } from "./upload-tokens"
 
 export class ScorecardRuleError extends Error {
   constructor(message: string) {
@@ -221,16 +221,9 @@ async function queueOutcome(db: OnbDb, ref: RefData, c: CandidateRow, sc: Scorec
   }
 
   // hire: a fresh 14-day upload link, then the congratulations email
-  const token = randomBytes(32).toString("base64url")
-  must(
-    await db
-      .from("upload_tokens")
-      .insert({ candidate_id: c.id, token_hash: createHash("sha256").update(token).digest("hex"), purpose: "initial" })
-      .select("id"),
-    "create upload token",
-  )
+  const { url: uploadUrl } = await issueUploadToken(db, c.id, { purpose: "initial" }, s.appBaseUrl)
   const t = s.templates.hire
-  const vars = { ...base, pay_rate: String(sc.pay_rate ?? 14), upload_url: `${s.appBaseUrl}/service/onboarding/upload/${token}` }
+  const vars = { ...base, pay_rate: String(sc.pay_rate ?? 14), upload_url: uploadUrl }
   const { id } = await enqueueEmail(db, {
     candidateId: c.id,
     kind: "hire",
@@ -239,7 +232,6 @@ async function queueOutcome(db: OnbDb, ref: RefData, c: CandidateRow, sc: Scorec
     subject: renderTemplate(t.subject, vars),
     html: renderTemplate(t.body, vars),
   })
-  await logEvent(db, { candidateId: c.id, type: "upload_link.created", payload: { purpose: "initial", expires_days: 14 } })
 
   // Same link by text, so they can upload straight from their phone.
   const ids = [id]
@@ -272,6 +264,15 @@ export async function fileScorecardPdf(db: OnbDb, ref: RefData, scorecardId: str
     const isoDate = new Date(iv.start_at).toLocaleDateString("en-CA", { timeZone: "America/New_York" })
     const file = await uploadCandidateDoc(db, c, "Interview Scorecard", isoDate, "pdf", "application/pdf", pdf)
     must(await db.from("scorecards").update({ pdf_drive_file_id: file.fileId }).eq("id", sc.id).select("id"), "save pdf id")
+    await db.from("documents").insert({
+      candidate_id: c.id,
+      doc_type: "Interview Scorecard",
+      drive_file_id: file.fileId,
+      filename: file.name,
+      size_bytes: pdf.length,
+      source: "scorecard",
+      review_status: "accepted",
+    })
     await logEvent(db, { candidateId: c.id, type: "drive.scorecard_filed", payload: { scorecard_id: sc.id, file_id: file.fileId, name: file.name } })
   } catch (err) {
     await logEvent(db, {

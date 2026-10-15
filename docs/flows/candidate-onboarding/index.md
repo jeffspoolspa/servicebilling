@@ -1,6 +1,6 @@
 # Candidate onboarding
 
-> Status: [active] Phase P1 (Calendly -> interview -> outcomes). P2-P5 pending.
+> Status: [active] P1 (Calendly -> interview -> outcomes) and P2 (upload -> Drive -> review -> approval, incl. Marsh draft + manual Gusto step). Samsara + Gusto-complete detection pending.
 > Last updated: 2026-10-15
 
 Hiring pipeline for field staff: a candidate books an interview in Calendly, the
@@ -20,6 +20,8 @@ draft, the Gusto hand-off and the Samsara driver.
 | Data | schema `onboarding` (Supabase `vvprodiuwraceabviyes`) | service_role only, RLS on, no policies. Hiring PII. |
 | Scheduler | pg_cron `onboarding-tick` every 5 min -> `onboarding.wake_tick()` -> `POST /api/onboarding/tick` | Vault secrets `onboarding_tick_url` + shared `billing_tick_token` (the machine token) |
 | Webhook in | `POST /api/webhooks/calendly` | HMAC signature with `CALENDLY_WEBHOOK_SIGNING_KEY` |
+| Candidate upload | `app/(candidate)/service/onboarding/upload/[token]` | No login: the only public onboarding path (one exception in `lib/supabase/middleware.ts`). Single-use 14-day token (sha256 stored). Browser uploads go to the private `onboarding-uploads` bucket via signed URLs, then to Drive on submit. |
+| Review | `/service/onboarding/candidates/<id>/review` | Documents streamed from Drive via `/api/onboarding/documents/<id>` (staff only, never shared). Approve -> Marsh Gmail draft; Gusto values panel + Mark invited. |
 
 No Zapier, no Windmill. Facts for this context live in `onboarding.events` (side-effect
 log with candidate id, status and error), not `maintenance.events`: hiring data stays in

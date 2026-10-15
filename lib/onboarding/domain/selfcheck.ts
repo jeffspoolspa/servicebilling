@@ -16,6 +16,8 @@ import {
   phoneFromAnswers,
   isTestCandidate,
   statusOnBooking,
+  ageOn,
+  detailProblems,
   type Ratings,
   type OfficeMatcher,
 } from "./index"
@@ -102,6 +104,18 @@ check("a re-booking never pulls a candidate back out of the documents stage", ()
   assert.equal(statusOnBooking("not_hired"), "scheduled")
   assert.equal(statusOnBooking("follow_up"), "scheduled")
   assert.equal(statusOnBooking("docs_submitted"), "docs_submitted")
+})
+
+check("age from date of birth", () => {
+  assert.equal(ageOn("2005-10-16", "2026-10-15"), 20)
+  assert.equal(ageOn("2005-10-15", "2026-10-15"), 21)
+})
+check("upload details: GA only, valid license, sane dates", () => {
+  const ok = { legalFirst: "A", legalLast: "B", dob: "1990-01-01", dlState: "GA", dlNumber: "054123456", dlExpires: "2030-01-01", firstLicensedYear: 2008 }
+  assert.deepEqual(detailProblems(ok, "2026-10-15"), [])
+  assert.equal(detailProblems({ ...ok, dlState: "FL" }, "2026-10-15").length, 1)
+  assert.equal(detailProblems({ ...ok, dlExpires: "2026-10-14" }, "2026-10-15").length, 1)
+  assert.equal(detailProblems({ ...ok, dlNumber: "12" }, "2026-10-15").length, 1)
 })
 
 console.log(`\nonboarding domain selfcheck: ${checks} checks passed`)

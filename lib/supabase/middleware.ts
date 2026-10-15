@@ -38,6 +38,14 @@ export async function updateSession(request: NextRequest) {
     return response
   }
 
+  // Candidate document upload page (candidate onboarding). The visitor is a
+  // job candidate with no account; the page authenticates the single-use
+  // token in its URL itself. Only this path is public; every other
+  // /service/onboarding/* page still requires login.
+  if (path.startsWith("/service/onboarding/upload/")) {
+    return response
+  }
+
   // Same logic for service-to-service comms transport endpoints. These
   // authenticate via the X-Internal-Token header (see lib/comms/server/auth.ts);
   // there's no session cookie because the caller is the website's Vercel
