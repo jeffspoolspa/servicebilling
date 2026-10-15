@@ -140,8 +140,16 @@ export function InterviewForm(p: InterviewFormProps) {
     })
   }
 
+  // Two taps instead of a browser confirm() dialog (dialogs block automation
+  // and look out of place on phones).
+  const [armNoShow, setArmNoShow] = useState(false)
   function noShow() {
-    if (!confirm("Mark this candidate as a No Show? No email is sent.")) return
+    if (!armNoShow) {
+      setArmNoShow(true)
+      setTimeout(() => setArmNoShow(false), 5000)
+      return
+    }
+    setArmNoShow(false)
     setError(null)
     start(async () => {
       const r = await noShowAction(p.interviewId)
@@ -168,7 +176,8 @@ export function InterviewForm(p: InterviewFormProps) {
         disabled={pending}
         className="flex items-center justify-center gap-2 h-11 rounded-lg border border-coral/40 bg-coral/10 text-coral font-medium hover:bg-coral/20 disabled:opacity-50"
       >
-        <UserX className="w-4 h-4" /> Candidate didn&apos;t show — mark No Show
+        <UserX className="w-4 h-4" />
+        {armNoShow ? "Tap again to confirm No Show (no email is sent)" : "Candidate didn't show — mark No Show"}
       </button>
 
       <Section title="Interview">
