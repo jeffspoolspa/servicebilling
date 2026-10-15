@@ -37,7 +37,8 @@ export interface UploadDetails {
   dlState: string
   dlNumber: string
   dlExpires: string
-  firstLicensedYear: number
+  /** "I have had a driver's license for at least 3 years" (reviewer verifies on the MVR). */
+  licensed3Years: boolean
 }
 
 /** Problems that block submission. Under-21 etc. are reviewer decisions, not blocks. */
@@ -50,9 +51,6 @@ export function detailProblems(d: UploadDetails, todayIso: string): string[] {
   if (!/^\d{7,9}$/.test(d.dlNumber.replace(/\s|-/g, ""))) p.push("Enter your Georgia license number (7 to 9 digits).")
   if (!isDate(d.dlExpires)) p.push("Enter your license expiration date.")
   else if (d.dlExpires < todayIso) p.push("Your license is expired. We need a valid Georgia license.")
-  const year = Number(todayIso.slice(0, 4))
-  if (!Number.isInteger(d.firstLicensedYear) || d.firstLicensedYear < 1940 || d.firstLicensedYear > year)
-    p.push("Enter the year you were first licensed.")
   return p
 }
 

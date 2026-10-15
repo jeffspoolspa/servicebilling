@@ -2,10 +2,12 @@ import type { Metadata } from "next"
 import { onboardingDb } from "@/lib/onboarding/infrastructure/db"
 import { resolveUploadToken } from "@/lib/onboarding/application/upload-tokens"
 import { docsForToken } from "@/lib/onboarding/application/submit-documents"
+import { loadSettings } from "@/lib/onboarding/infrastructure/settings"
+import { brandFor } from "@/lib/onboarding/infrastructure/brand"
 import { UploadForm } from "./upload-form"
 
 export const dynamic = "force-dynamic"
-export const metadata: Metadata = { title: "Upload hiring documents · Jeff's Pool & Spa", robots: { index: false, follow: false } }
+export const metadata: Metadata = { title: "Upload hiring documents", robots: { index: false, follow: false } }
 
 /**
  * /service/onboarding/upload/<token> — candidate-facing, no login (the
@@ -14,12 +16,14 @@ export const metadata: Metadata = { title: "Upload hiring documents · Jeff's Po
  */
 export default async function UploadPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
-  const st = await resolveUploadToken(onboardingDb(), token)
+  const db = onboardingDb()
+  const st = await resolveUploadToken(db, token)
+  const brand = brandFor((await loadSettings(db)).officeBrands, st.ok ? st.candidate.office_code : null)
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 [font-size:16px]">
       <div className="max-w-xl mx-auto px-4 py-6 sm:py-10">
-        <div className="text-[13px] font-semibold tracking-wide text-sky-700 uppercase">Jeff&apos;s Pool &amp; Spa</div>
+        <div className="text-[13px] font-semibold tracking-wide text-sky-700 uppercase">{brand.name}</div>
         {!st.ok ? (
           <div className="mt-4 bg-white rounded-xl border border-slate-200 p-5">
             <h1 className="text-xl font-semibold">

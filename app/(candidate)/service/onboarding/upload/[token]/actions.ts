@@ -33,7 +33,7 @@ const Details = z.object({
   dlState: z.string().max(2),
   dlNumber: z.string().max(20),
   dlExpires: z.string().max(10),
-  firstLicensedYear: z.number().int(),
+  licensed3Years: z.boolean(),
 })
 
 export type SubmitResult = { ok: true } | { ok: false; error: string }

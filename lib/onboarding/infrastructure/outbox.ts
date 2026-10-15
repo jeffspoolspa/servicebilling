@@ -1,6 +1,7 @@
 import "server-only"
 import { sendMail, type MailAttachment } from "@/lib/external/google/gmail"
 import { downloadFile } from "@/lib/external/google/drive"
+import { brandFor, withBrand, DEFAULT_BRAND } from "./brand"
 import { sendText } from "@/lib/external/ringcentral/sms"
 import type { Office as RcOffice } from "@/lib/comms/types"
 import { must, type OnbDb, type CandidateRow, type InterviewRow } from "./db"
@@ -51,7 +52,12 @@ export interface Enqueue {
   attachments?: { drive_file_id: string; filename: string }[]
 }
 
-const INTERNAL_DOMAIN = "@jeffspoolspa.com"
+// Company mailboxes: never rewritten in test mode (Richmond Hill staff share
+// info@perfectpoolscleaning.com).
+const INTERNAL_DOMAINS = ["@jeffspoolspa.com", "@perfectpoolscleaning.com"]
+
+/** Mail to the candidate carries the office brand (RH = Perfect Pools); staff mail doesn't. */
+const CANDIDATE_KINDS: ReadonlySet<EmailKind> = new Set(["rejection", "follow_up", "hire", "hire_sms", "reupload", "reupload_sms"])
 
 export async function enqueueEmail(db: OnbDb, e: Enqueue): Promise<{ id: string; created: boolean }> {
   const row = {
@@ -158,6 +164,8 @@ async function sendOne(db: OnbDb, row: OutboxRow, s: OnboardingSettings): Promis
     return "canceled"
   }
 
+  const brand = CANDIDATE_KINDS.has(row.kind) ? brandFor(s.officeBrands, candidate?.office_code) : DEFAULT_BRAND
+  row = { ...row, subject: withBrand(row.subject, brand), body_html: withBrand(row.body_html, brand) }
   if (row.channel === "sms") return sendSmsRow(db, row, s, candidate)
 
   const { to, cc, subject, html, rewritten } = applyRails(row, s, candidate?.is_test ?? false)
@@ -167,7 +175,15 @@ async function sendOne(db: OnbDb, row: OutboxRow, s: OnboardingSettings): Promis
       const f = await downloadFile(s.sender, a.drive_file_id)
       attachments.push({ filename: a.filename, contentType: f.contentType, data: f.data })
     }
-    const msg = await sendMail(s.sender, { from: `Jeff's Pool & Spa <${s.sender}>`, to, cc, subject, html, attachments })
+    const msg = await sendMail(s.sender, {
+      from: `${brand.name} <${s.sender}>`,
+      replyTo: brand.reply_to,
+      to,
+      cc,
+      subject,
+      html,
+      attachments,
+    })
     await db
       .from("outbound_emails")
       .update({ status: "sent", sent_at: new Date().toISOString(), gmail_message_id: msg.id, attempts: row.attempts + 1, last_error: null })
@@ -280,7 +296,7 @@ export function applyRails(
   s: Pick<OnboardingSettings, "liveMode" | "testRecipient">,
   isTest: boolean,
 ): { to: string[]; cc: string[]; subject: string; html: string; rewritten: boolean } {
-  const swap = (addr: string) => (isTest || (!s.liveMode && !lc(addr).endsWith(INTERNAL_DOMAIN)) ? s.testRecipient : addr)
+  const swap = (addr: string) => (isTest || (!s.liveMode && !INTERNAL_DOMAINS.some((d) => lc(addr).endsWith(d))) ? s.testRecipient : addr)
   const to = uniq(row.to_addrs.map(swap))
   const cc = uniq(row.cc_addrs.map(swap)).filter((c) => !to.map(lc).includes(lc(c)))
   const rewritten =
