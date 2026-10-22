@@ -21,7 +21,8 @@
 | Interview in 15 min | start - 15 min (tick), or at booking if booked < 15 min out | personal host, else office `notify` staff (RH: Jackie + Erin), else jpsbilling@ | interview still scheduled at the queued time |
 | Scorecard reminder | end + 2 h, once, no scorecard | interviewer, cc jpsbilling@ | interview still scheduled |
 | Rejection (No Hire) | decision + `rejection_delay_hours` (24) | candidate | candidate status still Not Hired |
-| Follow-up | immediately | candidate | needs the office's Calendly scheduling link (from setup) |
+| Follow-up documents | immediately (Follow-up scorecard) | candidate, email + text | new 14-day upload token; `email_templates.follow_up_docs`, `sms_templates.follow_up_docs` |
+| Follow-up booking link | when the follow-up path's documents are approved | candidate | needs the office's Calendly scheduling link (from setup) |
 | Hire | immediately | candidate | new 14-day upload token |
 | Hire text | immediately, with the hire email | candidate's phone, from the office RingCentral number (`offices.sms_sender`; SAV uses Brunswick's) | same upload link; live_mode off or test candidate -> `settings.test_phone` |
 | Office notice | booking, reschedule, cancel, scorecard, No Show, approve, reject, re-upload, Gusto invite (`office-notice.ts`) | `settings.sender` (jpsbilling@) | one-line update + link to the candidate page; queued, sent by the step's drain or the next tick |
@@ -37,7 +38,16 @@
 | Hire | pay rate $14/$15/$16, default $14 |
 | Email + phone | required |
 | No Show | status only; blocked once a scorecard exists |
-| Outcome status | Hire -> Docs Requested; No Hire -> Not Hired; Follow-up -> Follow-up Interview |
+| Outcome status | Hire -> Docs Requested; Follow-up -> Docs Requested (path kept in `candidates.recommendation`); No Hire -> Not Hired |
+
+## Follow-up path
+
+| Rule | Value |
+|---|---|
+| Approve documents | Approvers; checklist + criminal history question only (no start date, pay rate or Marsh). Approval `docs_approve`; documents accepted; status Follow-up Interview; booking link sent. Approve (hire) is refused on this path. |
+| Booking | A `follow_up` candidate with a `docs_approve` approval -> Second Interview (a later re-booking keeps it). Without one (candidates from before this rule) -> Scheduled, as before. |
+| Second interview | No scorecard: the interview form redirects to the candidate page. The decision opens there once the latest interview has started. |
+| Decision | Approvers only; Hire or No Hire, reason required (also a DB check). Hire -> recommendation hire, Docs Submitted, then Approve as usual (start date, pay rate, Marsh draft). No Hire -> Rejected, rejection email now. Open past interviews are marked completed. |
 
 ## Documents
 

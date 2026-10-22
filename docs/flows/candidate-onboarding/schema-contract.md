@@ -1,6 +1,6 @@
 # Candidate onboarding: schema contract
 
-> Status: [active] P1 + P2 tables. Migrations: `20261015190000_onboarding_context_floor.sql`, `20261015193000_onboarding_outbox_claimed_at.sql`, `20261015203000_onboarding_p2_documents_approvals.sql`, `20261022120000_onboarding_staff_upload.sql`.
+> Status: [active] P1 + P2 tables. Migrations: `20261015190000_onboarding_context_floor.sql`, `20261015193000_onboarding_outbox_claimed_at.sql`, `20261015203000_onboarding_p2_documents_approvals.sql`, `20261022120000_onboarding_staff_upload.sql`, `20261022130000_onboarding_follow_up_docs_first.sql`.
 > Last updated: 2026-10-22
 
 | Table | Purpose | Writer | Key / idempotency |

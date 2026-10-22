@@ -9,6 +9,8 @@ import { PAY_RATES, PAY_RATE_NOTE, STAFF_DOC_TYPES, UPLOAD_DOC_TYPES, type Staff
 import { prepare, type Picked } from "@/lib/onboarding/infrastructure/compress-photo"
 import {
   approveAction,
+  approveDocumentsAction,
+  secondInterviewAction,
   rejectAction,
   reuploadAction,
   gustoInvitedAction,
@@ -46,10 +48,13 @@ export function ReviewActions({
   candidateId,
   checklist,
   defaultPayRate,
+  followUp,
 }: {
   candidateId: string
   checklist: { key: string; label: string }[]
   defaultPayRate: number
+  /** Follow-up path: approving clears the documents only (no start, pay or Marsh). */
+  followUp: boolean
 }) {
   const { pending, result, run } = useRun()
   const [mode, setMode] = useState<"approve" | "reject" | "reupload">("approve")
@@ -74,7 +79,7 @@ export function ReviewActions({
             value={mode}
             onChange={(v) => setMode(v as typeof mode)}
             options={[
-              { value: "approve", label: "Approve" },
+              { value: "approve", label: followUp ? "Approve documents" : "Approve" },
               { value: "reupload", label: "Request re-upload" },
               { value: "reject", label: "Reject" },
             ]}
@@ -104,21 +109,25 @@ export function ReviewActions({
                 <textarea className={`${inputCls} mt-2`} rows={2} placeholder="Required: what was found and why it's acceptable" value={criminalNote} onChange={(e) => setCriminalNote(e.target.value)} />
               )}
             </div>
-            <div className="grid sm:grid-cols-2 gap-3 max-w-lg">
-              <div>
-                <span className={labelCls}>Target start date</span>
-                <input type="date" className={inputCls} value={start} onChange={(e) => setStart(e.target.value)} />
+            {!followUp && (
+              <>
+              <div className="grid sm:grid-cols-2 gap-3 max-w-lg">
+                <div>
+                  <span className={labelCls}>Target start date</span>
+                  <input type="date" className={inputCls} value={start} onChange={(e) => setStart(e.target.value)} />
+                </div>
+                <div>
+                  <span className={labelCls}>Pay rate</span>
+                  <select className={inputCls} value={payRate} onChange={(e) => setPayRate(Number(e.target.value))}>
+                    {PAY_RATES.map((r) => (
+                      <option key={r} value={r}>${r}/hr</option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <div>
-                <span className={labelCls}>Pay rate</span>
-                <select className={inputCls} value={payRate} onChange={(e) => setPayRate(Number(e.target.value))}>
-                  {PAY_RATES.map((r) => (
-                    <option key={r} value={r}>${r}/hr</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <p className="text-[12px] text-ink-mute -mt-2">{PAY_RATE_NOTE}</p>
+              <p className="text-[12px] text-ink-mute -mt-2">{PAY_RATE_NOTE}</p>
+              </>
+            )}
             <div>
               <span className={labelCls}>Notes (optional)</span>
               <textarea className={inputCls} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -126,10 +135,12 @@ export function ReviewActions({
             <div className="flex items-center gap-3">
               <Button
                 variant="primary"
-                disabled={pending || !allChecked || !start}
+                disabled={pending || !allChecked || (!followUp && !start)}
                 onClick={() =>
                   run(() =>
-                    approveAction({
+                    followUp
+                      ? approveDocumentsAction({ candidateId, checklist: checks, criminalFound: criminalFound === "yes", criminalNote: criminalNote || null, notes: notes || null })
+                      : approveAction({
                       candidateId,
                       checklist: checks,
                       criminalFound: criminalFound === "yes",
@@ -141,7 +152,7 @@ export function ReviewActions({
                   )
                 }
               >
-                {pending ? "Approving…" : "Approve"}
+                {pending ? "Approving…" : followUp ? "Approve documents" : "Approve"}
               </Button>
               {!allChecked && <span className="text-[12px] text-ink-mute">Tick every item and answer the criminal history question.</span>}
             </div>
@@ -419,5 +430,42 @@ export function DetailsEditor({ candidateId, initial }: { candidateId: string; i
       </div>
       <Result r={result} />
     </div>
+  )
+}
+
+/** After the second interview: the approver's Hire / No Hire, each with a reason. */
+export function SecondInterviewDecision({ candidateId }: { candidateId: string }) {
+  const { pending, result, run } = useRun()
+  const [decision, setDecision] = useState<"" | "hire" | "no_hire">("")
+  const [reason, setReason] = useState("")
+  return (
+    <section className="bg-bg-elev border border-cyan/30 rounded-lg">
+      <div className="px-4 py-3 border-b border-line-soft flex items-center gap-3">
+        <h2 className="font-display text-[15px]">Second interview</h2>
+        <div className="ml-auto">
+          <OptionPills
+            value={decision}
+            onChange={(v) => setDecision(v as "hire" | "no_hire")}
+            options={[{ value: "hire", label: "Hire" }, { value: "no_hire", label: "No Hire" }]}
+            size="sm"
+          />
+        </div>
+      </div>
+      <div className="p-4 flex flex-col gap-3">
+        <div>
+          <span className={labelCls}>Reason (internal, required)</span>
+          <textarea className={inputCls} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </div>
+        <p className="text-[12px] text-ink-mute">
+          {decision === "no_hire" ? "The candidate gets the standard rejection email (not the reason)." : "Hire moves the candidate to Approve: start date, pay rate, Marsh draft."}
+        </p>
+        <div>
+          <Button variant="primary" disabled={pending || !decision || !reason.trim()} onClick={() => run(() => secondInterviewAction(candidateId, decision, reason))}>
+            {pending ? "Saving…" : decision === "no_hire" ? "Record No Hire" : "Record Hire"}
+          </Button>
+        </div>
+        <Result r={result} />
+      </div>
+    </section>
   )
 }

@@ -5,8 +5,8 @@
 
 Hiring pipeline for field staff: a candidate books an interview in Calendly, the
 interviewer gets a 15-minute heads-up and fills one scorecard, and the recommendation
-drives the next email (rejection, follow-up booking link, or the hire email with a
-document upload link). Later phases add the upload page, approval, the Marsh driver-add
+drives the next email (rejection, or a document upload link for Hire and Follow-up;
+a Follow-up candidate gets the booking link once the documents are approved). Later phases add the upload page, approval, the Marsh driver-add
 draft, the Gusto hand-off and the Samsara driver.
 
 ## Layer 0: where it sits

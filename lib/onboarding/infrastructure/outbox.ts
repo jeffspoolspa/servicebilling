@@ -27,6 +27,8 @@ export type EmailKind =
   | "follow_up"
   | "hire"
   | "hire_sms"
+  | "follow_up_docs"
+  | "follow_up_docs_sms"
   | "review"
   | "reupload"
   | "reupload_sms"

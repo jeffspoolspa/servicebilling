@@ -5,7 +5,7 @@ import { onboardingDb, type CandidateRow, type ScorecardRow, type InterviewRow }
 import { loadRefData, officeName } from "@/lib/onboarding/application/context"
 import { STATUS_LABEL, RECOMMENDATION_LABEL, DRIVER_CRITERIA, ageOn, formatPhone } from "@/lib/onboarding/domain"
 import { easternTime } from "@/lib/onboarding/infrastructure/internal-emails"
-import { ReviewActions, GustoPanel, AddDocuments, DetailsEditor } from "./review-actions"
+import { ReviewActions, GustoPanel, AddDocuments, DetailsEditor, SecondInterviewDecision } from "./review-actions"
 
 export const dynamic = "force-dynamic"
 
@@ -145,8 +145,20 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
       </Box>
 
       {reviewable && me.staff.can_approve && (
-        <ReviewActions candidateId={c.id} checklist={ref.settings.approvalChecklist} defaultPayRate={Number(c.pay_rate ?? 14)} />
+        <ReviewActions
+          candidateId={c.id}
+          checklist={ref.settings.approvalChecklist}
+          defaultPayRate={Number(c.pay_rate ?? 14)}
+          followUp={c.recommendation === "follow_up"}
+        />
       )}
+
+      {c.status === "second_interview" && me.staff.can_approve &&
+        (iv && new Date(iv.start_at).getTime() <= Date.now() ? (
+          <SecondInterviewDecision candidateId={c.id} />
+        ) : (
+          <p className="text-[13px] text-ink-mute">The Hire / No Hire decision opens after the second interview{iv ? ` (${easternTime(iv.start_at)})` : ""}.</p>
+        ))}
 
       {(c.status === "approved" || c.status === "gusto_invited") && (
         <GustoPanel

@@ -63,7 +63,14 @@ async function created(db: OnbDb, ref: RefData, f: BookingFact) {
   const existing = must<CandidateRow[]>(await db.from("candidates").select("*").eq("email", email).limit(1), "find candidate")[0]
   let candidate: CandidateRow
   if (existing) {
-    const next = statusOnBooking(existing.status)
+    // A follow-up candidate whose documents are approved is booking the second interview.
+    const docsApproved =
+      existing.status === "follow_up" &&
+      must<{ id: string }[]>(
+        await db.from("approvals").select("id").eq("candidate_id", existing.id).eq("decision", "docs_approve").limit(1),
+        "find docs approval",
+      ).length > 0
+    const next = statusOnBooking(existing.status, docsApproved)
     candidate = must<CandidateRow[]>(
       await db
         .from("candidates")

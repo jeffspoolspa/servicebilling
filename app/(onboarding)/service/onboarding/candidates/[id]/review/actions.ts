@@ -6,6 +6,8 @@ import { onboardingDb } from "@/lib/onboarding/infrastructure/db"
 import { assertOnboardingStaff } from "@/lib/onboarding/infrastructure/staff-guard"
 import {
   approveCandidate,
+  approveDocuments,
+  decideSecondInterview,
   rejectCandidate,
   requestReupload,
   markGustoInvited,
@@ -53,6 +55,32 @@ export async function approveAction(raw: unknown): Promise<ReviewResult> {
   return run(p.data.candidateId, async () => {
     const r = await approveCandidate(onboardingDb(), p.data, await actor())
     return r.marshDraft ? "Approved. The Marsh driver-add draft is in jpsbilling's Drafts." : "Approved. The Marsh draft failed; use Retry below."
+  })
+}
+
+/** Follow-up path: checklist only, then the booking link goes out. */
+export async function approveDocumentsAction(raw: unknown): Promise<ReviewResult> {
+  const p = z
+    .object({
+      candidateId: uuid,
+      checklist: z.record(z.boolean()),
+      criminalFound: z.boolean(),
+      criminalNote: z.string().max(2000).nullable(),
+      notes: z.string().max(4000).nullable(),
+    })
+    .safeParse(raw)
+  if (!p.success) return { ok: false, error: "Check the form." }
+  return run(p.data.candidateId, async () => {
+    const r = await approveDocuments(onboardingDb(), p.data, await actor())
+    return r.linkSent ? "Documents approved. The follow-up booking link was sent." : "Documents approved, but the office has no booking link: run Calendly setup."
+  })
+}
+
+export async function secondInterviewAction(candidateId: string, decision: string, reason: string): Promise<ReviewResult> {
+  if (!uuid.safeParse(candidateId).success || (decision !== "hire" && decision !== "no_hire")) return { ok: false, error: "Check the form." }
+  return run(candidateId, async () => {
+    await decideSecondInterview(onboardingDb(), candidateId, decision, reason.slice(0, 2000), await actor())
+    return decision === "hire" ? "Hire recorded. Approve below to set the start date and pay rate." : "No Hire recorded. The rejection email was sent."
   })
 }
 

@@ -105,6 +105,12 @@ check("a re-booking never pulls a candidate back out of the documents stage", ()
   assert.equal(statusOnBooking("not_hired"), "scheduled")
   assert.equal(statusOnBooking("follow_up"), "scheduled")
   assert.equal(statusOnBooking("docs_submitted"), "docs_submitted")
+  assert.equal(statusOnBooking("second_interview"), "second_interview")
+})
+
+check("a follow-up booking is the second interview only once documents are approved", () => {
+  assert.equal(statusOnBooking("follow_up", true), "second_interview")
+  assert.equal(statusOnBooking("follow_up", false), "scheduled")
 })
 
 check("age from date of birth", () => {
