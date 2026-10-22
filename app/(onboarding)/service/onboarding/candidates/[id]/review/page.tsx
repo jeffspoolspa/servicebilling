@@ -5,7 +5,7 @@ import { onboardingDb, type CandidateRow, type ScorecardRow, type InterviewRow }
 import { loadRefData, officeName } from "@/lib/onboarding/application/context"
 import { STATUS_LABEL, RECOMMENDATION_LABEL, DRIVER_CRITERIA, ageOn, formatPhone } from "@/lib/onboarding/domain"
 import { easternTime } from "@/lib/onboarding/infrastructure/internal-emails"
-import { ReviewActions, GustoPanel, AddDocuments, DetailsEditor, SecondInterviewDecision } from "./review-actions"
+import { ReviewActions, HireApproval, GustoPanel, AddDocuments, DetailsEditor, SecondInterviewDecision } from "./review-actions"
 
 export const dynamic = "force-dynamic"
 
@@ -44,6 +44,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
   const reviewable = c.status === "docs_submitted" || c.status === "reupload_requested"
   const fmt = (iso: string) => `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}`
   const liveDocs = documents.filter((d) => d.review_status !== "superseded")
+  const docsApproval = ((apps ?? []) as { decision: string; approver: string; created_at: string }[]).find((a) => a.decision === "docs_approve") ?? null
 
   return (
     <div className="flex flex-col gap-5 pb-10">
@@ -145,12 +146,11 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
       </Box>
 
       {reviewable && me.staff.can_approve && (
-        <ReviewActions
-          candidateId={c.id}
-          checklist={ref.settings.approvalChecklist}
-          defaultPayRate={Number(c.pay_rate ?? 14)}
-          followUp={c.recommendation === "follow_up"}
-        />
+        <ReviewActions candidateId={c.id} checklist={ref.settings.approvalChecklist} followUp={c.recommendation === "follow_up"} />
+      )}
+
+      {c.status === "docs_approved" && me.staff.can_approve && (
+        <HireApproval candidateId={c.id} defaultPayRate={Number(c.pay_rate ?? 14)} docsApproved={docsApproval ? `${docsApproval.approver} · ${easternTime(docsApproval.created_at)}` : null} />
       )}
 
       {c.status === "second_interview" && me.staff.can_approve &&

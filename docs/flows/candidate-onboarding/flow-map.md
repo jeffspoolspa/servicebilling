@@ -21,12 +21,14 @@
    Photos are compressed in the browser, staged in storage, converted to one PDF per document and
    filed to Drive as `Last, First - <DocType> - YYYY-MM-DD.pdf`. Status Docs Submitted; review email
    (docs attached, <= 20 MB else MVR + DL only) to `settings.review_recipients`.
-7. Approver opens the review page: checklist (all required), start date, pay rate ->
-   Approve (Marsh driver-add Gmail DRAFT, Approved) / Reject (reason; rejection email) /
-   Request re-upload (new link by email + text).
-   - Follow-up path: Approve documents (checklist only) -> Follow-up Interview + booking link ->
-     booked -> Second Interview -> after it starts, an approver records Hire or No Hire with a reason
-     (`decideSecondInterview`). Hire -> Docs Submitted on the hire path -> Approve as above.
+7. Approver opens the review page. Two steps:
+   - Documents: checklist (all required) -> Approve documents (Docs Approved) / Reject (reason;
+     rejection email) / Request re-upload (new link by email + text).
+   - Hire (Docs Approved): start date, pay rate -> Approve hire (Marsh driver-add Gmail DRAFT,
+     Approved) / Reject.
+   - Follow-up path: Approve documents -> Follow-up Interview + booking link -> booked -> Second
+     Interview -> after it starts, an approver records Hire or No Hire with a reason
+     (`decideSecondInterview`). Hire -> Docs Approved, so only the hire step is left.
    - Staff can file documents (MVR, Drivers License, Criminal History, Application, Other) and
      enter or correct license details on the same page (`staff-documents.ts`; staged under
      `staff/<candidate id>/`, filed to Drive the same way, `source = 'staff'`). When that leaves

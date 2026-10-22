@@ -1,16 +1,19 @@
--- Module: lib/onboarding. A Follow-up recommendation requests documents first
--- (same upload link as Hire, its own wording); approving them sends the
+-- Module: lib/onboarding. Approval is two steps: approve the documents
+-- (checklist) -> Docs Approved, then approve the hire (start date, pay rate,
+-- Marsh draft) -> Approved. A Follow-up recommendation requests documents
+-- first (same upload link as Hire, its own wording); approving them sends the
 -- follow-up booking link; the booked interview is Second Interview; an
--- approver then decides Hire (back to the hire path's Approve) or No Hire,
--- each with a reason.
---   candidates.status: + second_interview
---   approvals.decision: + docs_approve (follow-up path, checklist only),
---     hire / no_hire (after the second interview; reason required)
+-- approver then decides Hire (-> Docs Approved, only the hire step left) or
+-- No Hire, each with a reason.
+--   candidates.status: + docs_approved, second_interview
+--   approvals.decision: + docs_approve (the checklist, both paths),
+--     hire / no_hire (after the second interview; reason required);
+--     approve is now the hire step (start date + pay rate, no checklist)
 --   settings.email_templates.follow_up_docs, settings.sms_templates.follow_up_docs
 alter table onboarding.candidates drop constraint if exists candidates_status_check;
 alter table onboarding.candidates add constraint candidates_status_check check (status in (
   'scheduled','no_show','canceled','interviewed','not_hired','follow_up','second_interview',
-  'docs_requested','docs_submitted','reupload_requested','rejected','approved',
+  'docs_requested','docs_submitted','reupload_requested','docs_approved','rejected','approved',
   'gusto_invited','onboarding_complete','samsara_added','withdrawn'));
 alter table onboarding.approvals drop constraint if exists approvals_decision_check;
 alter table onboarding.approvals add constraint approvals_decision_check check (decision in ('approve','reject','reupload','docs_approve','hire','no_hire'));

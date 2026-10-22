@@ -40,14 +40,15 @@
 | No Show | status only; blocked once a scorecard exists |
 | Outcome status | Hire -> Docs Requested; Follow-up -> Docs Requested (path kept in `candidates.recommendation`); No Hire -> Not Hired |
 
-## Follow-up path
+## Approval and the follow-up path
 
 | Rule | Value |
 |---|---|
-| Approve documents | Approvers; checklist + criminal history question only (no start date, pay rate or Marsh). Approval `docs_approve`; documents accepted; status Follow-up Interview; booking link sent. Approve (hire) is refused on this path. |
+| Approve documents | Both paths, approvers: checklist + criminal history question (approval `docs_approve`; documents accepted). Hire path -> Docs Approved; follow-up path -> Follow-up Interview + booking link. |
+| Approve hire | Approvers, only from Docs Approved: start date + pay rate (approval `approve`) -> Approved + Marsh draft, then Gusto. |
 | Booking | A `follow_up` candidate with a `docs_approve` approval -> Second Interview (a later re-booking keeps it). Without one (candidates from before this rule) -> Scheduled, as before. |
 | Second interview | No scorecard: the interview form redirects to the candidate page. The decision opens there once the latest interview has started. |
-| Decision | Approvers only; Hire or No Hire, reason required (also a DB check). Hire -> recommendation hire, Docs Submitted, then Approve as usual (start date, pay rate, Marsh draft). No Hire -> Rejected, rejection email now. Open past interviews are marked completed. |
+| Decision | Approvers only; Hire or No Hire, reason required (also a DB check). Hire -> recommendation hire, Docs Approved (documents already approved), then Approve hire. No Hire -> Rejected, rejection email now. Open past interviews are marked completed. |
 
 ## Documents
 

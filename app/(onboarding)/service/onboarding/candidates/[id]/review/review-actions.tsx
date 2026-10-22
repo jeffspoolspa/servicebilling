@@ -47,13 +47,11 @@ function Result({ r }: { r: ReviewResult | null }) {
 export function ReviewActions({
   candidateId,
   checklist,
-  defaultPayRate,
   followUp,
 }: {
   candidateId: string
   checklist: { key: string; label: string }[]
-  defaultPayRate: number
-  /** Follow-up path: approving clears the documents only (no start, pay or Marsh). */
+  /** Follow-up path: approving the documents sends the booking link instead of opening the hire step. */
   followUp: boolean
 }) {
   const { pending, result, run } = useRun()
@@ -61,8 +59,6 @@ export function ReviewActions({
   const [checks, setChecks] = useState<Record<string, boolean>>({})
   const [criminalFound, setCriminalFound] = useState<"" | "yes" | "no">("")
   const [criminalNote, setCriminalNote] = useState("")
-  const [start, setStart] = useState("")
-  const [payRate, setPayRate] = useState((PAY_RATES as readonly number[]).includes(defaultPayRate) ? defaultPayRate : 14)
   const [notes, setNotes] = useState("")
   const [reason, setReason] = useState("")
   const [docs, setDocs] = useState<string[]>([])
@@ -73,13 +69,13 @@ export function ReviewActions({
   return (
     <section className="bg-bg-elev border border-cyan/30 rounded-lg">
       <div className="px-4 py-3 border-b border-line-soft flex items-center gap-3">
-        <h2 className="font-display text-[15px]">Decision</h2>
+        <h2 className="font-display text-[15px]">Documents</h2>
         <div className="ml-auto">
           <OptionPills
             value={mode}
             onChange={(v) => setMode(v as typeof mode)}
             options={[
-              { value: "approve", label: followUp ? "Approve documents" : "Approve" },
+              { value: "approve", label: "Approve documents" },
               { value: "reupload", label: "Request re-upload" },
               { value: "reject", label: "Reject" },
             ]}
@@ -109,25 +105,6 @@ export function ReviewActions({
                 <textarea className={`${inputCls} mt-2`} rows={2} placeholder="Required: what was found and why it's acceptable" value={criminalNote} onChange={(e) => setCriminalNote(e.target.value)} />
               )}
             </div>
-            {!followUp && (
-              <>
-              <div className="grid sm:grid-cols-2 gap-3 max-w-lg">
-                <div>
-                  <span className={labelCls}>Target start date</span>
-                  <input type="date" className={inputCls} value={start} onChange={(e) => setStart(e.target.value)} />
-                </div>
-                <div>
-                  <span className={labelCls}>Pay rate</span>
-                  <select className={inputCls} value={payRate} onChange={(e) => setPayRate(Number(e.target.value))}>
-                    {PAY_RATES.map((r) => (
-                      <option key={r} value={r}>${r}/hr</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <p className="text-[12px] text-ink-mute -mt-2">{PAY_RATE_NOTE}</p>
-              </>
-            )}
             <div>
               <span className={labelCls}>Notes (optional)</span>
               <textarea className={inputCls} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -135,26 +112,22 @@ export function ReviewActions({
             <div className="flex items-center gap-3">
               <Button
                 variant="primary"
-                disabled={pending || !allChecked || (!followUp && !start)}
+                disabled={pending || !allChecked}
                 onClick={() =>
                   run(() =>
-                    followUp
-                      ? approveDocumentsAction({ candidateId, checklist: checks, criminalFound: criminalFound === "yes", criminalNote: criminalNote || null, notes: notes || null })
-                      : approveAction({
-                      candidateId,
-                      checklist: checks,
-                      criminalFound: criminalFound === "yes",
-                      criminalNote: criminalNote || null,
-                      targetStartDate: start,
-                      payRate,
-                      notes: notes || null,
-                    }),
+                    approveDocumentsAction({ candidateId, checklist: checks, criminalFound: criminalFound === "yes", criminalNote: criminalNote || null, notes: notes || null }),
                   )
                 }
               >
-                {pending ? "Approving…" : followUp ? "Approve documents" : "Approve"}
+                {pending ? "Approving…" : "Approve documents"}
               </Button>
-              {!allChecked && <span className="text-[12px] text-ink-mute">Tick every item and answer the criminal history question.</span>}
+              <span className="text-[12px] text-ink-mute">
+                {!allChecked
+                  ? "Tick every item and answer the criminal history question."
+                  : followUp
+                    ? "Follow-up path: sends the booking link for the second interview."
+                    : "Next: approve the hire (start date, pay rate)."}
+              </span>
             </div>
           </>
         )}
@@ -464,6 +437,88 @@ export function SecondInterviewDecision({ candidateId }: { candidateId: string }
             {pending ? "Saving…" : decision === "no_hire" ? "Record No Hire" : "Record Hire"}
           </Button>
         </div>
+        <Result r={result} />
+      </div>
+    </section>
+  )
+}
+
+/** The hire step, once the documents are approved: start date and pay rate -> Approved + Marsh draft. */
+export function HireApproval({
+  candidateId,
+  defaultPayRate,
+  docsApproved,
+}: {
+  candidateId: string
+  defaultPayRate: number
+  /** Who approved the documents and when, e.g. "carter@… · 10/22 3:14 PM". */
+  docsApproved: string | null
+}) {
+  const { pending, result, run } = useRun()
+  const [mode, setMode] = useState<"approve" | "reject">("approve")
+  const [start, setStart] = useState("")
+  const [payRate, setPayRate] = useState((PAY_RATES as readonly number[]).includes(defaultPayRate) ? defaultPayRate : 14)
+  const [notes, setNotes] = useState("")
+  const [reason, setReason] = useState("")
+  return (
+    <section className="bg-bg-elev border border-cyan/30 rounded-lg">
+      <div className="px-4 py-3 border-b border-line-soft flex items-center gap-3">
+        <h2 className="font-display text-[15px]">Hire</h2>
+        <div className="ml-auto">
+          <OptionPills
+            value={mode}
+            onChange={(v) => setMode(v as typeof mode)}
+            options={[{ value: "approve", label: "Approve hire" }, { value: "reject", label: "Reject" }]}
+            size="sm"
+          />
+        </div>
+      </div>
+      <div className="p-4 flex flex-col gap-4">
+        <p className="text-[13px] text-grass">Documents approved{docsApproved ? ` · ${docsApproved}` : ""}</p>
+        {mode === "approve" ? (
+          <>
+            <div className="grid sm:grid-cols-2 gap-3 max-w-lg">
+              <div>
+                <span className={labelCls}>Target start date</span>
+                <input type="date" className={inputCls} value={start} onChange={(e) => setStart(e.target.value)} />
+              </div>
+              <div>
+                <span className={labelCls}>Pay rate</span>
+                <select className={inputCls} value={payRate} onChange={(e) => setPayRate(Number(e.target.value))}>
+                  {PAY_RATES.map((r) => (
+                    <option key={r} value={r}>${r}/hr</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <p className="text-[12px] text-ink-mute -mt-2">{PAY_RATE_NOTE}</p>
+            <div>
+              <span className={labelCls}>Notes (optional)</span>
+              <textarea className={inputCls} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+            </div>
+            <div>
+              <Button
+                variant="primary"
+                disabled={pending || !start}
+                onClick={() => run(() => approveAction({ candidateId, targetStartDate: start, payRate, notes: notes || null }))}
+              >
+                {pending ? "Approving…" : "Approve hire"}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <span className={labelCls}>Reason (internal, required)</span>
+              <textarea className={inputCls} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+            </div>
+            <div>
+              <Button disabled={pending || !reason.trim()} onClick={() => run(() => rejectAction(candidateId, reason))} className="border-coral/50 text-coral">
+                {pending ? "Rejecting…" : "Reject candidate"}
+              </Button>
+            </div>
+          </>
+        )}
         <Result r={result} />
       </div>
     </section>

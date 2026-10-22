@@ -4,12 +4,12 @@
  *
  *   Scheduled -> (No Show | Canceled | Interviewed)
  *     -> (Not Hired | Docs Requested)       Hire and Follow-up both request docs
- *     -> Docs Submitted -> (Re-upload Requested | Rejected | Approved)
+ *     -> Docs Submitted -> (Re-upload Requested | Rejected | Docs Approved)
+ *     -> Approved (start date, pay rate, Marsh draft)
  *     -> Gusto Invited -> Onboarding Complete -> Samsara Added
- *   Follow-up path (recommendation follow_up): Docs Submitted -> documents
- *     approved -> Follow-up Interview (booking link sent) -> booked -> Second
- *     Interview -> approver decides: Hire -> Docs Submitted on the hire path
- *     (Approve as usual) | No Hire -> Rejected.
+ *   Follow-up path (recommendation follow_up): documents approved -> Follow-up
+ *     Interview (booking link sent) -> booked -> Second Interview -> approver
+ *     decides: Hire -> Docs Approved (only the hire step left) | No Hire -> Rejected.
  *   plus Withdrawn from anywhere.
  */
 export const CANDIDATE_STATUSES = [
@@ -23,6 +23,7 @@ export const CANDIDATE_STATUSES = [
   "docs_requested",
   "docs_submitted",
   "reupload_requested",
+  "docs_approved",
   "rejected",
   "approved",
   "gusto_invited",
@@ -44,6 +45,7 @@ export const STATUS_LABEL: Record<CandidateStatus, string> = {
   docs_requested: "Docs Requested",
   docs_submitted: "Docs Submitted",
   reupload_requested: "Re-upload Requested",
+  docs_approved: "Docs Approved",
   rejected: "Rejected",
   approved: "Approved",
   gusto_invited: "Gusto Invited",
@@ -62,6 +64,7 @@ const PAST_INTERVIEW: ReadonlySet<CandidateStatus> = new Set([
   "docs_requested",
   "docs_submitted",
   "reupload_requested",
+  "docs_approved",
   "approved",
   "gusto_invited",
   "onboarding_complete",

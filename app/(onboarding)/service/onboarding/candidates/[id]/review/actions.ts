@@ -43,9 +43,6 @@ export async function approveAction(raw: unknown): Promise<ReviewResult> {
   const p = z
     .object({
       candidateId: uuid,
-      checklist: z.record(z.boolean()),
-      criminalFound: z.boolean(),
-      criminalNote: z.string().max(2000).nullable(),
       targetStartDate: z.string(),
       payRate: z.number(),
       notes: z.string().max(4000).nullable(),
@@ -58,7 +55,7 @@ export async function approveAction(raw: unknown): Promise<ReviewResult> {
   })
 }
 
-/** Follow-up path: checklist only, then the booking link goes out. */
+/** Step 1, both paths: the checklist. Hire path -> Docs Approved; follow-up path -> booking link. */
 export async function approveDocumentsAction(raw: unknown): Promise<ReviewResult> {
   const p = z
     .object({
@@ -72,6 +69,7 @@ export async function approveDocumentsAction(raw: unknown): Promise<ReviewResult
   if (!p.success) return { ok: false, error: "Check the form." }
   return run(p.data.candidateId, async () => {
     const r = await approveDocuments(onboardingDb(), p.data, await actor())
+    if (r.next === "hire") return "Documents approved. Next: approve the hire."
     return r.linkSent ? "Documents approved. The follow-up booking link was sent." : "Documents approved, but the office has no booking link: run Calendly setup."
   })
 }
@@ -80,7 +78,7 @@ export async function secondInterviewAction(candidateId: string, decision: strin
   if (!uuid.safeParse(candidateId).success || (decision !== "hire" && decision !== "no_hire")) return { ok: false, error: "Check the form." }
   return run(candidateId, async () => {
     await decideSecondInterview(onboardingDb(), candidateId, decision, reason.slice(0, 2000), await actor())
-    return decision === "hire" ? "Hire recorded. Approve below to set the start date and pay rate." : "No Hire recorded. The rejection email was sent."
+    return decision === "hire" ? "Hire recorded. Approve the hire below: start date and pay rate." : "No Hire recorded. The rejection email was sent."
   })
 }
 
