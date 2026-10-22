@@ -59,8 +59,10 @@ async function created(db: OnbDb, ref: RefData, f: BookingFact) {
     (host && ref.staff.find((s) => s.active && s.email?.toLowerCase() === host.email.toLowerCase())) ||
     officeDefaultStaff(ref, office)
 
-  // ---- candidate (dedupe by email)
-  const existing = must<CandidateRow[]>(await db.from("candidates").select("*").eq("email", email).limit(1), "find candidate")[0]
+  // ---- candidate (dedupe by email, then by an address staff edited away)
+  const existing =
+    must<CandidateRow[]>(await db.from("candidates").select("*").eq("email", email).limit(1), "find candidate")[0] ??
+    must<CandidateRow[]>(await db.from("candidates").select("*").contains("previous_emails", [email]).limit(1), "find candidate by previous email")[0]
   let candidate: CandidateRow
   if (existing) {
     // A follow-up candidate whose documents are approved is booking the second interview.

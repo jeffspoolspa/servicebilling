@@ -41,6 +41,15 @@ export function tenDigitPhone(raw: string | null | undefined): string | null {
   return d.length === 10 ? d : null
 }
 
+/** previous_emails after an edit from `oldEmail` to `newEmail`: keeps the old one, never lists the current one. */
+export function rotateEmails(previous: string[], oldEmail: string, newEmail: string): string[] {
+  const now = newEmail.trim().toLowerCase()
+  const was = oldEmail.trim().toLowerCase()
+  const out = previous.map((e) => e.toLowerCase()).filter((e) => e !== now)
+  if (was !== now && !out.includes(was)) out.push(was)
+  return out
+}
+
 export function formatPhone(raw: string | null | undefined): string {
   const d = tenDigitPhone(raw)
   if (!d) return raw ?? ""

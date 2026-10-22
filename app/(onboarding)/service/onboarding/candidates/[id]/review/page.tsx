@@ -5,7 +5,7 @@ import { onboardingDb, type CandidateRow, type ScorecardRow, type InterviewRow }
 import { loadRefData, officeName } from "@/lib/onboarding/application/context"
 import { STATUS_LABEL, RECOMMENDATION_LABEL, DRIVER_CRITERIA, ageOn, formatPhone } from "@/lib/onboarding/domain"
 import { easternTime } from "@/lib/onboarding/infrastructure/internal-emails"
-import { ReviewActions, HireApproval, GustoPanel, AddDocuments, DetailsEditor, SecondInterviewDecision } from "./review-actions"
+import { ReviewActions, HireApproval, GustoPanel, AddDocuments, DetailsEditor, SecondInterviewDecision, CandidateEditor } from "./review-actions"
 
 export const dynamic = "force-dynamic"
 
@@ -34,7 +34,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
     db.from("events").select("created_at, type, status, actor, error").eq("candidate_id", id).order("created_at", { ascending: false }).limit(60),
     db.from("approvals").select("*").eq("candidate_id", id).order("created_at", { ascending: false }),
   ])
-  const details = det as null | { legal_first: string; legal_last: string; dob: string; dl_number: string; dl_state: string; dl_expires: string; first_licensed_year: number | null; licensed_3_years: boolean | null }
+  const details = det as null | { legal_first: string; legal_last: string; dob: string; dl_number: string; dl_state: string; dl_expires: string; first_licensed_year: number | null; licensed_3_years: boolean | null; updated_at: string }
   const documents = (docs ?? []) as { id: string; doc_type: string; filename: string; review_status: string; source: string; uploaded_at: string }[]
   const sc = ((scs ?? []) as ScorecardRow[])[0] ?? null
   const iv = ((ivs ?? []) as InterviewRow[])[0] ?? null
@@ -72,6 +72,20 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
               ["Red flags", sc?.red_flags ?? "—"],
             ]}
           />
+          <CandidateEditor
+            candidateId={c.id}
+            version={c.updated_at}
+            offices={ref.offices.map((o) => ({ code: o.code, name: o.name }))}
+            initial={{
+              firstName: c.first_name,
+              lastName: c.last_name,
+              email: c.email,
+              phone: c.phone ?? "",
+              officeCode: c.office_code ?? "",
+              position: c.position,
+              summaryNotes: c.summary_notes ?? "",
+            }}
+          />
         </Box>
         <Box title="License details (from the candidate)">
           {details ? (
@@ -92,6 +106,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
           {age !== null && age > 65 && <p className="mt-1 text-sun text-[13px]">Over 65: needs a physician statement.</p>}
           <DetailsEditor
             candidateId={c.id}
+            version={details?.updated_at ?? null}
             initial={
               details && {
                 legalFirst: details.legal_first,
