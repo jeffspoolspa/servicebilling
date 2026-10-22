@@ -18,6 +18,17 @@ export const SLOTS_FOR_DOC: Record<UploadDocType, UploadSlot[]> = {
   "Criminal History": ["criminal"],
 }
 
+/** What staff can file on the candidate page: the required three plus loose papers. */
+export const STAFF_DOC_TYPES = [...UPLOAD_DOC_TYPES, "Application", "Other"] as const
+export type StaffDocType = (typeof STAFF_DOC_TYPES)[number]
+
+/** Required documents with no live copy (a copy awaiting re-upload does not count). */
+export function missingDocs(docs: { doc_type: string; review_status: string }[]): UploadDocType[] {
+  return UPLOAD_DOC_TYPES.filter(
+    (t) => !docs.some((d) => d.doc_type === t && (d.review_status === "pending" || d.review_status === "accepted")),
+  )
+}
+
 export const MAX_FILE_BYTES = 20 * 1024 * 1024
 export const REVIEW_EMAIL_MAX_BYTES = 20 * 1024 * 1024
 

@@ -5,7 +5,7 @@ import { onboardingDb, type CandidateRow, type ScorecardRow, type InterviewRow }
 import { loadRefData, officeName } from "@/lib/onboarding/application/context"
 import { STATUS_LABEL, RECOMMENDATION_LABEL, DRIVER_CRITERIA, ageOn, formatPhone } from "@/lib/onboarding/domain"
 import { easternTime } from "@/lib/onboarding/infrastructure/internal-emails"
-import { ReviewActions, GustoPanel } from "./review-actions"
+import { ReviewActions, HireApproval, GustoPanel, AddDocuments, DetailsEditor, SecondInterviewDecision } from "./review-actions"
 
 export const dynamic = "force-dynamic"
 
@@ -35,7 +35,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
     db.from("approvals").select("*").eq("candidate_id", id).order("created_at", { ascending: false }),
   ])
   const details = det as null | { legal_first: string; legal_last: string; dob: string; dl_number: string; dl_state: string; dl_expires: string; first_licensed_year: number | null; licensed_3_years: boolean | null }
-  const documents = (docs ?? []) as { id: string; doc_type: string; filename: string; review_status: string; uploaded_at: string }[]
+  const documents = (docs ?? []) as { id: string; doc_type: string; filename: string; review_status: string; source: string; uploaded_at: string }[]
   const sc = ((scs ?? []) as ScorecardRow[])[0] ?? null
   const iv = ((ivs ?? []) as InterviewRow[])[0] ?? null
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" })
@@ -44,6 +44,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
   const reviewable = c.status === "docs_submitted" || c.status === "reupload_requested"
   const fmt = (iso: string) => `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}`
   const liveDocs = documents.filter((d) => d.review_status !== "superseded")
+  const docsApproval = ((apps ?? []) as { decision: string; approver: string; created_at: string }[]).find((a) => a.decision === "docs_approve") ?? null
 
   return (
     <div className="flex flex-col gap-5 pb-10">
@@ -89,6 +90,19 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
           {age !== null && age < 21 && <p className="mt-2 text-coral text-[13px]">Under 21: not an acceptable driver.</p>}
           {licensed3 === false && <p className="mt-1 text-coral text-[13px]">Candidate says licensed under 3 years: not an acceptable driver.</p>}
           {age !== null && age > 65 && <p className="mt-1 text-sun text-[13px]">Over 65: needs a physician statement.</p>}
+          <DetailsEditor
+            candidateId={c.id}
+            initial={
+              details && {
+                legalFirst: details.legal_first,
+                legalLast: details.legal_last,
+                dob: details.dob,
+                dlNumber: details.dl_number,
+                dlExpires: details.dl_expires,
+                licensed3Years: Boolean(licensed3),
+              }
+            }
+          />
         </Box>
       </div>
 
@@ -103,6 +117,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
                   <span className="font-medium">{d.doc_type}</span>
                   <span className="text-ink-mute">{d.filename}</span>
                   {d.review_status === "reupload_requested" && <span className="text-sun text-[11px]">re-upload requested</span>}
+                  {d.source === "staff" && <span className="text-ink-mute text-[11px]">staff</span>}
                   <a href={`/api/onboarding/documents/${d.id}`} target="_blank" rel="noreferrer" className="ml-auto text-cyan text-[12px] hover:underline">
                     Open
                   </a>
@@ -114,6 +129,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
             ))}
           </div>
         )}
+        <AddDocuments candidateId={c.id} />
       </Box>
 
       <Box title="Unacceptable driver criteria (carrier sheet 5-R-361 + company rules)">
@@ -130,8 +146,19 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
       </Box>
 
       {reviewable && me.staff.can_approve && (
-        <ReviewActions candidateId={c.id} checklist={ref.settings.approvalChecklist} defaultPayRate={Number(c.pay_rate ?? 14)} />
+        <ReviewActions candidateId={c.id} checklist={ref.settings.approvalChecklist} followUp={c.recommendation === "follow_up"} />
       )}
+
+      {c.status === "docs_approved" && me.staff.can_approve && (
+        <HireApproval candidateId={c.id} defaultPayRate={Number(c.pay_rate ?? 14)} docsApproved={docsApproval ? `${docsApproval.approver} · ${easternTime(docsApproval.created_at)}` : null} />
+      )}
+
+      {c.status === "second_interview" && me.staff.can_approve &&
+        (iv && new Date(iv.start_at).getTime() <= Date.now() ? (
+          <SecondInterviewDecision candidateId={c.id} />
+        ) : (
+          <p className="text-[13px] text-ink-mute">The Hire / No Hire decision opens after the second interview{iv ? ` (${easternTime(iv.start_at)})` : ""}.</p>
+        ))}
 
       {(c.status === "approved" || c.status === "gusto_invited") && (
         <GustoPanel

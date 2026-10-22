@@ -54,7 +54,8 @@ export interface ScorecardInput {
 const OUTCOME_STATUS: Record<Recommendation, CandidateStatus> = {
   hire: "docs_requested",
   no_hire: "not_hired",
-  follow_up: "follow_up",
+  // Follow-up asks for documents first; approving them sends the booking link.
+  follow_up: "docs_requested",
 }
 
 /**
@@ -210,38 +211,18 @@ async function queueOutcome(db: OnbDb, ref: RefData, c: CandidateRow, sc: Scorec
     return []
   }
 
-  if (sc.recommendation === "follow_up") {
-    const office = ref.offices.find((o) => o.code === c.office_code)
-    if (!office?.calendly_scheduling_url) {
-      await logEvent(db, {
-        candidateId: c.id,
-        type: "email.follow_up.blocked",
-        status: "error",
-        error: `no Calendly scheduling link stored for ${c.office_code}; run Calendly setup, then use Resend`,
-      })
-      return []
-    }
-    const t = s.templates.follow_up
-    const vars = { ...base, scheduling_url: office.calendly_scheduling_url }
-    const { id } = await enqueueEmail(db, {
-      candidateId: c.id,
-      kind: "follow_up",
-      dedupeKey: `follow_up:${sc.id}`,
-      to: [c.email],
-      subject: renderTemplate(t.subject, vars),
-      html: renderTemplate(t.body, vars),
-    })
-    return [id]
-  }
-
-  // hire: a fresh 14-day upload link, then the congratulations email
+  // hire / follow-up: a fresh 14-day upload link, then the congratulations
+  // email (hire) or the documents-before-the-follow-up email.
+  const followUp = sc.recommendation === "follow_up"
+  const kind = followUp ? "follow_up_docs" : "hire"
   const { url: uploadUrl } = await issueUploadToken(db, c.id, { purpose: "initial" }, s.appBaseUrl)
-  const t = s.templates.hire
+  const t = followUp ? s.templates.follow_up_docs : s.templates.hire
+  if (!t) throw new Error("settings.email_templates.follow_up_docs is missing")
   const vars = { ...base, pay_rate: String(sc.pay_rate ?? 14), upload_url: uploadUrl }
   const { id } = await enqueueEmail(db, {
     candidateId: c.id,
-    kind: "hire",
-    dedupeKey: `hire:${sc.id}`,
+    kind,
+    dedupeKey: `${kind}:${sc.id}`,
     to: [c.email],
     subject: renderTemplate(t.subject, vars),
     html: renderTemplate(t.body, vars),
@@ -249,14 +230,15 @@ async function queueOutcome(db: OnbDb, ref: RefData, c: CandidateRow, sc: Scorec
 
   // Same link by text, so they can upload straight from their phone.
   const ids = [id]
-  if (c.phone && s.smsTemplates.hire) {
+  const smsTpl = followUp ? s.smsTemplates.follow_up_docs : s.smsTemplates.hire
+  if (c.phone && smsTpl) {
     // Plain-text template: no HTML escaping.
-    const text = s.smsTemplates.hire.replace(/\{\{(\w+)\}\}/g, (_, k: string) => String((vars as Record<string, string>)[k] ?? ""))
+    const text = smsTpl.replace(/\{\{(\w+)\}\}/g, (_, k: string) => String((vars as Record<string, string>)[k] ?? ""))
     const sms = await enqueueEmail(db, {
       candidateId: c.id,
-      kind: "hire_sms",
+      kind: `${kind}_sms`,
       channel: "sms",
-      dedupeKey: `hire_sms:${sc.id}`,
+      dedupeKey: `${kind}_sms:${sc.id}`,
       to: [c.phone],
       subject: "",
       html: text,
@@ -316,3 +298,32 @@ export async function markNoShow(db: OnbDb, interviewId: string, actor: string):
 }
 
 export { loadRefData }
+
+/**
+ * The follow-up booking link (the office's Calendly scheduling page), sent
+ * once the follow-up path's documents are approved. Null when the office has
+ * no stored link (logged; run Calendly setup).
+ */
+export async function queueFollowUpLink(db: OnbDb, ref: RefData, c: CandidateRow, dedupe: string): Promise<string | null> {
+  const office = ref.offices.find((o) => o.code === c.office_code)
+  if (!office?.calendly_scheduling_url) {
+    await logEvent(db, {
+      candidateId: c.id,
+      type: "email.follow_up.blocked",
+      status: "error",
+      error: `no Calendly scheduling link stored for ${c.office_code}; run Calendly setup`,
+    })
+    return null
+  }
+  const t = ref.settings.templates.follow_up
+  const vars = { first_name: c.first_name, last_name: c.last_name, office_name: officeName(ref, c.office_code), scheduling_url: office.calendly_scheduling_url }
+  const { id } = await enqueueEmail(db, {
+    candidateId: c.id,
+    kind: "follow_up",
+    dedupeKey: `follow_up:${dedupe}`,
+    to: [c.email],
+    subject: renderTemplate(t.subject, vars),
+    html: renderTemplate(t.body, vars),
+  })
+  return id
+}

@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation"
 import Link from "next/link"
 import { CalendarClock, ClipboardCheck, ChevronRight } from "lucide-react"
 import { requireOnboardingStaff } from "@/lib/onboarding/infrastructure/staff-guard"
@@ -34,6 +35,8 @@ async function ForInterview({ iv, meStaffId }: { iv: InterviewRow; meStaffId: st
   const candidate = c as CandidateRow
   const { data: scRows } = await db.from("scorecards").select("*").eq("interview_id", iv.id).limit(1)
   const sc = (scRows?.[0] ?? null) as ScorecardRow | null
+  // A second interview has no scorecard: the approver decides on the candidate page.
+  if (!sc && candidate.status === "second_interview") redirect(`/service/onboarding/candidates/${candidate.id}/review`)
 
   const header = (
     <div className="mb-5">

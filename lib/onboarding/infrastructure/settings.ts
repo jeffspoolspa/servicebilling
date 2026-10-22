@@ -11,7 +11,7 @@ export interface OnboardingSettings {
   testRecipient: string
   /** Where texts go while live mode is off / for test candidates. */
   testPhone: string
-  smsTemplates: { hire: string }
+  smsTemplates: { hire: string; follow_up_docs?: string }
   smsReupload: string
   reuploadEmail: EmailTemplate
   reviewRecipients: string[]
@@ -23,7 +23,7 @@ export interface OnboardingSettings {
   sender: string
   appBaseUrl: string
   rejectionDelayHours: number
-  templates: Record<"rejection" | "follow_up" | "hire", EmailTemplate>
+  templates: Record<"rejection" | "follow_up" | "hire", EmailTemplate> & { follow_up_docs?: EmailTemplate }
   /** Drive root `JPS Hiring` (owner jpsbilling). Fixed by the build plan. */
   driveRootId: string
 }

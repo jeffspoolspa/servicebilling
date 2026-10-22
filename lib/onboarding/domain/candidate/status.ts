@@ -3,9 +3,13 @@
  * labels are what staff see.
  *
  *   Scheduled -> (No Show | Canceled | Interviewed)
- *     -> (Not Hired | Follow-up Interview | Docs Requested)
- *     -> Docs Submitted -> (Re-upload Requested | Rejected | Approved)
+ *     -> (Not Hired | Docs Requested)       Hire and Follow-up both request docs
+ *     -> Docs Submitted -> (Re-upload Requested | Rejected | Docs Approved)
+ *     -> Approved (start date, pay rate, Marsh draft)
  *     -> Gusto Invited -> Onboarding Complete -> Samsara Added
+ *   Follow-up path (recommendation follow_up): documents approved -> Follow-up
+ *     Interview (booking link sent) -> booked -> Second Interview -> approver
+ *     decides: Hire -> Docs Approved (only the hire step left) | No Hire -> Rejected.
  *   plus Withdrawn from anywhere.
  */
 export const CANDIDATE_STATUSES = [
@@ -15,9 +19,11 @@ export const CANDIDATE_STATUSES = [
   "interviewed",
   "not_hired",
   "follow_up",
+  "second_interview",
   "docs_requested",
   "docs_submitted",
   "reupload_requested",
+  "docs_approved",
   "rejected",
   "approved",
   "gusto_invited",
@@ -35,9 +41,11 @@ export const STATUS_LABEL: Record<CandidateStatus, string> = {
   interviewed: "Interviewed",
   not_hired: "Not Hired",
   follow_up: "Follow-up Interview",
+  second_interview: "Second Interview",
   docs_requested: "Docs Requested",
   docs_submitted: "Docs Submitted",
   reupload_requested: "Re-upload Requested",
+  docs_approved: "Docs Approved",
   rejected: "Rejected",
   approved: "Approved",
   gusto_invited: "Gusto Invited",
@@ -52,18 +60,24 @@ export const STATUS_LABEL: Record<CandidateStatus, string> = {
  * to Scheduled (someone in Gusto onboarding re-booking by mistake).
  */
 const PAST_INTERVIEW: ReadonlySet<CandidateStatus> = new Set([
+  "second_interview",
   "docs_requested",
   "docs_submitted",
   "reupload_requested",
+  "docs_approved",
   "approved",
   "gusto_invited",
   "onboarding_complete",
   "samsara_added",
 ])
 
-/** Status a candidate takes when a new interview is booked. */
-export function statusOnBooking(current: CandidateStatus | null): CandidateStatus {
+/**
+ * Status a candidate takes when a new interview is booked. A follow-up
+ * candidate whose documents are approved is booking the second interview.
+ */
+export function statusOnBooking(current: CandidateStatus | null, docsApproved = false): CandidateStatus {
   if (current && PAST_INTERVIEW.has(current)) return current
+  if (current === "follow_up" && docsApproved) return "second_interview"
   return "scheduled"
 }
 

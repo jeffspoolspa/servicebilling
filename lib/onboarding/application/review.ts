@@ -9,39 +9,34 @@ import { renderTemplate, renderText, escapeHtml } from "../infrastructure/settin
 import { loadRefData, officeName, setCandidateStatus } from "./context"
 import { issueUploadToken } from "./upload-tokens"
 import { noticeOffice } from "./office-notice"
+import { queueFollowUpLink } from "./submit-scorecard"
 
 export class ReviewRuleError extends Error {}
 
 const REVIEWABLE = new Set(["docs_submitted", "reupload_requested"])
 
-interface Actor {
+export interface Actor {
   staff: StaffRow
   label: string
 }
 
 export interface ApproveInput {
   candidateId: string
-  checklist: Record<string, boolean>
-  criminalFound: boolean
-  criminalNote: string | null
   targetStartDate: string
   payRate: number
   notes: string | null
 }
 
 /**
- * Approve: every checklist item ticked, a start date, a pay rate. Records
- * the approval, sets Approved, and creates the Marsh driver-add DRAFT in
- * jpsbilling (staff send it). The Gusto step is manual ("Mark invited").
+ * Approve the hire (the second step, once the documents are approved): a
+ * start date and a pay rate. Records the approval, sets Approved, and
+ * creates the Marsh driver-add DRAFT in jpsbilling (staff send it). The
+ * Gusto step is manual ("Mark invited").
  */
 export async function approveCandidate(db: OnbDb, input: ApproveInput, actor: Actor): Promise<{ marshDraft: boolean }> {
-  const ref = await loadRefData(db)
   if (!actor.staff.can_approve) throw new ReviewRuleError("You aren't set up as an approver.")
   const c = must<CandidateRow>(await db.from("candidates").select("*").eq("id", input.candidateId).single(), "load candidate")
-  if (!REVIEWABLE.has(c.status)) throw new ReviewRuleError(`Candidate is ${c.status}; nothing to approve.`)
-  const missing = ref.settings.approvalChecklist.filter((i) => !input.checklist[i.key])
-  if (missing.length) throw new ReviewRuleError(`Not checked: ${missing[0].label}`)
-  if (input.criminalFound && !input.criminalNote?.trim()) throw new ReviewRuleError("Add a note about what the criminal history report shows.")
+  if (c.status !== "docs_approved") throw new ReviewRuleError(`Candidate is ${c.status}; approve the documents first.`)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.targetStartDate)) throw new ReviewRuleError("Pick a target start date.")
   if (!(PAY_RATES as readonly number[]).includes(input.payRate)) throw new ReviewRuleError("Pay rate must be $14, $15 or $16.")
 
@@ -53,7 +48,6 @@ export async function approveCandidate(db: OnbDb, input: ApproveInput, actor: Ac
         approver_staff_id: actor.staff.id,
         approver: actor.label,
         decision: "approve",
-        checklist: { ...input.checklist, criminal_found: input.criminalFound, criminal_note: input.criminalNote },
         notes: input.notes,
         target_start_date: input.targetStartDate,
         pay_rate: input.payRate,
@@ -69,7 +63,6 @@ export async function approveCandidate(db: OnbDb, input: ApproveInput, actor: Ac
       .select("id"),
     "save start date",
   )
-  await db.from("documents").update({ review_status: "accepted" }).eq("candidate_id", c.id).eq("review_status", "pending")
   await logEvent(db, { candidateId: c.id, type: "review.approved", payload: { start: input.targetStartDate, pay_rate: input.payRate }, actor: actor.label })
   await setCandidateStatus(db, c, "approved", actor.label, "approved on review page")
 
@@ -146,7 +139,7 @@ export async function rejectCandidate(db: OnbDb, candidateId: string, reason: st
   const ref = await loadRefData(db)
   if (!reason.trim()) throw new ReviewRuleError("Give a reason for rejecting.")
   const c = must<CandidateRow>(await db.from("candidates").select("*").eq("id", candidateId).single(), "load candidate")
-  if (!REVIEWABLE.has(c.status) && c.status !== "approved") throw new ReviewRuleError(`Candidate is ${c.status}.`)
+  if (!REVIEWABLE.has(c.status) && c.status !== "docs_approved" && c.status !== "approved") throw new ReviewRuleError(`Candidate is ${c.status}.`)
   const a = must<{ id: string }[]>(
     await db
       .from("approvals")
@@ -244,4 +237,116 @@ export async function markGustoInvited(db: OnbDb, candidateId: string, actor: Ac
   await setCandidateStatus(db, c, "gusto_invited", actor.label, "Gusto invite sent (manual)")
   const n = await noticeOffice(db, c.id, "Gusto invite sent", `Recorded by ${actor.label}`, `gusto:${c.id}`)
   if (n) await drainOutbox(db, { onlyIds: [n] }).catch(() => undefined)
+}
+
+export interface DocsApproveInput {
+  candidateId: string
+  checklist: Record<string, boolean>
+  criminalFound: boolean
+  criminalNote: string | null
+  notes: string | null
+}
+
+/**
+ * Approve the documents (the first step, both paths): every checklist item
+ * ticked. Hire path -> Docs Approved (then Approve the hire). Follow-up path
+ * -> Follow-up Interview + the office's booking link; the hire step waits for
+ * the second interview.
+ */
+export async function approveDocuments(db: OnbDb, input: DocsApproveInput, actor: Actor): Promise<{ next: "hire" | "follow_up"; linkSent: boolean }> {
+  const ref = await loadRefData(db)
+  if (!actor.staff.can_approve) throw new ReviewRuleError("You aren't set up as an approver.")
+  const c = must<CandidateRow>(await db.from("candidates").select("*").eq("id", input.candidateId).single(), "load candidate")
+  if (!REVIEWABLE.has(c.status)) throw new ReviewRuleError(`Candidate is ${c.status}; nothing to approve.`)
+  const missing = ref.settings.approvalChecklist.filter((i) => !input.checklist[i.key])
+  if (missing.length) throw new ReviewRuleError(`Not checked: ${missing[0].label}`)
+  if (input.criminalFound && !input.criminalNote?.trim()) throw new ReviewRuleError("Add a note about what the criminal history report shows.")
+
+  const a = must<{ id: string }[]>(
+    await db
+      .from("approvals")
+      .insert({
+        candidate_id: c.id,
+        approver_staff_id: actor.staff.id,
+        approver: actor.label,
+        decision: "docs_approve",
+        checklist: { ...input.checklist, criminal_found: input.criminalFound, criminal_note: input.criminalNote },
+        notes: input.notes,
+      })
+      .select("id"),
+    "save documents approval",
+  )[0]
+  await db.from("documents").update({ review_status: "accepted" }).eq("candidate_id", c.id).eq("review_status", "pending")
+  await logEvent(db, { candidateId: c.id, type: "review.docs_approved", actor: actor.label })
+  if (c.recommendation !== "follow_up") {
+    await setCandidateStatus(db, c, "docs_approved", actor.label, "documents approved")
+    const n = await noticeOffice(db, c.id, "documents approved", `By ${actor.label}. Next: approve the hire (start date, pay rate).`, `docs_approved:${a.id}`)
+    if (n) await drainOutbox(db, { onlyIds: [n] }).catch(() => undefined)
+    return { next: "hire", linkSent: false }
+  }
+  await setCandidateStatus(db, c, "follow_up", actor.label, "documents approved (follow-up path)")
+  const link = await queueFollowUpLink(db, ref, { ...c, status: "follow_up" }, `docs:${a.id}`)
+  const n = await noticeOffice(db, c.id, "documents approved", `By ${actor.label}. ${link ? "Follow-up booking link sent." : "No booking link stored for the office: run Calendly setup."}`, `docs_approved:${a.id}`)
+  await drainOutbox(db, { onlyIds: [link, n].filter((x): x is string => Boolean(x)) })
+  return { next: "follow_up", linkSent: Boolean(link) }
+}
+
+/**
+ * After the second interview an approver decides, with a reason. Hire puts
+ * the candidate on the hire path at Docs Approved (the documents were
+ * approved before the booking link went out), so only the hire step is left.
+ * No Hire rejects and sends the rejection email.
+ */
+export async function decideSecondInterview(db: OnbDb, candidateId: string, decision: "hire" | "no_hire", reason: string, actor: Actor): Promise<void> {
+  const ref = await loadRefData(db)
+  if (!actor.staff.can_approve) throw new ReviewRuleError("You aren't set up as an approver.")
+  if (!reason.trim()) throw new ReviewRuleError("Give a reason.")
+  const c = must<CandidateRow>(await db.from("candidates").select("*").eq("id", candidateId).single(), "load candidate")
+  if (c.status !== "second_interview") throw new ReviewRuleError(`Candidate is ${c.status}.`)
+  const a = must<{ id: string }[]>(
+    await db
+      .from("approvals")
+      .insert({ candidate_id: c.id, approver_staff_id: actor.staff.id, approver: actor.label, decision, notes: reason.trim() })
+      .select("id"),
+    "save decision",
+  )[0]
+  await db
+    .from("interviews")
+    .update({ status: "completed", updated_at: new Date().toISOString() })
+    .eq("candidate_id", c.id)
+    .eq("status", "scheduled")
+    .lte("start_at", new Date().toISOString())
+  await logEvent(db, { candidateId: c.id, type: `second_interview.${decision}`, actor: actor.label })
+
+  const ids: string[] = []
+  if (decision === "hire") {
+    must(await db.from("candidates").update({ recommendation: "hire", updated_at: new Date().toISOString() }).eq("id", c.id).select("id"), "set hire path")
+    await setCandidateStatus(db, c, "docs_approved", actor.label, "second interview: hire")
+  } else {
+    await setCandidateStatus(db, c, "rejected", actor.label, "second interview: no hire")
+    const t = ref.settings.templates.rejection
+    const vars = { first_name: c.first_name, last_name: c.last_name, office_name: officeName(ref, c.office_code) }
+    ids.push(
+      (
+        await enqueueEmail(db, {
+          candidateId: c.id,
+          kind: "rejection",
+          dedupeKey: `rejection:second:${a.id}`,
+          to: [c.email],
+          subject: renderTemplate(t.subject, vars),
+          html: renderTemplate(t.body, vars),
+          requireStatus: "rejected",
+        })
+      ).id,
+    )
+  }
+  const n = await noticeOffice(
+    db,
+    c.id,
+    `second interview: ${decision === "hire" ? "Hire" : "No Hire"}`,
+    `By ${actor.label}: ${reason.trim().slice(0, 300)}${decision === "hire" ? ". Next: approve the hire (start date, pay rate)." : ""}`,
+    `second:${a.id}`,
+  )
+  if (n) ids.push(n)
+  if (ids.length) await drainOutbox(db, { onlyIds: ids })
 }
