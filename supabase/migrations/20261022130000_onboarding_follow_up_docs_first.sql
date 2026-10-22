@@ -1,3 +1,5 @@
+-- Applied 2026-10-22: the schema statements via MCP as onboarding_follow_up_docs_first;
+-- the two settings updates through the app service role (the MCP connector refused UPDATE).
 -- Module: lib/onboarding. Approval is two steps: approve the documents
 -- (checklist) -> Docs Approved, then approve the hire (start date, pay rate,
 -- Marsh draft) -> Approved. A Follow-up recommendation requests documents

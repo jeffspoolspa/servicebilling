@@ -1,3 +1,4 @@
+-- Applied via MCP 2026-10-22 as onboarding_staff_upload.
 -- Module: lib/onboarding. Staff file documents and license details on the
 -- candidate page (application/staff-documents.ts).
 --   documents.source 'staff' + uploaded_by_staff_id: who filed it. Staged in
