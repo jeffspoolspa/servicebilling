@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { OptionPills } from "@/components/ui/option-pills"
 import { createSupabaseBrowser } from "@/lib/supabase/client"
-import { PAY_RATES, PAY_RATE_NOTE, STAFF_DOC_TYPES, UPLOAD_DOC_TYPES, type StaffDocType } from "@/lib/onboarding/domain"
+import { PAY_RATES, PAY_RATE_NOTE, POSITIONS, STAFF_DOC_TYPES, UPLOAD_DOC_TYPES, type OfficeCode, type StaffDocType } from "@/lib/onboarding/domain"
 import { prepare, type Picked } from "@/lib/onboarding/infrastructure/compress-photo"
 import {
   approveAction,
@@ -18,6 +18,7 @@ import {
   staffTargetsAction,
   staffFileAction,
   staffDetailsAction,
+  editCandidateAction,
   type ReviewResult,
 } from "./actions"
 
@@ -339,7 +340,7 @@ export interface DetailsValues {
 }
 
 /** Staff enter or correct the license details (GA only, same rules as the candidate form). */
-export function DetailsEditor({ candidateId, initial }: { candidateId: string; initial: DetailsValues | null }) {
+export function DetailsEditor({ candidateId, initial, version }: { candidateId: string; initial: DetailsValues | null; version: string | null }) {
   const { pending, result, run } = useRun()
   const [open, setOpen] = useState(false)
   const [v, setV] = useState<DetailsValues>(initial ?? { legalFirst: "", legalLast: "", dob: "", dlNumber: "", dlExpires: "", licensed3Years: false })
@@ -389,7 +390,7 @@ export function DetailsEditor({ candidateId, initial }: { candidateId: string; i
           disabled={pending}
           onClick={() =>
             run(async () => {
-              const r = await staffDetailsAction({ candidateId, ...v })
+              const r = await staffDetailsAction({ candidateId, ...v, version })
               if (r.ok) setOpen(false)
               return r
             })
@@ -522,5 +523,109 @@ export function HireApproval({
         <Result r={result} />
       </div>
     </section>
+  )
+}
+
+export interface CandidateValues {
+  firstName: string
+  lastName: string
+  email: string
+  phone: string
+  officeCode: OfficeCode | ""
+  position: string
+  summaryNotes: string
+}
+
+/** Edit what a person typed about the candidate. `version` = the row's updated_at when the page loaded. */
+export function CandidateEditor({
+  candidateId,
+  initial,
+  version,
+  offices,
+}: {
+  candidateId: string
+  initial: CandidateValues
+  version: string
+  offices: { code: OfficeCode; name: string }[]
+}) {
+  const { pending, result, run } = useRun()
+  const [open, setOpen] = useState(false)
+  const [v, setV] = useState<CandidateValues>(initial)
+  const set = (k: keyof CandidateValues) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setV((cur) => ({ ...cur, [k]: e.target.value }))
+
+  if (!open)
+    return (
+      <div className="mt-2">
+        <button className="text-[12px] text-cyan hover:underline" onClick={() => { setV(initial); setOpen(true) }}>
+          Edit candidate
+        </button>
+        <Result r={result} />
+      </div>
+    )
+  return (
+    <div className="mt-3 flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <span className={labelCls}>First name</span>
+          <input className={inputCls} value={v.firstName} onChange={set("firstName")} />
+        </div>
+        <div>
+          <span className={labelCls}>Last name</span>
+          <input className={inputCls} value={v.lastName} onChange={set("lastName")} />
+        </div>
+        <div>
+          <span className={labelCls}>Email</span>
+          <input className={inputCls} type="email" value={v.email} onChange={set("email")} />
+        </div>
+        <div>
+          <span className={labelCls}>Phone</span>
+          <input className={inputCls} inputMode="tel" value={v.phone} onChange={set("phone")} />
+        </div>
+        <div>
+          <span className={labelCls}>Office</span>
+          <select className={inputCls} value={v.officeCode} onChange={set("officeCode")}>
+            {v.officeCode === "" && <option value="">Pick an office</option>}
+            {offices.map((o) => (
+              <option key={o.code} value={o.code}>{o.code} · {o.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <span className={labelCls}>Position</span>
+          <select className={inputCls} value={v.position} onChange={set("position")}>
+            {POSITIONS.map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div>
+        <span className={labelCls}>Summary notes</span>
+        <textarea className={inputCls} rows={2} value={v.summaryNotes} onChange={set("summaryNotes")} />
+      </div>
+      {v.email.trim().toLowerCase() !== initial.email.toLowerCase() && (
+        <p className="text-[12px] text-ink-mute">The old email is kept so a Calendly booking under it still finds this candidate; unsent emails move to the new address.</p>
+      )}
+      <div className="flex items-center gap-3">
+        <Button
+          variant="primary"
+          disabled={pending || v.officeCode === ""}
+          onClick={() =>
+            run(async () => {
+              const r = await editCandidateAction({ candidateId, version, ...v, summaryNotes: v.summaryNotes || null })
+              if (r.ok) setOpen(false)
+              return r
+            })
+          }
+        >
+          {pending ? "Saving…" : "Save candidate"}
+        </Button>
+        <button className="text-[12px] text-ink-mute hover:text-ink" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+      <Result r={result} />
+    </div>
   )
 }

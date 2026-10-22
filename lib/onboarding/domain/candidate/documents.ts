@@ -18,8 +18,8 @@ export const SLOTS_FOR_DOC: Record<UploadDocType, UploadSlot[]> = {
   "Criminal History": ["criminal"],
 }
 
-/** What staff can file on the candidate page: the required three plus loose papers. */
-export const STAFF_DOC_TYPES = [...UPLOAD_DOC_TYPES, "Application", "Other"] as const
+/** What staff can file on the candidate page: the required three plus anything else (Other). */
+export const STAFF_DOC_TYPES = [...UPLOAD_DOC_TYPES, "Other"] as const
 export type StaffDocType = (typeof STAFF_DOC_TYPES)[number]
 
 /** Required documents with no live copy (a copy awaiting re-upload does not count). */

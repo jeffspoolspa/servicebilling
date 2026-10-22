@@ -1,6 +1,6 @@
 # Candidate onboarding: schema contract
 
-> Status: [active] P1 + P2 tables. Migrations: `20261015190000_onboarding_context_floor.sql`, `20261015193000_onboarding_outbox_claimed_at.sql`, `20261015203000_onboarding_p2_documents_approvals.sql`, `20261022120000_onboarding_staff_upload.sql`, `20261022130000_onboarding_follow_up_docs_first.sql`.
+> Status: [active] P1 + P2 tables. Migrations: `20261015190000_onboarding_context_floor.sql`, `20261015193000_onboarding_outbox_claimed_at.sql`, `20261015203000_onboarding_p2_documents_approvals.sql`, `20261022120000_onboarding_staff_upload.sql`, `20261022130000_onboarding_follow_up_docs_first.sql`, `20261022140000_onboarding_candidate_edit.sql`.
 > Last updated: 2026-10-22
 
 | Table | Purpose | Writer | Key / idempotency |
@@ -8,7 +8,7 @@
 | `onboarding.staff` | Interviewers/approvers allowlist; `email` = work address for notifications; `employee_id` links `public.employees` (login match via `auth_user_id`) | seed; settings page (P4) | unique lower(email) |
 | `onboarding.offices` | BWK/CAM/RH/SAV: Calendly event type URIs + scheduling link, Gusto department, Samsara cost center | seed; `calendly-setup`; `ingest-booking` (learns event type URIs) | code |
 | `onboarding.office_staff` | Office -> staff: `form_default` (interviewer when the Calendly host is a shared mailbox), `notify` (gets the 15-min email) | seed | one default per office |
-| `onboarding.candidates` | One per person | `ingest-booking`, `submit-scorecard` | unique lower(email) |
+| `onboarding.candidates` | One per person; `previous_emails` = addresses before an edit (booking match); `updated_at` stamped by trigger = the edit version | `ingest-booking`, `submit-scorecard`, `edit-candidate` | unique lower(email) |
 | `onboarding.interviews` | One per Calendly invitee; a reschedule moves the row | `ingest-booking`, `submit-scorecard`, `markNoShow`, outbox (sent stamps) | unique invitee_uri |
 | `onboarding.scorecards` | One per interview | `submit-scorecard`; tick (pdf id retry) | unique interview_id |
 | `onboarding.upload_tokens` | Candidate upload links (sha256 only, 14 days) | `submit-scorecard` (hire); P2 re-upload | unique token_hash |

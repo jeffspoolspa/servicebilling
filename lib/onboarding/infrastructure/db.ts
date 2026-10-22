@@ -62,7 +62,9 @@ export interface CandidateRow {
   summary_notes: string | null
   drive_folder_id: string | null
   is_test: boolean
+  previous_emails: string[]
   created_at: string
+  updated_at: string
 }
 
 export interface InterviewRow {

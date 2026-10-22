@@ -15,8 +15,9 @@ import {
   ReviewRuleError,
 } from "@/lib/onboarding/application/review"
 import { createStaffUploadTargets, fileStaffDocuments, saveStaffDetails } from "@/lib/onboarding/application/staff-documents"
+import { editCandidate } from "@/lib/onboarding/application/edit-candidate"
 import { UploadRuleError } from "@/lib/onboarding/application/submit-documents"
-import { STAFF_DOC_TYPES, UPLOAD_DOC_TYPES } from "@/lib/onboarding/domain"
+import { OFFICE_CODES, STAFF_DOC_TYPES, UPLOAD_DOC_TYPES } from "@/lib/onboarding/domain"
 
 export type ReviewResult = { ok: true; message: string } | { ok: false; error: string }
 
@@ -149,13 +150,37 @@ export async function staffDetailsAction(raw: unknown): Promise<ReviewResult> {
       dlNumber: z.string().max(20),
       dlExpires: z.string().max(10),
       licensed3Years: z.boolean(),
+      version: z.string().max(64).nullable(),
     })
     .safeParse(raw)
   if (!p.success) return { ok: false, error: "Check the form." }
-  const { candidateId, ...d } = p.data
+  const { candidateId, version, ...d } = p.data
   return run(candidateId, async () => {
-    const r = await saveStaffDetails(onboardingDb(), candidateId, { ...d, dlState: "GA" }, await actor())
+    const r = await saveStaffDetails(onboardingDb(), candidateId, { ...d, dlState: "GA" }, version, await actor())
     return r.advanced ? "Saved. Every required document is in: the candidate is now Docs Submitted." : "License details saved."
+  })
+}
+
+/** Edit the candidate's typed fields; `version` is the updated_at the form loaded. */
+export async function editCandidateAction(raw: unknown): Promise<ReviewResult> {
+  const p = z
+    .object({
+      candidateId: uuid,
+      version: z.string().max(64),
+      firstName: z.string().max(100),
+      lastName: z.string().max(100),
+      email: z.string().max(200),
+      phone: z.string().max(30),
+      officeCode: z.enum(OFFICE_CODES),
+      position: z.string().max(100),
+      summaryNotes: z.string().max(4000).nullable(),
+    })
+    .safeParse(raw)
+  if (!p.success) return { ok: false, error: "Check the form." }
+  const { candidateId, version, ...e } = p.data
+  return run(candidateId, async () => {
+    const r = await editCandidate(onboardingDb(), candidateId, e, version, await actor())
+    return `Saved: ${r.changed.join(", ").replace(/_/g, " ")}.`
   })
 }
 

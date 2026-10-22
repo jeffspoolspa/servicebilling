@@ -29,7 +29,9 @@
    - Follow-up path: Approve documents -> Follow-up Interview + booking link -> booked -> Second
      Interview -> after it starts, an approver records Hire or No Hire with a reason
      (`decideSecondInterview`). Hire -> Docs Approved, so only the hire step is left.
-   - Staff can file documents (MVR, Drivers License, Criminal History, Application, Other) and
+   - Staff can edit the candidate (name, email, phone, office, position, notes) with a version
+     check: a save made by someone else in between refuses yours (`edit-candidate.ts`).
+   - Staff can file documents (MVR, Drivers License, Criminal History, Other) and
      enter or correct license details on the same page (`staff-documents.ts`; staged under
      `staff/<candidate id>/`, filed to Drive the same way, `source = 'staff'`). When that leaves
      Docs Requested / Re-upload Requested with every required document live and details present,

@@ -56,29 +56,34 @@ export async function fileStaffDocuments(
   return { advanced: await advanceIfComplete(db, c, actor), filed: filed.length }
 }
 
-export async function saveStaffDetails(db: OnbDb, candidateId: string, d: UploadDetails, actor: Actor): Promise<{ advanced: boolean }> {
+/** `version`: the details' updated_at the form loaded, or null when there were none (version check). */
+export async function saveStaffDetails(db: OnbDb, candidateId: string, d: UploadDetails, version: string | null, actor: Actor): Promise<{ advanced: boolean }> {
   const todayIso = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" })
   const problems = detailProblems(d, todayIso)
   if (problems.length) throw new ReviewRuleError(problems[0])
   const c = await loadCandidate(db, candidateId)
-  must(
-    await db
-      .from("candidate_details")
-      .upsert({
-        candidate_id: c.id,
-        legal_first: d.legalFirst.trim(),
-        legal_last: d.legalLast.trim(),
-        dob: d.dob,
-        dl_number: d.dlNumber.replace(/\s|-/g, ""),
-        dl_state: "GA",
-        dl_expires: d.dlExpires,
-        licensed_3_years: d.licensed3Years,
-        entered_by_staff_id: actor.staff.id,
-        updated_at: new Date().toISOString(),
-      })
-      .select("candidate_id"),
-    "save details",
-  )
+  const row = {
+    legal_first: d.legalFirst.trim(),
+    legal_last: d.legalLast.trim(),
+    dob: d.dob,
+    dl_number: d.dlNumber.replace(/\s|-/g, ""),
+    dl_state: "GA",
+    dl_expires: d.dlExpires,
+    licensed_3_years: d.licensed3Years,
+    entered_by_staff_id: actor.staff.id,
+  }
+  const stale = () => new ReviewRuleError("Someone changed these details since you opened them. Reload to see them, then edit again.")
+  if (version === null) {
+    const ins = await db.from("candidate_details").insert({ candidate_id: c.id, ...row }).select("candidate_id")
+    if (ins.error?.code === "23505") throw stale()
+    must(ins, "save details")
+  } else {
+    const upd = must<{ candidate_id: string }[]>(
+      await db.from("candidate_details").update(row).eq("candidate_id", c.id).eq("updated_at", version).select("candidate_id"),
+      "save details",
+    )
+    if (!upd.length) throw stale()
+  }
   // No DOB or DL number in the log (events.ts).
   await logEvent(db, { candidateId: c.id, type: "details.staff_saved", actor: actor.label })
   return { advanced: await advanceIfComplete(db, c, actor) }

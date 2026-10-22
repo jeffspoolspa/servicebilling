@@ -54,7 +54,16 @@
 
 | Rule | Value |
 |---|---|
-| Live copy | One per required type (MVR, Drivers License, Criminal History): a new candidate or staff copy supersedes the earlier ones, written after the new row so a failure never leaves none. Application / Other only add. |
-| Staff filing | Any onboarding staff member, any status; recorded as `source = 'staff'` with the staff id. No review email. |
+| Live copy | One per required type (MVR, Drivers License, Criminal History): a new candidate or staff copy supersedes the earlier ones, written after the new row so a failure never leaves none. Other only adds. |
+| Staff filing | MVR, Drivers License, Criminal History or Other. Any onboarding staff member, any status; recorded as `source = 'staff'` with the staff id. No review email. |
 | Staff details | Same rules as the candidate form (GA only, valid dates, 7-9 digit DL#); `entered_by_staff_id` set; DOB and DL# never logged. |
 | Complete by staff | Docs Requested / Re-upload Requested + every required type live (pending or accepted) + details present -> Docs Submitted, open upload link revoked, office notice. |
+
+## Editing a candidate
+
+| Rule | Value |
+|---|---|
+| Fields | Staff edit what a person typed: first/last name, email, phone, office, position, summary notes (`edit-candidate.ts`). Status, recommendation, score, grade and pay rate stay with their steps. |
+| Version check | The form carries the row's `updated_at`; the save matches only that value (a trigger stamps `updated_at` on every update). An edit saved in between -> refused, "reload". Same for license details (insert when none existed). |
+| Email | Unique across candidates' current and previous emails. The old address goes to `previous_emails`, so a Calendly booking under it still finds the candidate; queued, unsent emails move to the new address. The scorecard form's email edit keeps the old one the same way. |
+| Name | The Drive folder and files already filed keep the old "Last, First". |

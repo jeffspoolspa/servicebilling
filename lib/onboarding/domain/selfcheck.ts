@@ -19,6 +19,7 @@ import {
   ageOn,
   detailProblems,
   missingDocs,
+  rotateEmails,
   type Ratings,
   type OfficeMatcher,
 } from "./index"
@@ -113,6 +114,12 @@ check("a follow-up booking is the second interview only once documents are appro
   assert.equal(statusOnBooking("follow_up", false), "scheduled")
 })
 
+check("an email edit keeps the old address for booking matches, never the current one", () => {
+  assert.deepEqual(rotateEmails([], "A@x.com", "b@x.com"), ["a@x.com"])
+  assert.deepEqual(rotateEmails(["a@x.com"], "b@x.com", "a@x.com"), ["b@x.com"])
+  assert.deepEqual(rotateEmails(["a@x.com"], "b@x.com", "b@x.com"), ["a@x.com"])
+})
+
 check("age from date of birth", () => {
   assert.equal(ageOn("2005-10-16", "2026-10-15"), 20)
   assert.equal(ageOn("2005-10-15", "2026-10-15"), 21)
@@ -130,7 +137,7 @@ check("required documents: a live copy counts, one awaiting re-upload does not",
   assert.deepEqual(missingDocs([]), ["MVR", "Drivers License", "Criminal History"])
   assert.deepEqual(missingDocs([doc("MVR", "pending"), doc("Drivers License", "accepted"), doc("Criminal History", "pending")]), [])
   assert.deepEqual(missingDocs([doc("MVR", "reupload_requested"), doc("Drivers License", "pending"), doc("Criminal History", "pending")]), ["MVR"])
-  assert.deepEqual(missingDocs([doc("MVR", "superseded"), doc("Application", "pending")]), ["MVR", "Drivers License", "Criminal History"])
+  assert.deepEqual(missingDocs([doc("MVR", "superseded"), doc("Other", "pending")]), ["MVR", "Drivers License", "Criminal History"])
 })
 
 console.log(`\nonboarding domain selfcheck: ${checks} checks passed`)
