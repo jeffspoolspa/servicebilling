@@ -1,11 +1,23 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { OptionPills } from "@/components/ui/option-pills"
-import { PAY_RATES, PAY_RATE_NOTE, UPLOAD_DOC_TYPES } from "@/lib/onboarding/domain"
-import { approveAction, rejectAction, reuploadAction, gustoInvitedAction, retryMarshAction, type ReviewResult } from "./actions"
+import { createSupabaseBrowser } from "@/lib/supabase/client"
+import { PAY_RATES, PAY_RATE_NOTE, STAFF_DOC_TYPES, UPLOAD_DOC_TYPES, type StaffDocType } from "@/lib/onboarding/domain"
+import { prepare, type Picked } from "@/lib/onboarding/infrastructure/compress-photo"
+import {
+  approveAction,
+  rejectAction,
+  reuploadAction,
+  gustoInvitedAction,
+  retryMarshAction,
+  staffTargetsAction,
+  staffFileAction,
+  staffDetailsAction,
+  type ReviewResult,
+} from "./actions"
 
 const inputCls =
   "w-full bg-[#0E1C2A] border border-line rounded-md px-3 py-2 text-[14px] text-ink placeholder:text-ink-mute focus:border-cyan focus:outline-none"
@@ -257,5 +269,155 @@ export function GustoPanel({
         <Result r={result} />
       </div>
     </section>
+  )
+}
+
+/** Staff file a document the candidate sent some other way (photos become one PDF). */
+export function AddDocuments({ candidateId }: { candidateId: string }) {
+  const { pending, result, run } = useRun()
+  const [docType, setDocType] = useState<StaffDocType>("MVR")
+  const [files, setFiles] = useState<Picked[]>([])
+  const [pickErr, setPickErr] = useState<string | null>(null)
+  const ref = useRef<HTMLInputElement>(null)
+
+  async function add(list: FileList | null) {
+    if (!list?.length) return
+    setPickErr(null)
+    try {
+      const prepared: Picked[] = []
+      for (const f of Array.from(list)) prepared.push(await prepare(f))
+      setFiles((cur) => [...cur, ...prepared])
+    } catch (e) {
+      setPickErr(e instanceof Error ? e.message : "Couldn't add that file.")
+    }
+  }
+
+  const file = () =>
+    run(async (): Promise<ReviewResult> => {
+      const t = await staffTargetsAction(candidateId, files.map((f) => ({ name: f.name, type: f.type, size: f.size })))
+      if (!t.ok) return t
+      const sb = createSupabaseBrowser()
+      for (const [i, f] of files.entries()) {
+        const { error } = await sb.storage.from("onboarding-uploads").uploadToSignedUrl(t.targets[i].path, t.targets[i].token, f.file, { contentType: f.type })
+        if (error) return { ok: false, error: `${f.name} didn't upload. Try again.` }
+      }
+      const r = await staffFileAction({ candidateId, docType, files: files.map((f, i) => ({ path: t.targets[i].path, type: f.type, name: f.name })) })
+      if (r.ok) setFiles([])
+      return r
+    })
+
+  return (
+    <div className="mt-4 pt-4 border-t border-line-soft flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className={labelCls + " mb-0"}>Add documents</span>
+        <OptionPills value={docType} onChange={(v) => setDocType(v as StaffDocType)} options={STAFF_DOC_TYPES.map((d) => ({ value: d, label: d }))} size="sm" />
+      </div>
+      {files.map((f) => (
+        <div key={f.id} className="flex items-center gap-2 text-[13px]">
+          <span className="truncate flex-1">{f.name}</span>
+          <button className="text-[12px] text-ink-mute hover:text-ink" onClick={() => setFiles((cur) => cur.filter((x) => x.id !== f.id))}>
+            Remove
+          </button>
+        </div>
+      ))}
+      <div className="flex items-center gap-3">
+        <Button onClick={() => ref.current?.click()} disabled={pending}>
+          {files.length ? "Add another page" : "Choose files"}
+        </Button>
+        <Button variant="primary" disabled={pending || files.length === 0} onClick={file}>
+          {pending ? "Filing…" : `File as ${docType}`}
+        </Button>
+      </div>
+      <input
+        ref={ref}
+        type="file"
+        accept="image/*,application/pdf"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          add(e.target.files)
+          e.target.value = ""
+        }}
+      />
+      {pickErr && <p className="text-[13px] text-coral">{pickErr}</p>}
+      <Result r={result} />
+    </div>
+  )
+}
+
+export interface DetailsValues {
+  legalFirst: string
+  legalLast: string
+  dob: string
+  dlNumber: string
+  dlExpires: string
+  licensed3Years: boolean
+}
+
+/** Staff enter or correct the license details (GA only, same rules as the candidate form). */
+export function DetailsEditor({ candidateId, initial }: { candidateId: string; initial: DetailsValues | null }) {
+  const { pending, result, run } = useRun()
+  const [open, setOpen] = useState(false)
+  const [v, setV] = useState<DetailsValues>(initial ?? { legalFirst: "", legalLast: "", dob: "", dlNumber: "", dlExpires: "", licensed3Years: false })
+  const set = (k: keyof DetailsValues) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setV((cur) => ({ ...cur, [k]: k === "licensed3Years" ? e.target.checked : e.target.value }))
+
+  if (!open)
+    return (
+      <div className="mt-2">
+        <button className="text-[12px] text-cyan hover:underline" onClick={() => setOpen(true)}>
+          {initial ? "Edit details" : "Enter details"}
+        </button>
+        <Result r={result} />
+      </div>
+    )
+  return (
+    <div className="mt-3 flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <span className={labelCls}>Legal first name</span>
+          <input className={inputCls} value={v.legalFirst} onChange={set("legalFirst")} />
+        </div>
+        <div>
+          <span className={labelCls}>Legal last name</span>
+          <input className={inputCls} value={v.legalLast} onChange={set("legalLast")} />
+        </div>
+        <div>
+          <span className={labelCls}>Date of birth</span>
+          <input type="date" className={inputCls} value={v.dob} onChange={set("dob")} />
+        </div>
+        <div>
+          <span className={labelCls}>GA license #</span>
+          <input className={inputCls} inputMode="numeric" value={v.dlNumber} onChange={set("dlNumber")} />
+        </div>
+        <div>
+          <span className={labelCls}>License expires</span>
+          <input type="date" className={inputCls} value={v.dlExpires} onChange={set("dlExpires")} />
+        </div>
+      </div>
+      <label className="flex gap-2 text-[14px] items-center">
+        <input type="checkbox" checked={v.licensed3Years} onChange={set("licensed3Years")} />
+        Licensed 3+ years
+      </label>
+      <div className="flex items-center gap-3">
+        <Button
+          variant="primary"
+          disabled={pending}
+          onClick={() =>
+            run(async () => {
+              const r = await staffDetailsAction({ candidateId, ...v })
+              if (r.ok) setOpen(false)
+              return r
+            })
+          }
+        >
+          {pending ? "Saving…" : "Save details"}
+        </Button>
+        <button className="text-[12px] text-ink-mute hover:text-ink" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+      <Result r={result} />
+    </div>
   )
 }

@@ -18,6 +18,7 @@ import {
   statusOnBooking,
   ageOn,
   detailProblems,
+  missingDocs,
   type Ratings,
   type OfficeMatcher,
 } from "./index"
@@ -116,6 +117,14 @@ check("upload details: GA only, valid license, sane dates", () => {
   assert.equal(detailProblems({ ...ok, dlState: "FL" }, "2026-10-15").length, 1)
   assert.equal(detailProblems({ ...ok, dlExpires: "2026-10-14" }, "2026-10-15").length, 1)
   assert.equal(detailProblems({ ...ok, dlNumber: "12" }, "2026-10-15").length, 1)
+})
+
+check("required documents: a live copy counts, one awaiting re-upload does not", () => {
+  const doc = (doc_type: string, review_status: string) => ({ doc_type, review_status })
+  assert.deepEqual(missingDocs([]), ["MVR", "Drivers License", "Criminal History"])
+  assert.deepEqual(missingDocs([doc("MVR", "pending"), doc("Drivers License", "accepted"), doc("Criminal History", "pending")]), [])
+  assert.deepEqual(missingDocs([doc("MVR", "reupload_requested"), doc("Drivers License", "pending"), doc("Criminal History", "pending")]), ["MVR"])
+  assert.deepEqual(missingDocs([doc("MVR", "superseded"), doc("Application", "pending")]), ["MVR", "Drivers License", "Criminal History"])
 })
 
 console.log(`\nonboarding domain selfcheck: ${checks} checks passed`)

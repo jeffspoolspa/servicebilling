@@ -1,7 +1,7 @@
 # Candidate onboarding: decision map
 
 > Status: [active] P1 rules.
-> Last updated: 2026-10-15
+> Last updated: 2026-10-22
 
 ## Booking
 
@@ -38,3 +38,12 @@
 | Email + phone | required |
 | No Show | status only; blocked once a scorecard exists |
 | Outcome status | Hire -> Docs Requested; No Hire -> Not Hired; Follow-up -> Follow-up Interview |
+
+## Documents
+
+| Rule | Value |
+|---|---|
+| Live copy | One per required type (MVR, Drivers License, Criminal History): a new candidate or staff copy supersedes the earlier ones, written after the new row so a failure never leaves none. Application / Other only add. |
+| Staff filing | Any onboarding staff member, any status; recorded as `source = 'staff'` with the staff id. No review email. |
+| Staff details | Same rules as the candidate form (GA only, valid dates, 7-9 digit DL#); `entered_by_staff_id` set; DOB and DL# never logged. |
+| Complete by staff | Docs Requested / Re-upload Requested + every required type live (pending or accepted) + details present -> Docs Submitted, open upload link revoked, office notice. |

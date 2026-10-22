@@ -5,7 +5,7 @@ import { onboardingDb, type CandidateRow, type ScorecardRow, type InterviewRow }
 import { loadRefData, officeName } from "@/lib/onboarding/application/context"
 import { STATUS_LABEL, RECOMMENDATION_LABEL, DRIVER_CRITERIA, ageOn, formatPhone } from "@/lib/onboarding/domain"
 import { easternTime } from "@/lib/onboarding/infrastructure/internal-emails"
-import { ReviewActions, GustoPanel } from "./review-actions"
+import { ReviewActions, GustoPanel, AddDocuments, DetailsEditor } from "./review-actions"
 
 export const dynamic = "force-dynamic"
 
@@ -35,7 +35,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
     db.from("approvals").select("*").eq("candidate_id", id).order("created_at", { ascending: false }),
   ])
   const details = det as null | { legal_first: string; legal_last: string; dob: string; dl_number: string; dl_state: string; dl_expires: string; first_licensed_year: number | null; licensed_3_years: boolean | null }
-  const documents = (docs ?? []) as { id: string; doc_type: string; filename: string; review_status: string; uploaded_at: string }[]
+  const documents = (docs ?? []) as { id: string; doc_type: string; filename: string; review_status: string; source: string; uploaded_at: string }[]
   const sc = ((scs ?? []) as ScorecardRow[])[0] ?? null
   const iv = ((ivs ?? []) as InterviewRow[])[0] ?? null
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" })
@@ -89,6 +89,19 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
           {age !== null && age < 21 && <p className="mt-2 text-coral text-[13px]">Under 21: not an acceptable driver.</p>}
           {licensed3 === false && <p className="mt-1 text-coral text-[13px]">Candidate says licensed under 3 years: not an acceptable driver.</p>}
           {age !== null && age > 65 && <p className="mt-1 text-sun text-[13px]">Over 65: needs a physician statement.</p>}
+          <DetailsEditor
+            candidateId={c.id}
+            initial={
+              details && {
+                legalFirst: details.legal_first,
+                legalLast: details.legal_last,
+                dob: details.dob,
+                dlNumber: details.dl_number,
+                dlExpires: details.dl_expires,
+                licensed3Years: Boolean(licensed3),
+              }
+            }
+          />
         </Box>
       </div>
 
@@ -103,6 +116,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
                   <span className="font-medium">{d.doc_type}</span>
                   <span className="text-ink-mute">{d.filename}</span>
                   {d.review_status === "reupload_requested" && <span className="text-sun text-[11px]">re-upload requested</span>}
+                  {d.source === "staff" && <span className="text-ink-mute text-[11px]">staff</span>}
                   <a href={`/api/onboarding/documents/${d.id}`} target="_blank" rel="noreferrer" className="ml-auto text-cyan text-[12px] hover:underline">
                     Open
                   </a>
@@ -114,6 +128,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
             ))}
           </div>
         )}
+        <AddDocuments candidateId={c.id} />
       </Box>
 
       <Box title="Unacceptable driver criteria (carrier sheet 5-R-361 + company rules)">

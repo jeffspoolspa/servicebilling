@@ -12,7 +12,9 @@ import {
   createMarshDraft,
   ReviewRuleError,
 } from "@/lib/onboarding/application/review"
-import { UPLOAD_DOC_TYPES } from "@/lib/onboarding/domain"
+import { createStaffUploadTargets, fileStaffDocuments, saveStaffDetails } from "@/lib/onboarding/application/staff-documents"
+import { UploadRuleError } from "@/lib/onboarding/application/submit-documents"
+import { STAFF_DOC_TYPES, UPLOAD_DOC_TYPES } from "@/lib/onboarding/domain"
 
 export type ReviewResult = { ok: true; message: string } | { ok: false; error: string }
 
@@ -27,7 +29,7 @@ async function run(id: string, fn: () => Promise<string>): Promise<ReviewResult>
     revalidatePath(`/service/onboarding/candidates/${id}/review`)
     return { ok: true, message }
   } catch (err) {
-    if (err instanceof ReviewRuleError) return { ok: false, error: err.message }
+    if (err instanceof ReviewRuleError || err instanceof UploadRuleError) return { ok: false, error: err.message }
     console.error("[onboarding] review action failed", err)
     return { ok: false, error: err instanceof Error && /session|authenticated/.test(err.message) ? "Sign in again." : "That didn't save. Try again." }
   }
@@ -76,6 +78,58 @@ export async function gustoInvitedAction(candidateId: string): Promise<ReviewRes
   return run(candidateId, async () => {
     await markGustoInvited(onboardingDb(), candidateId, await actor())
     return "Marked as invited in Gusto."
+  })
+}
+
+export type StaffTargetsResult = { ok: true; targets: { path: string; token: string }[] } | { ok: false; error: string }
+
+/** Step 1 of a staff upload: signed URLs into the staging bucket. */
+export async function staffTargetsAction(candidateId: string, files: unknown): Promise<StaffTargetsResult> {
+  const p = z.array(z.object({ name: z.string().max(200), type: z.string().max(100), size: z.number().int().nonnegative() })).safeParse(files)
+  if (!uuid.safeParse(candidateId).success || !p.success) return { ok: false, error: "Something went wrong with the files." }
+  try {
+    await actor()
+    return { ok: true, targets: await createStaffUploadTargets(onboardingDb(), candidateId, p.data) }
+  } catch (err) {
+    if (err instanceof ReviewRuleError || err instanceof UploadRuleError) return { ok: false, error: err.message }
+    console.error("[onboarding] staff upload targets failed", err)
+    return { ok: false, error: "Couldn't start the upload. Try again." }
+  }
+}
+
+/** Step 2: file the staged files as one document type. */
+export async function staffFileAction(raw: unknown): Promise<ReviewResult> {
+  const p = z
+    .object({
+      candidateId: uuid,
+      docType: z.enum(STAFF_DOC_TYPES),
+      files: z.array(z.object({ path: z.string().max(300), type: z.string().max(100), name: z.string().max(200) })).min(1).max(20),
+    })
+    .safeParse(raw)
+  if (!p.success) return { ok: false, error: "Check the form." }
+  return run(p.data.candidateId, async () => {
+    const r = await fileStaffDocuments(onboardingDb(), p.data.candidateId, p.data, await actor())
+    return r.advanced ? "Filed. Every required document is in: the candidate is now Docs Submitted." : `Filed ${p.data.docType}.`
+  })
+}
+
+export async function staffDetailsAction(raw: unknown): Promise<ReviewResult> {
+  const p = z
+    .object({
+      candidateId: uuid,
+      legalFirst: z.string().max(100),
+      legalLast: z.string().max(100),
+      dob: z.string().max(10),
+      dlNumber: z.string().max(20),
+      dlExpires: z.string().max(10),
+      licensed3Years: z.boolean(),
+    })
+    .safeParse(raw)
+  if (!p.success) return { ok: false, error: "Check the form." }
+  const { candidateId, ...d } = p.data
+  return run(candidateId, async () => {
+    const r = await saveStaffDetails(onboardingDb(), candidateId, { ...d, dlState: "GA" }, await actor())
+    return r.advanced ? "Saved. Every required document is in: the candidate is now Docs Submitted." : "License details saved."
   })
 }
 

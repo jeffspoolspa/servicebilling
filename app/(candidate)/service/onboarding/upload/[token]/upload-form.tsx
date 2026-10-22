@@ -3,10 +3,10 @@
 import { useRef, useState } from "react"
 import { createSupabaseBrowser } from "@/lib/supabase/client"
 import { detailProblems, type UploadDocType, type UploadSlot } from "@/lib/onboarding/domain"
+import { prepare, type Picked } from "@/lib/onboarding/infrastructure/compress-photo"
 import { createTargetsAction, submitDocumentsAction } from "./actions"
 
 const BUCKET = "onboarding-uploads"
-const MAX_BYTES = 20 * 1024 * 1024
 
 interface Props {
   token: string
@@ -16,48 +16,11 @@ interface Props {
   note: string | null
 }
 
-interface Picked {
-  id: string
-  name: string
-  file: Blob
-  type: string
-  size: number
-}
-
 const input =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-[16px] text-slate-900 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-100"
 const label = "block text-[14px] font-medium text-slate-800 mb-1"
 
 const US_STATES = "GA AL FL SC NC TN AK AZ AR CA CO CT DE HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY ND OH OK OR PA RI SD TX UT VT VA WA WV WI WY DC".split(" ")
-
-/** Re-encode a photo as a compressed JPEG (max 2200 px). PDFs pass through. */
-async function prepare(file: File): Promise<Picked> {
-  const id = Math.random().toString(36).slice(2)
-  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-    if (file.size > MAX_BYTES) throw new Error(`${file.name} is over 20 MB. Please upload a smaller file.`)
-    return { id, name: file.name, file, type: "application/pdf", size: file.size }
-  }
-  const url = URL.createObjectURL(file)
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image()
-      el.onload = () => resolve(el)
-      el.onerror = () => reject(new Error(`We couldn't read ${file.name}. Take a new photo, or upload a JPG or PDF.`))
-      el.src = url
-    })
-    const scale = Math.min(1, 2200 / Math.max(img.naturalWidth, img.naturalHeight))
-    const canvas = document.createElement("canvas")
-    canvas.width = Math.round(img.naturalWidth * scale)
-    canvas.height = Math.round(img.naturalHeight * scale)
-    canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height)
-    const blob = await new Promise<Blob>((resolve, reject) =>
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't process the photo."))), "image/jpeg", 0.82),
-    )
-    return { id, name: file.name.replace(/\.[^.]+$/, "") + ".jpg", file: blob, type: "image/jpeg", size: blob.size }
-  } finally {
-    URL.revokeObjectURL(url)
-  }
-}
 
 export function UploadForm(p: Props) {
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" })

@@ -10,6 +10,8 @@ import {
   REVIEW_EMAIL_MAX_BYTES,
   RECOMMENDATION_LABEL,
   detailProblems,
+  type DocType,
+  type StaffDocType,
   type UploadSlot,
   type UploadDocType,
   type UploadDetails,
@@ -44,20 +46,100 @@ export async function createUploadTargets(
 ): Promise<{ slot: UploadSlot; path: string; token: string }[]> {
   const st = await resolveUploadToken(db, rawToken)
   if (!st.ok) throw new UploadRuleError("This upload link is no longer valid.")
+  for (const f of files) if (!(f.slot in SLOT_DOC_TYPE)) throw new UploadRuleError("Unknown document.")
+  const signed = await signTargets(files, (i) => `${st.token.id}/${files[i].slot}/`)
+  return signed.map((s, i) => ({ slot: files[i].slot, ...s }))
+}
+
+/** Signed upload URLs in the staging bucket, file i under dir(i). Shared by the candidate and staff doors. */
+export async function signTargets(
+  files: { name: string; type: string; size: number }[],
+  dir: (i: number) => string,
+): Promise<{ path: string; token: string }[]> {
   if (files.length === 0 || files.length > 20) throw new UploadRuleError("Add your documents first.")
   const admin = createSupabaseAdmin()
-  const out: { slot: UploadSlot; path: string; token: string }[] = []
-  for (const f of files) {
-    if (!(f.slot in SLOT_DOC_TYPE)) throw new UploadRuleError("Unknown document.")
+  const out: { path: string; token: string }[] = []
+  for (const [i, f] of files.entries()) {
     if (!ALLOWED_MIME.test(f.type)) throw new UploadRuleError(`${f.name}: upload a photo or a PDF.`)
     if (f.size > MAX_FILE_BYTES) throw new UploadRuleError(`${f.name} is over 20 MB.`)
     const ext = f.type === "application/pdf" ? "pdf" : f.type.split("/")[1]
-    const path = `${st.token.id}/${f.slot}/${randomUUID()}.${ext}`
+    const path = `${dir(i)}${randomUUID()}.${ext}`
     const { data, error } = await admin.storage.from(UPLOAD_BUCKET).createSignedUploadUrl(path)
     if (error || !data) throw new Error(`signed upload url: ${error?.message}`)
-    out.push({ slot: f.slot, path, token: data.token })
+    out.push({ path, token: data.token })
   }
   return out
+}
+
+/** One document's staged files: photos become one PDF, each PDF files as itself. */
+export interface FileGroup {
+  docType: StaffDocType
+  driveName: DocType
+  files: { path: string; type: string }[]
+}
+
+/**
+ * Staged files -> Drive -> onboarding.documents. New rows go in before the
+ * older copies of the required types are superseded, so a failure part-way
+ * never leaves a candidate with no live copy.
+ */
+export async function fileDocuments(
+  db: OnbDb,
+  candidate: CandidateRow,
+  groups: FileGroup[],
+  by: { source: "upload"; uploadTokenId: string } | { source: "staff"; staffId: string },
+): Promise<{ docType: StaffDocType; fileId: string; name: string; size: number }[]> {
+  const todayIso = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" })
+  const admin = createSupabaseAdmin()
+  const filed: { docType: StaffDocType; fileId: string; name: string; size: number }[] = []
+  for (const g of groups) {
+    const blobs: { type: string; data: Buffer }[] = []
+    for (const f of g.files) {
+      const { data, error } = await admin.storage.from(UPLOAD_BUCKET).download(f.path)
+      if (error || !data) throw new UploadRuleError("An upload didn't finish. Please add that file again.")
+      blobs.push({ type: data.type || f.type, data: Buffer.from(await data.arrayBuffer()) })
+    }
+    const images = blobs.filter((b) => b.type.startsWith("image/"))
+    const pdfs = blobs.filter((b) => b.type === "application/pdf")
+    const outputs: Buffer[] = [...pdfs.map((p) => p.data)]
+    if (images.length) outputs.unshift(await imagesToPdf(images))
+    for (const pdf of outputs) {
+      const f = await uploadCandidateDoc(db, candidate, g.driveName, todayIso, "pdf", "application/pdf", pdf)
+      filed.push({ docType: g.docType, fileId: f.fileId, name: f.name, size: pdf.length })
+    }
+  }
+
+  const ids = must<{ id: string }[]>(
+    await db
+      .from("documents")
+      .insert(
+        filed.map((f) => ({
+          candidate_id: candidate.id,
+          doc_type: f.docType,
+          drive_file_id: f.fileId,
+          filename: f.name,
+          size_bytes: f.size,
+          source: by.source,
+          upload_token_id: by.source === "upload" ? by.uploadTokenId : null,
+          uploaded_by_staff_id: by.source === "staff" ? by.staffId : null,
+        })),
+      )
+      .select("id"),
+    "save documents",
+  ).map((r) => r.id)
+  // One live copy per required type: the new one supersedes the earlier ones.
+  const required = groups.map((g) => g.docType).filter((t): t is UploadDocType => (UPLOAD_DOC_TYPES as readonly string[]).includes(t))
+  if (required.length) {
+    await db
+      .from("documents")
+      .update({ review_status: "superseded" })
+      .eq("candidate_id", candidate.id)
+      .in("doc_type", required)
+      .in("source", ["upload", "staff"])
+      .not("id", "in", `(${ids.join(",")})`)
+  }
+  await admin.storage.from(UPLOAD_BUCKET).remove(groups.flatMap((g) => g.files.map((f) => f.path)))
+  return filed
 }
 
 export interface SubmitInput {
@@ -91,27 +173,19 @@ export async function submitDocuments(db: OnbDb, rawToken: string, input: Submit
     }
   }
 
-  const admin = createSupabaseAdmin()
-  const filed: { docType: UploadDocType; fileId: string; name: string; size: number }[] = []
-  for (const doc of wanted) {
-    const slotFiles = input.files.filter((f) => SLOTS_FOR_DOC[doc].includes(f.slot))
-    // Keep slot order (front before back), then upload order.
-    slotFiles.sort((a, b) => SLOTS_FOR_DOC[doc].indexOf(a.slot) - SLOTS_FOR_DOC[doc].indexOf(b.slot))
-    const blobs: { type: string; data: Buffer }[] = []
-    for (const f of slotFiles) {
-      const { data, error } = await admin.storage.from(UPLOAD_BUCKET).download(f.path)
-      if (error || !data) throw new UploadRuleError("An upload didn't finish. Please add that file again.")
-      blobs.push({ type: data.type || f.type, data: Buffer.from(await data.arrayBuffer()) })
-    }
-    const images = blobs.filter((b) => b.type.startsWith("image/"))
-    const pdfs = blobs.filter((b) => b.type === "application/pdf")
-    const outputs: Buffer[] = [...pdfs.map((p) => p.data)]
-    if (images.length) outputs.unshift(await imagesToPdf(images))
-    for (const pdf of outputs) {
-      const f = await uploadCandidateDoc(db, candidate, doc, todayIso, "pdf", "application/pdf", pdf)
-      filed.push({ docType: doc, fileId: f.fileId, name: f.name, size: pdf.length })
-    }
-  }
+  const filed = await fileDocuments(
+    db,
+    candidate,
+    wanted.map((doc) => ({
+      docType: doc,
+      driveName: doc,
+      // Keep slot order (front before back), then upload order.
+      files: input.files
+        .filter((f) => SLOTS_FOR_DOC[doc].includes(f.slot))
+        .sort((a, b) => SLOTS_FOR_DOC[doc].indexOf(a.slot) - SLOTS_FOR_DOC[doc].indexOf(b.slot)),
+    })),
+    { source: "upload", uploadTokenId: token.id },
+  )
 
   // ---- record
   if (token.purpose === "initial" && input.details) {
@@ -128,38 +202,14 @@ export async function submitDocuments(db: OnbDb, rawToken: string, input: Submit
           dl_state: "GA",
           dl_expires: d.dlExpires,
           licensed_3_years: d.licensed3Years,
+          entered_by_staff_id: null,
           updated_at: new Date().toISOString(),
         })
         .select("candidate_id"),
       "save details",
     )
   }
-  // A re-upload supersedes the earlier copies of the same documents.
-  await db
-    .from("documents")
-    .update({ review_status: "superseded" })
-    .eq("candidate_id", candidate.id)
-    .in("doc_type", wanted)
-    .eq("source", "upload")
-  must(
-    await db
-      .from("documents")
-      .insert(
-        filed.map((f) => ({
-          candidate_id: candidate.id,
-          doc_type: f.docType,
-          drive_file_id: f.fileId,
-          filename: f.name,
-          size_bytes: f.size,
-          source: "upload",
-          upload_token_id: token.id,
-        })),
-      )
-      .select("id"),
-    "save documents",
-  )
   await db.from("upload_tokens").update({ used_at: new Date().toISOString() }).eq("id", token.id)
-  await admin.storage.from(UPLOAD_BUCKET).remove(input.files.map((f) => f.path))
   await logEvent(db, {
     candidateId: candidate.id,
     type: "documents.submitted",
@@ -183,7 +233,7 @@ export async function queueReviewEmail(db: OnbDb, candidateId: string, isReuploa
       .from("documents")
       .select("id, doc_type, drive_file_id, filename, size_bytes, uploaded_at")
       .eq("candidate_id", candidateId)
-      .eq("source", "upload")
+      .in("source", ["upload", "staff"])
       .neq("review_status", "superseded")
       .order("uploaded_at"),
     "load documents",

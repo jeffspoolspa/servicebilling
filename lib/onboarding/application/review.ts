@@ -14,7 +14,7 @@ export class ReviewRuleError extends Error {}
 
 const REVIEWABLE = new Set(["docs_submitted", "reupload_requested"])
 
-interface Actor {
+export interface Actor {
   staff: StaffRow
   label: string
 }

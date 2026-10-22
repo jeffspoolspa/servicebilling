@@ -1,7 +1,7 @@
 # Candidate onboarding: flow map
 
 > Status: [active] P1 sequence.
-> Last updated: 2026-10-15
+> Last updated: 2026-10-22
 
 1. Candidate books "Interview - <office>" in Calendly.
 2. Calendly -> `POST /api/webhooks/calendly` [trigger] -> verify signature -> `ingestBooking`:
@@ -23,6 +23,11 @@
 7. Approver opens the review page: checklist (all required), start date, pay rate ->
    Approve (Marsh driver-add Gmail DRAFT, Approved) / Reject (reason; rejection email) /
    Request re-upload (new link by email + text).
+   - Staff can file documents (MVR, Drivers License, Criminal History, Application, Other) and
+     enter or correct license details on the same page (`staff-documents.ts`; staged under
+     `staff/<candidate id>/`, filed to Drive the same way, `source = 'staff'`). When that leaves
+     Docs Requested / Re-upload Requested with every required document live and details present,
+     the candidate moves to Docs Submitted and the open upload link is revoked. No review email.
 8. Staff create the employee in Gusto from the panel's values, then Mark invited -> Gusto Invited.
 
 Setup (once, re-runnable): an onboarding admin uses `/service/onboarding/setup` (Connect
