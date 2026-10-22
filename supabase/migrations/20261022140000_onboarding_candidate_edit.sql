@@ -1,3 +1,4 @@
+-- Applied via MCP 2026-10-22 as onboarding_candidate_edit.
 -- Module: lib/onboarding. Staff edit a candidate's typed fields on the
 -- candidate page (application/edit-candidate.ts) with a version check:
 -- the form carries the row's updated_at and the save only matches that value.
@@ -15,9 +16,7 @@ begin
 end
 $$;
 
-drop trigger if exists candidates_touch_updated_at on onboarding.candidates;
-create trigger candidates_touch_updated_at before update on onboarding.candidates
+create or replace trigger candidates_touch_updated_at before update on onboarding.candidates
   for each row execute function onboarding.touch_updated_at();
-drop trigger if exists candidate_details_touch_updated_at on onboarding.candidate_details;
-create trigger candidate_details_touch_updated_at before update on onboarding.candidate_details
+create or replace trigger candidate_details_touch_updated_at before update on onboarding.candidate_details
   for each row execute function onboarding.touch_updated_at();
