@@ -26,9 +26,9 @@
      rejection email) / Request re-upload (new link by email + text).
    - Hire (Docs Approved): start date, pay rate -> Approve hire (Marsh driver-add Gmail DRAFT,
      Approved) / Reject.
-   - Follow-up path: Approve documents -> Follow-up Interview + booking link -> booked -> Second
-     Interview -> after it starts, an approver records Hire or No Hire with a reason
-     (`decideSecondInterview`). Hire -> Docs Approved, so only the hire step is left.
+   - Follow-up path: Approve documents -> Follow-up Interview + booking link (or none, when the
+     second interview is arranged outside Calendly) -> an approver uses Record second interview:
+     held at, Hire or No Hire, reason (`recordSecondInterview`). Hire -> Docs Approved, so only the hire step is left.
    - Staff can edit the candidate (name, email, phone, office, position, notes) with a version
      check: a save made by someone else in between refuses yours (`edit-candidate.ts`).
    - Staff can file documents (MVR, Drivers License, Criminal History, Other) and
