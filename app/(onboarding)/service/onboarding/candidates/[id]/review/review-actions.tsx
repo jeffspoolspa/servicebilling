@@ -10,7 +10,7 @@ import { prepare, type Picked } from "@/lib/onboarding/infrastructure/compress-p
 import {
   approveAction,
   approveDocumentsAction,
-  secondInterviewAction,
+  recordSecondInterviewAction,
   rejectAction,
   reuploadAction,
   gustoInvitedAction,
@@ -61,6 +61,7 @@ export function ReviewActions({
   const [criminalFound, setCriminalFound] = useState<"" | "yes" | "no">("")
   const [criminalNote, setCriminalNote] = useState("")
   const [notes, setNotes] = useState("")
+  const [skipLink, setSkipLink] = useState(false)
   const [reason, setReason] = useState("")
   const [docs, setDocs] = useState<string[]>([])
   const [ruNote, setRuNote] = useState("")
@@ -110,13 +111,26 @@ export function ReviewActions({
               <span className={labelCls}>Notes (optional)</span>
               <textarea className={inputCls} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
             </div>
+            {followUp && (
+              <label className="flex gap-2 text-[14px] items-center">
+                <input type="checkbox" checked={skipLink} onChange={(e) => setSkipLink(e.target.checked)} />
+                Second interview already arranged (don&apos;t send the booking link)
+              </label>
+            )}
             <div className="flex items-center gap-3">
               <Button
                 variant="primary"
                 disabled={pending || !allChecked}
                 onClick={() =>
                   run(() =>
-                    approveDocumentsAction({ candidateId, checklist: checks, criminalFound: criminalFound === "yes", criminalNote: criminalNote || null, notes: notes || null }),
+                    approveDocumentsAction({
+                      candidateId,
+                      checklist: checks,
+                      criminalFound: criminalFound === "yes",
+                      criminalNote: criminalNote || null,
+                      notes: notes || null,
+                      skipBookingLink: followUp && skipLink,
+                    }),
                   )
                 }
               >
@@ -126,7 +140,9 @@ export function ReviewActions({
                 {!allChecked
                   ? "Tick every item and answer the criminal history question."
                   : followUp
-                    ? "Follow-up path: sends the booking link for the second interview."
+                    ? skipLink
+                      ? "Follow-up path: no booking link; record the second interview here once it's held."
+                      : "Follow-up path: sends the booking link for the second interview."
                     : "Next: approve the hire (start date, pay rate)."}
               </span>
             </div>
@@ -407,11 +423,19 @@ export function DetailsEditor({ candidateId, initial, version }: { candidateId: 
   )
 }
 
-/** After the second interview: the approver's Hire / No Hire, each with a reason. */
-export function SecondInterviewDecision({ candidateId }: { candidateId: string }) {
+/** "YYYY-MM-DDTHH:mm" in the browser's time zone, for a datetime-local input. */
+function localInput(iso: string): string {
+  const d = new Date(iso)
+  const p = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/** The second interview's outcome, booked or not: when it was held, Hire / No Hire, reason. */
+export function SecondInterviewDecision({ candidateId, bookedAt }: { candidateId: string; bookedAt: string | null }) {
   const { pending, result, run } = useRun()
   const [decision, setDecision] = useState<"" | "hire" | "no_hire">("")
   const [reason, setReason] = useState("")
+  const [heldAt, setHeldAt] = useState(() => localInput(bookedAt && new Date(bookedAt).getTime() <= Date.now() ? bookedAt : new Date().toISOString()))
   return (
     <section className="bg-bg-elev border border-cyan/30 rounded-lg">
       <div className="px-4 py-3 border-b border-line-soft flex items-center gap-3">
@@ -426,6 +450,10 @@ export function SecondInterviewDecision({ candidateId }: { candidateId: string }
         </div>
       </div>
       <div className="p-4 flex flex-col gap-3">
+        <div className="max-w-xs">
+          <span className={labelCls}>Held at</span>
+          <input type="datetime-local" className={inputCls} value={heldAt} onChange={(e) => setHeldAt(e.target.value)} />
+        </div>
         <div>
           <span className={labelCls}>Reason (internal, required)</span>
           <textarea className={inputCls} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -434,7 +462,11 @@ export function SecondInterviewDecision({ candidateId }: { candidateId: string }
           {decision === "no_hire" ? "The candidate gets the standard rejection email (not the reason)." : "Hire moves the candidate to Approve: start date, pay rate, Marsh draft."}
         </p>
         <div>
-          <Button variant="primary" disabled={pending || !decision || !reason.trim()} onClick={() => run(() => secondInterviewAction(candidateId, decision, reason))}>
+          <Button
+            variant="primary"
+            disabled={pending || !decision || !reason.trim() || !heldAt}
+            onClick={() => run(() => recordSecondInterviewAction(candidateId, new Date(heldAt).toISOString(), decision, reason))}
+          >
             {pending ? "Saving…" : decision === "no_hire" ? "Record No Hire" : "Record Hire"}
           </Button>
         </div>

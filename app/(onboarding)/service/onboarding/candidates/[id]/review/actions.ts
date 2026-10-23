@@ -7,7 +7,7 @@ import { assertOnboardingStaff } from "@/lib/onboarding/infrastructure/staff-gua
 import {
   approveCandidate,
   approveDocuments,
-  decideSecondInterview,
+  recordSecondInterview,
   rejectCandidate,
   requestReupload,
   markGustoInvited,
@@ -65,20 +65,23 @@ export async function approveDocumentsAction(raw: unknown): Promise<ReviewResult
       criminalFound: z.boolean(),
       criminalNote: z.string().max(2000).nullable(),
       notes: z.string().max(4000).nullable(),
+      skipBookingLink: z.boolean().optional(),
     })
     .safeParse(raw)
   if (!p.success) return { ok: false, error: "Check the form." }
   return run(p.data.candidateId, async () => {
     const r = await approveDocuments(onboardingDb(), p.data, await actor())
     if (r.next === "hire") return "Documents approved. Next: approve the hire."
+    if (p.data.skipBookingLink) return "Documents approved. No booking link sent: record the second interview here once it's held."
     return r.linkSent ? "Documents approved. The follow-up booking link was sent." : "Documents approved, but the office has no booking link: run Calendly setup."
   })
 }
 
-export async function secondInterviewAction(candidateId: string, decision: string, reason: string): Promise<ReviewResult> {
-  if (!uuid.safeParse(candidateId).success || (decision !== "hire" && decision !== "no_hire")) return { ok: false, error: "Check the form." }
+/** The second interview's outcome, booked or not: when it was held, Hire / No Hire, reason. */
+export async function recordSecondInterviewAction(candidateId: string, heldAt: string, decision: string, reason: string): Promise<ReviewResult> {
+  if (!uuid.safeParse(candidateId).success || (decision !== "hire" && decision !== "no_hire") || heldAt.length > 40) return { ok: false, error: "Check the form." }
   return run(candidateId, async () => {
-    await decideSecondInterview(onboardingDb(), candidateId, decision, reason.slice(0, 2000), await actor())
+    await recordSecondInterview(onboardingDb(), candidateId, heldAt, decision, reason.slice(0, 2000), await actor())
     return decision === "hire" ? "Hire recorded. Approve the hire below: start date and pay rate." : "No Hire recorded. The rejection email was sent."
   })
 }

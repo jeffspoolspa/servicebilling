@@ -245,13 +245,15 @@ export interface DocsApproveInput {
   criminalFound: boolean
   criminalNote: string | null
   notes: string | null
+  /** Follow-up path: the second interview is arranged outside Calendly; no booking link. */
+  skipBookingLink?: boolean
 }
 
 /**
  * Approve the documents (the first step, both paths): every checklist item
  * ticked. Hire path -> Docs Approved (then Approve the hire). Follow-up path
- * -> Follow-up Interview + the office's booking link; the hire step waits for
- * the second interview.
+ * -> Follow-up Interview + the office's booking link (unless the second
+ * interview is already arranged); the hire step waits for the second interview.
  */
 export async function approveDocuments(db: OnbDb, input: DocsApproveInput, actor: Actor): Promise<{ next: "hire" | "follow_up"; linkSent: boolean }> {
   const ref = await loadRefData(db)
@@ -285,8 +287,13 @@ export async function approveDocuments(db: OnbDb, input: DocsApproveInput, actor
     return { next: "hire", linkSent: false }
   }
   await setCandidateStatus(db, c, "follow_up", actor.label, "documents approved (follow-up path)")
-  const link = await queueFollowUpLink(db, ref, { ...c, status: "follow_up" }, `docs:${a.id}`)
-  const n = await noticeOffice(db, c.id, "documents approved", `By ${actor.label}. ${link ? "Follow-up booking link sent." : "No booking link stored for the office: run Calendly setup."}`, `docs_approved:${a.id}`)
+  const link = input.skipBookingLink ? null : await queueFollowUpLink(db, ref, { ...c, status: "follow_up" }, `docs:${a.id}`)
+  const detail = input.skipBookingLink
+    ? "Second interview arranged outside Calendly (no booking link sent)."
+    : link
+      ? "Follow-up booking link sent."
+      : "No booking link stored for the office: run Calendly setup."
+  const n = await noticeOffice(db, c.id, "documents approved", `By ${actor.label}. ${detail}`, `docs_approved:${a.id}`)
   await drainOutbox(db, { onlyIds: [link, n].filter((x): x is string => Boolean(x)) })
   return { next: "follow_up", linkSent: Boolean(link) }
 }
@@ -349,4 +356,65 @@ export async function decideSecondInterview(db: OnbDb, candidateId: string, deci
   )
   if (n) ids.push(n)
   if (ids.length) await drainOutbox(db, { onlyIds: ids })
+}
+
+/**
+ * The one door for the second interview's outcome, booked through Calendly
+ * or not: an approver records when it was held, Hire or No Hire, and a
+ * reason. Follow-up path only, once the documents are approved. With no
+ * booked interview on file it saves a completed interview (no Calendly
+ * fields, the approver as interviewer); then the decision runs as for a
+ * booked one.
+ */
+export async function recordSecondInterview(
+  db: OnbDb,
+  candidateId: string,
+  heldAt: string,
+  decision: "hire" | "no_hire",
+  reason: string,
+  actor: Actor,
+): Promise<void> {
+  if (!actor.staff.can_approve) throw new ReviewRuleError("You aren't set up as an approver.")
+  if (!reason.trim()) throw new ReviewRuleError("Give a reason.")
+  const held = new Date(heldAt)
+  if (Number.isNaN(held.getTime())) throw new ReviewRuleError("Enter when the interview was held.")
+  if (held.getTime() > Date.now() + 5 * 60_000) throw new ReviewRuleError("The interview time is in the future.")
+  const c = must<CandidateRow>(await db.from("candidates").select("*").eq("id", candidateId).single(), "load candidate")
+  if (c.recommendation !== "follow_up") throw new ReviewRuleError("Only follow-up candidates have a second interview.")
+  if (c.status !== "follow_up" && c.status !== "second_interview") throw new ReviewRuleError(`Candidate is ${c.status}.`)
+  const docsOk = must<{ id: string }[]>(
+    await db.from("approvals").select("id").eq("candidate_id", c.id).eq("decision", "docs_approve").limit(1),
+    "find docs approval",
+  )
+  if (!docsOk.length) throw new ReviewRuleError("Approve the documents first.")
+
+  const booked = must<{ id: string }[]>(
+    await db.from("interviews").select("id").eq("candidate_id", c.id).eq("status", "scheduled").order("start_at", { ascending: false }).limit(1),
+    "find booked interview",
+  )[0]
+  if (booked) {
+    must(
+      await db.from("interviews").update({ status: "completed", interviewer_staff_id: actor.staff.id, updated_at: new Date().toISOString() }).eq("id", booked.id).select("id"),
+      "complete booked interview",
+    )
+  } else {
+    must(
+      await db
+        .from("interviews")
+        .insert({
+          candidate_id: c.id,
+          office_code: c.office_code,
+          event_name: "Second interview (recorded on the candidate page)",
+          start_at: held.toISOString(),
+          end_at: held.toISOString(),
+          interviewer_staff_id: actor.staff.id,
+          status: "completed",
+        })
+        .select("id"),
+      "save interview",
+    )
+  }
+  await logEvent(db, { candidateId: c.id, type: "second_interview.recorded", payload: { held_at: held.toISOString(), booked: Boolean(booked) }, actor: actor.label })
+  await setCandidateStatus(db, c, "second_interview", actor.label, booked ? "second interview held (booked)" : "second interview held (not booked)")
+  await decideSecondInterview(db, c.id, decision, reason, actor)
 }

@@ -47,7 +47,9 @@
 | Approve documents | Both paths, approvers: checklist + criminal history question (approval `docs_approve`; documents accepted). Hire path -> Docs Approved; follow-up path -> Follow-up Interview + booking link. |
 | Approve hire | Approvers, only from Docs Approved: start date + pay rate (approval `approve`) -> Approved + Marsh draft, then Gusto. |
 | Booking | A `follow_up` candidate with a `docs_approve` approval -> Second Interview (a later re-booking keeps it). Without one (candidates from before this rule) -> Scheduled, as before. |
-| Second interview | No scorecard: the interview form redirects to the candidate page. The decision opens there once the latest interview has started. |
+| Second interview | No scorecard: the interview form redirects to the candidate page. **Record second interview** (approvers; once the documents are approved; status Follow-up Interview or Second Interview): held at (not in the future), Hire / No Hire, reason. A booked interview is marked completed; with none booked, a completed interview is saved without Calendly fields, the approver as interviewer. |
+| Arranged outside Calendly | Approve documents can tick "Second interview already arranged": no booking link is sent. |
+| Older follow-ups | A Follow-up Interview candidate with no `docs_approve` (scored before documents came first) owes the documents: staff filing + details move them to Docs Submitted like Docs Requested. |
 | Decision | Approvers only; Hire or No Hire, reason required (also a DB check). Hire -> recommendation hire, Docs Approved (documents already approved), then Approve hire. No Hire -> Rejected, rejection email now. Open past interviews are marked completed. |
 
 ## Documents

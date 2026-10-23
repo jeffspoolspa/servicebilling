@@ -168,12 +168,9 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
         <HireApproval candidateId={c.id} defaultPayRate={Number(c.pay_rate ?? 14)} docsApproved={docsApproval ? `${docsApproval.approver} · ${easternTime(docsApproval.created_at)}` : null} />
       )}
 
-      {c.status === "second_interview" && me.staff.can_approve &&
-        (iv && new Date(iv.start_at).getTime() <= Date.now() ? (
-          <SecondInterviewDecision candidateId={c.id} />
-        ) : (
-          <p className="text-[13px] text-ink-mute">The Hire / No Hire decision opens after the second interview{iv ? ` (${easternTime(iv.start_at)})` : ""}.</p>
-        ))}
+      {me.staff.can_approve && c.recommendation === "follow_up" && docsApproval && (c.status === "follow_up" || c.status === "second_interview") && (
+        <SecondInterviewDecision candidateId={c.id} bookedAt={c.status === "second_interview" && iv ? iv.start_at : null} />
+      )}
 
       {(c.status === "approved" || c.status === "gusto_invited") && (
         <GustoPanel
