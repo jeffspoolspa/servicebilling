@@ -62,6 +62,14 @@ const INTERNAL_DOMAINS = ["@jeffspoolspa.com", "@perfectpoolscleaning.com"]
 /** Mail to the candidate carries the office brand (RH = Perfect Pools); staff mail doesn't. */
 const CANDIDATE_KINDS: ReadonlySet<EmailKind> = new Set(["rejection", "follow_up", "hire", "hire_sms", "reupload", "reupload_sms"])
 
+/**
+ * Document requests: a candidate who replies with forms must also land in the
+ * central jpsbilling@ inbox (record keeping). Reply-To = office mailbox (if
+ * any, e.g. info@perfectpoolscleaning.com, which runs those appointments)
+ * plus jpsbilling@.
+ */
+const DOCUMENT_KINDS: ReadonlySet<EmailKind> = new Set(["hire", "reupload"])
+
 export async function enqueueEmail(db: OnbDb, e: Enqueue): Promise<{ id: string; created: boolean }> {
   const row = {
     candidate_id: e.candidateId,
@@ -180,7 +188,9 @@ async function sendOne(db: OnbDb, row: OutboxRow, s: OnboardingSettings): Promis
     }
     const msg = await sendMail(s.sender, {
       from: `${brand.name} <${s.sender}>`,
-      replyTo: brand.reply_to,
+      replyTo: DOCUMENT_KINDS.has(row.kind)
+        ? [...new Set([brand.reply_to, s.sender].filter(Boolean))].join(", ")
+        : brand.reply_to,
       to,
       cc,
       subject,
