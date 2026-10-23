@@ -63,9 +63,10 @@ const INTERNAL_DOMAINS = ["@jeffspoolspa.com", "@perfectpoolscleaning.com"]
 const CANDIDATE_KINDS: ReadonlySet<EmailKind> = new Set(["rejection", "follow_up", "hire", "hire_sms", "reupload", "reupload_sms"])
 
 /**
- * Document requests: a candidate who replies with forms must land in the
- * central jpsbilling@ inbox (record keeping), never an office mailbox, even
- * when the email carries the Perfect Pools brand.
+ * Document requests: a candidate who replies with forms must also land in the
+ * central jpsbilling@ inbox (record keeping). Reply-To = office mailbox (if
+ * any, e.g. info@perfectpoolscleaning.com, which runs those appointments)
+ * plus jpsbilling@.
  */
 const DOCUMENT_KINDS: ReadonlySet<EmailKind> = new Set(["hire", "reupload"])
 
@@ -187,7 +188,9 @@ async function sendOne(db: OnbDb, row: OutboxRow, s: OnboardingSettings): Promis
     }
     const msg = await sendMail(s.sender, {
       from: `${brand.name} <${s.sender}>`,
-      replyTo: DOCUMENT_KINDS.has(row.kind) ? s.sender : brand.reply_to,
+      replyTo: DOCUMENT_KINDS.has(row.kind)
+        ? [...new Set([brand.reply_to, s.sender].filter(Boolean))].join(", ")
+        : brand.reply_to,
       to,
       cc,
       subject,

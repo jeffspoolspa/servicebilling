@@ -26,7 +26,7 @@
 | Hire | immediately | candidate | new 14-day upload token |
 | Hire text | immediately, with the hire email | candidate's phone, from the office RingCentral number (`offices.sms_sender`; SAV uses Brunswick's) | same upload link; live_mode off or test candidate -> `settings.test_phone` |
 | Office notice | booking, reschedule, cancel, scorecard, No Show, approve, reject, re-upload, Gusto invite (`office-notice.ts`) | `settings.sender` (jpsbilling@) | one-line update + link to the candidate page; queued, sent by the step's drain or the next tick |
-| Candidate branding | every candidate-facing email/text and the upload page | — | office brand from `settings.office_brands` (RH and SAV = Perfect Pools, Reply-To info@perfectpoolscleaning.com). Exception: hire and re-upload emails (document requests) always Reply-To jpsbilling@, so forms a candidate emails back land in the central record-keeping inbox. |
+| Candidate branding | every candidate-facing email/text and the upload page | — | office brand from `settings.office_brands` (RH and SAV = Perfect Pools, Reply-To info@perfectpoolscleaning.com). Hire and re-upload emails (document requests) Reply-To the office mailbox plus jpsbilling@, so forms a candidate emails back reach the office and the central record-keeping inbox. |
 
 ## Scorecard
 
