@@ -89,9 +89,21 @@ export async function saveStaffDetails(db: OnbDb, candidateId: string, d: Upload
   return { advanced: await advanceIfComplete(db, c, actor) }
 }
 
-/** Docs Requested / Re-upload Requested -> Docs Submitted once every required document is live and details exist. */
+/**
+ * Docs Requested / Re-upload Requested -> Docs Submitted once every required
+ * document is live and details exist. A Follow-up Interview candidate with no
+ * documents approval on file (scored Follow-up before documents came first)
+ * owes the documents the same way.
+ */
 async function advanceIfComplete(db: OnbDb, c: CandidateRow, actor: Actor): Promise<boolean> {
-  if (!ADVANCE_FROM.has(c.status)) return false
+  const owesDocs =
+    ADVANCE_FROM.has(c.status) ||
+    (c.status === "follow_up" &&
+      must<{ id: string }[]>(
+        await db.from("approvals").select("id").eq("candidate_id", c.id).eq("decision", "docs_approve").limit(1),
+        "find docs approval",
+      ).length === 0)
+  if (!owesDocs) return false
   const docs = must<{ doc_type: string; review_status: string }[]>(
     await db.from("documents").select("doc_type, review_status").eq("candidate_id", c.id).in("doc_type", [...UPLOAD_DOC_TYPES]),
     "load documents",
